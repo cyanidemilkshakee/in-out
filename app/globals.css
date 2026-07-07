@@ -2841,11 +2841,6 @@ a {
 }
 
 /* Add borders to all boxes in the dashboard */
-.role-admin .admin-rail,
-.role-admin .metric,
-.role-admin .gauge-panel,
-.role-admin .workspace-main,
-.role-admin .detail-drawer,
-.role-admin .plain-panel {
-  border: 1px solid var(--admin-line) !important;
+.role-admin .admin-rail {
+  border: 1px solid #ced38f
 }
