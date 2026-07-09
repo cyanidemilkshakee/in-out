@@ -67,6 +67,13 @@ export type Scanner = {
   version: string;
 };
 
+export type ScanAnalytics = {
+  totalScans: number;
+  totalEntries: number;
+  totalExits: number;
+  activeInside: number;
+};
+
 export type MovementEvent = {
   id: string;
   time: string;

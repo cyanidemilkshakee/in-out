@@ -23,7 +23,18 @@ type SyncPillProps = {
 };
 
 export function SyncPill({ value }: SyncPillProps) {
-  return <span className={`sync-dot sync-${value}`} title={value} />;
+  const labels: Record<SyncState, string> = {
+    synced: "Synced",
+    queued: "Queued",
+    conflict: "Conflict"
+  };
+
+  return (
+    <span className={`sync-pill sync-${value}`} aria-label={`Sync state: ${labels[value]}`}>
+      <span className="sync-dot" aria-hidden="true" />
+      <span>{labels[value]}</span>
+    </span>
+  );
 }
 
 type ScannerPillProps = {

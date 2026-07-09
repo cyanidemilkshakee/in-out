@@ -1,4 +1,19 @@
-import type { Alert, Checkpoint, HardwareAsset, MovementEvent, Person, Scanner } from "./types";
+import type {
+  Alert,
+  Checkpoint,
+  HardwareAsset,
+  MovementEvent,
+  Person,
+  ScanAnalytics,
+  Scanner
+} from "./types";
+
+export const scanAnalytics: ScanAnalytics = {
+  totalScans: 450,
+  totalEntries: 250,
+  totalExits: 200,
+  activeInside: 50
+};
 
 export const checkpoints: Checkpoint[] = [
   {
