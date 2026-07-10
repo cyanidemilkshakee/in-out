@@ -290,49 +290,25 @@ export default function AdminPage() {
     const queued = events.filter((event) => event.syncState !== "synced").length;
     const onlineScanners = scannerState.filter((scanner) => scanner.status === "online").length;
     const localExceptions = scannerState.filter((scanner) => scanner.status !== "online").length;
-    const safeTotalScans = Math.max(scanAnalytics.totalScans, 1);
-
     return [
-      {
-        label: "Total Entries",
-        value: scanAnalytics.totalEntries.toLocaleString(),
-        note: `${Math.round((scanAnalytics.totalEntries / safeTotalScans) * 100)}% of total scans`,
-        tone: "good"
-      },
-      {
-        label: "Total Exits",
-        value: scanAnalytics.totalExits.toLocaleString(),
-        note: `${Math.round((scanAnalytics.totalExits / safeTotalScans) * 100)}% of total scans`,
-        tone: "good"
-      },
       {
         label: "Active Inside",
         value: scanAnalytics.activeInside.toLocaleString(),
-        note: "Currently inside",
         tone: "neutral"
       },
       {
         label: "Alerts",
         value: String(8 + Math.max(0, openAlerts - 3)),
-        note: "Critical and high",
-        tone: "bad"
-      },
-      {
-        label: "Failed Scans",
-        value: "15",
-        note: "Denied, duplicate, expired",
         tone: "bad"
       },
       {
         label: "Offline Queue",
         value: String(queued),
-        note: "Queued or in conflict",
         tone: "accent"
       },
       {
         label: "Scanner Status",
         value: `${onlineScanners}/${scannerState.length} Online`,
-        note: `${localExceptions} local exceptions`,
         tone: "good"
       }
     ];
@@ -813,7 +789,7 @@ function DashboardOverview({
   events
 }: {
   alerts: Alert[];
-  metrics: { label: string; value: string; note: string; tone: string }[];
+  metrics: { label: string; value: string; tone: string }[];
   scanAnalytics: ScanAnalytics;
   scannerState: Scanner[];
   events: MovementEvent[];
@@ -825,7 +801,6 @@ function DashboardOverview({
           <article key={metric.label} className="metric">
             <span>{metric.label}</span>
             <strong className={`metric-${metric.tone}`}>{metric.value}</strong>
-            <small>{metric.note}</small>
           </article>
         ))}
       </div>
@@ -835,7 +810,7 @@ function DashboardOverview({
         scanAnalytics={scanAnalytics}
         scanners={scannerState}
       />
-      <section className="scanner-health" aria-label="Scanner health">
+      <section className="scanner-health" aria-label="Scanner health" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 280px))" }}>
         {scannerState.map((scanner) => (
           <article key={scanner.id} className={`scanner-card scanner-card-${scanner.status}`}>
             <div>
@@ -844,16 +819,22 @@ function DashboardOverview({
             </div>
             <dl>
               <div>
-                <dt>Battery</dt>
-                <dd>{scanner.battery}%</dd>
-              </div>
-              <div>
                 <dt>Last seen</dt>
                 <dd>{scanner.lastSeen}</dd>
               </div>
               <div>
+                <dt>Staff</dt>
+                <dd>
+                  <select defaultValue="Unassigned" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "inherit", borderRadius: "4px", padding: "2px 4px", fontSize: "0.85em", outline: "none", cursor: "pointer" }}>
+                    <option value="Unassigned" style={{ color: "#000" }}>Unassigned</option>
+                    <option value="Alex Rivera" style={{ color: "#000" }}>Alex Rivera</option>
+                    <option value="Sam Chen" style={{ color: "#000" }}>Sam Chen</option>
+                  </select>
+                </dd>
+              </div>
+              <div>
                 <dt>Action</dt>
-                <dd>{scanner.status === "online" ? "Monitoring" : scanner.status === "warning" ? "Check battery" : "Retry connection"}</dd>
+                <dd>{scanner.status === "online" ? "Monitoring" : scanner.status === "warning" ? "Needs attention" : "Retry connection"}</dd>
               </div>
             </dl>
           </article>
@@ -1497,7 +1478,6 @@ function ScannerTable({
               <th>Device</th>
               <th>Status</th>
               <th>Last Seen</th>
-              <th>Battery</th>
               <th>Version</th>
               <th>Action</th>
             </tr>
@@ -1510,7 +1490,6 @@ function ScannerTable({
                   <ScannerPill value={scanner.status} />
                 </td>
                 <td>{scanner.lastSeen}</td>
-                <td>{scanner.battery}%</td>
                 <td>{scanner.version}</td>
                 <td>
                   <button
