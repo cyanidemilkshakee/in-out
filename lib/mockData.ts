@@ -9,9 +9,15 @@ import type {
 } from "./types";
 
 export const scanAnalytics: ScanAnalytics = {
-  totalScans: 450,
+  totalScans: 700,
+  totalApproved: 450,
+  totalDenied: 250,
   totalEntries: 250,
   totalExits: 200,
+  totalAutomatic: 550,
+  totalManual: 150,
+  totalRestricted: 180,
+  totalExpired: 70,
   activeInside: 50
 };
 
@@ -57,7 +63,6 @@ export const scanners: Scanner[] = [
     checkpointId: "cp-main",
     status: "online",
     lastSeen: "10:25:18 AM",
-    battery: 94,
     version: "v1.4.2"
   },
   {
@@ -66,26 +71,7 @@ export const scanners: Scanner[] = [
     checkpointId: "cp-warehouse",
     status: "warning",
     lastSeen: "10:21:35 AM",
-    battery: 32,
     version: "v1.4.1"
-  },
-  {
-    id: "T-03",
-    name: "Terminal-03",
-    checkpointId: "cp-it-exit",
-    status: "offline",
-    lastSeen: "09:57:12 AM",
-    battery: 18,
-    version: "v1.3.9"
-  },
-  {
-    id: "T-04",
-    name: "Terminal-04",
-    checkpointId: "cp-server",
-    status: "online",
-    lastSeen: "10:18:44 AM",
-    battery: 81,
-    version: "v1.4.2"
   }
 ];
 
