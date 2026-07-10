@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { type KeyboardEvent, useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { AppChrome } from "../../components/AppChrome";
 import { ResultPill } from "../../components/StatusPill";
+import { ToastRegion, type ToastMessage } from "../../components/ToastRegion";
 import {
   checkpoints,
   hardwareAssets,
@@ -77,6 +78,9 @@ export default function TerminalPage() {
   const [activeTab, setActiveTab] = useState<TerminalTab>("Subject");
   const [menuOpen, setMenuOpen] = useState(false);
   const [decision, setDecision] = useState<ScanDecision>(initialTerminalDecision);
+  const [scanError, setScanError] = useState("");
+  const [syncMessage, setSyncMessage] = useState("Queue ready");
+  const [toast, setToast] = useState<ToastMessage | null>(null);
 
   const checkpoint = checkpoints.find((item) => item.id === checkpointId) ?? checkpoints[0];
   const scanner = scanners.find((item) => item.id === checkpoint.scannerId) ?? scanners[0];
@@ -92,9 +96,19 @@ export default function TerminalPage() {
     return events.find((event) => event.subjectId === subject.id);
   }, [events, subject]);
 
+  function showToast(message: string, actionLabel?: string, onAction?: () => void) {
+    setToast({ id: Date.now(), message, actionLabel, onAction });
+  }
+
   function runScan(nextBarcode = barcode) {
+    const normalizedBarcode = nextBarcode.trim();
+    if (!normalizedBarcode) {
+      setScanError("Enter or scan a barcode before running a decision.");
+      return;
+    }
+
     const scan = evaluateScan({
-      barcode: nextBarcode,
+      barcode: normalizedBarcode,
       checkpoint,
       people: personState,
       hardware: assetState,
@@ -107,7 +121,9 @@ export default function TerminalPage() {
     setEvents((current) => [scan.event, ...current]);
     setPersonState(movementState.people);
     setAssetState(movementState.hardware);
-    setBarcode(nextBarcode);
+    setBarcode(normalizedBarcode);
+    setScanError("");
+    showToast(`${scan.event.subjectName} scan recorded as ${scan.event.result}.`);
   }
 
   function toggleHardware(assetId: string) {
@@ -120,6 +136,8 @@ export default function TerminalPage() {
 
   function syncQueue() {
     if (!online) {
+      setSyncMessage("Sync failed: terminal is offline. Reconnect and retry.");
+      showToast("Sync failed while offline.");
       return;
     }
     setEvents((current) =>
@@ -133,6 +151,8 @@ export default function TerminalPage() {
         };
       })
     );
+    setSyncMessage("Queue sync complete. Review conflicts before handoff.");
+    showToast("Offline queue processed.");
   }
 
   function sendToManualReview() {
@@ -148,6 +168,28 @@ export default function TerminalPage() {
         ? current.map((event) => (event.id === reviewEvent.id ? reviewEvent : event))
         : [reviewEvent, ...current]
     );
+    showToast("Scan sent to manual review.");
+  }
+
+  function handleTabKey(event: KeyboardEvent<HTMLButtonElement>, tab: TerminalTab) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) {
+      return;
+    }
+
+    event.preventDefault();
+    const currentIndex = terminalTabs.indexOf(tab);
+    const nextIndex =
+      event.key === "Home"
+        ? 0
+        : event.key === "End"
+          ? terminalTabs.length - 1
+          : event.key === "ArrowRight"
+            ? (currentIndex + 1) % terminalTabs.length
+            : (currentIndex - 1 + terminalTabs.length) % terminalTabs.length;
+    const nextTab = terminalTabs[nextIndex];
+    setActiveTab(nextTab);
+    const tabButtons = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]');
+    tabButtons?.[nextIndex]?.focus();
   }
 
   return (
@@ -163,19 +205,27 @@ export default function TerminalPage() {
               <button
                 className={online ? "network-toggle online" : "network-toggle offline"}
                 type="button"
+                aria-pressed={online}
                 onClick={() => setOnline((value) => !value)}
               >
                 {online ? <Wifi /> : <WifiOff />}
                 {online ? "Online" : "Offline"}
               </button>
-              <button className="icon-button" type="button" onClick={() => setMenuOpen((value) => !value)}>
+              <button
+                className="icon-button"
+                type="button"
+                aria-label="Open terminal menu"
+                aria-expanded={menuOpen}
+                aria-controls="terminal-menu"
+                onClick={() => setMenuOpen((value) => !value)}
+              >
                 <Menu />
               </button>
             </div>
           </div>
 
           {menuOpen ? (
-            <div className="terminal-menu">
+            <div className="terminal-menu" id="terminal-menu">
               <button type="button" onClick={() => setActiveTab("Offline Queue")}>
                 Review offline queue
               </button>
@@ -208,6 +258,7 @@ export default function TerminalPage() {
             <div>
               <span>Queue</span>
               <strong>{queuedEvents.length}</strong>
+              <small>{syncMessage}</small>
             </div>
             <div>
               <span>Device</span>
@@ -231,11 +282,19 @@ export default function TerminalPage() {
                         }
                       }}
                       autoComplete="off"
+                      aria-invalid={Boolean(scanError)}
+                      aria-describedby={scanError ? "scan-error" : undefined}
+                      placeholder="Scan or enter barcode"
                     />
-                    <button className="icon-button" type="button" onClick={() => runScan()}>
+                    <button className="icon-button" type="button" onClick={() => runScan()} aria-label="Run barcode scan">
                       <Keyboard />
                     </button>
                   </span>
+                  {scanError ? (
+                    <span className="field-error" id="scan-error">
+                      {scanError}
+                    </span>
+                  ) : null}
                 </label>
                 <div className="sample-row">
                   <span>Samples</span>
@@ -244,6 +303,7 @@ export default function TerminalPage() {
                       key={sample}
                       className={barcode === sample ? "sample-button active" : "sample-button"}
                       type="button"
+                      aria-pressed={barcode === sample}
                       onClick={() => runScan(sample)}
                     >
                       {sample}
@@ -259,14 +319,20 @@ export default function TerminalPage() {
                   <RefreshCw />
                   Manual Review
                 </button>
-                <button className="secondary-button square" type="button" onClick={() => setMenuOpen((value) => !value)}>
+                <button
+                  className="secondary-button square"
+                  type="button"
+                  aria-label="More terminal actions"
+                  onClick={() => setMenuOpen((value) => !value)}
+                >
                   <MoreVertical />
                 </button>
               </div>
+              <RecentScansTimeline events={events} />
             </div>
 
             <aside className="terminal-secondary" aria-label="Terminal details">
-              <nav className="terminal-tabs" aria-label="Terminal detail tabs">
+              <nav className="terminal-tabs" aria-label="Terminal detail tabs" role="tablist">
                 {terminalTabs.map((tab) => {
                   const label =
                     tab === "Offline Queue"
@@ -276,10 +342,16 @@ export default function TerminalPage() {
                         : tab;
                   return (
                     <button
+                      id={`terminal-tab-${tab.replace(/\s+/g, "-").toLowerCase()}`}
                       key={tab}
                       className={activeTab === tab ? "terminal-tab active" : "terminal-tab"}
+                      role="tab"
+                      aria-selected={activeTab === tab}
+                      aria-controls={`terminal-panel-${tab.replace(/\s+/g, "-").toLowerCase()}`}
+                      tabIndex={activeTab === tab ? 0 : -1}
                       type="button"
                       onClick={() => setActiveTab(tab)}
+                      onKeyDown={(event) => handleTabKey(event, tab)}
                     >
                       {label}
                     </button>
@@ -287,7 +359,12 @@ export default function TerminalPage() {
                 })}
               </nav>
 
-              <section className="terminal-detail-panel">
+              <section
+                className="terminal-detail-panel"
+                id={`terminal-panel-${activeTab.replace(/\s+/g, "-").toLowerCase()}`}
+                role="tabpanel"
+                aria-labelledby={`terminal-tab-${activeTab.replace(/\s+/g, "-").toLowerCase()}`}
+              >
                 {activeTab === "Subject" ? (
                   <SubjectPanel subject={subject} lastMovement={subjectLastMovement} />
                 ) : null}
@@ -314,6 +391,7 @@ export default function TerminalPage() {
           <span>Failed Scans: {events.filter((event) => event.result !== "success").length}</span>
           <span>Offline: {queuedEvents.length}</span>
         </footer>
+        <ToastRegion toast={toast} onDismiss={() => setToast(null)} />
       </main>
     </AppChrome>
   );
@@ -371,6 +449,30 @@ function DecisionPanel({ decision }: { decision: ScanDecision }) {
           <strong>{event.syncState}</strong>
         </div>
       </div>
+      <p className="operator-guidance">
+        {success
+          ? "Proceed after visually confirming the subject and any carried hardware."
+          : manual
+            ? "Hold the subject at the checkpoint and document the reason before handoff."
+            : "Do not permit movement. Confirm identity, checkpoint rules, and escalate if the subject disputes the result."}
+      </p>
+    </section>
+  );
+}
+
+function RecentScansTimeline({ events }: { events: MovementEvent[] }) {
+  return (
+    <section className="recent-scans" aria-label="Recent scans timeline">
+      <h2>Recent Scans</h2>
+      <ol>
+        {events.slice(0, 5).map((event) => (
+          <li key={event.id}>
+            <span>{event.time}</span>
+            <strong>{event.subjectName}</strong>
+            <ResultPill value={event.result} />
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }
@@ -515,8 +617,11 @@ function QueuePanel({
   return (
     <div className="queue-panel">
       <button className="primary-button full" disabled={!online || events.length === 0} type="button" onClick={onSync}>
-        Sync Queue
+        {online ? "Sync Queue" : "Reconnect to Sync"}
       </button>
+      {!online ? (
+        <p className="inline-note warning-note">Terminal is offline. Reconnect network, then retry the queue.</p>
+      ) : null}
       {events.map((event) => (
         <div key={event.id} className="queue-row">
           <strong>{event.subjectName}</strong>
@@ -531,6 +636,12 @@ function QueuePanel({
 function ConflictPanel({ events }: { events: MovementEvent[] }) {
   return (
     <div className="queue-panel">
+      {events.length ? (
+        <p className="inline-note warning-note">
+          Conflicts need operator review before records are considered final. Compare the checkpoint log with the
+          subject status before resolving.
+        </p>
+      ) : null}
       {events.map((event) => (
         <div key={event.id} className="queue-row conflict">
           <strong>{event.subjectName}</strong>
