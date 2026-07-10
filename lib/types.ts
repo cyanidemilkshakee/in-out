@@ -63,14 +63,19 @@ export type Scanner = {
   checkpointId: string;
   status: "online" | "offline" | "warning";
   lastSeen: string;
-  battery: number;
   version: string;
 };
 
 export type ScanAnalytics = {
   totalScans: number;
+  totalApproved: number;
+  totalDenied: number;
   totalEntries: number;
   totalExits: number;
+  totalAutomatic: number;
+  totalManual: number;
+  totalRestricted: number;
+  totalExpired: number;
   activeInside: number;
 };
 
