@@ -16,6 +16,7 @@ import {
   Filter,
   Grid2X2,
   History,
+  Heart,
   MapPin,
   Package,
   RefreshCw,
@@ -131,14 +132,6 @@ const adminRailGroups = [
       { view: "Hardware" as AdminView, icon: Package, label: "Hardware" },
       { view: "Barcodes" as AdminView, icon: ScanBarcode, label: "Barcodes" }
     ]
-  },
-  {
-    label: "System",
-    items: [
-      { view: "Checkpoints" as AdminView, icon: MapPin, label: "Checkpoints" },
-      { view: "Scanners" as AdminView, icon: SlidersHorizontal, label: "Scanners" },
-      { view: "Offline Sync" as AdminView, icon: RefreshCw, label: "Offline Sync" }
-    ]
   }
 ];
 
@@ -194,6 +187,7 @@ export default function AdminPage() {
   const [lastUpdatedAt, setLastUpdatedAt] = useState(() => new Date());
   const [refreshLabel, setRefreshLabel] = useState("Live");
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => {
     setActiveView(viewFromPathname(pathname));
@@ -493,119 +487,194 @@ export default function AdminPage() {
 
   return (
     <AppChrome role="admin">
-      <main className="admin-console">
-        <aside className="admin-rail" aria-label="Admin quick navigation">
-          <div className="admin-rail-brand">
-            <Link href="/admin" className="brand">
-              IN / OUT
-            </Link>
-            <span>Management System</span>
-          </div>
-          <div className="admin-rail-groups">
-            {adminRailGroups.map((group) => (
-              <section className="admin-rail-group" key={group.label}>
-                <span className="admin-rail-label">{group.label}</span>
-                {group.items.map((item) => {
-                  const Icon = item.icon;
-                  const active = activeView === item.view;
+      <main className="admin-console" style={{ display: "flex", flexDirection: "row", height: "100vh", padding: 0 }}>
 
-                  return (
-                    <button
-                      key={item.label}
-                      className={active ? "rail-button active" : "rail-button"}
-                      aria-current={active ? "page" : undefined}
-                      aria-pressed={active}
-                      onClick={() => navigateToView(item.view)}
-                      type="button"
-                    >
-                      <Icon />
-                      <span>{item.label}</span>
-                    </button>
-                  );
-                })}
-              </section>
-            ))}
-          </div>
-          <div className="session-chip" title="OAuth 2.0 + OIDC role session simulation">
-            <span className="session-avatar">AU</span>
-            <span>
-              <strong>Admin User</strong>
-              <small>admin@company.com</small>
+        {/* Sidebar Container - Always reserves exactly 72px in the page layout */}
+        <div style={{ flexShrink: 0, width: "72px", position: "relative", zIndex: 50 }}>
+          <aside
+            onMouseEnter={() => setSidebarOpen(true)}
+            onMouseLeave={() => setSidebarOpen(false)}
+            style={{
+              position: "absolute",
+              top: 0,
+              left: 0,
+              bottom: 0,
+              width: sidebarOpen ? "250px" : "72px",
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+              padding: "0 12px",
+              backgroundColor: "transparent",
+              borderRight: "none",
+              transition: "width 0.3s cubic-bezier(0.2, 0, 0, 1)",
+            overflow: "hidden",
+            whiteSpace: "nowrap"
+          }}
+          aria-label="Admin quick navigation"
+        >
+          {/* Logo - Top */}
+          <div style={{
+            position: "absolute",
+            top: "16px",
+            left: "12px",
+            width: "calc(100% - 24px)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            padding: "12px",
+          }}>
+            <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+              <Heart size={24} strokeWidth={2} />
+            </div>
+            <span style={{
+              marginLeft: "20px",
+              fontSize: "15px",
+              fontWeight: 800,
+              opacity: sidebarOpen ? 1 : 0,
+              transition: "opacity 0.2s ease",
+              pointerEvents: sidebarOpen ? "auto" : "none",
+              color: "rgba(0,0,0,0.85)"
+            }}>
+              In/Out
             </span>
           </div>
-        </aside>
 
-        {["Dashboard", "Logs"].includes(activeView) ? (
-          <>
-            <div className="command-bar">
-              <label className="select-control">
-                <MapPin />
-                <select
-                  value={checkpointFilter}
-                  onChange={(event) => {
-                    setCheckpointFilter(event.target.value);
-                    setPage(1);
+          {/* Top Spacer */}
+          <div style={{ flex: 1 }} />
+
+          {/* Nav Icons */}
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
+            {adminRailGroups.flatMap(group => group.items).map((item) => {
+              const Icon = item.icon;
+              const active = activeView === item.view;
+              const isAlert = item.view === "Alerts";
+
+              return (
+                <button
+                  key={item.label}
+                  onClick={() => { navigateToView(item.view); setSidebarOpen(false); }}
+                  title={sidebarOpen ? "" : item.label}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: active ? "#000" : "rgba(0,0,0,0.65)",
+                    cursor: "pointer",
+                    position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "flex-start",
+                    padding: "12px",
+                    width: "100%",
+                    borderRadius: "12px",
+                    transition: "background-color 0.2s ease, transform 0.2s ease",
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.06)";
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.backgroundColor = "transparent";
                   }}
                 >
-                  <option value="all">All Checkpoints</option>
-                  {checkpoints.map((checkpoint) => (
-                    <option key={checkpoint.id} value={checkpoint.id}>
-                      {checkpoint.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="select-control">
-                <CalendarDays />
-                <select value={dateFilter} onChange={(event) => setDateFilter(event.target.value)}>
-                  <option value="today" suppressHydrationWarning>Today: {todayLabel}</option>
-                  <option value="week">This Week</option>
-                  <option value="month">This Month</option>
-                </select>
-              </label>
-              <label className="search-control">
-                <Search />
-                <input
-                  value={search}
-                  onChange={(event) => {
-                    setSearch(event.target.value);
-                    setPage(1);
-                  }}
-                  placeholder="Search by name, barcode, or id..."
-                />
-              </label>
+                  <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                    <Icon size={24} strokeWidth={active ? 2 : 1.25} />
+                    {isAlert && (
+                      <span style={{
+                        position: "absolute",
+                        top: "8px",
+                        left: "26px",
+                        width: "10px",
+                        height: "10px",
+                        backgroundColor: "#ff3040",
+                        borderRadius: "50%",
+                        border: "2px solid var(--bg, #121212)"
+                      }} />
+                    )}
+                  </div>
+                  <span style={{
+                    marginLeft: "20px",
+                    fontSize: "15px",
+                    fontWeight: active ? 700 : 400,
+                    opacity: sidebarOpen ? 1 : 0,
+                    transition: "opacity 0.2s ease",
+                    pointerEvents: sidebarOpen ? "auto" : "none"
+                  }}>
+                    {item.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
 
-              <div className="scanner-summary" style={{ gridColumn: "-2 / -1", justifySelf: "end" }}>
-                <span suppressHydrationWarning>Last updated {formatClock(lastUpdatedAt)}</span>
+          {/* Bottom Spacer */}
+          <div style={{ flex: 1 }} />
+
+          {/* User Profile - Bottom */}
+          <button 
+            style={{
+              background: "none",
+              border: "none",
+              cursor: "pointer",
+              position: "absolute",
+              bottom: "16px",
+              left: "12px",
+              width: "calc(100% - 24px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "flex-start",
+              padding: "12px",
+              borderRadius: "12px",
+              transition: "background-color 0.2s ease",
+            }}
+            onMouseOver={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.06)"}
+            onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
+            title="Profile"
+          >
+            <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+              <div style={{
+                width: "24px",
+                height: "24px",
+                borderRadius: "50%",
+                backgroundColor: "#ff7b00",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff"
+              }}>
+                <UserRound size={16} strokeWidth={2} />
               </div>
             </div>
-            <div className="filter-presets" aria-label="Saved filter presets">
-              <button className="preset-button" type="button" onClick={() => applyFilterPreset("all")}>
-                All Today
-              </button>
-              <button className="preset-button" type="button" onClick={() => applyFilterPreset("exceptions")}>
-                Exceptions
-              </button>
-              <button className="preset-button" type="button" onClick={() => applyFilterPreset("offline")}>
-                Offline Queue
-              </button>
-            </div>
+            <span style={{
+              marginLeft: "20px",
+              fontSize: "15px",
+              fontWeight: 400,
+              opacity: sidebarOpen ? 1 : 0,
+              transition: "opacity 0.2s ease",
+              pointerEvents: sidebarOpen ? "auto" : "none",
+              color: "rgba(0,0,0,0.65)"
+            }}>
+              Profile
+            </span>
+          </button>
+          </aside>
+        </div>
 
-            {activeView === "Dashboard" ? (
-              <DashboardOverview
-                alerts={alerts}
-                metrics={metrics}
-                scanAnalytics={scanAnalytics}
-                scannerState={scannerState}
-                events={events}
-              />
-            ) : null}
+        <div style={{ flex: 1, position: "relative", width: "auto" }}>
+          {activeView === "Dashboard" ? (
+            <DashboardOverview
+            alerts={alerts}
+            metrics={metrics}
+            scanAnalytics={scanAnalytics}
+            scannerState={scannerState}
+            events={events}
+          />
+        ) : null}
 
-            <section className="split-workspace">
-              <div className="workspace-main">
-                <div className="panel-titlebar">
-                  <div>
-                    <h1>{activeView === "Dashboard" ? "Movement Log" : "Log Explorer"}</h1>
+        {activeView === "Logs" ? (
+          <section className="split-workspace">
+            <div className="workspace-main">
+              <div className="panel-titlebar">
+                <div>
+                  <h1>Log Explorer</h1>
                     <p>
                       Showing {Math.min(filteredEvents.length, (page - 1) * rowsPerPage + 1)} to{" "}
                       {Math.min(filteredEvents.length, page * rowsPerPage)} of{" "}
@@ -734,8 +803,7 @@ export default function AdminPage() {
                   onClose={clearSelectedEvent}
                 />
               ) : null}
-            </section>
-          </>
+          </section>
         ) : null}
 
         {activeView === "Alerts" ? (
@@ -776,6 +844,7 @@ export default function AdminPage() {
           <OfflineSyncTable events={events} onResolveConflicts={resolveSyncConflicts} onSync={syncQueued} />
         ) : null}
         <ToastRegion toast={toast} onDismiss={() => setToast(null)} />
+        </div>
       </main>
     </AppChrome>
   );
@@ -795,51 +864,13 @@ function DashboardOverview({
   events: MovementEvent[];
 }) {
   return (
-    <section className="dashboard-overview" aria-label="Operational overview">
-      <div className="metric-strip" aria-label="Operational metrics">
-        {metrics.map((metric) => (
-          <article key={metric.label} className="metric">
-            <span>{metric.label}</span>
-            <strong className={`metric-${metric.tone}`}>{metric.value}</strong>
-          </article>
-        ))}
-      </div>
+    <section className="dashboard-overview" aria-label="Operational overview" style={{ margin: 0, padding: 0 }}>
       <DashboardCharts
         alerts={alerts}
         events={events}
         scanAnalytics={scanAnalytics}
         scanners={scannerState}
       />
-      <section className="scanner-health" aria-label="Scanner health" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(200px, 280px))" }}>
-        {scannerState.map((scanner) => (
-          <article key={scanner.id} className={`scanner-card scanner-card-${scanner.status}`}>
-            <div>
-              <span>{scanner.name}</span>
-              <strong>{scanner.status}</strong>
-            </div>
-            <dl>
-              <div>
-                <dt>Last seen</dt>
-                <dd>{scanner.lastSeen}</dd>
-              </div>
-              <div>
-                <dt>Staff</dt>
-                <dd>
-                  <select defaultValue="Unassigned" style={{ background: "transparent", border: "1px solid rgba(255,255,255,0.2)", color: "inherit", borderRadius: "4px", padding: "2px 4px", fontSize: "0.85em", outline: "none", cursor: "pointer" }}>
-                    <option value="Unassigned" style={{ color: "#000" }}>Unassigned</option>
-                    <option value="Alex Rivera" style={{ color: "#000" }}>Alex Rivera</option>
-                    <option value="Sam Chen" style={{ color: "#000" }}>Sam Chen</option>
-                  </select>
-                </dd>
-              </div>
-              <div>
-                <dt>Action</dt>
-                <dd>{scanner.status === "online" ? "Monitoring" : scanner.status === "warning" ? "Needs attention" : "Retry connection"}</dd>
-              </div>
-            </dl>
-          </article>
-        ))}
-      </section>
     </section>
   );
 }
