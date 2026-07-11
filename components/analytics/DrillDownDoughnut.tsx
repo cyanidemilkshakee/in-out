@@ -223,7 +223,10 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
         data={chartData}
         options={{
           maintainAspectRatio: false,
-          cutout: "35%", // Smaller cutout to leave room for rings
+          cutout: "50%", // Smaller cutout to leave room for rings
+          layout: {
+            padding: 10
+          },
           onHover,
           onClick,
           plugins: {
@@ -232,10 +235,11 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
             },
             tooltip: {
               backgroundColor: "#18201f",
-              bodyFont: { ...chartFont, size: 12 },
+              bodyFont: { size: 13, family: "Urbanist, Arial, sans-serif" },
               cornerRadius: 8,
-              displayColors: true,
-              titleFont: { ...chartFont, size: 12, weight: 800 },
+              displayColors: false,
+              titleFont: { size: 13, weight: 800, family: "Urbanist, Arial, sans-serif" },
+              padding: 8,
               callbacks: {
                 title: () => "",
                 label: function (context) {

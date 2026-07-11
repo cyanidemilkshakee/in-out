@@ -343,7 +343,7 @@ export const initialAlerts: Alert[] = [
     id: "AL-2026-0512",
     severity: "critical",
     status: "open",
-    title: "Visitor denied at Main Entrance",
+    title: "Visitor denied entrance",
     reason: "Not pre-approved",
     subjectName: "Alan Reed",
     barcode: "V-TEMP-8841",
@@ -364,12 +364,12 @@ export const initialAlerts: Alert[] = [
   {
     id: "AL-2026-0510",
     severity: "medium",
-    status: "acknowledged",
-    title: "Offline queue waiting",
-    reason: "Terminal-03 offline",
-    subjectName: "Scanner T-03",
-    barcode: "T-03",
-    checkpoint: "IT Lab Exit",
-    time: "09:57:12 AM"
+    status: "open",
+    title: "Unauthorized area access attempt",
+    reason: "No access level",
+    subjectName: "John Doe",
+    barcode: "E-4819",
+    checkpoint: "Server Room B",
+    time: "10:15:22 AM"
   }
 ];
