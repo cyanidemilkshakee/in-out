@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   ArcElement,
   BarElement,
@@ -14,6 +14,7 @@ import {
   Tooltip
 } from "chart.js";
 import { Bar, Doughnut, Line } from "react-chartjs-2";
+import { Bell } from "lucide-react";
 import { DrillDownDoughnut, mockData } from "./DrillDownDoughnut";
 import type { Alert, MovementEvent, ScanAnalytics, Scanner } from "../../lib/types";
 
@@ -75,6 +76,8 @@ export function DashboardCharts({
   scanAnalytics,
   scanners
 }: DashboardChartsProps) {
+  const [timeRange, setTimeRange] = useState("Today");
+  const timeRanges = ["Today", "This Week", "This Month", "This Year", "All Time"];
   const chartModel = useMemo(() => {
     const checkpointNames = Array.from(new Set(events.map((event) => event.checkpoint)));
     const checkpointEntries = checkpointNames.map(
@@ -264,229 +267,287 @@ export function DashboardCharts({
   };
 
   return (
-    <section className="dashboard-analytics" aria-label="Dashboard analytics">
-      <article className="analytics-card">
-        <div className="analytics-card-header">
-          <div>
-            <h2>Scan Results</h2>
-          </div>
-          <strong>{scanAnalytics.totalScans.toLocaleString()}</strong>
-        </div>
-        <div className="analytics-donut">
-          <Doughnut
-            data={qualityData}
-            options={{
-              cutout: "75%",
-              maintainAspectRatio: false,
-              plugins: { ...sharedPlugins, legend: { display: false } }
+    <section className="dashboard-analytics" aria-label="Dashboard analytics" style={{
+      position: "absolute",
+      top: 0,
+      left: 0,
+      width: "100%",
+      height: "100%",
+      display: "grid",
+      gridTemplateColumns: "1fr 0.8fr 1fr",
+      gridTemplateRows: "1fr 1fr",
+      padding: "50px 24px 24px 24px",
+      boxSizing: "border-box",
+      zIndex: 0
+    }}>
+      {/* Time Range Selector */}
+      <div style={{
+        position: "absolute",
+        top: "40px",
+        left: "50%",
+        transform: "translateX(-50%)",
+        display: "flex",
+        background: "rgba(24, 32, 31, 0.04)",
+        padding: "6px",
+        borderRadius: "20px",
+        gap: "6px",
+        zIndex: 10
+      }}>
+        {timeRanges.map(range => (
+          <button
+            key={range}
+            onClick={() => setTimeRange(range)}
+            style={{
+              background: timeRange === range ? "#fff" : "transparent",
+              color: timeRange === range ? "#000" : "#52605d",
+              border: "none",
+              padding: "8px 18px",
+              borderRadius: "16px",
+              fontSize: "16px",
+              fontWeight: timeRange === range ? 700 : 600,
+              cursor: "pointer",
+              boxShadow: timeRange === range ? "0 2px 6px rgba(0,0,0,0.1)" : "none",
+              transition: "all 0.2s ease"
             }}
-          />
-          <div style={{
-            position: "absolute",
-            top: "0",
-            left: "0",
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: "12px",
-            pointerEvents: "none"
-          }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#12b76a", fontSize: "12px", fontWeight: 750, textTransform: "uppercase" }}>
-                <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#12b76a" }} />
-                Approved
-              </div>
-              <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "0px", lineHeight: 1.1 }}>{scanAnalytics.totalApproved.toLocaleString()}</div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#f04438", fontSize: "12px", fontWeight: 750, textTransform: "uppercase" }}>
-                <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#f04438" }} />
-                Denied
-              </div>
-              <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "0px", lineHeight: 1.1 }}>{scanAnalytics.totalDenied.toLocaleString()}</div>
-            </div>
-          </div>
-        </div>
-      </article>
+          >
+            {range}
+          </button>
+        ))}
+      </div>
 
-      <article className="analytics-card">
-        <div className="analytics-card-header">
-          <div>
-            <h2>Approved Scan Composition</h2>
-          </div>
-          <strong>{scanAnalytics.totalApproved.toLocaleString()}</strong>
-        </div>
-        <div className="analytics-donut">
-          <Doughnut
-            data={scanMixData}
-            options={{
-              cutout: "75%",
-              maintainAspectRatio: false,
-              plugins: { ...sharedPlugins, legend: { display: false } }
-            }}
-          />
-          <div style={{
-            position: "absolute",
-            top: "0",
-            left: "0",
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: "12px",
-            pointerEvents: "none"
-          }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#12b76a", fontSize: "12px", fontWeight: 750, textTransform: "uppercase" }}>
-                <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#12b76a" }} />
-                Entries
-              </div>
-              <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "0px", lineHeight: 1.1 }}>{scanAnalytics.totalEntries.toLocaleString()}</div>
+      {/* Top Left */}
+      <div className="analytics-donut" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", transform: "translateX(-24px)" }}>
+        <Doughnut
+          data={qualityData}
+          options={{
+            cutout: "75%",
+            maintainAspectRatio: false,
+            plugins: { ...sharedPlugins, legend: { display: false } }
+          }}
+        />
+        <div style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none" }}>
+          <div style={{ textAlign: "center", marginBottom: "4px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#12b76a", fontSize: "11px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#12b76a" }} />
+              Approved
             </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#027a48", fontSize: "12px", fontWeight: 750, textTransform: "uppercase" }}>
-                <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#027a48" }} />
-                Exits
-              </div>
-              <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "0px", lineHeight: 1.1 }}>{scanAnalytics.totalExits.toLocaleString()}</div>
-            </div>
+            <div style={{ fontSize: "18px", fontWeight: 800, lineHeight: 1 }}>{scanAnalytics.totalApproved.toLocaleString()}</div>
           </div>
-        </div>
-      </article>
-
-      <article className="analytics-card">
-        <div className="analytics-card-header">
-          <div>
-            <h2>Automatic vs Manual</h2>
-          </div>
-          <strong>{scanAnalytics.totalScans.toLocaleString()}</strong>
-        </div>
-        <div className="analytics-donut">
-          <Doughnut
-            data={autoVsManualData}
-            options={{
-              cutout: "75%",
-              maintainAspectRatio: false,
-              plugins: { ...sharedPlugins, legend: { display: false } }
-            }}
-          />
-          <div style={{
-            position: "absolute",
-            top: "0",
-            left: "0",
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: "12px",
-            pointerEvents: "none"
-          }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#0b63e5", fontSize: "12px", fontWeight: 750, textTransform: "uppercase" }}>
-                <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#0b63e5" }} />
-                Automatic
-              </div>
-              <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "0px", lineHeight: 1.1 }}>{(scanAnalytics.totalAutomatic ?? 350).toLocaleString()}</div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#667085", fontSize: "12px", fontWeight: 750, textTransform: "uppercase" }}>
-                <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#667085" }} />
-                Manual
-              </div>
-              <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "0px", lineHeight: 1.1 }}>{(scanAnalytics.totalManual ?? 100).toLocaleString()}</div>
-            </div>
-          </div>
-        </div>
-      </article>
-
-      <article className="analytics-card">
-        <div className="analytics-card-header">
-          <div>
-            <h2>Denied Scan Composition</h2>
-          </div>
-          <strong>{scanAnalytics.totalDenied.toLocaleString()}</strong>
-        </div>
-        <div className="analytics-donut">
-          <Doughnut
-            data={deniedMixData}
-            options={{
-              cutout: "75%",
-              maintainAspectRatio: false,
-              plugins: { ...sharedPlugins, legend: { display: false } }
-            }}
-          />
-          <div style={{
-            position: "absolute",
-            top: "0",
-            left: "0",
-            width: "100%",
-            height: "100%",
-            display: "flex",
-            flexDirection: "column",
-            justifyContent: "center",
-            alignItems: "center",
-            gap: "12px",
-            pointerEvents: "none"
-          }}>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#f04438", fontSize: "12px", fontWeight: 750, textTransform: "uppercase" }}>
-                <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#f04438" }} />
-                Restricted
-              </div>
-              <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "0px", lineHeight: 1.1 }}>{(scanAnalytics.totalRestricted ?? 180).toLocaleString()}</div>
-            </div>
-            <div style={{ textAlign: "center" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#912018", fontSize: "12px", fontWeight: 750, textTransform: "uppercase" }}>
-                <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#912018" }} />
-                Expired
-              </div>
-              <div style={{ fontSize: "20px", fontWeight: 800, marginTop: "0px", lineHeight: 1.1 }}>{(scanAnalytics.totalExpired ?? 70).toLocaleString()}</div>
-            </div>
-          </div>
-        </div>
-      </article>
-
-      <article className="analytics-card analytics-alert-card">
-        <div className="analytics-card-header compact">
-          <div>
-            <h2>Open Alerts</h2>
-          </div>
-          <strong>{chartModel.openAlerts.length}</strong>
-        </div>
-        <ul className="analytics-alert-list">
-          {chartModel.openAlerts.map((alert) => (
-            <li key={alert.id}>
-              <span className={`analytics-severity analytics-severity-${alert.severity}`}>
-                {alert.severity}
-              </span>
-              <div>
-                <strong>{alert.title}</strong>
-                <small>{alert.checkpoint} / {alert.time}</small>
-              </div>
-            </li>
-          ))}
-        </ul>
-      </article>
-
-
-
-      <article className="analytics-card analytics-card-full" style={{ minHeight: "520px", display: "flex", flexDirection: "column" }}>
-        <div className="analytics-card-header compact" style={{ justifyContent: "center", marginBottom: "20px" }}>
           <div style={{ textAlign: "center" }}>
-            <h2>Scan Drill-down</h2>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#f04438", fontSize: "11px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#f04438" }} />
+              Denied
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 800, lineHeight: 1 }}>{scanAnalytics.totalDenied.toLocaleString()}</div>
           </div>
         </div>
-        <div className="analytics-donut" style={{ height: "450px", width: "450px", margin: "0 auto" }}>
-          <DrillDownDoughnut data={mockData} />
+      </div>
+
+      {/* Top Right */}
+      <div className="analytics-donut" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1" }}>
+        <Doughnut
+          data={scanMixData}
+          options={{
+            cutout: "75%",
+            maintainAspectRatio: false,
+            plugins: { ...sharedPlugins, legend: { display: false } }
+          }}
+        />
+        <div style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none" }}>
+          <div style={{ textAlign: "center", marginBottom: "4px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#12b76a", fontSize: "11px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#12b76a" }} />
+              Entries
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 800, lineHeight: 1 }}>{scanAnalytics.totalEntries.toLocaleString()}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#027a48", fontSize: "11px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#027a48" }} />
+              Exits
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 800, lineHeight: 1 }}>{scanAnalytics.totalExits.toLocaleString()}</div>
+          </div>
         </div>
-      </article>
+      </div>
+
+      {/* Bottom Left */}
+      <div className="analytics-donut" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", transform: "translateX(-24px)", marginBottom: "16px" }}>
+        <Doughnut
+          data={autoVsManualData}
+          options={{
+            cutout: "75%",
+            maintainAspectRatio: false,
+            plugins: { ...sharedPlugins, legend: { display: false } }
+          }}
+        />
+        <div style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none" }}>
+          <div style={{ textAlign: "center", marginBottom: "4px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#0b63e5", fontSize: "11px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#0b63e5" }} />
+              Automatic
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 800, lineHeight: 1 }}>{(scanAnalytics.totalAutomatic ?? 350).toLocaleString()}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#667085", fontSize: "11px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#667085" }} />
+              Manual
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 800, lineHeight: 1 }}>{(scanAnalytics.totalManual ?? 100).toLocaleString()}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Bottom Right */}
+      <div className="analytics-donut" style={{ gridColumn: 3, gridRow: 2, alignSelf: "end", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginBottom: "16px" }}>
+        <Doughnut
+          data={deniedMixData}
+          options={{
+            cutout: "75%",
+            maintainAspectRatio: false,
+            plugins: { ...sharedPlugins, legend: { display: false } }
+          }}
+        />
+        <div style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none" }}>
+          <div style={{ textAlign: "center", marginBottom: "4px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#f04438", fontSize: "11px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#f04438" }} />
+              Restricted
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 800, lineHeight: 1 }}>{(scanAnalytics.totalRestricted ?? 180).toLocaleString()}</div>
+          </div>
+          <div style={{ textAlign: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#912018", fontSize: "11px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#912018" }} />
+              Expired
+            </div>
+            <div style={{ fontSize: "18px", fontWeight: 800, lineHeight: 1 }}>{(scanAnalytics.totalExpired ?? 70).toLocaleString()}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Center Right - Active Alerts Box */}
+      <div style={{
+        gridColumn: 3,
+        gridRow: "1 / -1",
+        alignSelf: "center",
+        justifySelf: "end",
+        background: "#fff",
+        padding: "16px",
+        borderRadius: "20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "12px",
+        width: "100%",
+        maxWidth: "360px",
+        height: "220px",
+        border: "1px solid rgba(0,0,0,0.06)",
+        boxShadow: "0 4px 24px rgba(0,0,0,0.04)",
+        overflow: "hidden"
+      }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", paddingBottom: "12px", borderBottom: "1px solid rgba(0,0,0,0.06)" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+            <Bell size={16} strokeWidth={2.5} color="#f04438" />
+            <span style={{ fontSize: "12px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.5px", color: "#18201f" }}>Active Alerts</span>
+          </div>
+          <div style={{ background: "#f04438", color: "#fff", padding: "2px 8px", borderRadius: "12px", fontSize: "11px", fontWeight: 800 }}>
+            {chartModel.openAlerts.length}
+          </div>
+        </div>
+        
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px", overflowY: "auto", paddingRight: "4px" }}>
+          {chartModel.openAlerts.map(alert => (
+            <div key={alert.id} style={{
+              padding: "12px",
+              borderRadius: "12px",
+              background: alert.severity === "critical" ? "rgba(240, 68, 56, 0.08)" : alert.severity === "high" ? "rgba(247, 144, 9, 0.08)" : "rgba(24, 32, 31, 0.04)",
+              border: `1px solid ${alert.severity === "critical" ? "rgba(240, 68, 56, 0.15)" : alert.severity === "high" ? "rgba(247, 144, 9, 0.15)" : "rgba(0,0,0,0.05)"}`,
+              display: "flex",
+              flexDirection: "column",
+              gap: "6px",
+              flexShrink: 0
+            }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "8px" }}>
+                <div style={{ fontSize: "12px", fontWeight: 700, color: "#18201f", lineHeight: 1.2 }}>{alert.title}</div>
+                <div style={{ fontSize: "10px", fontWeight: 600, color: "#52605d", flexShrink: 0 }}>
+                  {new Date(alert.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+              <div style={{ fontSize: "11px", color: "#52605d", lineHeight: 1.4 }}>
+                {alert.subjectName} ({alert.barcode})
+              </div>
+              <div style={{ fontSize: "10px", fontWeight: 600, color: alert.severity === "critical" ? "#d92d20" : alert.severity === "high" ? "#b54708" : "#52605d", textTransform: "uppercase" }}>
+                📍 {alert.checkpoint}
+              </div>
+            </div>
+          ))}
+          {chartModel.openAlerts.length === 0 && (
+            <div style={{ textAlign: "center", color: "#52605d", fontSize: "12px", fontWeight: 500, padding: "24px 0" }}>
+              No active alerts
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Center - Drill-down Chart */}
+      <div className="analytics-donut" style={{ gridColumn: 2, gridRow: "1 / -1", alignSelf: "center", justifySelf: "center", width: "100%", height: "auto", aspectRatio: "1/1", maxWidth: "1200px" }}>
+        <DrillDownDoughnut data={mockData} />
+      </div>
+
+      <div 
+        style={{
+          position: "absolute",
+          bottom: "16px",
+          left: "50%",
+          transform: "translateX(-50%)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: "14px",
+          cursor: "pointer",
+          zIndex: 10,
+        }}
+        onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" })}
+      >
+        <style>{`
+          @keyframes scrollWheel {
+            0% { transform: translateY(0); opacity: 1; }
+            100% { transform: translateY(10px); opacity: 0; }
+          }
+        `}</style>
+        <span style={{
+          fontSize: "12px",
+          fontWeight: 800,
+          letterSpacing: "3px",
+          color: "#475467",
+          textTransform: "uppercase",
+          marginRight: "-3px", /* Compensate for letter spacing to perfectly center */
+          textAlign: "center"
+        }}>
+          Scroll
+        </span>
+        <div style={{
+          width: "18px",
+          height: "30px",
+          border: "2px solid rgba(253, 176, 34, 0.4)",
+          borderRadius: "9px",
+          display: "flex",
+          justifyContent: "center",
+          paddingTop: "4px",
+          boxSizing: "border-box",
+          boxShadow: "0 0 8px rgba(253, 176, 34, 0.2)"
+        }}>
+          <div style={{
+            width: "3px",
+            height: "5px",
+            backgroundColor: "#fdb022",
+            borderRadius: "1.5px",
+            boxShadow: "0 0 4px 1px rgba(253, 176, 34, 0.8)",
+            animation: "scrollWheel 1.5s cubic-bezier(0.15, 0.41, 0.69, 0.94) infinite"
+          }} />
+        </div>
+      </div>
     </section>
   );
 }
