@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { initialMovements } from "../../../lib/mockData";
-import { OfflineSyncTable } from "../../../components/admin/Tables";
+import { AdminPageFrame, OfflineSyncTable } from "../../../components/admin/Tables";
 import type { MovementEvent } from "../../../lib/types";
 
 export default function OfflineSyncPage() {
@@ -33,12 +33,16 @@ export default function OfflineSyncPage() {
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: "1200px", margin: "0 auto" }}>
+    <AdminPageFrame
+      title="Offline Sync"
+      description="Replay queued terminal movements, reconcile conflicts, and keep the active presence state consistent."
+      metric={`${events.filter((event) => event.syncState !== "synced").length} pending`}
+    >
       <OfflineSyncTable 
         events={events} 
         onResolveConflicts={handleResolveConflicts} 
         onSync={handleSync} 
       />
-    </div>
+    </AdminPageFrame>
   );
 }

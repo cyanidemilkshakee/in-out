@@ -1,16 +1,75 @@
-import { Fragment, useState } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, X, Download } from 'lucide-react';
+import { Fragment, useState, type FormEvent, type ReactNode } from 'react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BadgePlus, Download, GitBranch, X } from 'lucide-react';
 import { ResultPill, ScannerPill, SyncPill } from '../StatusPill';
-import { checkpoints } from '../../lib/mockData';
-import type { Alert, HardwareAsset, MovementEvent, Person, Scanner } from '../../lib/types';
+import {
+  activePresence,
+  checkpoints,
+  employeeRecords,
+  offlineSyncBatches,
+  roles,
+  shiftPolicies,
+  users
+} from '../../lib/mockData';
+import type { Alert, HardwareAsset, MovementEvent, Person, Scanner, SortDirection, VisibleColumn } from '../../lib/types';
 
-type VisibleColumn =
-  | "time"
-  | "checkpoint"
-  | "direction"
-  | "subject"
-  | "type"
-  | "barcode"
+export function AdminPageFrame({
+  title,
+  description,
+  metric,
+  children
+}: {
+  title: string;
+  description: string;
+  metric?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="admin-page-frame">
+      <section className="admin-model-hero">
+        <div className="admin-hero-copy">
+          <span>Operations model</span>
+          <h1>{title}</h1>
+          <p>{description}</p>
+          {metric ? <strong>{metric}</strong> : null}
+        </div>
+        <DatabaseModelStrip />
+      </section>
+      {children}
+    </div>
+  );
+}
+
+function DatabaseModelStrip() {
+  const modelTables = [
+    { name: "roles", count: roles.length, detail: `${roles.reduce((sum, role) => sum + role.permissions.length, 0)} permissions` },
+    { name: "users", count: users.length, detail: `${users.filter((user) => user.status === "active").length} active` },
+    { name: "employees", count: employeeRecords.length, detail: `${new Set(employeeRecords.map((employee) => employee.department)).size} departments` },
+    { name: "shift_policies", count: shiftPolicies.length, detail: `${shiftPolicies.filter((policy) => policy.status === "active").length} active` },
+    { name: "active_presence", count: activePresence.length, detail: `${activePresence.filter((presence) => presence.state === "held").length} held` },
+    { name: "offline_sync_batches", count: offlineSyncBatches.length, detail: `${offlineSyncBatches.reduce((sum, batch) => sum + batch.conflictCount, 0)} conflicts` }
+  ];
+
+  return (
+    <div className="database-model-strip" aria-label="Mock database model summary">
+      <div className="model-strip-title">
+        <GitBranch />
+        <div>
+          <strong>Mock database is populated</strong>
+          <span>Admin pages read from these entity groups instead of a static diagram.</span>
+        </div>
+      </div>
+      <div className="model-table-list">
+        {modelTables.map((table) => (
+          <div className="model-table-row" key={table.name}>
+            <span>{table.name}</span>
+            <strong>{table.count}</strong>
+            <small>{table.detail}</small>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export function MovementTable({
   events,
@@ -241,10 +300,16 @@ export function AlertsView({
   onBulkUpdate: (alertIds: string[], status: Alert["status"]) => void;
 }) {
   const [severityFilter, setSeverityFilter] = useState<Alert["severity"] | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<Alert["status"] | "active" | "all">("all");
   const [groupBySeverity, setGroupBySeverity] = useState(true);
   const [selectedAlertIds, setSelectedAlertIds] = useState<string[]>([]);
+  const activeAlerts = alerts.filter((alert) => alert.status === "open");
   const filteredAlerts = alerts.filter(
-    (alert) => severityFilter === "all" || alert.severity === severityFilter
+    (alert) =>
+      (severityFilter === "all" || alert.severity === severityFilter) &&
+      (statusFilter === "all" ||
+        (statusFilter === "active" && alert.status === "open") ||
+        alert.status === statusFilter)
   );
   const groupedAlerts = groupBySeverity
     ? (["critical", "high", "medium"] as Alert["severity"][]).map((severity) => ({
@@ -275,7 +340,7 @@ export function AlertsView({
       <div className="panel-titlebar">
         <div>
           <h1>Alerts</h1>
-          <p>Open exceptions by severity and checkpoint.</p>
+          <p>All alert history with active exceptions surfaced first.</p>
         </div>
         <div className="toolbar">
           <label className="select-control compact-control">
@@ -290,6 +355,18 @@ export function AlertsView({
               <option value="medium">Medium</option>
             </select>
           </label>
+          <label className="select-control compact-control">
+            <span className="sr-only">Filter status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as Alert["status"] | "active" | "all")}
+            >
+              <option value="all">All Alerts</option>
+              <option value="active">Active Alerts</option>
+              <option value="acknowledged">Acknowledged</option>
+              <option value="resolved">Resolved</option>
+            </select>
+          </label>
           <label className="checkbox-row">
             <input
               type="checkbox"
@@ -298,6 +375,20 @@ export function AlertsView({
             />
             Group
           </label>
+        </div>
+      </div>
+      <div className="alert-summary-strip">
+        <div>
+          <span>Active alerts</span>
+          <strong>{activeAlerts.length}</strong>
+        </div>
+        <div>
+          <span>All alerts</span>
+          <strong>{alerts.length}</strong>
+        </div>
+        <div>
+          <span>Critical open</span>
+          <strong>{alerts.filter((alert) => alert.status === "open" && alert.severity === "critical").length}</strong>
         </div>
       </div>
       <div className="bulk-bar">
@@ -367,7 +458,9 @@ export function AlertsView({
                       <td>
                         <span className={`severity severity-${alert.severity}`}>{alert.severity}</span>
                       </td>
-                      <td>{alert.status}</td>
+                      <td>
+                        <span className={`alert-status alert-status-${alert.status}`}>{alert.status}</span>
+                      </td>
                       <td>{alert.subjectName}</td>
                       <td>{alert.barcode}</td>
                       <td>{alert.checkpoint}</td>
@@ -403,11 +496,13 @@ export function AlertsView({
 export function PeopleTable({
   title,
   people: rows,
-  onToggleInside
+  onToggleInside,
+  action
 }: {
   title: string;
   people: Person[];
   onToggleInside: (personId: string) => void;
+  action?: ReactNode;
 }) {
   return (
     <section className="plain-panel">
@@ -416,10 +511,13 @@ export function PeopleTable({
           <h1>{title}</h1>
           <p>Directory records with current presence state.</p>
         </div>
-        <button className="ghost-button" type="button">
-          <Download />
-          Export
-        </button>
+        <div className="toolbar">
+          {action}
+          <button className="ghost-button" type="button">
+            <Download />
+            Export
+          </button>
+        </div>
       </div>
       <div className="table-wrap">
         <table className="data-table">
@@ -458,6 +556,75 @@ export function PeopleTable({
         </table>
       </div>
     </section>
+  );
+}
+
+export function TemporaryVisitorCreator({ onCreate }: { onCreate: (person: Person) => void }) {
+  const [name, setName] = useState("");
+  const [company, setCompany] = useState("");
+  const [host, setHost] = useState("");
+  const [hours, setHours] = useState(4);
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const suffix = String(Math.floor(1000 + Math.random() * 9000));
+    const start = new Date();
+    const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+    onCreate({
+      id: `vis-temp-${suffix}`,
+      name: name.trim() || `Temporary Visitor ${suffix}`,
+      type: "visitor",
+      barcode: `V-TEMP-${suffix}`,
+      company: company.trim() || "Walk-in",
+      phone: "+91 00000 00000",
+      accessLevel: "Visitor",
+      allowedZones: ["Main Entrance"],
+      status: "pre_approved",
+      host: host.trim() || "Security Desk",
+      purpose: "Temporary visit",
+      validFrom: start.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }),
+      validTo: end.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }),
+      inside: false
+    });
+    setName("");
+    setCompany("");
+    setHost("");
+    setHours(4);
+  }
+
+  return (
+    <form className="temporary-id-form" onSubmit={submit}>
+      <div>
+        <BadgePlus />
+        <strong>Create Temporary Visitor ID</strong>
+        <span>Updates the mock-backed visitor table immediately.</span>
+      </div>
+      <label>
+        <span>Name</span>
+        <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Visitor name" />
+      </label>
+      <label>
+        <span>Company</span>
+        <input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Company or walk-in" />
+      </label>
+      <label>
+        <span>Host</span>
+        <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="Host employee" />
+      </label>
+      <label>
+        <span>Hours</span>
+        <input
+          min={1}
+          max={24}
+          type="number"
+          value={hours}
+          onChange={(event) => setHours(Number(event.target.value))}
+        />
+      </label>
+      <button className="primary-button" type="submit">
+        Create ID
+      </button>
+    </form>
   );
 }
 

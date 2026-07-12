@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { scanners, checkpoints } from "../../../lib/mockData";
-import { CheckpointTable } from "../../../components/admin/Tables";
+import { scanners } from "../../../lib/mockData";
+import { AdminPageFrame, CheckpointTable } from "../../../components/admin/Tables";
 
 export default function CheckpointsPage() {
   const [scannerState, setScannerState] = useState(scanners);
@@ -18,11 +18,15 @@ export default function CheckpointsPage() {
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: "1200px", margin: "0 auto" }}>
+    <AdminPageFrame
+      title="Checkpoint Rules"
+      description="Inspect mode, zone, scanner assignment, and terminal availability for every controlled crossing."
+      metric={`${scannerState.filter((scanner) => scanner.status === "online").length} online scanners`}
+    >
       <CheckpointTable 
         scannerState={scannerState} 
         onToggleScanner={handleToggleScanner} 
       />
-    </div>
+    </AdminPageFrame>
   );
 }

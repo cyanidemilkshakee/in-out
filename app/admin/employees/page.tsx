@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { people } from "../../../lib/mockData";
-import { PeopleTable } from "../../../components/admin/Tables";
+import { AdminPageFrame, PeopleTable } from "../../../components/admin/Tables";
 
 export default function EmployeesPage() {
   const [staff, setStaff] = useState(people);
@@ -19,12 +19,16 @@ export default function EmployeesPage() {
   const employees = staff.filter(person => person.type === "employee");
 
   return (
-    <div style={{ padding: "24px", maxWidth: "1200px", margin: "0 auto" }}>
+    <AdminPageFrame
+      title="Employee Directory"
+      description="Manage employee presence, role-linked access, and checkpoint identity records from the operations data model."
+      metric={`${employees.filter((person) => person.inside).length} inside`}
+    >
       <PeopleTable 
         title="Employees" 
         people={employees} 
         onToggleInside={handleToggleInside} 
       />
-    </div>
+    </AdminPageFrame>
   );
 }

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { hardwareAssets } from "../../../lib/mockData";
-import { HardwareTable } from "../../../components/admin/Tables";
+import { AdminPageFrame, HardwareTable } from "../../../components/admin/Tables";
 
 export default function HardwarePage() {
   const [assets, setAssets] = useState(hardwareAssets);
@@ -16,11 +16,15 @@ export default function HardwarePage() {
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: "1200px", margin: "0 auto" }}>
+    <AdminPageFrame
+      title="Hardware Custody"
+      description="Track restricted exits, owner departments, and physical assets moving through monitored checkpoints."
+      metric={`${assets.filter((asset) => asset.status === "restricted").length} restricted`}
+    >
       <HardwareTable 
         assets={assets} 
         onToggleInside={handleToggleInside} 
       />
-    </div>
+    </AdminPageFrame>
   );
 }

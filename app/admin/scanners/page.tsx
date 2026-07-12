@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { scanners } from "../../../lib/mockData";
-import { ScannerTable } from "../../../components/admin/Tables";
+import { AdminPageFrame, ScannerTable } from "../../../components/admin/Tables";
 
 export default function ScannersPage() {
   const [scannerState, setScannerState] = useState(scanners);
@@ -18,11 +18,15 @@ export default function ScannersPage() {
   }
 
   return (
-    <div style={{ padding: "24px", maxWidth: "1200px", margin: "0 auto" }}>
+    <AdminPageFrame
+      title="Scanner Fleet"
+      description="Monitor checkpoint terminal health, versions, and sync readiness before security operators start a shift."
+      metric={`${scannerState.filter((scanner) => scanner.status !== "offline").length} available`}
+    >
       <ScannerTable 
         scannerState={scannerState} 
         onToggleScanner={handleToggleScanner} 
       />
-    </div>
+    </AdminPageFrame>
   );
 }

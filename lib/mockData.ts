@@ -1,12 +1,114 @@
 import type {
   Alert,
+  ActivePresence,
   Checkpoint,
+  EmployeeRecord,
   HardwareAsset,
   MovementEvent,
   Person,
+  RoleRecord,
   ScanAnalytics,
-  Scanner
+  Scanner,
+  ShiftPolicy,
+  UserRecord,
+  OfflineSyncBatch
 } from "./types";
+
+export const roles: RoleRecord[] = [
+  {
+    id: "role-admin",
+    name: "Admin",
+    permissions: ["manage_users", "manage_policy", "view_all_movements", "resolve_alerts"]
+  },
+  {
+    id: "role-security",
+    name: "Security Operator",
+    permissions: ["scan_subjects", "manual_review", "sync_offline_batches"]
+  },
+  {
+    id: "role-auditor",
+    name: "Auditor",
+    permissions: ["view_movements", "export_reports"]
+  }
+];
+
+export const users: UserRecord[] = [
+  {
+    id: "usr-001",
+    roleId: "role-admin",
+    email: "admin@company.com",
+    displayName: "Ops Admin",
+    status: "active"
+  },
+  {
+    id: "usr-002",
+    roleId: "role-security",
+    email: "terminal@company.com",
+    displayName: "Security Staff",
+    status: "active"
+  },
+  {
+    id: "usr-003",
+    roleId: "role-auditor",
+    email: "audit@company.com",
+    displayName: "Compliance Review",
+    status: "active"
+  }
+];
+
+export const shiftPolicies: ShiftPolicy[] = [
+  {
+    id: "shift-day",
+    name: "Day Shift",
+    rules: ["entry_after_08_00", "exit_before_19_00", "visitor_host_required"],
+    status: "active"
+  },
+  {
+    id: "shift-security",
+    name: "Security Rotation",
+    rules: ["manual_override_allowed", "offline_sync_allowed", "checkpoint_handoff_required"],
+    status: "active"
+  },
+  {
+    id: "shift-it",
+    name: "IT Restricted",
+    rules: ["server_room_requires_it_admin", "asset_exit_requires_review"],
+    status: "active"
+  }
+];
+
+export const employeeRecords: EmployeeRecord[] = [
+  {
+    id: "emp-rec-1001",
+    userId: "usr-001",
+    shiftPolicyId: "shift-day",
+    employeeCode: "E1001",
+    name: "John Doe",
+    department: "Facilities",
+    status: "active",
+    createdAt: "2026-07-01T09:00:00+05:30"
+  },
+  {
+    id: "emp-rec-1003",
+    userId: "usr-003",
+    shiftPolicyId: "shift-it",
+    employeeCode: "E1003",
+    name: "Michael Lee",
+    department: "IT",
+    status: "active",
+    createdAt: "2026-07-02T10:30:00+05:30"
+  },
+  {
+    id: "emp-rec-1004",
+    userId: "usr-002",
+    shiftPolicyId: "shift-security",
+    employeeCode: "E1004",
+    name: "Sarah Connor",
+    department: "Security",
+    status: "active",
+    createdAt: "2026-07-03T08:45:00+05:30"
+  }
+];
 
 export const scanAnalytics: ScanAnalytics = {
   totalScans: 700,
@@ -170,6 +272,22 @@ export const people: Person[] = [
     purpose: "Client Meeting",
     validFrom: "Jul 6, 2026 09:00 AM",
     validTo: "Jul 6, 2026 06:00 PM",
+    inside: false
+  },
+  {
+    id: "vis-temp-6409",
+    name: "Nisha Rao",
+    type: "visitor",
+    barcode: "V-TEMP-6409",
+    company: "Helios Controls",
+    phone: "+91 90000 06409",
+    accessLevel: "Visitor",
+    allowedZones: ["Main Entrance", "Conference Wing"],
+    status: "pre_approved",
+    host: "Michael Lee",
+    purpose: "Temporary maintenance audit",
+    validFrom: "Jul 12, 2026 10:00 AM",
+    validTo: "Jul 12, 2026 04:00 PM",
     inside: false
   }
 ];
@@ -371,5 +489,82 @@ export const initialAlerts: Alert[] = [
     barcode: "E-4819",
     checkpoint: "Server Room B",
     time: "10:15:22 AM"
+  },
+  {
+    id: "AL-2026-0509",
+    severity: "high",
+    status: "acknowledged",
+    title: "Offline scan conflict",
+    reason: "Queued denial requires reconciliation",
+    subjectName: "Laptop-045",
+    barcode: "test3",
+    checkpoint: "Warehouse Gate",
+    time: "10:11:08 AM"
+  },
+  {
+    id: "AL-2026-0508",
+    severity: "medium",
+    status: "resolved",
+    title: "Expired visitor pass",
+    reason: "Pass expired",
+    subjectName: "Tom Hanks",
+    barcode: "V-TEMP-7712",
+    checkpoint: "Main Entrance",
+    time: "10:09:44 AM"
+  }
+];
+
+export const activePresence: ActivePresence[] = [
+  {
+    id: "presence-001",
+    employeeId: "emp-1001",
+    checkpointId: "cp-main",
+    movementTransactionId: "EVT-000986",
+    state: "inside",
+    enteredAt: "10:23:58 AM"
+  },
+  {
+    id: "presence-002",
+    employeeId: "emp-1003",
+    checkpointId: "cp-it-exit",
+    movementTransactionId: "EVT-000984",
+    state: "inside",
+    enteredAt: "10:22:45 AM"
+  },
+  {
+    id: "presence-003",
+    hardwareItemId: "hw-4007",
+    checkpointId: "cp-warehouse",
+    movementTransactionId: "EVT-000980",
+    state: "held",
+    enteredAt: "10:18:03 AM"
+  }
+];
+
+export const offlineSyncBatches: OfflineSyncBatch[] = [
+  {
+    id: "batch-2026-0712-01",
+    deviceId: "T-02",
+    checkpointId: "cp-warehouse",
+    status: "received",
+    receivedAt: "10:21:42 AM",
+    conflictCount: 1
+  },
+  {
+    id: "batch-2026-0712-02",
+    deviceId: "T-03",
+    checkpointId: "cp-it-exit",
+    status: "replayed",
+    receivedAt: "10:12:08 AM",
+    resolvedAt: "10:14:55 AM",
+    conflictCount: 0
+  },
+  {
+    id: "batch-2026-0712-03",
+    deviceId: "T-01",
+    checkpointId: "cp-main",
+    status: "conflict",
+    receivedAt: "10:09:44 AM",
+    conflictCount: 2
   }
 ];

@@ -4,7 +4,7 @@ import { useState, useMemo } from "react";
 import { Filter, Columns3 } from "lucide-react";
 import { initialMovements, initialAlerts } from "../../../lib/mockData";
 import type { MovementEvent, Alert, VisibleColumn, SortDirection, ResultStatus } from "../../../lib/types";
-import { MovementTable, DetailDrawer } from "../../../components/admin/Tables";
+import { AdminPageFrame, MovementTable, DetailDrawer } from "../../../components/admin/Tables";
 
 type StatusFilter = ResultStatus | "all" | "exceptions" | "queued";
 
@@ -120,8 +120,13 @@ export default function LogsPage() {
   const selectedAlert = alerts.find((a) => a.id === selectedEventId);
 
   return (
-    <section className="split-workspace" style={{ display: 'flex', height: '100%' }}>
-      <div className="workspace-main" style={{ flex: 1, padding: '24px' }}>
+    <AdminPageFrame
+      title="Movement Ledger"
+      description="Search every entry, exit, denial, and offline movement with row-level review for security handoff."
+      metric={`${filteredEvents.length} matching events`}
+    >
+    <section className="split-workspace log-workspace">
+      <div className="workspace-main">
         <div className="panel-titlebar">
           <div>
             <h1>Log Explorer</h1>
@@ -146,9 +151,9 @@ export default function LogsPage() {
                 Columns
               </button>
               {showColumns ? (
-                <div className="popover" style={{ position: 'absolute', top: '100%', right: 0, background: 'white', border: '1px solid #ccc', padding: '10px', zIndex: 10 }}>
+                <div className="popover">
                   {(Object.keys(visibleColumns) as VisibleColumn[]).map((column) => (
-                    <label key={column} className="checkbox-row" style={{ display: 'block' }}>
+                    <label key={column} className="checkbox-row">
                       <input
                         type="checkbox"
                         checked={visibleColumns[column]}
@@ -256,5 +261,6 @@ export default function LogsPage() {
         />
       ) : null}
     </section>
+    </AdminPageFrame>
   );
 }
