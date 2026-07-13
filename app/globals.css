@@ -2613,65 +2613,6 @@ tbody tr:hover {
   color: var(--admin-muted);
 }
 
-.role-security .terminal-shell,
-.role-security .terminal-footer,
-.role-security .terminal-card,
-.role-security .terminal-detail-panel,
-.role-security .decision-panel,
-.role-security .subject-card,
-.role-security .terminal-menu,
-.role-security .last-movement {
-  border-radius: 10px;
-}
-
-.role-security .sample-button,
-.role-security .network-toggle,
-.role-security .ghost-button,
-.role-security .secondary-button,
-.role-security .primary-button,
-.role-security .icon-button,
-.role-security .terminal-tab,
-.role-security .scan-input input {
-  border-radius: 8px;
-}
-
-.role-security .recent-scans,
-.role-security .recent-scans li,
-.role-security .queue-row,
-.role-security .hardware-row {
-  border-radius: 8px;
-}
-
-.role-security .subject-avatar {
-  border-radius: 8px;
-}
-
-.role-security .terminal-shell {
-  border-radius: 12px;
-}
-
-.role-security .decision-panel {
-  border-radius: 0;
-}
-
-.role-security .terminal-page {
-  background:
-    linear-gradient(90deg, rgba(239, 255, 112, 0.12), transparent 32%),
-    transparent;
-}
-
-.role-security .terminal-header {
-  background: transparent;
-}
-
-.role-security .decision-banner,
-.role-security .scan-panel {
-  background: transparent;
-}
-
-.role-security .terminal-secondary {
-  background: rgba(246, 249, 248, 0.62);
-}
 
 .role-admin .log-workspace {
   padding: 0;
@@ -2851,307 +2792,6 @@ tbody tr:hover {
 }
 
 /* ============================================================
-   ROLE-SECURITY
-   ============================================================ */
-.role-security {
-  min-height: 100vh;
-}
-
-.role-security .topbar {
-  border-bottom: 0;
-  background: transparent;
-  padding: 18px 28px 12px;
-}
-
-.role-security .brand {
-  letter-spacing: 0;
-}
-
-.role-security .brand-block span,
-.role-security .session-chip small {
-  color: var(--admin-muted);
-}
-
-.role-security .surface-link,
-.role-security .session-avatar {
-  border: 0;
-  background: rgba(231, 238, 236, 0.7);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.74);
-}
-
-.role-security .surface-link.active,
-.role-security .session-avatar {
-  background: var(--admin-lime);
-  color: var(--admin-text);
-}
-
-.role-security .terminal-page {
-  min-height: calc(100vh - 78px);
-  background: transparent;
-  padding: 20px 28px 32px;
-}
-
-.role-security .terminal-shell,
-.role-security .terminal-footer,
-.role-security .terminal-card,
-.role-security .terminal-detail-panel,
-.role-security .decision-panel,
-.role-security .subject-card,
-.role-security .terminal-menu,
-.role-security .last-movement {
-  border: 0;
-  border-radius: 22px;
-  background: var(--admin-surface);
-  box-shadow: var(--admin-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.72);
-}
-
-.role-security .terminal-shell {
-  overflow: hidden;
-}
-
-.role-security .terminal-header,
-.role-security .terminal-secondary,
-.role-security .terminal-actions,
-.role-security .terminal-footer,
-.role-security .subject-grid,
-.role-security .decision-facts,
-.role-security .terminal-tabs {
-  border-color: var(--admin-line);
-}
-
-.role-security .sample-button,
-.role-security .network-toggle,
-.role-security .ghost-button,
-.role-security .secondary-button,
-.role-security .primary-button,
-.role-security .icon-button,
-.role-security .terminal-tab {
-  border: 0;
-  border-radius: 16px;
-  background: rgba(245, 248, 247, 0.7);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
-  color: var(--admin-text);
-}
-
-.role-security .primary-button,
-.role-security .sample-button.active,
-.role-security .terminal-tab.active {
-  background: var(--admin-lime);
-  color: var(--admin-text);
-}
-
-.role-security .scan-input input {
-  border-radius: 18px;
-  background: rgba(245, 248, 247, 0.72);
-  font-family: var(--admin-font);
-}
-
-.role-security .terminal-primary {
-  grid-template-rows: auto auto auto 1fr;
-}
-
-.role-security .recent-scans,
-.role-security .operator-guidance {
-  border-color: var(--admin-line);
-}
-
-.role-security .decision-icon svg {
-  width: var(--app-decision-icon-size);
-  height: var(--app-decision-icon-size);
-}
-
-.role-security .subject-avatar svg {
-  width: var(--app-subject-icon-size);
-  height: var(--app-subject-icon-size);
-}
-
-/* Security terminal polish */
-.role-security {
-  background:
-    radial-gradient(circle at 12% 10%, rgba(239, 255, 112, 0.25), transparent 28%),
-    linear-gradient(135deg, #edf2f0 0%, #dfe9e6 52%, #f6f8f7 100%);
-}
-
-.role-security .terminal-shell {
-  border-radius: 28px;
-}
-
-.role-security .terminal-header {
-  padding: 22px 24px;
-  background: linear-gradient(135deg, rgba(239, 255, 112, 0.22), rgba(255, 255, 255, 0.18));
-}
-
-.role-security .terminal-header h1 {
-  font-size: 26px;
-  letter-spacing: 0;
-}
-
-.role-security .terminal-status-grid > * {
-  min-height: 88px;
-  background: rgba(255, 255, 255, 0.28);
-}
-
-.role-security .terminal-status-grid strong {
-  font-size: 18px;
-}
-
-.role-security .scan-panel {
-  gap: 16px;
-  padding: 22px;
-  background:
-    linear-gradient(135deg, rgba(24, 32, 31, 0.04), transparent),
-    rgba(255, 255, 255, 0.2);
-}
-
-.role-security .scan-input {
-  grid-template-columns: 1fr 56px;
-}
-
-.role-security .scan-input input {
-  min-height: 72px;
-  box-shadow:
-    inset 0 0 0 1px rgba(24, 32, 31, 0.12),
-    0 18px 42px rgba(45, 56, 54, 0.08);
-  font-size: 34px;
-}
-
-.role-security .scan-input .icon-button {
-  width: 56px;
-  min-height: 72px;
-}
-
-.role-security .decision-panel {
-  margin: 22px;
-  overflow: hidden;
-}
-
-.role-security .decision-banner {
-  grid-template-columns: 70px 1fr;
-  padding: 26px;
-}
-
-.role-security .decision-banner h2 {
-  font-size: clamp(28px, 4vw, 44px);
-}
-
-.role-security .decision-facts div {
-  min-height: 82px;
-}
-
-.role-security .operator-guidance {
-  margin: 0;
-  padding: 16px 22px 20px;
-  color: var(--admin-muted);
-  font-size: 15px;
-}
-
-.role-security .recent-scans {
-  margin: 0 22px 22px;
-  border-radius: 22px;
-  background: rgba(245, 248, 247, 0.72);
-  padding: 18px;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.76);
-}
-
-.role-security .recent-scans h2 {
-  margin: 0 0 12px;
-  font-size: 15px;
-}
-
-.role-security .recent-scans ol {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.role-security .recent-scans li,
-.role-security .queue-row,
-.role-security .hardware-row {
-  display: grid;
-  grid-template-columns: 78px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.62);
-  padding: 10px;
-}
-
-.role-security .terminal-tabs {
-  gap: 8px;
-  padding: 14px;
-}
-
-.role-security .terminal-detail-panel {
-  padding: 16px;
-}
-
-.role-security .subject-card {
-  padding: 18px;
-}
-
-.role-security .subject-heading {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 14px;
-}
-
-.role-security .subject-avatar {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  place-items: center;
-  border-radius: 16px;
-  background: var(--admin-lime);
-  color: var(--admin-text);
-  font-weight: 900;
-}
-
-/* ============================================================
-   ADMIN RAIL — ICON / BUTTON (legacy small rail)
-   ============================================================ */
-.rail-button {
-  position: relative;
-  display: grid;
-  width: 48px;
-  height: 48px;
-  place-items: center;
-  border: 0;
-  border-radius: 14px;
-  background: rgba(231, 238, 236, 0.76);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  color: #485552;
-}
-
-.rail-button.active,
-.rail-button:hover {
-  background: #dce6e4;
-  color: var(--admin-text);
-}
-
-.rail-button.active::after {
-  position: absolute;
-  right: 8px;
-  bottom: 8px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--admin-lime);
-  content: "";
-}
-
-.role-admin .rail-button.active::after {
-  right: 12px;
-  top: 50%;
-  bottom: auto;
-  width: 9px;
-  height: 9px;
-  transform: translateY(-50%);
-}
-
-/* ============================================================
    RESPONSIVE — BASE (non-role-admin)
    ============================================================ */
 @media (max-width: 1180px) {
@@ -3225,7 +2865,7 @@ tbody tr:hover {
     width: 100%;
   }
 
-  .role-security .topbar {
+  .fake-security .topbar {
     display: none;
   }
 
@@ -3459,7 +3099,7 @@ tbody tr:hover {
     font-size: 24px;
   }
 
-  .role-security .terminal-page {
+  .fake-security .terminal-page {
     padding: 14px;
   }
 }
@@ -3622,8 +3262,8 @@ tr {
   display: flex;
   width: 100%;
   height: calc(100vh - 66px);
-  background: var(--bg);
-  color: var(--text);
+  background: var(--admin-bg);
+  color: var(--admin-text);
   font-family: var(--admin-font);
 }
 
@@ -3632,7 +3272,7 @@ tr {
   grid-template-rows: auto auto 1fr auto;
   width: 100%;
   height: 100%;
-  background: var(--bg);
+  background: var(--admin-bg);
   border: none;
   border-radius: 0;
   box-shadow: none;
@@ -3645,8 +3285,8 @@ tr {
   align-items: center;
   justify-content: space-between;
   padding: 20px 32px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--admin-surface);
+  border-bottom: 1px solid var(--admin-line);
 }
 
 .brand {
@@ -3659,12 +3299,12 @@ tr {
   font-size: 22px;
   font-weight: 700;
   letter-spacing: -0.5px;
-  color: var(--text);
+  color: var(--admin-text);
 }
 
 .brand span {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--admin-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
 }
 
@@ -3679,18 +3319,18 @@ tr {
   align-items: center;
   gap: 8px;
   background: var(--surface-soft);
-  border: 1px solid var(--border);
+  border: 1px solid var(--admin-line);
   border-radius: 999px;
   padding: 8px 16px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--admin-text);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .networkToggle:hover {
-  background: var(--border);
+  background: var(--admin-line);
 }
 
 .onlineIcon { color: var(--green); }
@@ -3703,15 +3343,15 @@ tr {
   width: 40px;
   height: 40px;
   background: var(--surface-soft);
-  border: 1px solid var(--border);
+  border: 1px solid var(--admin-line);
   border-radius: 50%;
-  color: var(--text);
+  color: var(--admin-text);
   cursor: pointer;
   transition: all 0.2s ease;
 }
 
 .iconButton:hover {
-  background: var(--border);
+  background: var(--admin-line);
   transform: scale(1.05);
 }
 
@@ -3719,8 +3359,8 @@ tr {
 .statusGrid {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: var(--admin-surface);
+  border-bottom: 1px solid var(--admin-line);
 }
 
 .statusItem {
@@ -3728,7 +3368,7 @@ tr {
   flex-direction: column;
   justify-content: center;
   padding: 16px 32px;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--admin-line);
 }
 
 .statusItem:last-child {
@@ -3739,20 +3379,20 @@ tr {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 1px;
-  color: var(--muted);
+  color: var(--admin-muted);
   font-weight: 700;
   margin-bottom: 4px;
 }
 
 .statusItem strong {
   font-size: 16px;
-  color: var(--text);
+  color: var(--admin-text);
 }
 
 .statusItem select {
   background: transparent;
   border: none;
-  color: var(--text);
+  color: var(--admin-text);
   font-size: 16px;
   font-weight: 700;
   outline: none;
@@ -3761,8 +3401,8 @@ tr {
 }
 
 .statusItem select option {
-  background: var(--surface);
-  color: var(--text);
+  background: var(--admin-surface);
+  color: var(--admin-text);
 }
 
 /* Main Workspace */
@@ -3776,7 +3416,7 @@ tr {
   display: flex;
   flex-direction: column;
   padding: 48px;
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--admin-line);
   position: relative;
   overflow-y: auto;
 }
@@ -3804,7 +3444,7 @@ tr {
   align-items: center;
   width: 100%;
   max-width: 600px;
-  background: var(--surface);
+  background: var(--admin-surface);
   border: 2px solid var(--blue-soft);
   border-radius: 16px;
   padding: 8px 8px 8px 24px;
@@ -3822,14 +3462,14 @@ tr {
   flex: 1;
   background: transparent;
   border: none;
-  color: var(--text);
+  color: var(--admin-text);
   font-size: 32px;
   font-family: ui-monospace, monospace;
   outline: none;
 }
 
 .scanInputWrapper input::placeholder {
-  color: var(--muted);
+  color: var(--admin-muted);
 }
 
 .scanInputWrapper button {
@@ -3860,8 +3500,8 @@ tr {
 
 .sampleBtn {
   background: var(--surface-soft);
-  border: 1px solid var(--border);
-  color: var(--muted);
+  border: 1px solid var(--admin-line);
+  color: var(--admin-muted);
   padding: 8px 16px;
   border-radius: 999px;
   font-family: monospace;
@@ -3871,8 +3511,8 @@ tr {
 }
 
 .sampleBtn:hover {
-  background: var(--border);
-  color: var(--text);
+  background: var(--admin-line);
+  color: var(--admin-text);
 }
 
 .sampleBtn.active {
@@ -3888,8 +3528,8 @@ tr {
   overflow: hidden;
   animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   box-shadow: var(--shadow);
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-line);
 }
 
 @keyframes slideUp {
@@ -3982,13 +3622,13 @@ tr {
   flex-direction: column;
 }
 .decisionFacts div:last-child { border: none; }
-.decisionFacts span { font-size: 11px; color: var(--muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
-.decisionFacts strong { font-size: 15px; color: var(--text); font-family: monospace; }
+.decisionFacts span { font-size: 11px; color: var(--admin-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 4px; }
+.decisionFacts strong { font-size: 15px; color: var(--admin-text); font-family: monospace; }
 
 .operatorGuidance {
   padding: 16px 24px;
   background: rgba(0,0,0,0.02);
-  color: var(--muted);
+  color: var(--admin-muted);
   font-size: 14px;
   margin: 0;
   border-top: 1px solid rgba(0,0,0,0.05);
@@ -3998,8 +3638,8 @@ tr {
 .sidebar {
   display: flex;
   flex-direction: column;
-  background: var(--surface);
-  border-left: 1px solid var(--border);
+  background: var(--admin-surface);
+  border-left: 1px solid var(--admin-line);
   overflow-y: auto;
 }
 
@@ -4017,7 +3657,7 @@ tr {
   padding: 16px 20px;
   background: transparent;
   border: 1px solid transparent;
-  color: var(--muted);
+  color: var(--admin-muted);
   font-size: 15px;
   font-weight: 600;
   border-radius: 12px;
@@ -4027,7 +3667,7 @@ tr {
 
 .tabBtn:hover {
   background: var(--surface-soft);
-  color: var(--text);
+  color: var(--admin-text);
 }
 
 .tabBtn.active {
@@ -4044,8 +3684,8 @@ tr {
 
 /* Subject Panel Redesign */
 .subjectCard {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-line);
   box-shadow: var(--shadow);
   border-radius: 16px;
   overflow: hidden;
@@ -4057,7 +3697,7 @@ tr {
   gap: 16px;
   padding: 20px;
   background: var(--surface-soft);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--admin-line);
 }
 
 .subjectAvatar {
@@ -4076,14 +3716,14 @@ tr {
 .subjectInfo h3 {
   margin: 0 0 4px;
   font-size: 20px;
-  color: var(--text);
+  color: var(--admin-text);
 }
 
 .badge {
   display: inline-block;
   padding: 4px 10px;
   background: rgba(0,0,0,0.05);
-  color: var(--text);
+  color: var(--admin-text);
   border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
@@ -4104,7 +3744,7 @@ tr {
 
 .subjectGrid span {
   font-size: 11px;
-  color: var(--muted);
+  color: var(--admin-muted);
   text-transform: uppercase;
   font-weight: 700;
   margin-bottom: 4px;
@@ -4112,7 +3752,7 @@ tr {
 
 .subjectGrid strong {
   font-size: 14px;
-  color: var(--text);
+  color: var(--admin-text);
 }
 
 /* Timeline */
@@ -4123,7 +3763,7 @@ tr {
 
 .timeline h3 {
   font-size: 16px;
-  color: var(--muted);
+  color: var(--admin-muted);
   margin-bottom: 24px;
   display: flex;
   align-items: center;
@@ -4134,7 +3774,7 @@ tr {
   content: '';
   flex: 1;
   height: 1px;
-  background: var(--border);
+  background: var(--admin-line);
 }
 
 .timelineList {
@@ -4149,8 +3789,8 @@ tr {
   align-items: center;
   gap: 16px;
   padding: 16px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--admin-surface);
+  border: 1px solid var(--admin-line);
   box-shadow: 0 2px 8px rgba(0,0,0,0.02);
   border-radius: 12px;
   transition: all 0.2s ease;
@@ -4162,12 +3802,12 @@ tr {
 
 .timelineTime {
   font-family: monospace;
-  color: var(--muted);
+  color: var(--admin-muted);
   font-size: 14px;
 }
 
 .timelineName {
-  color: var(--text);
+  color: var(--admin-text);
   font-weight: 600;
   font-size: 15px;
 }
@@ -4178,11 +3818,11 @@ tr {
   gap: 32px;
   padding: 16px 32px;
   background: var(--surface-soft);
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--admin-line);
 }
 
 .footer span {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--admin-muted);
   font-weight: 600;
 }
