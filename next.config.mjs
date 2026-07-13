@@ -5,7 +5,12 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  outputFileTracingRoot: projectRoot
+  outputFileTracingRoot: projectRoot,
+  output: "standalone",
+  poweredByHeader: false,
+  experimental: {
+    optimizeCss: true,
+  },
 };
 
 export default nextConfig;

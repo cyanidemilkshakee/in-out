@@ -31,58 +31,6 @@ export type VisibleColumn =
 
 export type SortDirection = "asc" | "desc";
 
-export type RoleRecord = {
-  id: string;
-  name: string;
-  permissions: string[];
-};
-
-export type UserRecord = {
-  id: string;
-  roleId: string;
-  email: string;
-  displayName: string;
-  status: "active" | "suspended";
-};
-
-export type EmployeeRecord = {
-  id: string;
-  userId: string;
-  shiftPolicyId: string;
-  employeeCode: string;
-  name: string;
-  department: string;
-  status: "active" | "inactive";
-  createdAt: string;
-};
-
-export type ShiftPolicy = {
-  id: string;
-  name: string;
-  rules: string[];
-  status: "active" | "draft" | "retired";
-};
-
-export type ActivePresence = {
-  id: string;
-  employeeId?: string;
-  visitorId?: string;
-  hardwareItemId?: string;
-  checkpointId: string;
-  movementTransactionId: string;
-  state: "inside" | "outside" | "held";
-  enteredAt: string;
-};
-
-export type OfflineSyncBatch = {
-  id: string;
-  deviceId: string;
-  checkpointId: string;
-  status: "received" | "replayed" | "conflict";
-  receivedAt: string;
-  resolvedAt?: string;
-  conflictCount: number;
-};
 
 export type Person = {
   id: string;

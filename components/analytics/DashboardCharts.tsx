@@ -1,270 +1,94 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  Chart as ChartJS,
-  Filler,
-  Legend,
-  LinearScale,
-  LineElement,
-  PointElement,
-  Tooltip
-} from "chart.js";
-import { Bar, Doughnut, Line } from "react-chartjs-2";
-import { Bell, Scan, Activity, CheckCircle, XCircle, TrendingUp, TrendingDown, ChevronRight } from "lucide-react";
+import { Doughnut } from "react-chartjs-2";
+import { Bell, Scan, CheckCircle, XCircle, TrendingUp, TrendingDown, ChevronRight } from "lucide-react";
 import { DrillDownDoughnut, mockData } from "./DrillDownDoughnut";
-import type { Alert, MovementEvent, ScanAnalytics, Scanner } from "../../lib/types";
+import type { Alert, ScanAnalytics } from "../../lib/types";
 
-ChartJS.register(
-  ArcElement,
-  BarElement,
-  CategoryScale,
-  Filler,
-  Legend,
-  LinearScale,
-  LineElement,
-  PointElement,
-  Tooltip
-);
+// ChartJS.register is handled by DrillDownDoughnut (same elements, module-level)
 
 type DashboardChartsProps = {
   alerts: Alert[];
-  events: MovementEvent[];
   scanAnalytics: ScanAnalytics;
-  scanners: Scanner[];
 };
 
 const chartFont = {
-  family: "Urbanist, Arial, sans-serif"
+  family: "var(--font-urbanist, Urbanist), Arial, sans-serif"
 };
 
-const quietGrid = "rgba(24, 32, 31, 0.08)";
 const mutedText = "#52605d";
 
-function countBy<T extends string>(items: T[]) {
-  return items.reduce<Record<T, number>>((totals, item) => {
-    totals[item] = (totals[item] ?? 0) + 1;
-    return totals;
-  }, {} as Record<T, number>);
-}
-
-function timeToMinutes(time: string) {
-  const match = time.match(/^(\d{1,2}):(\d{2}):(\d{2})\s(AM|PM)$/);
-  if (!match) {
-    return 0;
+const sharedPlugins = {
+  legend: {
+    labels: {
+      boxHeight: 9,
+      boxWidth: 9,
+      color: mutedText,
+      font: { ...chartFont, size: 12, weight: 700 }
+    }
+  },
+  tooltip: {
+    backgroundColor: "#18201f",
+    bodyFont: { ...chartFont, size: 12 },
+    cornerRadius: 8,
+    displayColors: false,
+    titleFont: { ...chartFont, size: 12, weight: 800 }
   }
+} as const;
 
-  const [, rawHour, rawMinute, , period] = match;
-  const hour = (Number(rawHour) % 12) + (period === "PM" ? 12 : 0);
-  return hour * 60 + Number(rawMinute);
-}
 
-function formatWindowLabel(minutes: number) {
-  const hour = Math.floor(minutes / 60);
-  const minute = minutes % 60;
-  const period = hour >= 12 ? "PM" : "AM";
-  const displayHour = hour % 12 || 12;
-  return `${displayHour}:${String(minute).padStart(2, "0")} ${period}`;
-}
 
 export function DashboardCharts({
   alerts,
-  events,
-  scanAnalytics,
-  scanners
+  scanAnalytics
 }: DashboardChartsProps) {
   const [timeRange, setTimeRange] = useState("Today");
   const timeRanges = ["Today", "This Week", "This Month", "This Year", "All Time"];
-  const chartModel = useMemo(() => {
-    const checkpointNames = Array.from(new Set(events.map((event) => event.checkpoint)));
-    const checkpointEntries = checkpointNames.map(
-      (checkpoint) =>
-        events.filter((event) => event.checkpoint === checkpoint && event.direction === "entry")
-          .length
-    );
-    const checkpointExits = checkpointNames.map(
-      (checkpoint) =>
-        events.filter((event) => event.checkpoint === checkpoint && event.direction === "exit")
-          .length
-    );
 
-    const resultCounts = countBy(events.map((event) => event.result));
-    const scannerCounts = countBy(scanners.map((scanner) => scanner.status));
-    const exceptionTotal = events.filter((event) => event.result !== "success").length;
-    const successTotal = events.length - exceptionTotal;
+  const openAlerts = useMemo(
+    () => alerts.filter((alert) => alert.status !== "resolved"),
+    [alerts]
+  );
 
-    const sortedEvents = [...events].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
-    const firstMinute = sortedEvents[0] ? Math.floor(timeToMinutes(sortedEvents[0].time) / 2) * 2 : 0;
-    const windows = Array.from({ length: 5 }, (_, index) => firstMinute + index * 2);
-    const activityEntries = windows.map(
-      (windowStart) =>
-        sortedEvents.filter((event) => {
-          const minutes = timeToMinutes(event.time);
-          return event.direction === "entry" && minutes >= windowStart && minutes < windowStart + 2;
-        }).length
-    );
-    const activityExits = windows.map(
-      (windowStart) =>
-        sortedEvents.filter((event) => {
-          const minutes = timeToMinutes(event.time);
-          return event.direction === "exit" && minutes >= windowStart && minutes < windowStart + 2;
-        }).length
-    );
-
-    const openAlerts = alerts.filter((alert) => alert.status !== "resolved");
-
-    return {
-      activityEntries,
-      activityExits,
-      checkpointEntries,
-      checkpointExits,
-      checkpointNames,
-      exceptionTotal,
-      openAlerts,
-      resultCounts,
-      scannerCounts,
-      successTotal,
-      windows: windows.map(formatWindowLabel)
-    };
-  }, [alerts, events, scanners]);
-
-  const sharedPlugins = {
-    legend: {
-      labels: {
-        boxHeight: 9,
-        boxWidth: 9,
-        color: mutedText,
-        font: { ...chartFont, size: 12, weight: 700 }
-      }
-    },
-    tooltip: {
-      backgroundColor: "#18201f",
-      bodyFont: { ...chartFont, size: 12 },
-      cornerRadius: 8,
-      displayColors: false,
-      titleFont: { ...chartFont, size: 12, weight: 800 }
-    }
-  } as const;
-
-  const scanMixData = {
-    labels: ["Entries", "Exits"],
-    datasets: [
-      {
-        data: [
-          scanAnalytics.totalEntries,
-          scanAnalytics.totalExits
-        ],
+  const chartData = useMemo(() => ({
+    scanMix: {
+      labels: ["Entries", "Exits"],
+      datasets: [{
+        data: [scanAnalytics.totalEntries, scanAnalytics.totalExits],
         backgroundColor: ["#12b76a", "#027a48"],
         borderColor: "#f7faf9",
         borderWidth: 4
-      }
-    ]
-  };
-
-  const autoVsManualData = {
-    labels: ["Automatic", "Manual"],
-    datasets: [
-      {
-        data: [
-          scanAnalytics.totalAutomatic ?? 350,
-          scanAnalytics.totalManual ?? 100
-        ],
+      }]
+    },
+    autoVsManual: {
+      labels: ["Automatic", "Manual"],
+      datasets: [{
+        data: [scanAnalytics.totalAutomatic ?? 350, scanAnalytics.totalManual ?? 100],
         backgroundColor: ["#0b63e5", "#667085"],
         borderColor: "#f7faf9",
         borderWidth: 4
-      }
-    ]
-  };
-
-  const deniedMixData = {
-    labels: ["Restricted", "Expired"],
-    datasets: [
-      {
-        data: [
-          scanAnalytics.totalRestricted ?? 180,
-          scanAnalytics.totalExpired ?? 70
-        ],
+      }]
+    },
+    deniedMix: {
+      labels: ["Restricted", "Expired"],
+      datasets: [{
+        data: [scanAnalytics.totalRestricted ?? 180, scanAnalytics.totalExpired ?? 70],
         backgroundColor: ["#f04438", "#912018"],
         borderColor: "#f7faf9",
         borderWidth: 4
-      }
-    ]
-  };
-
-  const checkpointData = {
-    labels: chartModel.checkpointNames,
-    datasets: [
-      {
-        label: "Entries",
-        data: chartModel.checkpointEntries,
-        backgroundColor: "#12b76a",
-        borderRadius: 6
-      },
-      {
-        label: "Exits",
-        data: chartModel.checkpointExits,
-        backgroundColor: "#0b63e5",
-        borderRadius: 6
-      }
-    ]
-  };
-
-  const activityData = {
-    labels: chartModel.windows,
-    datasets: [
-      {
-        label: "Entries",
-        data: chartModel.activityEntries,
-        borderColor: "#12b76a",
-        backgroundColor: "rgba(18, 183, 106, 0.14)",
-        fill: true,
-        pointBackgroundColor: "#12b76a",
-        pointBorderWidth: 0,
-        tension: 0.36
-      },
-      {
-        label: "Exits",
-        data: chartModel.activityExits,
-        borderColor: "#f04438",
-        backgroundColor: "rgba(240, 68, 56, 0.14)",
-        fill: true,
-        pointBackgroundColor: "#f04438",
-        pointBorderWidth: 0,
-        tension: 0.36
-      }
-    ]
-  };
-
-  const qualityData = {
-    labels: ["Approved", "Denied"],
-    datasets: [
-      {
+      }]
+    },
+    quality: {
+      labels: ["Approved", "Denied"],
+      datasets: [{
         data: [scanAnalytics.totalApproved, scanAnalytics.totalDenied],
         backgroundColor: ["#12b76a", "#f04438"],
         borderColor: "#f7faf9",
         borderWidth: 4
-      }
-    ]
-  };
-
-  const scannerData = {
-    labels: ["Online", "Warning", "Offline"],
-    datasets: [
-      {
-        data: [
-          chartModel.scannerCounts.online ?? 0,
-          chartModel.scannerCounts.warning ?? 0,
-          chartModel.scannerCounts.offline ?? 0
-        ],
-        backgroundColor: ["#12b76a", "#f79009", "#f04438"],
-        borderColor: "#f7faf9",
-        borderWidth: 4
-      }
-    ]
-  };
+      }]
+    },
+  }), [scanAnalytics]);
 
   return (
     <section className="dashboard-analytics" aria-label="Dashboard analytics" style={{
@@ -292,7 +116,7 @@ export function DashboardCharts({
         zIndex: 20
       }}>
         {/* Total Scans */}
-        <div className="plain-panel hover-metric-card" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.02)" }}>
+        <div className="metric-widget-box" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#667085" }}>
             <Scan size={18} />
             <span style={{ fontSize: "14px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Scans</span>
@@ -306,7 +130,7 @@ export function DashboardCharts({
         </div>
 
         {/* Alerts */}
-        <div className="plain-panel hover-metric-card" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.02)" }}>
+        <div className="metric-widget-box" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#667085" }}>
             <Bell size={18} />
             <span style={{ fontSize: "14px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Alerts</span>
@@ -320,7 +144,7 @@ export function DashboardCharts({
         </div>
 
         {/* Approved */}
-        <div className="plain-panel hover-metric-card" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.02)" }}>
+        <div className="metric-widget-box" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#667085" }}>
             <CheckCircle size={18} />
             <span style={{ fontSize: "14px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Approved</span>
@@ -334,7 +158,7 @@ export function DashboardCharts({
         </div>
 
         {/* Denied */}
-        <div className="plain-panel" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px", border: "1px solid rgba(0,0,0,0.06)", boxShadow: "0 2px 8px rgba(0,0,0,0.02)" }}>
+        <div className="metric-widget-box" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "#667085" }}>
             <XCircle size={18} />
             <span style={{ fontSize: "14px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Denied</span>
@@ -387,7 +211,7 @@ export function DashboardCharts({
       <div className="analytics-donut animate-slide-up delay-100" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px" }}>
         <div style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Scan Status</div>
         <Doughnut
-          data={qualityData}
+          data={chartData.quality}
           options={{
             cutout: "75%",
             maintainAspectRatio: false,
@@ -416,7 +240,7 @@ export function DashboardCharts({
       <div className="analytics-donut animate-slide-up delay-150" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px", marginBottom: "16px" }}>
         <div style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Approved Scans</div>
         <Doughnut
-          data={scanMixData}
+          data={chartData.scanMix}
           options={{
             cutout: "75%",
             maintainAspectRatio: false,
@@ -445,7 +269,7 @@ export function DashboardCharts({
       <div className="analytics-donut animate-slide-up delay-200" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1" }}>
         <div style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Scan Methods</div>
         <Doughnut
-          data={autoVsManualData}
+          data={chartData.autoVsManual}
           options={{
             cutout: "75%",
             maintainAspectRatio: false,
@@ -474,7 +298,7 @@ export function DashboardCharts({
       <div className="analytics-donut animate-slide-up delay-250" style={{ gridColumn: 3, gridRow: 2, alignSelf: "end", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginBottom: "16px" }}>
         <div style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Denied Scans</div>
         <Doughnut
-          data={deniedMixData}
+          data={chartData.deniedMix}
           options={{
             cutout: "75%",
             maintainAspectRatio: false,
@@ -531,11 +355,8 @@ export function DashboardCharts({
             border: 1px solid #475467;
           }
           .alert-widget-header {
-            border-bottom: 1px solid transparent;
+            border-bottom: none;
             transition: border-color 0.2s ease;
-          }
-          .alert-widget-box:hover .alert-widget-header {
-            border-bottom: 1px solid #475467;
           }
           .alert-widget-chevron {
             opacity: 0;
@@ -568,12 +389,14 @@ export function DashboardCharts({
           .alert-item-card:hover {
             z-index: 10;
           }
-          .hover-metric-card {
-            border-color: transparent !important;
+          .metric-widget-box {
+            background: transparent;
+            border-radius: 16px;
+            border: 1px solid transparent;
             transition: border-color 0.2s ease;
           }
-          .hover-metric-card:hover {
-            border-color: #475467 !important;
+          .metric-widget-box:hover {
+            border: 1px solid #475467;
           }
 
           .view-button {
@@ -585,7 +408,7 @@ export function DashboardCharts({
           }
         `}</style>
         <div className="alert-list-container" style={{ display: "flex", flexDirection: "column", flex: 1, padding: "2px" }}>
-          {chartModel.openAlerts.map((alert, index) => {
+          {openAlerts.map((alert, index) => {
             const relTime = index === 0 ? "Just now" : index === 1 ? "2 mins ago" : "5 mins ago";
             
             return (
@@ -620,7 +443,7 @@ export function DashboardCharts({
               </div>
             );
           })}
-          {chartModel.openAlerts.length === 0 && (
+          {openAlerts.length === 0 && (
             <div style={{ textAlign: "center", color: "#667085", fontSize: "13px", fontWeight: 600, padding: "32px 0", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
               No active alerts 
             </div>
@@ -647,7 +470,17 @@ export function DashboardCharts({
           cursor: "pointer",
           zIndex: 10,
         }}
-        onClick={() => window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" })}
+        onClick={() => {
+          const tableHeader = Array.from(document.querySelectorAll('h2')).find(h => h.textContent === 'Recent Movement Logs');
+          if (tableHeader) {
+            tableHeader.scrollIntoView({ behavior: 'smooth' });
+          } else {
+            const container = document.getElementById("admin-scroll-container");
+            if (container) {
+              container.scrollTo({ top: container.scrollHeight, behavior: "smooth" });
+            }
+          }
+        }}
       >
         <style>{`
           @keyframes scrollWheel {

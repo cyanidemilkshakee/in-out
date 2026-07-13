@@ -1,5 +1,13 @@
 import type { Metadata } from "next";
+import { Urbanist } from "next/font/google";
 import "./globals.css";
+
+const urbanist = Urbanist({
+  subsets: ["latin"],
+  variable: "--font-urbanist",
+  display: "swap",
+  preload: true,
+});
 
 export const metadata: Metadata = {
   title: "IN / OUT Management System",
@@ -12,7 +20,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" className={urbanist.variable}>
       <body>{children}</body>
     </html>
   );

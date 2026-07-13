@@ -212,10 +212,6 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
     }
   };
 
-  const chartFont = {
-    family: "var(--admin-font)",
-  };
-
   return (
     <div style={{ position: "relative", width: "100%", height: "100%" }}>
       <Doughnut

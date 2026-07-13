@@ -1,15 +1,7 @@
 import { Fragment, useState, type FormEvent, type ReactNode } from 'react';
-import { ArrowDown, ArrowUp, ArrowUpDown, BadgePlus, Download, GitBranch, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, ArrowUpDown, BadgePlus, Download, X } from 'lucide-react';
 import { ResultPill, ScannerPill, SyncPill } from '../StatusPill';
-import {
-  activePresence,
-  checkpoints,
-  employeeRecords,
-  offlineSyncBatches,
-  roles,
-  shiftPolicies,
-  users
-} from '../../lib/mockData';
+import { checkpoints } from '../../lib/mockData';
 import type { Alert, HardwareAsset, MovementEvent, Person, Scanner, SortDirection, VisibleColumn } from '../../lib/types';
 
 export function AdminPageFrame({
@@ -32,44 +24,12 @@ export function AdminPageFrame({
           <p>{description}</p>
           {metric ? <strong>{metric}</strong> : null}
         </div>
-        <DatabaseModelStrip />
       </section>
       {children}
     </div>
   );
 }
 
-function DatabaseModelStrip() {
-  const modelTables = [
-    { name: "roles", count: roles.length, detail: `${roles.reduce((sum, role) => sum + role.permissions.length, 0)} permissions` },
-    { name: "users", count: users.length, detail: `${users.filter((user) => user.status === "active").length} active` },
-    { name: "employees", count: employeeRecords.length, detail: `${new Set(employeeRecords.map((employee) => employee.department)).size} departments` },
-    { name: "shift_policies", count: shiftPolicies.length, detail: `${shiftPolicies.filter((policy) => policy.status === "active").length} active` },
-    { name: "active_presence", count: activePresence.length, detail: `${activePresence.filter((presence) => presence.state === "held").length} held` },
-    { name: "offline_sync_batches", count: offlineSyncBatches.length, detail: `${offlineSyncBatches.reduce((sum, batch) => sum + batch.conflictCount, 0)} conflicts` }
-  ];
-
-  return (
-    <div className="database-model-strip" aria-label="Mock database model summary">
-      <div className="model-strip-title">
-        <GitBranch />
-        <div>
-          <strong>Mock database is populated</strong>
-          <span>Admin pages read from these entity groups instead of a static diagram.</span>
-        </div>
-      </div>
-      <div className="model-table-list">
-        {modelTables.map((table) => (
-          <div className="model-table-row" key={table.name}>
-            <span>{table.name}</span>
-            <strong>{table.count}</strong>
-            <small>{table.detail}</small>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
 
 export function MovementTable({
   events,

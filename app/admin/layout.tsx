@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useState, useEffect } from "react";
+import { ReactNode, useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { AppChrome } from "../../components/AppChrome";
@@ -38,9 +38,40 @@ const adminRailGroups = [
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const rafRef = useRef<number | null>(null);
+  const scrolledRef = useRef(false);
+
+  const handleScroll = useCallback(() => {
+    if (rafRef.current !== null) return; // already scheduled
+    rafRef.current = requestAnimationFrame(() => {
+      rafRef.current = null;
+      const next = (scrollRef.current?.scrollTop ?? 0) > 100;
+      if (next !== scrolledRef.current) {
+        scrolledRef.current = next;
+        setScrolled(next);
+      }
+    });
+  }, []);
+
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.addEventListener("scroll", handleScroll, { passive: true });
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+      if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
+    };
+  }, [handleScroll]);
 
   return (
     <AppChrome role="admin">
+      {/* One-time CSS injection — no JS on hover */}
+      <style>{`
+        .nav-rail-link { transition: background-color 0.15s ease; }
+        .nav-rail-link:hover { background-color: rgba(0,0,0,0.06); }
+      `}</style>
       <main className="admin-console" style={{ display: "flex", flexDirection: "row", height: "100vh", padding: 0 }}>
         {/* Sidebar Container */}
         <div style={{ flexShrink: 0, width: "72px", position: "relative", zIndex: 50 }}>
@@ -57,7 +88,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               flexDirection: "column",
               alignItems: "flex-start",
               padding: "0 12px",
-              backgroundColor: pathname !== "/admin" && sidebarOpen ? "#D0D8DE" : "transparent",
+              backgroundColor: pathname !== "/admin" && sidebarOpen ? "#D0D8DE" : (scrolled && pathname === "/admin" ? "var(--bg)" : "transparent"),
               borderRight: "none",
               transition: "width 0.3s cubic-bezier(0.2, 0, 0, 1), background-color 0.3s ease",
               overflow: "hidden",
@@ -108,6 +139,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     href={item.path}
                     onClick={() => setSidebarOpen(false)}
                     title={sidebarOpen ? "" : item.label}
+                    className="nav-rail-link"
                     style={{
                       background: "none",
                       border: "none",
@@ -120,14 +152,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                       padding: "8px 12px",
                       width: "100%",
                       borderRadius: "12px",
-                      transition: "background-color 0.2s ease, transform 0.2s ease",
                       textDecoration: "none"
-                    }}
-                    onMouseOver={(e) => {
-                      e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.06)";
-                    }}
-                    onMouseOut={(e) => {
-                      e.currentTarget.style.backgroundColor = "transparent";
                     }}
                   >
                     <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
@@ -164,7 +189,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <div style={{ flex: 1 }} />
 
             {/* User Profile - Bottom */}
-            <button 
+            <Link
+              href="/admin/profile"
+              onClick={() => setSidebarOpen(false)}
+              className="nav-rail-link"
               style={{
                 background: "none",
                 border: "none",
@@ -178,10 +206,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 justifyContent: "flex-start",
                 padding: "12px",
                 borderRadius: "12px",
-                transition: "background-color 0.2s ease",
               }}
-              onMouseOver={(e) => e.currentTarget.style.backgroundColor = "rgba(0,0,0,0.06)"}
-              onMouseOut={(e) => e.currentTarget.style.backgroundColor = "transparent"}
               title="Profile"
             >
               <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
@@ -209,11 +234,16 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               }}>
                 Profile
               </span>
-            </button>
+            </Link>
           </aside>
         </div>
 
-        <div style={{ flex: 1, position: "relative", width: "auto", height: "100vh", overflowY: "auto" }}>
+        <div 
+          id="admin-scroll-container"
+          ref={scrollRef}
+          className={scrolled ? "scrolled-main-content" : "top-main-content"}
+          style={{ flex: 1, position: "relative", width: "auto", height: "100vh", overflowY: "auto" }}
+        >
           {children}
         </div>
       </main>
