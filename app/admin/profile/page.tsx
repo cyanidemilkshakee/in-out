@@ -4,70 +4,57 @@ import { useEffect, useState } from "react";
 import {
   Bell,
   Check,
-  Clock3,
   KeyRound,
   Moon,
   Palette,
   Save,
-  ShieldCheck,
   Sun,
   UserRound
 } from "lucide-react";
 
-type AdminTheme = "light" | "dark" | "high-contrast-dark";
+type AdminTheme = "light" | "dark";
 
 const themeOptions: Array<{
   id: AdminTheme;
   label: string;
   description: string;
   icon: typeof Sun;
-  swatches: string[];
 }> = [
   {
     id: "light",
     label: "Light",
     description: "Bright tables and quieter contrast for long reviews.",
-    icon: Sun,
-    swatches: ["#f7faf9", "#0b63e5", "#16211f"]
+    icon: Sun
   },
   {
     id: "dark",
     label: "Dark",
     description: "Dim surfaces for low-light checkpoint rooms.",
-    icon: Moon,
-    swatches: ["#111716", "#9cff6a", "#eef7f2"]
-  },
-  {
-    id: "high-contrast-dark",
-    label: "High Contrast Dark",
-    description: "Black surfaces, bright text, and high-visibility signal colors.",
-    icon: ShieldCheck,
-    swatches: ["#000000", "#ffffff", "#ffe45c"]
+    icon: Moon
   }
 ];
 
+function readStoredTheme(): AdminTheme {
+  if (typeof window === "undefined") {
+    return "light";
+  }
+
+  const storedTheme = window.localStorage.getItem("inout-admin-theme");
+  return storedTheme === "dark" || storedTheme === "light" ? storedTheme : "light";
+}
+
 export default function ProfilePage() {
-  const [theme, setTheme] = useState<AdminTheme>("light");
-  const [density, setDensity] = useState("comfortable");
+  const [theme, setTheme] = useState<AdminTheme>(readStoredTheme);
   const [autoLock, setAutoLock] = useState("15");
   const [saved, setSaved] = useState(false);
   const [settings, setSettings] = useState({
     incidentAlerts: true,
     syncAlerts: true,
     weeklyDigest: false,
-    requireReviewNote: true,
-    compactRail: false
+    requireReviewNote: true
   });
 
   useEffect(() => {
-    const storedTheme = window.localStorage.getItem("inout-admin-theme") as AdminTheme | null;
-    if (storedTheme && themeOptions.some((option) => option.id === storedTheme)) {
-      setTheme(storedTheme);
-    } else {
-      setTheme("light");
-    }
-    const storedDensity = window.localStorage.getItem("inout-admin-density");
-    if (storedDensity) setDensity(storedDensity);
     const storedAutoLock = window.localStorage.getItem("inout-admin-autolock");
     if (storedAutoLock) setAutoLock(storedAutoLock);
   }, []);
@@ -77,15 +64,12 @@ export default function ProfilePage() {
     window.localStorage.setItem("inout-admin-theme", theme);
   }, [theme]);
 
-  const activeTheme = themeOptions.find((option) => option.id === theme) ?? themeOptions[0];
-
   function toggleSetting(key: keyof typeof settings) {
     setSettings((current) => ({ ...current, [key]: !current[key] }));
     setSaved(false);
   }
 
   function savePreferences() {
-    window.localStorage.setItem("inout-admin-density", density);
     window.localStorage.setItem("inout-admin-autolock", autoLock);
     window.localStorage.setItem("inout-admin-settings", JSON.stringify(settings));
     setSaved(true);
@@ -93,7 +77,6 @@ export default function ProfilePage() {
 
   return (
     <main className="profile-workspace" aria-label="Profile settings">
-      {/* Identity band */}
       <header className="profile-identity-band">
         <div className="profile-avatar-large">
           <UserRound />
@@ -101,19 +84,11 @@ export default function ProfilePage() {
         <div className="profile-identity-info">
           <span>Signed in as</span>
           <h1>Ops Admin</h1>
-          <p>admin@company.com · Admin role · Full operations access</p>
-        </div>
-        <div className="profile-session-stack">
-          <span>Active theme</span>
-          <strong>{activeTheme.label}</strong>
-          <small>Session · OAuth 2.0 + OIDC</small>
+          <p>admin@company.com | Admin role | Full operations access</p>
         </div>
       </header>
 
-      {/* Settings grid */}
       <div className="profile-grid">
-
-        {/* Theme — spans full width */}
         <section className="settings-section theme-section">
           <div className="settings-section-title">
             <Palette />
@@ -142,11 +117,6 @@ export default function ProfilePage() {
                     <strong>{option.label}</strong>
                     <small>{option.description}</small>
                   </span>
-                  <span className="theme-swatches" aria-hidden="true">
-                    {option.swatches.map((color) => (
-                      <i key={color} style={{ backgroundColor: color }} />
-                    ))}
-                  </span>
                   {active ? <Check className="theme-check" /> : null}
                 </button>
               );
@@ -154,7 +124,6 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        {/* Notifications */}
         <section className="settings-section">
           <div className="settings-section-title">
             <Bell />
@@ -183,7 +152,6 @@ export default function ProfilePage() {
           />
         </section>
 
-        {/* Security */}
         <section className="settings-section">
           <div className="settings-section-title">
             <KeyRound />
@@ -196,7 +164,10 @@ export default function ProfilePage() {
             <span>Auto-lock after</span>
             <select
               value={autoLock}
-              onChange={(event) => setAutoLock(event.target.value)}
+              onChange={(event) => {
+                setAutoLock(event.target.value);
+                setSaved(false);
+              }}
             >
               <option value="5">5 minutes</option>
               <option value="15">15 minutes</option>
@@ -211,38 +182,8 @@ export default function ProfilePage() {
             onChange={() => toggleSetting("requireReviewNote")}
           />
         </section>
-
-        {/* Console Preferences */}
-        <section className="settings-section">
-          <div className="settings-section-title">
-            <Clock3 />
-            <div>
-              <h2>Console Preferences</h2>
-              <p>Adjust table and navigation ergonomics.</p>
-            </div>
-          </div>
-          <label className="profile-field">
-            <span>Table density</span>
-            <select
-              value={density}
-              onChange={(event) => setDensity(event.target.value)}
-            >
-              <option value="comfortable">Comfortable</option>
-              <option value="compact">Compact</option>
-              <option value="audit">Audit dense</option>
-            </select>
-          </label>
-          <SettingsToggle
-            checked={settings.compactRail}
-            label="Prefer compact rail"
-            description="Keep admin navigation collapsed after selection."
-            onChange={() => toggleSetting("compactRail")}
-          />
-        </section>
-
       </div>
 
-      {/* Footer actions */}
       <footer className="profile-actions">
         <span className={saved ? "profile-save-status saved" : "profile-save-status"}>
           {saved ? "Preferences saved." : "Unsaved changes."}

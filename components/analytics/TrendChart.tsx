@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -30,9 +30,21 @@ ChartJS.register(
 export type TimeRange = "1D" | "1W" | "1M" | "1Y";
 
 export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }: { events?: MovementEvent[], timeRange?: TimeRange, onTimeRangeChange?: (range: TimeRange) => void }) {
+  const [darkTheme, setDarkTheme] = useState(false);
   const chartFont = {
     family: "var(--font-urbanist, Urbanist), Arial, sans-serif",
   };
+
+  useEffect(() => {
+    const syncTheme = () => {
+      setDarkTheme(document.documentElement.dataset.adminTheme === "dark");
+    };
+
+    syncTheme();
+    const observer = new MutationObserver(syncTheme);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-admin-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   const { avgMovements, percentage, isUp, labelUnit, chartData } = useMemo(() => {
     let labels: string[] = [];
@@ -68,7 +80,7 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
       if (timeRange === "1M") days = 30;
       if (timeRange === "1Y") days = 365;
 
-      const dailyCounts = getDailyMovementCounts(days);
+      const dailyCounts = getDailyMovementCounts(events, days);
       const sortedDates = Object.keys(dailyCounts).sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
 
       if (timeRange === "1Y") {
@@ -158,19 +170,25 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
           borderColor: "#0b63e5",
           borderWidth: 3,
           tension: 0.4,
-          pointBackgroundColor: "#ffffff",
+          pointBackgroundColor: "#0b63e5",
           pointBorderColor: "#0b63e5",
           pointBorderWidth: 0,
           pointRadius: 0,
           pointHoverRadius: 0,
           fill: true,
-          backgroundColor: "rgba(11, 99, 229, 0.1)",
+          backgroundColor: "rgba(11, 99, 229, 0.14)",
         },
       ],
     };
   }, [chartData]);
 
   const options = useMemo(() => {
+    const tickColor = darkTheme ? "rgba(238, 247, 242, 0.72)" : "#667085";
+    const tooltipBackground = darkTheme ? "#151515" : "#ffffff";
+    const tooltipTitle = darkTheme ? "#eef7f2" : "#111827";
+    const tooltipBody = darkTheme ? "#aab8b3" : "#4b5563";
+    const tooltipBorder = darkTheme ? "#2e2e2e" : "#d8dde6";
+
     return {
       responsive: true,
       maintainAspectRatio: false,
@@ -183,10 +201,10 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
           display: false,
         },
         tooltip: {
-          backgroundColor: "#ffffff",
-          titleColor: "#111827",
-          bodyColor: "#4b5563",
-          borderColor: "#d8dde6",
+          backgroundColor: tooltipBackground,
+          titleColor: tooltipTitle,
+          bodyColor: tooltipBody,
+          borderColor: tooltipBorder,
           borderWidth: 1,
           titleFont: { ...chartFont, size: 13, weight: 700 as const },
           bodyFont: { ...chartFont, size: 12 },
@@ -202,13 +220,13 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
             drawBorder: false,
           },
           ticks: {
-            color: "#667085",
+            color: tickColor,
             font: { ...chartFont, size: 10, weight: 600 as const },
             padding: 8,
           },
           border: {
-            display: true,
-            color: "#c2c9d6"
+            display: false,
+            color: "#2e2e2e"
           }
         },
         y: {
@@ -219,13 +237,13 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
             drawBorder: false,
           },
           ticks: {
-            color: "#667085",
+            color: tickColor,
             font: { ...chartFont, size: 10, weight: 600 as const },
             maxTicksLimit: 4,
           },
           border: {
-            display: true,
-            color: "#c2c9d6"
+            display: false,
+            color: "#2e2e2e"
           }
         },
       },
@@ -234,12 +252,12 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
         mode: "index" as const,
       },
     };
-  }, [timeRange]);
+  }, [darkTheme, timeRange]);
 
   const getButtonStyle = (range: TimeRange) => ({
     background: timeRange === range ? "rgba(11, 99, 229, 0.1)" : "transparent",
-    color: timeRange === range ? "#0b63e5" : "#667085",
-    border: timeRange === range ? "1px solid rgba(11, 99, 229, 0.2)" : "1px solid #d8dde6",
+    color: timeRange === range ? "#0b63e5" : "var(--admin-muted)",
+    border: "0",
     padding: "5px 15px",
     borderRadius: "20px",
     fontSize: "11px",
@@ -274,14 +292,14 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
         <div style={{ display: "flex", gap: "48px" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div style={{ fontSize: "32px", fontWeight: 800, color: "#111827", lineHeight: 1 }}>
+              <div style={{ fontSize: "32px", fontWeight: 800, color: "var(--admin-text)", lineHeight: 1 }}>
                 {avgMovements.toLocaleString()}
               </div>
               <div style={{ fontSize: "12px", fontWeight: 700, color: "#0b63e5" }}>
                 {isUp ? "↑" : "↓"} {percentage}%
               </div>
             </div>
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#667085", letterSpacing: "1px" }}>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--admin-muted)", letterSpacing: "1px" }}>
               {labelUnit}
             </div>
           </div>

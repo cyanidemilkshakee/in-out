@@ -1,196 +1,253 @@
 # IN / OUT Management System
 
-A mock frontend for a physical checkpoint access-control system — tracking the inbound and outbound movement of employees, visitors, and hardware assets across secured zones in real-time.
+A Next.js frontend for managing employee, visitor, and hardware movement through secured facility checkpoints.
 
----
-
-## Overview
-
-The IN/OUT Management System is a **Next.js 15** web application that simulates a complete **checkpoint access-control platform** for a physical facility. It provides two distinct interfaces for two types of users:
+The application has two connected interfaces:
 
 | Role | Interface | Path |
 |---|---|---|
-| Administrator | Admin Console | `/admin` |
-| Security Guard | Scan Terminal | `/terminal` |
+| Administrator | Admin console | `/admin` |
+| Security staff | Checkpoint terminal | `/terminal` |
 
-### How it works
+The current implementation uses an in-memory mock service. Admin pages and the terminal share the same application state through React Context, so changes made in one interface are immediately visible in the other during the same browser session.
 
-When a person or asset arrives at a checkpoint, a barcode is scanned. The system evaluates the scan against a set of rules (zone permissions, access status, whether the subject is already inside, etc.) and produces one of these outcomes:
+## Current Features
 
-| Result | Meaning |
+### Admin console
+
+- Dashboard metrics, active alerts, drill-down charts, and recent movement activity
+- Searchable, sortable, filterable, and paginated movement ledger
+- Movement detail review and shared movement notes
+- Alert status updates
+- Employee directory and employee work-pattern profiles
+- Temporary visitor ID creation and visitor access records
+- Hardware custody and presence records
+- Checkpoint rule listing
+- Offline queue synchronization and conflict resolution
+- Light and dark themes with profile security and notification preferences
+
+### Checkpoint terminal
+
+- Checkpoint selection and online/offline simulation
+- Barcode-based employee, visitor, and hardware lookup
+- Entry and exit decision evaluation
+- Carried-hardware selection
+- Recent activity, offline queue, and conflict panels
+- Manual security review
+- Shared movement, presence, and synchronization state with the admin console
+
+Sample barcodes are available in the terminal:
+
+| Barcode | Subject |
 |---|---|
-| ✅ **Success** | Entry or exit is approved |
-| ⛔ **Denied** | Barcode not registered or not pre-approved |
-| 🔁 **Duplicate** | Subject is already inside (on entry) or not logged in (on exit) |
-| 🚫 **Restricted** | Subject's zone permissions don't cover this checkpoint |
-| ⏳ **Expired** | Visitor's temporary barcode has expired |
-| 👁 **Manual Review** | Flagged for a security officer to inspect |
+| `test1` | Employee |
+| `test2` | Visitor |
+| `test3` | Hardware asset |
 
-The system also supports **offline mode**: scans taken while offline are queued locally and synced when connectivity is restored.
+## State Management and API Layer
 
----
+The application uses React Context as its lightweight global state manager. Zustand is not currently required because the domain is small enough for a single provider, and Context avoids introducing another dependency.
 
-## Features
+Domain data is not stored in page-level `useState` hooks. Local component state is reserved for temporary UI concerns such as search text, filters, selected rows, open dialogs, chart ranges, and theme controls.
 
-### Admin Console (`/admin`)
-- **Dashboard** — Live metrics strip (total scans, entries, exits, approved, denied, restricted, active inside) with interactive charts (bar, doughnut, line via Chart.js)
-- **Movement Logs** — Full searchable, sortable, filterable event log with configurable columns, pagination, and a slide-out detail drawer
-- **Alerts** — Security alerts ranked by severity (critical / high / medium) with acknowledge & resolve actions
-- **Employees** — Employee directory with access level and zone assignment management
-- **Visitors** — Visitor management with pre-approval workflows and temporary barcode issuance
-- **Hardware** — Asset registry (laptops, equipment, tools) with zone restrictions and ownership tracking
-- **Scanners** — Scanner device health monitoring (online / offline / warning)
-- **Checkpoints** — Checkpoint configuration (entry / exit / auto mode, zone assignment)
-- **Offline Sync** — View and manage queued movement events pending synchronisation
-- **Profile** — Administrator profile page
+### Data flow
 
-### Scan Terminal (`/terminal`)
-- **Barcode scan input** — Type or paste a barcode to simulate a hardware scanner
-- **Real-time decision panel** — Instantly shows the scan result, direction, subject identity, and reason
-- **Subject panel** — Full subject profile card (name, type, access level, allowed zones, last movement)
-- **Hardware picker** — Select hardware assets being carried through the checkpoint alongside a person
-- **Activity feed** — Live scrolling timeline of recent scans at the terminal
-- **Offline queue** — View events waiting to sync when connectivity returns
-- **Conflict resolution** — Handle scans with conflicting sync states
-- **Online / Offline toggle** — Simulate network connectivity loss to test offline behaviour
-- **Checkpoint selector** — Switch the active checkpoint to simulate different access points
+```text
+lib/mockData.ts
+       |
+       v
+services/MockDataService
+       |
+       v
+context/DataProvider
+       |
+       +--> useDataState()   --> render shared domain data
+       |
+       +--> useDataActions() --> perform mutations and update shared state
+       |
+       +--> useDataService() --> access the injected service when needed
+```
 
----
+### Service contract
+
+`services/dataService.ts` defines the `DataService` interface used by the component tree. It covers all current domain fetching and mutations.
+
+Fetch operations:
+
+- People
+- Hardware assets
+- Checkpoints
+- Movement events
+- Alerts
+- Scan analytics
+- Movement notes
+
+Mutation operations:
+
+- Create a temporary visitor
+- Update a person
+- Update a hardware asset
+- Update an alert
+- Record a terminal scan
+- Save a movement or manual-review result
+- Synchronize queued movements
+- Resolve movement conflicts
+- Add a movement note
+
+`services/mockDataService.ts` is the Phase 1 in-memory implementation. It owns the mutable mock records and uses `lib/movementLogic.ts` for scan evaluation.
+
+### Context boundaries
+
+`context/DataContext.tsx` intentionally separates three contexts:
+
+| Context | Responsibility |
+|---|---|
+| `DataServiceContext` | Supplies the injected `DataService` implementation |
+| `DataStateContext` | Supplies the current application snapshot, loading state, and load error |
+| `DataActionsContext` | Supplies stable mutation and refresh functions |
+
+The public hooks are:
+
+```ts
+const data = useDataState();
+const actions = useDataActions();
+const service = useDataService();
+```
+
+Splitting actions from state means components that only dispatch mutations do not need to depend on the state object.
+
+### Provider composition
+
+`components/AppProviders.tsx` creates the current `MockDataService` and passes it to `DataProvider`. The root layout mounts `AppProviders` once, above both `/admin` and `/terminal`.
+
+This placement provides session-level persistence across client-side navigation. A full browser refresh recreates the in-memory mock service and resets the data to its fixtures. Theme and profile preferences use browser storage separately from domain state.
+
+### Phase 2 API injection
+
+To connect a backend without rewriting components:
+
+1. Create an HTTP implementation such as `HttpDataService` that implements `DataService`.
+2. Implement each method with the corresponding API request.
+3. Replace the mock service instance in `components/AppProviders.tsx`.
+4. Optionally pass server-provided `initialData` to avoid an initial loading state.
+
+The pages and components can continue using `useDataState()` and `useDataActions()` unchanged.
+
+For a substantially larger application, consider Zustand when selector-based subscriptions, multiple independent stores, or more granular render control become necessary. The `DataService` interface should remain independent of the chosen state manager.
 
 ## Project Structure
 
-```
-.
-├── app/
-│   ├── admin/              # Admin console pages (dashboard, logs, alerts, employees, etc.)
-│   ├── terminal/           # Scan terminal page
-│   ├── dashboard/          # Dashboard route
-│   ├── layout.tsx          # Root layout (Urbanist font, global CSS)
-│   ├── page.tsx            # Root redirect → /admin
-│   └── globals.css         # All application styles (design tokens, components, responsive)
-│
-├── components/
-│   ├── admin/
-│   │   └── Tables.tsx      # Movement log table, column controls, detail drawer
-│   ├── analytics/
-│   │   ├── DashboardCharts.tsx   # Chart.js charts (bar, doughnut, line, area)
-│   │   └── DrillDownDoughnut.tsx # Interactive drill-down doughnut chart
-│   ├── terminal/
-│   │   └── Panels.tsx      # Terminal UI panels (decision, subject, hardware, queue, conflicts)
-│   ├── AppChrome.tsx       # Shared top bar / page shell for both admin and terminal
-│   ├── StatusPill.tsx      # Coloured result status badge component
-│   └── ToastRegion.tsx     # Toast notification system
-│
-├── lib/
-│   ├── types.ts            # All shared TypeScript types
-│   ├── mockData.ts         # Seed data (people, hardware, checkpoints, scanners, events)
-│   └── movementLogic.ts    # Core scan evaluation engine (barcode → decision)
-│
-├── Dockerfile              # Multi-stage Docker build (deps → builder → runner)
-├── next.config.mjs         # Next.js config (standalone output, CSS optimisation)
-└── package.json
+```text
+app/
+  admin/                         Admin dashboard and management routes
+  terminal/                      Security checkpoint terminal
+  layout.tsx                     Root layout and provider mount
+  globals.css                    Global design tokens and component styles
+
+components/
+  admin/                         Admin tables and employee profile views
+  analytics/                     Chart.js dashboard and trend components
+  terminal/                      Terminal panels
+  AppProviders.tsx               Application provider composition
+  AppChrome.tsx                  Role-specific application shell
+
+context/
+  DataContext.tsx                Service, shared-state, and action contexts
+
+services/
+  dataService.ts                 API contract and request/response types
+  mockDataService.ts             In-memory Phase 1 service implementation
+
+lib/
+  types.ts                       Shared domain types
+  mockData.ts                    Seed people, assets, checkpoints, and alerts
+  initialMovements.json          Seed movement ledger
+  movementLogic.ts               Scan evaluation and presence transitions
+  analyticsUtils.ts              Pure analytics derived from injected movements
 ```
 
----
+## Routes
+
+| Path | Purpose |
+|---|---|
+| `/admin` | Analytics dashboard and recent movements |
+| `/admin/logs` | Movement ledger and detail review |
+| `/admin/alerts` | Alert command view |
+| `/admin/offline-sync` | Queue synchronization and conflict resolution |
+| `/admin/checkpoints` | Checkpoint rules |
+| `/admin/employees` | Employee directory |
+| `/admin/visitors` | Visitor access and temporary IDs |
+| `/admin/hardware` | Hardware custody |
+| `/admin/profile` | Theme, notifications, and security preferences |
+| `/terminal` | Security checkpoint terminal |
+
+`/` redirects to `/admin`. The compatibility route `/admin/[view]` currently renders the dashboard.
 
 ## Tech Stack
 
 | Technology | Purpose |
 |---|---|
-| [Next.js 15](https://nextjs.org/) | React framework with App Router, server components, standalone output |
-| [React 19](https://react.dev/) | UI library |
-| [TypeScript](https://www.typescriptlang.org/) | Type safety across the entire codebase |
-| [Chart.js](https://www.chartjs.org/) + [react-chartjs-2](https://react-chartjs-2.js.org/) | Data visualisation (bar, doughnut, line charts) |
-| [Lucide React](https://lucide.dev/) | Icon library |
-| [Urbanist](https://fonts.google.com/specimen/Urbanist) | Google Fonts typeface (via `next/font`) |
-| Vanilla CSS | All styling — no utility framework, uses CSS custom properties |
+| Next.js 15 | App Router, layouts, and standalone production output |
+| React 19 | Component and Context state model |
+| TypeScript | Domain and service contract type safety |
+| Chart.js and react-chartjs-2 | Dashboard and trend visualizations |
+| Lucide React | Interface icons |
+| Urbanist | Application typeface through `next/font` |
+| Vanilla CSS | Design tokens, themes, responsive layout, and component styling |
 
----
+## Local Development
 
-## Prerequisites
+Requirements:
 
-Ensure you have the following installed before running the project:
+- Node.js 20 or newer
+- npm
 
-- **Node.js** v20 or higher
-- **npm** (comes bundled with Node.js)
-- **Docker** (only required for the Docker run method)
-
----
-
-## Running with npm (Local Development)
-
-### 1. Install dependencies
+Install dependencies:
 
 ```bash
 npm install
 ```
 
-### 2. Start the development server
+Start the development server:
 
 ```bash
 npm run dev
 ```
 
-The app will be available at `http://localhost:1001`.
+The configured development URL is `http://localhost:1001`. The development command binds to IPv6 localhost (`::1`), so `http://[::1]:1001` may be required on some systems.
 
-> The dev server binds to IPv6 localhost (`::1`) on port `1001` by default. If `http://localhost:1001` doesn't work in your browser, try `http://[::1]:1001`.
+Available scripts:
 
-### 3. Build for production (optional)
-
-```bash
-npm run build
-npm run start
-```
-
-### Other scripts
-
-| Command | Description |
+| Command | Purpose |
 |---|---|
-| `npm run dev` | Start local development server with hot reload |
-| `npm run build` | Build an optimised production bundle |
-| `npm run start` | Start the production server (requires a build first) |
-| `npm run typecheck` | Run TypeScript type checking without emitting files |
+| `npm run dev` | Start the Turbopack development server |
+| `npm run dev:webpack` | Start the development server with Webpack |
+| `npm run typecheck` | Run TypeScript validation without output |
+| `npm run build` | Create the standalone production build |
+| `npm run start` | Start an existing production build |
 
----
+## Docker
 
-## Running with Docker
-
-The project includes a production-ready **multi-stage Dockerfile** that produces a minimal image using Next.js's standalone output mode.
-
-### 1. Build the Docker image
-
-Run this from the root of the project directory:
+Build the production image:
 
 ```bash
 docker build -t in-out-management-frontend .
 ```
 
-### 2. Run the container
+Run the container:
 
 ```bash
 docker run -p 1001:1001 in-out-management-frontend
 ```
 
-### 3. Open in your browser
+Open `http://localhost:1001`.
 
-```
-http://localhost:1001
-```
+The multi-stage image installs dependencies, builds the Next.js standalone output, and runs it as the non-root `nextjs` user.
 
-### Docker build stages
+## Current Limitations
 
-| Stage | Base | Purpose |
-|---|---|---|
-| `deps` | `node:20-alpine` | Install `node_modules` cleanly via `npm ci` |
-| `builder` | `node:20-alpine` | Compile the Next.js production bundle |
-| `runner` | `node:20-alpine` | Minimal production image — only the standalone output |
-
-The final image runs as a non-root `nextjs` user for security.
-
----
-
-## Notes
-
-- **All data is mocked.** There is no backend or database. All movement events, people, hardware, alerts, and analytics are generated from `lib/mockData.ts` and held in React state. Refreshing the page resets all state.
-- **The scan engine is client-side.** `lib/movementLogic.ts` contains the full barcode evaluation logic — zone checks, access status, duplicate detection, and offline queuing — all running in the browser.
-- **Offline simulation** on the terminal page is a UI toggle only; it does not affect real network connectivity.
+- There is no backend, authentication service, or database yet.
+- Domain state is in memory and resets on a full refresh.
+- Offline mode simulates synchronization state; it does not disable the browser network.
+- The mock scan engine runs in the browser through the injected mock service.
+- Export buttons are presentational in the current phase.

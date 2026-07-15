@@ -1,15 +1,15 @@
 "use client";
 
 import { useDeferredValue, useMemo, useState } from "react";
-import { people } from "../../../lib/mockData";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { EmployeeTable } from "../../../components/admin/tables/EmployeeTable";
 import { MetricTrendChart } from "../../../components/analytics/MetricTrendChart";
 import type { TimeRange } from "../../../components/analytics/TrendChart";
 import { Download } from "lucide-react";
+import { useDataState } from "../../../context/DataContext";
 
 export default function EmployeesPage() {
-  const [staff, setStaff] = useState(people);
+  const { people: staff } = useDataState();
   const [search, setSearch] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>("1M");
   const deferredSearch = useDeferredValue(search);

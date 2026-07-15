@@ -14,6 +14,7 @@ import {
 import { Line } from "react-chartjs-2";
 import { getEmployeeKPIs, getAverageShiftLengths } from "../../../lib/analyticsUtils";
 import type { Person } from "../../../lib/types";
+import { useDataState } from "../../../context/DataContext";
 
 ChartJS.register(
   CategoryScale,
@@ -26,11 +27,15 @@ ChartJS.register(
 );
 
 export function EmployeeHeaderStats({ employees }: { employees: Person[] }) {
+  const { movements } = useDataState();
   const [hovered, setHovered] = useState<string | null>(null);
   const [timeRange, setTimeRange] = useState<"1W" | "1M" | "1Y">("1W");
 
   const kpis = useMemo(() => getEmployeeKPIs(employees), [employees]);
-  const avgShiftData = useMemo(() => getAverageShiftLengths(timeRange), [timeRange]);
+  const avgShiftData = useMemo(
+    () => getAverageShiftLengths(movements, timeRange),
+    [movements, timeRange]
+  );
 
   const currentAvg = avgShiftData.data.length > 0 ? avgShiftData.data[avgShiftData.data.length - 1] : 0;
   

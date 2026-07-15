@@ -27,24 +27,25 @@ export function ActiveAlertsWidget({ openAlerts }: ActiveAlertsWidgetProps) {
       marginTop: "-15px"
     }}>
       <div className="alert-widget-header" style={{ display: "flex", alignItems: "center", paddingBottom: "16px", background: "transparent", justifyContent: "center", gap: "4px" }}>
-        <span style={{ fontSize: "18px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "#18201f" }}>Active Alerts</span>
-        <ChevronRight size={18} color="#18201f" className="alert-widget-chevron" />
+        <span style={{ fontSize: "18px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--admin-text)" }}>Active Alerts</span>
+        <ChevronRight size={18} color="currentColor" className="alert-widget-chevron" />
       </div>
-      
+
       <style>{`
         .alert-widget-box {
           border: 1px solid transparent;
+          color: var(--admin-text);
           transition: border-color 0.2s ease;
         }
         .alert-widget-box:hover {
-          border: 1px solid rgba(71, 84, 103, 0.4);
+          border: 1px solid #2e2e2e;
         }
         .alert-widget-header {
           border-bottom: 1px solid transparent;
           transition: border-color 0.2s ease;
         }
         .alert-widget-box:hover .alert-widget-header {
-          border-bottom: 1px solid rgba(71, 84, 103, 0.4);
+          border-bottom: 1px solid #2e2e2e;
         }
         .alert-widget-chevron {
           opacity: 0;
@@ -68,13 +69,15 @@ export function ActiveAlertsWidget({ openAlerts }: ActiveAlertsWidgetProps) {
           background: transparent;
         }
         .alert-list-container::-webkit-scrollbar-thumb {
-          background: rgba(0,0,0,0.15);
+          background: var(--admin-line);
           border-radius: 4px;
         }
         .alert-item-card {
+          border: 1px solid transparent;
           transition: border-color 80ms linear, background-color 80ms linear;
         }
         .alert-item-card:hover {
+          border-color: #2e2e2e;
           z-index: 10;
         }
         .metric-widget-box {
@@ -84,21 +87,21 @@ export function ActiveAlertsWidget({ openAlerts }: ActiveAlertsWidgetProps) {
           transition: border-color 0.2s ease;
         }
         .metric-widget-box:hover {
-          border: 1px solid rgba(71, 84, 103, 0.4);
+          border: 1px solid #2e2e2e;
         }
         .view-button {
           border: 1px solid transparent !important;
           transition: border-color 0.2s ease;
         }
         .view-button:hover {
-          border-color: rgba(0,0,0,0.2) !important;
+          border-color: var(--admin-line) !important;
         }
       `}</style>
 
       <div className="alert-list-container" style={{ display: "flex", flexDirection: "column", flex: 1, padding: "2px" }}>
         {openAlerts.map((alert, index) => {
           const relTime = index === 0 ? "Just now" : index === 1 ? "2 mins ago" : "5 mins ago";
-          
+
           return (
             <div key={alert.id} className="alert-item-card" style={{
               position: "relative",
@@ -115,25 +118,25 @@ export function ActiveAlertsWidget({ openAlerts }: ActiveAlertsWidgetProps) {
             }}>
               <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{ fontSize: "15px", fontWeight: 700, color: "#111827", lineHeight: 1.2 }}>{alert.title}</div>
+                  <div style={{ fontSize: "15px", fontWeight: 700, color: "var(--admin-text)", lineHeight: 1.2 }}>{alert.title}</div>
                 </div>
-                
+
                 <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 600, color: "#667085" }}>{relTime}</div>
-                  <div style={{ color: "rgba(0,0,0,0.2)", fontSize: "13px" }}>•</div>
-                  <div style={{ fontSize: "13px", color: "#98a2b3" }}>{alert.time}</div>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--admin-muted)" }}>{relTime}</div>
+                  <div style={{ color: "var(--admin-line)", fontSize: "13px" }}>•</div>
+                  <div style={{ fontSize: "13px", color: "var(--admin-muted)" }}>{alert.time}</div>
                 </div>
               </div>
-              
+
               <div style={{ display: "flex", alignItems: "center" }}>
-                <button className="view-button" style={{ fontSize: "13px", fontWeight: 700, padding: "2px 8px", borderRadius: "4px", background: "transparent", cursor: "pointer", color: "#18201f" }}>View</button>
+                <button className="view-button" style={{ fontSize: "13px", fontWeight: 700, padding: "2px 8px", borderRadius: "4px", background: "transparent", cursor: "pointer", color: "var(--admin-text)" }}>View</button>
               </div>
             </div>
           );
         })}
         {openAlerts.length === 0 && (
-          <div style={{ textAlign: "center", color: "#667085", fontSize: "13px", fontWeight: 600, padding: "32px 0", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            No active alerts 
+          <div style={{ textAlign: "center", color: "var(--admin-muted)", fontSize: "13px", fontWeight: 600, padding: "32px 0", flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            No active alerts
           </div>
         )}
       </div>

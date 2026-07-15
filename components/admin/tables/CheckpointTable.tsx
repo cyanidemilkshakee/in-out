@@ -1,6 +1,6 @@
-import { checkpoints } from '../../../lib/mockData';
+import type { Checkpoint } from '../../../lib/types';
 
-export function CheckpointTable() {
+export function CheckpointTable({ checkpoints }: { checkpoints: Checkpoint[] }) {
   return (
     <section className="plain-panel">
       <div className="panel-titlebar">

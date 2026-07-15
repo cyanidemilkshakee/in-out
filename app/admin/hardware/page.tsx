@@ -1,25 +1,23 @@
 "use client";
 
 import { useDeferredValue, useMemo, useState } from "react";
-import { hardwareAssets } from "../../../lib/mockData";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { HardwareTable } from "../../../components/admin/tables/HardwareTable";
 import { MetricTrendChart } from "../../../components/analytics/MetricTrendChart";
 import type { TimeRange } from "../../../components/analytics/TrendChart";
 import { Download } from "lucide-react";
+import { useDataActions, useDataState } from "../../../context/DataContext";
 
 export default function HardwarePage() {
-  const [assets, setAssets] = useState(hardwareAssets);
+  const { hardwareAssets: assets } = useDataState();
+  const { updateHardwareAsset } = useDataActions();
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
 
   function handleToggleInside(assetId: string) {
-    setAssets((current) =>
-      current.map((asset) =>
-        asset.id === assetId ? { ...asset, inside: !asset.inside } : asset
-      )
-    );
+    const asset = assets.find((item) => item.id === assetId);
+    if (asset) void updateHardwareAsset(assetId, { inside: !asset.inside });
   }
 
   const filteredAssets = useMemo(() => {

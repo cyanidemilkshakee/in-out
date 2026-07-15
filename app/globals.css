@@ -2126,7 +2126,7 @@ tbody tr:hover {
 .role-admin .data-table th,
 .role-admin .data-table td {
   border-right-color: rgba(176, 190, 186, 0.42);
-  padding: 6px 12px;
+  padding: 8px 12px;
 }
 
 .role-admin .data-table tbody tr {
@@ -2151,6 +2151,18 @@ tbody tr:hover {
 .role-admin .table-wrap {
   border-top: 1px solid rgba(24, 32, 31, 0.14);
   border-bottom: 1px solid rgba(24, 32, 31, 0.1);
+}
+
+.role-admin .data-table-condensed th,
+.role-admin .data-table-condensed td {
+  padding: 5px 10px;
+}
+
+.role-admin .data-table-condensed .secondary-button.compact-button {
+  min-height: 34px;
+  border-radius: 10px;
+  padding: 0 12px;
+  font-size: 14px;
 }
 
 /* Pill in admin */
@@ -4311,46 +4323,6 @@ button,
   }
 }
 
-html[data-admin-theme="high-contrast-dark"] .role-admin,
-html[data-admin-theme="high-contrast-dark"] .role-security {
-  --bg: #000000;
-  --surface: #000000;
-  --surface-soft: #000000;
-  --surface-muted: #000000;
-  --text: #ffffff;
-  --muted: #ffffff;
-  --border: #ffffff;
-  --border-strong: #ffffff;
-  --admin-bg: #000000;
-  --admin-surface: #000000;
-  --admin-surface-strong: #000000;
-  --admin-panel: #000000;
-  --admin-line: #ffffff;
-  --admin-text: #ffffff;
-  --admin-muted: #ffffff;
-  --admin-lime: #ffe45c;
-  --admin-lime-soft: rgba(255, 228, 92, 0.18);
-  --admin-shadow: none;
-  background: #000000;
-  color: #ffffff;
-}
-
-html[data-admin-theme="high-contrast-dark"] .role-admin .data-table th,
-html[data-admin-theme="high-contrast-dark"] .role-admin .data-table td,
-html[data-admin-theme="high-contrast-dark"] .role-admin .workspace-main,
-html[data-admin-theme="high-contrast-dark"] .role-admin .plain-panel,
-html[data-admin-theme="high-contrast-dark"] .role-admin .admin-model-hero,
-html[data-admin-theme="high-contrast-dark"] .role-admin .settings-section,
-html[data-admin-theme="high-contrast-dark"] .role-security .terminalShell,
-html[data-admin-theme="high-contrast-dark"] .role-security .terminalHeader,
-html[data-admin-theme="high-contrast-dark"] .role-security .sidebar,
-html[data-admin-theme="high-contrast-dark"] .role-security .statusGrid,
-html[data-admin-theme="high-contrast-dark"] .role-security .footer {
-  background: #000000;
-  border-color: #ffffff;
-  color: #ffffff;
-}
-
 .admin-hero-metric {
   margin-top: 14px;
   font-weight: 800;
@@ -4583,15 +4555,6 @@ html[data-admin-theme="high-contrast-dark"] .role-security .footer {
   display: block;
   height: 100%;
   border-radius: inherit;
-}
-
-.visitor-workspace {
-  display: block;
-  padding-right: 24px !important;
-}
-
-.visitor-workspace .workspace-main {
-  width: 100%;
 }
 
 .temporary-id-popover {
@@ -4827,8 +4790,7 @@ html[data-admin-theme="high-contrast-dark"] .role-security .footer {
   background: rgba(24, 32, 31, 0.04);
 }
 
-html[data-admin-theme="dark"] .role-admin .theme-option.active,
-html[data-admin-theme="high-contrast-dark"] .role-admin .theme-option.active {
+html[data-admin-theme="dark"] .role-admin .theme-option.active {
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -5129,4 +5091,334 @@ html[data-admin-theme="high-contrast-dark"] .role-admin .theme-option.active {
 .terminalHeroMetrics div:nth-child(2) svg { color: var(--red); }
 .terminalHeroMetrics div:nth-child(3) svg { color: var(--amber); }
 
+/* Final admin polish overrides */
+html[data-admin-theme="dark"] .role-admin,
+html[data-admin-theme="dark"] .role-security {
+  --bg: #0f1413;
+  --surface: #141b1a;
+  --surface-soft: #17201e;
+  --surface-muted: #202b29;
+  --text: #eef7f2;
+  --muted: #aab8b3;
+  --border: #2f3d39;
+  --border-strong: #52615d;
+  --admin-bg: #0f1413;
+  --admin-surface: #141b1a;
+  --admin-surface-strong: #17201e;
+  --admin-panel: #141b1a;
+  --admin-line: rgba(196, 211, 204, 0.24);
+  --admin-text: #eef7f2;
+  --admin-muted: #aab8b3;
+  --admin-lime: #d9ff66;
+  --admin-lime-soft: rgba(217, 255, 102, 0.14);
+  --admin-shadow: none;
+  background: var(--admin-bg);
+  color: var(--admin-text);
+}
+
+html[data-admin-theme="dark"] body,
+html[data-admin-theme="dark"] .app-shell {
+  background: var(--admin-bg);
+}
+
+html[data-admin-theme="dark"] .role-admin .nav-rail-link {
+  color: var(--admin-text) !important;
+}
+
+html[data-admin-theme="dark"] .role-admin .profile-avatar-large {
+  color: #0f1413;
+}
+
+.role-admin .temporary-id-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(15, 20, 19, 0.28);
+}
+
+.role-admin .temporary-id-card {
+  position: static;
+  width: min(420px, 100%);
+  grid-template-columns: 1fr;
+  align-items: stretch;
+  max-height: min(720px, calc(100vh - 48px));
+  overflow: auto;
+}
+
+.role-admin .temporary-id-card .primary-button {
+  justify-content: center;
+}
+
+.role-admin .profile-workspace {
+  padding: 0 32px 0 0;
+  background: var(--admin-bg);
+}
+
+.role-admin .profile-grid {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+
+.role-admin .profile-grid .settings-section:nth-child(2) {
+  padding-right: 32px;
+  border-right: 1px solid var(--admin-line);
+}
+
+.role-admin .profile-grid .settings-section:nth-child(3) {
+  padding-left: 32px;
+}
+
+.role-admin .theme-option {
+  grid-template-columns: auto 1fr auto;
+  padding-right: 40px;
+}
+
+.role-admin .theme-swatches,
+.role-admin .profile-session-stack {
+  display: none;
+}
+
+.role-admin .dashboard-overview,
+.role-admin .dashboard-analytics,
+.role-admin .dashboard-overview > div,
+.role-admin .top-main-content,
+.role-admin .scrolled-main-content {
+  background: var(--admin-bg);
+  color: var(--admin-text);
+}
+
+html[data-admin-theme="dark"] .role-admin .data-table th,
+html[data-admin-theme="dark"] .role-admin .data-table td,
+html[data-admin-theme="dark"] .role-admin .workspace-main,
+html[data-admin-theme="dark"] .role-admin .plain-panel,
+html[data-admin-theme="dark"] .role-admin .admin-model-hero,
+html[data-admin-theme="dark"] .role-admin .settings-section,
+html[data-admin-theme="dark"] .role-admin .metric-widget-box,
+html[data-admin-theme="dark"] .role-admin .alert-widget-box {
+  background: transparent;
+  border-color: var(--admin-line);
+  color: var(--admin-text);
+}
+
+html[data-admin-theme="dark"] .role-admin .data-table th {
+  background: var(--admin-panel);
+  color: var(--admin-muted);
+}
+
+html[data-admin-theme="dark"] .role-admin .data-table td {
+  color: var(--admin-text);
+}
+
+html[data-admin-theme="dark"] .role-admin .data-table tr:hover td {
+  background: var(--admin-panel);
+}
+
+html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected td {
+  background: rgba(46, 46, 46, 0.86);
+  color: var(--admin-text);
+  box-shadow: inset 0 1px 0 rgba(238, 247, 242, 0.12), inset 0 -1px 0 rgba(238, 247, 242, 0.12);
+}
+
+html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected .direction-entry {
+  color: #70e28d;
+}
+
+html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected .direction-exit {
+  color: #66a8ff;
+}
+
+html[data-admin-theme="dark"] .role-admin .detail-drawer,
+html[data-admin-theme="dark"] .role-admin .drawer-header,
+html[data-admin-theme="dark"] .role-admin .drawer-section,
+html[data-admin-theme="dark"] .role-admin .detail-list {
+  background: var(--admin-bg);
+  color: var(--admin-text);
+  border-color: var(--admin-line);
+}
+
+html[data-admin-theme="dark"] .role-admin .drawer-header h2,
+html[data-admin-theme="dark"] .role-admin .detail-grid dd,
+html[data-admin-theme="dark"] .role-admin .detail-list dd {
+  color: var(--admin-text);
+}
+
+html[data-admin-theme="dark"] .role-admin .detail-grid dt,
+html[data-admin-theme="dark"] .role-admin .detail-list dt {
+  color: var(--admin-muted);
+}
+
+html[data-admin-theme="dark"] .role-admin .severity-critical,
+html[data-admin-theme="dark"] .role-admin .alert-status-open {
+  background: rgba(217, 45, 32, 0.16);
+  color: #ff8a80;
+}
+
+html[data-admin-theme="dark"] .role-admin .severity-high,
+html[data-admin-theme="dark"] .role-admin .alert-status-acknowledged {
+  background: rgba(182, 106, 0, 0.18);
+  color: #ffc46b;
+}
+
+html[data-admin-theme="dark"] .role-admin .severity-medium,
+html[data-admin-theme="dark"] .role-admin .alert-status-resolved {
+  background: rgba(15, 143, 46, 0.18);
+  color: #70e28d;
+}
+
+html[data-admin-theme="dark"] .role-admin .result-approved {
+  background: rgba(15, 143, 46, 0.18);
+  color: #70e28d;
+  box-shadow: inset 0 0 0 1px rgba(112, 226, 141, 0.22);
+}
+
+html[data-admin-theme="dark"] .role-admin .result-denied,
+html[data-admin-theme="dark"] .role-admin .result-expired,
+html[data-admin-theme="dark"] .role-admin .result-restricted {
+  background: rgba(217, 45, 32, 0.16);
+  color: #ff8a80;
+  box-shadow: inset 0 0 0 1px rgba(255, 138, 128, 0.24);
+}
+
+/* Dashboard time range: light theme defaults */
+.role-admin .dashboard-time-range-selector {
+  position: absolute;
+  top: 32px;
+  left: 50%;
+  z-index: 10;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid #9ca6a3;
+  border-radius: 20px;
+  background: #e6e6e6;
+  transform: translateX(-50%);
+}
+
+.role-admin .dashboard-time-range-button {
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--admin-muted);
+  padding: 8px 16px;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+.role-admin .dashboard-time-range-button:hover:not(.is-active) {
+  background: rgba(24, 32, 31, 0.05);
+  color: var(--admin-text);
+}
+
+.role-admin .dashboard-time-range-button.is-active {
+  background: #e8f1ff;
+  color: #1a1f1e;
+  font-weight: 700;
+}
+
+.role-admin .dashboard-time-range-button:focus-visible {
+  outline: 2px solid var(--admin-text);
+  outline-offset: 2px;
+}
+
+/* Dashboard time range: dark theme rules */
+html[data-admin-theme="dark"] .role-admin .dashboard-time-range-selector {
+  border-color: #8f9896;
+  background: #e6e6e6;
+}
+
+html[data-admin-theme="dark"] .role-admin .dashboard-time-range-button {
+  color: #aab8b3;
+}
+
+html[data-admin-theme="dark"] .role-admin .dashboard-time-range-button:hover:not(.is-active) {
+  background: #232927;
+  color: #eef7f2;
+}
+
+html[data-admin-theme="dark"] .role-admin .dashboard-time-range-button.is-active {
+  background: #e8f1ff;
+  color: #161616;
+}
+
+.role-admin .metric-widget-box,
+.role-admin .alert-widget-box,
+.role-admin .alert-item-card {
+  border-style: solid !important;
+  border-color: transparent !important;
+}
+
+.role-admin .metric-widget-box:hover,
+.role-admin .alert-widget-box:hover,
+.role-admin .alert-item-card:hover {
+  border-color: rgba(184, 190, 188, 0.78) !important;
+}
+
+.role-security,
+.role-security .terminalPage,
+.role-security .terminalShell,
+.role-security .topbar,
+.role-security .footer {
+  font-family: var(--admin-font);
+}
+
+.role-security .topbar {
+  min-height: 60px;
+  background: var(--admin-bg);
+}
+
+.role-security .topbar-actions {
+  margin-left: auto;
+}
+
+.role-security .terminalPage {
+  height: calc(100vh - 60px);
+}
+
+.role-security .terminalShell,
+.role-security .terminalHeader,
+.role-security .statusGrid,
+.role-security .mainStage,
+.role-security .sidebar,
+.role-security .footer {
+  background: var(--admin-bg);
+}
+
+.role-security .terminalHeader,
+.role-security .statusGrid,
+.role-security .terminalScanCard,
+.role-security .decisionPanel,
+.role-security .sidebar,
+.role-security .footer,
+.role-security .tabPanel,
+.role-security .subjectCard,
+.role-security .timelineItem {
+  border-color: var(--admin-line);
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.role-security .footer {
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+@media (max-width: 900px) {
+  .role-admin .profile-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .role-admin .profile-grid .settings-section:nth-child(2),
+  .role-admin .profile-grid .settings-section:nth-child(3) {
+    padding-right: 0;
+    padding-left: 0;
+    border-right: 0;
+  }
+}
 

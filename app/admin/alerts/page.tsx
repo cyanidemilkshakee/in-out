@@ -1,23 +1,22 @@
 "use client";
 
 import { useDeferredValue, useMemo, useState } from "react";
-import { initialAlerts } from "../../../lib/mockData";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { AlertsView } from "../../../components/admin/tables/AlertsView";
 import { MetricTrendChart } from "../../../components/analytics/MetricTrendChart";
 import type { TimeRange } from "../../../components/analytics/TrendChart";
 import type { Alert } from "../../../lib/types";
+import { useDataActions, useDataState } from "../../../context/DataContext";
 
 export default function AlertsPage() {
-  const [alerts, setAlerts] = useState(initialAlerts);
+  const { alerts } = useDataState();
+  const { updateAlert } = useDataActions();
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
 
   function handleUpdateAlert(alertId: string, status: Alert["status"]) {
-    setAlerts((current) =>
-      current.map((alert) => (alert.id === alertId ? { ...alert, status } : alert))
-    );
+    void updateAlert(alertId, { status });
   }
 
 

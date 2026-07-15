@@ -1,5 +1,4 @@
-import { initialMovements } from "./mockData";
-import { MovementEvent, Person } from "./types";
+import type { MovementEvent, Person, ScanAnalytics } from "./types";
 
 export interface Session {
   start: number;
@@ -26,8 +25,11 @@ export const timeToDecimal = (timeStr: string): number => {
 };
 
 // Main function to calculate a person's exact worked hours and sessions per day
-export const getPersonSessions = (personId: string): DayPattern[] => {
-  const userMovements = initialMovements.filter((m) => m.subjectId === personId);
+export const getPersonSessions = (
+  personId: string,
+  movements: MovementEvent[]
+): DayPattern[] => {
+  const userMovements = movements.filter((m) => m.subjectId === personId);
   
   // Sort chronologically
   const sorted = [...userMovements].sort((a, b) => {
@@ -97,7 +99,10 @@ export const getPersonSessions = (personId: string): DayPattern[] => {
 };
 
 // Function for the dashboard to get aggregate entries/exits per day
-export const getDailyMovementCounts = (daysToLookBack: number = 14) => {
+export const getDailyMovementCounts = (
+  movements: MovementEvent[],
+  daysToLookBack: number = 14
+) => {
   const now = new Date();
   const counts: Record<string, { entries: number, exits: number }> = {};
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -114,7 +119,7 @@ export const getDailyMovementCounts = (daysToLookBack: number = 14) => {
   const cutoffTime = new Date(now);
   cutoffTime.setDate(now.getDate() - daysToLookBack);
 
-  for (const m of initialMovements) {
+  for (const m of movements) {
     const d = new Date(`${m.date} ${m.time}`);
     if (d >= cutoffTime) {
       const dateStr = `${d.getDate()} ${monthNames[d.getMonth()]}`;
@@ -129,9 +134,9 @@ export const getDailyMovementCounts = (daysToLookBack: number = 14) => {
 };
 
 // Function for the dashboard DrillDownDoughnut to get zone activity
-export const getZoneActivity = () => {
+export const getZoneActivity = (movements: MovementEvent[]) => {
   const zoneCounts: Record<string, number> = {};
-  for (const m of initialMovements) {
+  for (const m of movements) {
     // Some checkpoints are zones (e.g. Warehouse). We can just use the checkpoint name directly.
     const name = m.checkpoint || "Unknown";
     zoneCounts[name] = (zoneCounts[name] || 0) + 1;
@@ -148,7 +153,7 @@ export const getZoneActivity = () => {
 };
 
 // Function to get the overall Dashboard KPIs
-export const getDashboardKPIs = () => {
+export const getDashboardKPIs = (movements: MovementEvent[]): ScanAnalytics => {
   let totalEntries = 0;
   let totalExits = 0;
   let totalApproved = 0;
@@ -156,7 +161,7 @@ export const getDashboardKPIs = () => {
   let totalAutomatic = 0;
   let totalManual = 0;
 
-  for (const m of initialMovements) {
+  for (const m of movements) {
     if (m.direction === "entry") totalEntries++;
     if (m.direction === "exit") totalExits++;
     
@@ -174,7 +179,7 @@ export const getDashboardKPIs = () => {
   }
 
   return {
-    totalScans: initialMovements.length,
+    totalScans: movements.length,
     totalApproved,
     totalDenied,
     totalEntries,
@@ -188,7 +193,7 @@ export const getDashboardKPIs = () => {
 };
 
 // Function for DrillDownDoughnut multi-level scan breakdown
-export const getDrillDownData = () => {
+export const getDrillDownData = (movements: MovementEvent[]) => {
   let approvedAutoEntry = 0, approvedAutoExit = 0;
   let approvedManualEntry = 0, approvedManualExit = 0;
   let deniedAutoRestricted = 0, deniedAutoExpired = 0;
@@ -198,7 +203,7 @@ export const getDrillDownData = () => {
   let autoApp = 0, manualApp = 0;
   let autoDen = 0, manualDen = 0;
 
-  for (const m of initialMovements) {
+  for (const m of movements) {
     if (m.result === "approved") {
       approved++;
       if (m.scanType === "auto") {
@@ -226,7 +231,7 @@ export const getDrillDownData = () => {
   }
 
   return {
-    totalScans: initialMovements.length,
+    totalScans: movements.length,
     sections: [
       {
         id: "approved",
@@ -316,7 +321,10 @@ export const getDepartmentStats = (peopleList: Person[]) => {
   };
 };
 
-export const getAverageShiftLengths = (timeRange: "1W" | "1M" | "1Y" = "1W") => {
+export const getAverageShiftLengths = (
+  movements: MovementEvent[],
+  timeRange: "1W" | "1M" | "1Y" = "1W"
+) => {
   const labels: string[] = [];
   const averages: number[] = [];
   // We'll calculate the average shift length per day across all employees over the given time range
@@ -333,13 +341,13 @@ export const getAverageShiftLengths = (timeRange: "1W" | "1M" | "1Y" = "1W") => 
   const dailyShifts: Record<string, number[]> = {};
   
   // Just take a sample of unique employees from movements
-  const uniqueEmployeeIds = Array.from(new Set(initialMovements.filter(m => m.subjectType === 'employee').map(m => m.subjectId)));
+  const uniqueEmployeeIds = Array.from(new Set(movements.filter(m => m.subjectType === 'employee').map(m => m.subjectId)));
   
   // To avoid huge computation freezing the UI, we sample up to 50 employees
   const sampleIds = uniqueEmployeeIds.slice(0, 50);
   
   sampleIds.forEach(empId => {
-    const sessions = getPersonSessions(empId);
+    const sessions = getPersonSessions(empId, movements);
     sessions.forEach(dayPattern => {
       if (dayPattern.workedHours > 0 && dayPattern.dateObj >= cutoffTime) {
         const dateStr = `${dayPattern.dateObj.getDate()} ${monthNames[dayPattern.dateObj.getMonth()]}`;

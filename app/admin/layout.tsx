@@ -37,26 +37,37 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [scrollTint, setScrollTint] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const rafRef = useRef<number | null>(null);
   const scrolledRef = useRef(false);
+  const scrollTintRef = useRef(0);
 
   const handleScroll = useCallback(() => {
     if (rafRef.current !== null) return; // already scheduled
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = null;
       const next = (scrollRef.current?.scrollTop ?? 0) > 100;
+      const scrollTop = scrollRef.current?.scrollTop ?? 0;
+      const nextTint = Math.min(1, Math.max(0, scrollTop / 180));
       if (next !== scrolledRef.current) {
         scrolledRef.current = next;
         setScrolled(next);
+      }
+      if (Math.abs(nextTint - scrollTintRef.current) > 0.04 || nextTint === 0 || nextTint === 1) {
+        scrollTintRef.current = nextTint;
+        setScrollTint(nextTint);
       }
     });
   }, []);
 
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("inout-admin-theme");
-    if (storedTheme) {
+    if (storedTheme === "light" || storedTheme === "dark") {
       document.documentElement.dataset.adminTheme = storedTheme;
+    } else {
+      document.documentElement.dataset.adminTheme = "light";
+      window.localStorage.setItem("inout-admin-theme", "light");
     }
     const el = scrollRef.current;
     if (!el) return;
@@ -72,11 +83,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       {/* One-time CSS injection — no JS on hover */}
       <style>{`
         .nav-rail-link { transition: background-color 0.15s ease; }
-        .nav-rail-link:hover { background-color: rgba(0,0,0,0.06); }
+        .nav-rail-link:hover { background-color: var(--admin-panel); }
       `}</style>
       <main className="admin-console" style={{ display: "flex", flexDirection: "row", height: "100vh", padding: 0 }}>
         {/* Sidebar Container */}
-        <div style={{ flexShrink: 0, width: "72px", position: "relative", zIndex: 50 }}>
+        <div style={{ flexShrink: 0, width: "72px", position: "relative", zIndex: 50, backgroundColor: "var(--admin-bg)" }}>
           <aside
             onMouseEnter={() => setSidebarOpen(true)}
             onMouseLeave={() => setSidebarOpen(false)}
@@ -90,7 +101,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               flexDirection: "column",
               alignItems: "flex-start",
               padding: "0 12px",
-              backgroundColor: pathname !== "/admin" && sidebarOpen ? "#D0D8DE" : (scrolled && pathname === "/admin" ? "var(--bg)" : "transparent"),
+              backgroundColor: pathname === "/admin"
+                ? `color-mix(in srgb, var(--admin-bg) ${Math.round(scrollTint * 100)}%, transparent)`
+                : sidebarOpen ? "var(--admin-surface-strong)" : "transparent",
               borderRight: "none",
               transition: "width 0.22s cubic-bezier(0.2, 0, 0, 1), background-color 0.22s ease",
               willChange: "width",
@@ -120,7 +133,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 opacity: sidebarOpen ? 1 : 0,
                 transition: "opacity 0.2s ease",
                 pointerEvents: sidebarOpen ? "auto" : "none",
-                color: "rgba(0,0,0,0.85)"
+                color: "var(--admin-text)"
               }}>
                 In/Out
               </span>
@@ -146,7 +159,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     style={{
                       background: "none",
                       border: "none",
-                      color: active ? "#000" : "rgba(0,0,0,0.65)",
+                      color: active ? "var(--admin-text)" : "var(--admin-muted)",
                       cursor: "pointer",
                       position: "relative",
                       display: "flex",
@@ -169,7 +182,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                           height: "10px",
                           backgroundColor: "#ff3040",
                           borderRadius: "50%",
-                          border: "2px solid var(--bg, #121212)"
+                          border: "2px solid var(--admin-bg, #121212)"
                         }} />
                       )}
                     </div>
@@ -217,11 +230,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   width: "24px",
                   height: "24px",
                   borderRadius: "50%",
-                  backgroundColor: "#ff7b00",
+                  backgroundColor: "var(--admin-lime)",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: "#fff"
+                  color: "var(--admin-text)"
                 }}>
                   <UserRound size={16} strokeWidth={2} />
                 </div>
@@ -233,7 +246,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                 opacity: sidebarOpen ? 1 : 0,
                 transition: "opacity 0.2s ease",
                 pointerEvents: sidebarOpen ? "auto" : "none",
-                color: "rgba(0,0,0,0.65)"
+                color: "var(--admin-muted)"
               }}>
                 Profile
               </span>

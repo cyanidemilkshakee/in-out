@@ -39,8 +39,8 @@ export function AlertsView({
   }
 
   return (
-    <div className="table-wrap">
-      <table className="data-table">
+    <div className="table-wrap table-wrap-condensed">
+      <table className="data-table data-table-condensed">
         <thead>
           <tr>
             {sortHeader("id", "ID")}

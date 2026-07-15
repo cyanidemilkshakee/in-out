@@ -2,12 +2,8 @@
 
 import { useState, useMemo, lazy, Suspense } from "react";
 import { MovementTable } from "../../components/admin/tables/MovementTable";
-import {
-  initialAlerts,
-  initialMovements,
-} from "../../lib/mockData";
-import { getDashboardKPIs } from "../../lib/analyticsUtils";
 import type { Alert, MovementEvent, ScanAnalytics, SortDirection, VisibleColumn } from "../../lib/types";
+import { useDataState } from "../../context/DataContext";
 
 // Lazy-load the heavy Chart.js dashboard to avoid blocking initial render
 const DashboardCharts = lazy(() =>
@@ -63,7 +59,7 @@ function DashboardOverview({
             </div>
           }
         >
-          <DashboardCharts alerts={alerts} scanAnalytics={scanAnalytics} />
+          <DashboardCharts alerts={alerts} movements={events} scanAnalytics={scanAnalytics} />
         </Suspense>
       </div>
 
@@ -95,13 +91,13 @@ function DashboardOverview({
 }
 
 export default function AdminPage() {
-  const actualScanAnalytics = useMemo(() => getDashboardKPIs(), []);
+  const { alerts, movements, scanAnalytics } = useDataState();
 
   return (
     <DashboardOverview
-      alerts={initialAlerts}
-      scanAnalytics={actualScanAnalytics as any}
-      events={initialMovements}
+      alerts={alerts}
+      scanAnalytics={scanAnalytics}
+      events={movements}
     />
   );
 }

@@ -202,8 +202,8 @@ export function MetricTrendChart({
 
   const getButtonStyle = (range: TimeRange) => ({
     background: timeRange === range ? color + "1a" : "transparent",
-    color: timeRange === range ? color : "#667085",
-    border: timeRange === range ? `1px solid ${color}33` : "1px solid #d8dde6",
+    color: timeRange === range ? color : "var(--admin-muted)",
+    border: "0",
     padding: "5px 15px",
     borderRadius: "20px",
     fontSize: "11px",
@@ -238,7 +238,7 @@ export function MetricTrendChart({
         <div style={{ display: "flex", gap: "48px" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div style={{ fontSize: "32px", fontWeight: 800, color: "#111827", lineHeight: 1 }}>
+              <div style={{ fontSize: "32px", fontWeight: 800, color: "var(--admin-text)", lineHeight: 1 }}>
                 {average.toLocaleString()}
                 {unit}
               </div>
@@ -246,7 +246,7 @@ export function MetricTrendChart({
                 {isUp ? "↑" : "↓"} {percentage}%
               </div>
             </div>
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#667085", letterSpacing: "1px", textTransform: "uppercase" }}>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--admin-muted)", letterSpacing: "1px", textTransform: "uppercase" }}>
               {labelUnit}
             </div>
           </div>

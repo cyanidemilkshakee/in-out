@@ -1,0 +1,1006 @@
+.page {
+  --terminal-success: #287d2f;
+  --terminal-success-soft: rgba(40, 125, 47, 0.1);
+  --terminal-danger: #c72d2d;
+  --terminal-danger-soft: rgba(199, 45, 45, 0.09);
+  --terminal-warning: #a95c00;
+  --terminal-focus: #9dbd12;
+  display: grid;
+  grid-template-rows: 64px 72px minmax(0, 1fr);
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--admin-bg);
+  color: var(--admin-text);
+  font-family: var(--admin-font);
+}
+
+.appbar,
+.statusStrip {
+  border-bottom: 1px solid var(--admin-line);
+  background: var(--admin-bg);
+}
+
+.appbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 0 24px;
+}
+
+.appbarLeft,
+.headerActions,
+.brandLink,
+.adminLink,
+.networkButton,
+.operator,
+.checkpointControl,
+.scanHeading,
+.scanInput,
+.scanButton,
+.decisionBody,
+.reviewButton,
+.subjectIdentity,
+.subjectEvent,
+.emptySubject,
+.hardwareRow,
+.syncRows div,
+.syncButton,
+.resolveButton,
+.direction {
+  display: flex;
+  align-items: center;
+}
+
+.appbarLeft {
+  min-width: 0;
+  gap: 16px;
+}
+
+.brandLink {
+  gap: 10px;
+  color: var(--admin-text);
+  font-size: 15px;
+  font-weight: 850;
+  white-space: nowrap;
+}
+
+.brandMark {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--admin-text);
+  color: var(--admin-bg);
+}
+
+.brandMark svg {
+  width: 18px;
+  height: 18px;
+}
+
+.appbarDivider {
+  width: 1px;
+  height: 28px;
+  background: var(--admin-line);
+}
+
+.pageIdentity {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.pageIdentity strong {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.pageIdentity span,
+.operator small,
+.statusStrip small,
+.scanHeading small,
+.sectionHeader span,
+.railHeading span,
+.subjectIdentity small,
+.subjectEvent small,
+.emptySubject small,
+.hardwareRow small {
+  color: var(--admin-muted);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.headerActions {
+  gap: 8px;
+}
+
+.adminLink,
+.networkButton {
+  min-height: 40px;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 0 12px;
+  background: transparent;
+  color: var(--admin-text);
+  font-size: 14px;
+  font-weight: 700;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.adminLink:hover,
+.networkButton:hover {
+  border-color: rgba(184, 190, 188, 0.78);
+  background: var(--admin-panel);
+}
+
+.adminLink svg,
+.networkButton svg {
+  width: 17px;
+  height: 17px;
+}
+
+.networkButton svg {
+  color: var(--terminal-success);
+}
+
+.networkButton[aria-pressed="false"] svg {
+  color: var(--terminal-danger);
+}
+
+.operator {
+  gap: 9px;
+  margin-left: 6px;
+  padding-left: 14px;
+  border-left: 1px solid var(--admin-line);
+}
+
+.operator > span:last-child {
+  display: grid;
+  gap: 1px;
+}
+
+.operator strong {
+  font-size: 13px;
+}
+
+.operatorAvatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--admin-surface-strong);
+  color: var(--admin-text);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.statusStrip {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.45fr) minmax(150px, 0.8fr) minmax(130px, 0.6fr) minmax(120px, 0.6fr);
+}
+
+.checkpointControl,
+.statusCell {
+  min-width: 0;
+  padding: 13px 24px;
+  border-right: 1px solid var(--admin-line);
+}
+
+.checkpointControl {
+  gap: 12px;
+}
+
+.checkpointControl > svg {
+  width: 19px;
+  height: 19px;
+  color: var(--admin-muted);
+}
+
+.checkpointControl > span,
+.statusCell {
+  display: grid;
+  align-content: center;
+  gap: 3px;
+}
+
+.checkpointControl select {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--admin-text);
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.checkpointControl select:focus-visible {
+  outline: 2px solid var(--terminal-focus);
+  outline-offset: 3px;
+}
+
+.statusCell strong {
+  overflow: hidden;
+  color: var(--admin-text);
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alertText {
+  color: var(--terminal-danger) !important;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 390px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.mainStage {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  gap: 22px;
+  padding: 26px 28px 22px;
+  overflow: auto;
+}
+
+.scanSection {
+  min-width: 0;
+}
+
+.scanHeading {
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.scanHeading > span:last-child {
+  display: grid;
+  gap: 2px;
+}
+
+.scanHeadingIcon {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--admin-surface-strong);
+  color: var(--admin-text);
+}
+
+.scanHeadingIcon svg {
+  width: 21px;
+  height: 21px;
+}
+
+.scanHeading h1,
+.sectionHeader h2,
+.railHeading h2 {
+  margin: 0;
+  color: var(--admin-text);
+  letter-spacing: 0;
+}
+
+.scanHeading h1 {
+  font-size: 21px;
+  line-height: 1.15;
+}
+
+.scanForm {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 168px;
+  gap: 12px;
+}
+
+.scanInput {
+  min-width: 0;
+  min-height: 54px;
+  gap: 12px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  padding: 0 16px;
+  background: transparent;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+
+.scanInput:focus-within {
+  border-color: var(--terminal-focus);
+  box-shadow: 0 0 0 3px rgba(157, 189, 18, 0.16);
+}
+
+.scanInput input {
+  width: 100%;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--admin-text);
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.scanInput input::placeholder {
+  color: var(--admin-muted);
+}
+
+.scanInput > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: var(--admin-muted);
+}
+
+.scanButton {
+  justify-content: center;
+  min-height: 54px;
+  gap: 9px;
+  border: 1px solid #b8d72a;
+  border-radius: 8px;
+  background: var(--admin-lime);
+  color: #18201f;
+  font-size: 15px;
+  font-weight: 850;
+  transition: filter 140ms ease, transform 140ms ease;
+}
+
+.scanButton:hover:not(:disabled) {
+  filter: brightness(1.04);
+  transform: translateY(-1px);
+}
+
+.scanButton svg,
+.reviewButton svg,
+.syncButton svg,
+.resolveButton svg {
+  width: 18px;
+  height: 18px;
+}
+
+.scanError {
+  margin: 8px 0 0;
+  color: var(--terminal-danger);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.decision {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--admin-line);
+  border-left: 4px solid var(--admin-muted);
+  border-radius: 8px;
+  background: transparent;
+}
+
+.decision[data-result="approved"] {
+  border-left-color: var(--terminal-success);
+  background: var(--terminal-success-soft);
+}
+
+.decision[data-result="denied"] {
+  border-left-color: var(--terminal-danger);
+  background: var(--terminal-danger-soft);
+}
+
+.decisionBody {
+  min-height: 128px;
+  gap: 18px;
+  padding: 20px 22px;
+}
+
+.decisionIcon {
+  display: grid;
+  width: 58px;
+  height: 58px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--admin-surface-strong);
+  color: var(--admin-muted);
+}
+
+.decisionIcon svg {
+  width: 31px;
+  height: 31px;
+}
+
+.decision[data-result="approved"] .decisionIcon {
+  background: var(--terminal-success-soft);
+  color: var(--terminal-success);
+}
+
+.decision[data-result="denied"] .decisionIcon {
+  background: var(--terminal-danger-soft);
+  color: var(--terminal-danger);
+}
+
+.decisionCopy {
+  min-width: 0;
+}
+
+.decisionLabel {
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.decisionCopy h2 {
+  margin: 4px 0 3px;
+  color: var(--admin-text);
+  font-size: 29px;
+  line-height: 1.08;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.decision[data-result="approved"] .decisionCopy h2 {
+  color: var(--terminal-success);
+}
+
+.decision[data-result="denied"] .decisionCopy h2 {
+  color: var(--terminal-danger);
+}
+
+.decisionCopy p {
+  margin: 0;
+  color: var(--admin-muted);
+  font-size: 14px;
+}
+
+.reviewButton {
+  justify-content: center;
+  min-height: 44px;
+  gap: 8px;
+  margin-left: auto;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.reviewButton:hover {
+  border-color: rgba(184, 190, 188, 0.78);
+  background: var(--admin-panel);
+}
+
+.decisionFacts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--admin-line);
+}
+
+.decisionFacts div {
+  min-width: 0;
+  padding: 12px 18px;
+  border-right: 1px solid var(--admin-line);
+}
+
+.decisionFacts div:last-child {
+  border-right: 0;
+}
+
+.decisionFacts dt,
+.subjectDetails dt {
+  margin-bottom: 3px;
+  color: var(--admin-muted);
+  font-size: 11px;
+}
+
+.decisionFacts dd,
+.subjectDetails dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  text-transform: capitalize;
+  white-space: nowrap;
+}
+
+.activitySection {
+  min-width: 0;
+  min-height: 0;
+  border-top: 1px solid var(--admin-line);
+}
+
+.sectionHeader,
+.railHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.sectionHeader {
+  min-height: 54px;
+}
+
+.sectionHeader h2,
+.railHeading h2 {
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.activityTableWrap {
+  min-height: 0;
+  overflow: auto;
+  border-top: 1px solid var(--admin-line);
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.activityTable {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--admin-text);
+  font-size: 13px;
+}
+
+.activityTable th,
+.activityTable td {
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--admin-line);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.activityTable th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--admin-panel);
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.activityTable tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.activityTable tbody tr:hover td {
+  background: var(--admin-panel);
+}
+
+.activityTable td:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.activityTable td:nth-child(2) span {
+  color: var(--admin-muted);
+  font-size: 11px;
+}
+
+.direction {
+  gap: 5px;
+  text-transform: capitalize;
+}
+
+.direction svg {
+  width: 15px;
+  height: 15px;
+}
+
+.direction[data-direction="entry"] {
+  color: var(--terminal-success);
+}
+
+.direction[data-direction="exit"] {
+  color: #176ed8;
+}
+
+.result {
+  color: var(--terminal-danger);
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: capitalize;
+}
+
+.result[data-result="approved"] {
+  color: var(--terminal-success);
+}
+
+.rightRail {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  border-left: 1px solid var(--admin-line);
+  background: var(--admin-bg);
+}
+
+.railSection {
+  padding: 19px 20px;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.railHeading {
+  margin-bottom: 16px;
+}
+
+.railHeading span {
+  text-transform: capitalize;
+}
+
+.subjectIdentity {
+  gap: 12px;
+  margin-bottom: 17px;
+}
+
+.subjectIdentity > span:last-child,
+.subjectEvent > span,
+.emptySubject > span,
+.hardwareRow > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.subjectIdentity strong {
+  font-size: 17px;
+}
+
+.subjectAvatar {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--admin-surface-strong);
+  color: var(--admin-text);
+  font-size: 15px;
+  font-weight: 850;
+}
+
+.subjectDetails {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 18px;
+  margin: 0;
+}
+
+.subjectEvent {
+  gap: 9px;
+  margin-top: 17px;
+  padding-top: 15px;
+  border-top: 1px solid var(--admin-line);
+}
+
+.subjectEvent svg,
+.emptySubject > svg {
+  width: 18px;
+  height: 18px;
+  color: var(--admin-muted);
+}
+
+.subjectEvent strong {
+  color: var(--terminal-success);
+  font-size: 13px;
+  text-transform: capitalize;
+}
+
+.emptySubject {
+  min-height: 76px;
+  gap: 12px;
+  color: var(--admin-muted);
+}
+
+.emptySubject strong {
+  color: var(--admin-text);
+  font-size: 14px;
+}
+
+.hardwareSection {
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.hardwareSection .railHeading {
+  padding: 0 20px;
+}
+
+.hardwareList {
+  max-height: 230px;
+  overflow: auto;
+  border-top: 1px solid var(--admin-line);
+}
+
+.hardwareRow {
+  min-height: 54px;
+  gap: 10px;
+  padding: 8px 20px;
+  border-bottom: 1px solid var(--admin-line);
+  cursor: pointer;
+}
+
+.hardwareRow:hover {
+  background: var(--admin-panel);
+}
+
+.hardwareRow input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.checkBox {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--admin-line);
+  border-radius: 4px;
+  color: #18201f;
+}
+
+.hardwareRow input:checked + .checkBox {
+  border-color: var(--admin-lime);
+  background: var(--admin-lime);
+}
+
+.hardwareRow input:focus-visible + .checkBox {
+  outline: 2px solid var(--terminal-focus);
+  outline-offset: 2px;
+}
+
+.checkBox svg {
+  width: 14px;
+  height: 14px;
+}
+
+.hardwareRow > svg {
+  width: 19px;
+  height: 19px;
+  flex: 0 0 auto;
+  color: var(--admin-muted);
+}
+
+.hardwareRow strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.syncSection {
+  border-bottom: 0;
+}
+
+.syncRows {
+  border-top: 1px solid var(--admin-line);
+}
+
+.syncRows div {
+  min-height: 43px;
+  gap: 10px;
+  border-bottom: 1px solid var(--admin-line);
+  font-size: 13px;
+}
+
+.syncRows svg {
+  width: 17px;
+  height: 17px;
+  color: var(--admin-muted);
+}
+
+.syncRows span {
+  flex: 1;
+}
+
+.syncRows strong {
+  font-size: 13px;
+}
+
+.syncActions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.syncButton,
+.resolveButton {
+  justify-content: center;
+  min-height: 42px;
+  gap: 8px;
+  border: 1px solid var(--admin-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--admin-text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+.syncButton:hover:not(:disabled),
+.resolveButton:hover:not(:disabled) {
+  border-color: rgba(184, 190, 188, 0.78);
+  background: var(--admin-panel);
+}
+
+.resolveButton {
+  color: var(--terminal-danger);
+}
+
+.adminLink:focus-visible,
+.networkButton:focus-visible,
+.scanButton:focus-visible,
+.reviewButton:focus-visible,
+.syncButton:focus-visible,
+.resolveButton:focus-visible {
+  outline: 2px solid var(--terminal-focus);
+  outline-offset: 2px;
+}
+
+:global(html[data-admin-theme="dark"]) .page {
+  --terminal-success: #70e28d;
+  --terminal-success-soft: rgba(112, 226, 141, 0.1);
+  --terminal-danger: #ff8a80;
+  --terminal-danger-soft: rgba(255, 138, 128, 0.09);
+  --terminal-warning: #ffc46b;
+  --terminal-focus: #d9ff66;
+}
+
+:global(html[data-admin-theme="dark"]) .adminLink:hover,
+:global(html[data-admin-theme="dark"]) .networkButton:hover,
+:global(html[data-admin-theme="dark"]) .reviewButton:hover,
+:global(html[data-admin-theme="dark"]) .hardwareRow:hover,
+:global(html[data-admin-theme="dark"]) .syncButton:hover:not(:disabled),
+:global(html[data-admin-theme="dark"]) .resolveButton:hover:not(:disabled),
+:global(html[data-admin-theme="dark"]) .activityTable tbody tr:hover td {
+  background: #2e2e2e;
+}
+
+:global(html[data-admin-theme="dark"]) .direction[data-direction="exit"] {
+  color: #66a8ff;
+}
+
+@media (max-width: 1100px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  .mainStage {
+    padding: 22px 20px 20px;
+  }
+
+  .pageIdentity span,
+  .operator > span:last-child {
+    display: none;
+  }
+}
+
+@media (max-width: 900px) {
+  .page {
+    height: auto;
+    min-height: 100dvh;
+    overflow: auto;
+  }
+
+  .statusStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .checkpointControl,
+  .statusCell {
+    border-bottom: 1px solid var(--admin-line);
+  }
+
+  .workspace {
+    grid-template-columns: 1fr;
+    overflow: visible;
+  }
+
+  .mainStage {
+    overflow: visible;
+  }
+
+  .rightRail {
+    overflow: visible;
+    border-top: 1px solid var(--admin-line);
+    border-left: 0;
+  }
+
+  .hardwareList {
+    max-height: none;
+  }
+}
+
+@media (max-width: 680px) {
+  .page {
+    grid-template-rows: 58px auto auto;
+  }
+
+  .appbar {
+    padding: 0 14px;
+  }
+
+  .appbarDivider,
+  .pageIdentity,
+  .operator,
+  .adminLink span,
+  .networkButton span {
+    display: none;
+  }
+
+  .adminLink,
+  .networkButton {
+    width: 40px;
+    justify-content: center;
+    padding: 0;
+  }
+
+  .statusStrip {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .checkpointControl,
+  .statusCell {
+    padding: 11px 14px;
+  }
+
+  .mainStage {
+    gap: 18px;
+    padding: 18px 14px;
+  }
+
+  .scanForm {
+    grid-template-columns: 1fr;
+  }
+
+  .decisionBody {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 18px;
+  }
+
+  .decisionCopy {
+    flex: 1 1 180px;
+  }
+
+  .reviewButton {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .decisionFacts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .decisionFacts div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .decisionFacts div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--admin-line);
+  }
+
+  .activityTable {
+    min-width: 660px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .adminLink,
+  .networkButton,
+  .scanInput,
+  .scanButton {
+    transition: none;
+  }
+}

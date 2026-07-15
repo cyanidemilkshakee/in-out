@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { Doughnut } from "react-chartjs-2";
 import {
   ArcElement,
@@ -33,9 +33,29 @@ const rootColorPalette = ["#12b76a", "#f04438", "#f79009", "#0b63e5", "#8a3ffc"]
 export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [lockedId, setLockedId] = useState<string | null>(null);
+  const [themeColors, setThemeColors] = useState({
+    border: "#18201f",
+    tooltip: "#18201f"
+  });
   const chartRef = useRef<any>(null);
 
   const displayId = lockedId || hoveredId;
+
+  useEffect(() => {
+    const readThemeColors = () => {
+      const shell = document.querySelector<HTMLElement>(".role-admin");
+      const styles = shell ? getComputedStyle(shell) : getComputedStyle(document.documentElement);
+      setThemeColors({
+        border: styles.getPropertyValue("--admin-bg").trim() || "#18201f",
+        tooltip: styles.getPropertyValue("--admin-text").trim() || "#18201f"
+      });
+    };
+
+    readThemeColors();
+    const observer = new MutationObserver(readThemeColors);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-admin-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   const chartData = useMemo(() => {
     const rootData: number[] = [];
@@ -54,7 +74,7 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
       {
         data: rootData,
         backgroundColor: rootColors,
-        borderColor: "#18201f",
+        borderColor: themeColors.border,
         borderWidth: 2,
         labels: rootLabels,
         ids: rootIds,
@@ -135,7 +155,7 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
       }
     });
 
-    const getBorders = (colors: string[]) => colors.map((c) => (c === "transparent" ? "transparent" : "#18201f"));
+    const getBorders = (colors: string[]) => colors.map((c) => (c === "transparent" ? "transparent" : themeColors.border));
     const getWidths = (colors: string[]) => colors.map((c) => (c === "transparent" ? 0 : 2));
 
     datasets.push({
@@ -164,7 +184,7 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
       labels: rootLabels,
       datasets,
     };
-  }, [data, displayId]);
+  }, [data, displayId, themeColors.border]);
 
   const onHover = (event: ChartEvent, elements: ActiveElement[]) => {
     if (lockedId) return; // If locked, hover doesn't change anything
@@ -233,7 +253,7 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
               display: false,
             },
             tooltip: {
-              backgroundColor: "#18201f",
+              backgroundColor: themeColors.tooltip,
               bodyFont: { size: 13, family: "Urbanist, Arial, sans-serif" },
               cornerRadius: 8,
               displayColors: false,

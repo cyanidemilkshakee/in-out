@@ -1,36 +1,19 @@
 "use client";
 
-import { useState } from "react";
-import { initialMovements } from "../../../lib/mockData";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { OfflineSyncTable } from "../../../components/admin/tables/OfflineSyncTable";
-import type { MovementEvent } from "../../../lib/types";
+import { useDataActions, useDataState } from "../../../context/DataContext";
 
 export default function OfflineSyncPage() {
-  const [events, setEvents] = useState<MovementEvent[]>(initialMovements);
+  const { movements: events } = useDataState();
+  const { resolveMovementConflicts, syncMovements } = useDataActions();
 
   function handleResolveConflicts(eventIds: string[]) {
-    setEvents((current) =>
-      current.map((event) =>
-        eventIds.includes(event.id) ? { ...event, syncState: "synced" } : event
-      )
-    );
+    void resolveMovementConflicts(eventIds);
   }
 
   function handleSync(eventIds?: string[]) {
-    if (!eventIds) {
-      setEvents((current) =>
-        current.map((event) =>
-          event.syncState === "queued" ? { ...event, syncState: "synced" } : event
-        )
-      );
-    } else {
-      setEvents((current) =>
-        current.map((event) =>
-          eventIds.includes(event.id) ? { ...event, syncState: "synced" } : event
-        )
-      );
-    }
+    void syncMovements(eventIds);
   }
 
   return (

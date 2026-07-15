@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Doughnut } from "react-chartjs-2";
 import {
   ArcElement,
@@ -12,7 +12,7 @@ import { DrillDownDoughnut } from "./DrillDownDoughnut";
 import { KPICards } from "./KPICards";
 import { TimeRangeSelector } from "./TimeRangeSelector";
 import { ActiveAlertsWidget } from "./ActiveAlertsWidget";
-import type { Alert, ScanAnalytics } from "../../lib/types";
+import type { Alert, MovementEvent, ScanAnalytics } from "../../lib/types";
 import { getDrillDownData } from "../../lib/analyticsUtils";
 
 // Register once at module level — safe because ChartJS handles duplicate registrations
@@ -20,6 +20,7 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 
 type DashboardChartsProps = {
   alerts: Alert[];
+  movements: MovementEvent[];
   scanAnalytics: ScanAnalytics;
 };
 
@@ -27,38 +28,61 @@ const chartFont = {
   family: "var(--font-urbanist, Urbanist), Arial, sans-serif"
 };
 
-const mutedText = "#52605d";
-
-const sharedPlugins = {
-  legend: {
-    labels: {
-      boxHeight: 9,
-      boxWidth: 9,
-      color: mutedText,
-      font: { ...chartFont, size: 12, weight: 700 }
-    }
-  },
-  tooltip: {
-    backgroundColor: "#18201f",
-    bodyFont: { ...chartFont, size: 12 },
-    cornerRadius: 8,
-    displayColors: false,
-    titleFont: { ...chartFont, size: 12, weight: 800 }
-  }
-} as const;
-
 const TIME_RANGES = ["Today", "This Week", "This Month", "This Year", "All Time"] as const;
 
 export function DashboardCharts({
   alerts,
+  movements,
   scanAnalytics
 }: DashboardChartsProps) {
   const [timeRange, setTimeRange] = useState("Today");
+  const [themeColors, setThemeColors] = useState({
+    border: "#f7faf9",
+    muted: "#52605d",
+    tooltip: "#18201f"
+  });
+
+  useEffect(() => {
+    const readThemeColors = () => {
+      const styles = getComputedStyle(document.documentElement);
+      const shell = document.querySelector<HTMLElement>(".role-admin");
+      const shellStyles = shell ? getComputedStyle(shell) : styles;
+      setThemeColors({
+        border: shellStyles.getPropertyValue("--admin-bg").trim() || "#f7faf9",
+        muted: shellStyles.getPropertyValue("--admin-muted").trim() || "#52605d",
+        tooltip: shellStyles.getPropertyValue("--admin-text").trim() || "#18201f"
+      });
+    };
+
+    readThemeColors();
+    const observer = new MutationObserver(readThemeColors);
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-admin-theme"] });
+    return () => observer.disconnect();
+  }, []);
 
   const openAlerts = useMemo(
     () => alerts.filter((alert) => alert.status !== "resolved"),
     [alerts]
   );
+  const drillDownData = useMemo(() => getDrillDownData(movements), [movements]);
+
+  const sharedPlugins = useMemo(() => ({
+    legend: {
+      labels: {
+        boxHeight: 9,
+        boxWidth: 9,
+        color: themeColors.muted,
+        font: { ...chartFont, size: 12, weight: 700 }
+      }
+    },
+    tooltip: {
+      backgroundColor: themeColors.tooltip,
+      bodyFont: { ...chartFont, size: 12 },
+      cornerRadius: 8,
+      displayColors: false,
+      titleFont: { ...chartFont, size: 12, weight: 800 }
+    }
+  }), [themeColors]);
 
   const chartData = useMemo(() => ({
     scanMix: {
@@ -66,7 +90,7 @@ export function DashboardCharts({
       datasets: [{
         data: [scanAnalytics.totalEntries, scanAnalytics.totalExits],
         backgroundColor: ["#12b76a", "#027a48"],
-        borderColor: "#f7faf9",
+        borderColor: themeColors.border,
         borderWidth: 4
       }]
     },
@@ -75,7 +99,7 @@ export function DashboardCharts({
       datasets: [{
         data: [scanAnalytics.totalAutomatic ?? 350, scanAnalytics.totalManual ?? 100],
         backgroundColor: ["#0b63e5", "#667085"],
-        borderColor: "#f7faf9",
+        borderColor: themeColors.border,
         borderWidth: 4
       }]
     },
@@ -84,7 +108,7 @@ export function DashboardCharts({
       datasets: [{
         data: [scanAnalytics.totalRestricted ?? 180, scanAnalytics.totalExpired ?? 70],
         backgroundColor: ["#f04438", "#912018"],
-        borderColor: "#f7faf9",
+        borderColor: themeColors.border,
         borderWidth: 4
       }]
     },
@@ -93,11 +117,11 @@ export function DashboardCharts({
       datasets: [{
         data: [scanAnalytics.totalApproved, scanAnalytics.totalDenied],
         backgroundColor: ["#12b76a", "#f04438"],
-        borderColor: "#f7faf9",
+        borderColor: themeColors.border,
         borderWidth: 4
       }]
     },
-  }), [scanAnalytics]);
+  }), [scanAnalytics, themeColors.border]);
 
   return (
     <section className="dashboard-analytics" aria-label="Dashboard analytics" style={{
@@ -119,7 +143,7 @@ export function DashboardCharts({
 
       {/* Top Left — Scan Status */}
       <div className="analytics-donut animate-slide-up delay-100" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px" }}>
-        <div style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Scan Status</div>
+        <div style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Status</div>
         <Doughnut
           data={chartData.quality}
           options={{
@@ -148,7 +172,7 @@ export function DashboardCharts({
 
       {/* Bottom Left — Approved Scans (Entry/Exit) */}
       <div className="analytics-donut animate-slide-up delay-150" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px", marginBottom: "16px" }}>
-        <div style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Approved Scans</div>
+        <div style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Approved Scans</div>
         <Doughnut
           data={chartData.scanMix}
           options={{
@@ -177,7 +201,7 @@ export function DashboardCharts({
 
       {/* Top Right — Scan Methods */}
       <div className="analytics-donut animate-slide-up delay-200" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1" }}>
-        <div style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Scan Methods</div>
+        <div style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Methods</div>
         <Doughnut
           data={chartData.autoVsManual}
           options={{
@@ -206,7 +230,7 @@ export function DashboardCharts({
 
       {/* Bottom Right — Denied Scans */}
       <div className="analytics-donut animate-slide-up delay-250" style={{ gridColumn: 3, gridRow: 2, alignSelf: "end", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginBottom: "16px" }}>
-        <div style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Denied Scans</div>
+        <div style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Denied Scans</div>
         <Doughnut
           data={chartData.deniedMix}
           options={{
@@ -238,8 +262,8 @@ export function DashboardCharts({
 
       {/* Center — Drill-down Chart */}
       <div className="analytics-donut" style={{ gridColumn: 2, gridRow: "1 / -1", alignSelf: "center", justifySelf: "center", width: "100%", height: "auto", aspectRatio: "1/1", maxWidth: "1200px", marginTop: "35px" }}>
-        <DrillDownDoughnut data={getDrillDownData()} />
-        <div style={{ position: "absolute", top: "calc(100% + 40px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "25px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "#000" }}>Total Scan Breakdown</div>
+        <DrillDownDoughnut data={drillDownData} />
+        <div style={{ position: "absolute", top: "calc(100% + 40px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "25px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Total Scan Breakdown</div>
       </div>
 
       {/* Scroll Indicator */}
@@ -278,7 +302,7 @@ export function DashboardCharts({
           fontSize: "10px",
           fontWeight: 800,
           letterSpacing: "3px",
-          color: "#475467",
+          color: "var(--admin-muted)",
           textTransform: "uppercase",
           marginRight: "-3px",
           textAlign: "center"

@@ -1,31 +1,24 @@
 "use client";
 
 import { useDeferredValue, useMemo, useState } from "react";
-import { people } from "../../../lib/mockData";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { PeopleTable } from "../../../components/admin/tables/PeopleTable";
 import { TemporaryVisitorCreator } from "../../../components/admin/tables/TemporaryVisitorCreator";
 import { MetricTrendChart } from "../../../components/analytics/MetricTrendChart";
 import type { TimeRange } from "../../../components/analytics/TrendChart";
 import { Download } from "lucide-react";
-import type { Person } from "../../../lib/types";
+import { useDataActions, useDataState } from "../../../context/DataContext";
 
 export default function VisitorsPage() {
-  const [staff, setStaff] = useState(people);
+  const { people: staff } = useDataState();
+  const { createTemporaryVisitor, updatePerson } = useDataActions();
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
 
   function handleToggleInside(personId: string) {
-    setStaff((current) =>
-      current.map((person) =>
-        person.id === personId ? { ...person, inside: !person.inside } : person
-      )
-    );
-  }
-
-  function handleCreateVisitor(visitor: Person) {
-    setStaff((current) => [visitor, ...current]);
+    const person = staff.find((item) => item.id === personId);
+    if (person) void updatePerson(personId, { inside: !person.inside });
   }
 
   // Filter only visitors, and apply search
@@ -60,7 +53,7 @@ export default function VisitorsPage() {
         />
       }
     >
-      <section className="log-workspace visitor-workspace">
+      <section className="split-workspace log-workspace">
         <div className="workspace-main">
           <div className="filter-bar">
             <label className="select-control">
@@ -75,7 +68,7 @@ export default function VisitorsPage() {
                 <option value="1D">Last 24 Hours</option>
               </select>
             </label>
-            <TemporaryVisitorCreator onCreate={handleCreateVisitor} />
+            <TemporaryVisitorCreator onCreate={createTemporaryVisitor} />
             <button className="ghost-button" type="button">
               <Download />
               Export

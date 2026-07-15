@@ -1,59 +1,39 @@
 import { useMemo } from "react";
 import { getPersonSessions, DayPattern } from "../../lib/analyticsUtils";
+import type { MovementEvent } from "../../lib/types";
 
 interface WorkPatternChartProps {
   personId: string;
   timeRange?: string;
+  movements: MovementEvent[];
 }
 
-export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChartProps) {
+type WorkPatternRow = Pick<DayPattern, "dateStr" | "percentage" | "sessions" | "workedHours">;
+
+export function WorkPatternChart({ personId, timeRange = "1W", movements }: WorkPatternChartProps) {
   const days = useMemo(() => {
-    const allSessions = getPersonSessions(personId);
-    let filtered: DayPattern[] = [];
-    
-    // getPersonSessions returns them sorted descending (newest first). 
-    // We want chronologically ascending for the chart (oldest at top).
-    // Let's reverse them after taking the slice.
-    
-    if (timeRange === "1W") {
-      filtered = allSessions.slice(0, 7).reverse();
-    } else if (timeRange === "1M") {
-      filtered = allSessions.slice(0, 30).reverse();
-    } else if (timeRange === "1Y") {
-      // Group by month
-      const monthlyData: Record<string, { totalHours: number, count: number }> = {};
-      const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      
-      for (const s of allSessions.slice(0, 365)) {
-        const m = monthNames[s.dateObj.getMonth()];
-        if (!monthlyData[m]) monthlyData[m] = { totalHours: 0, count: 0 };
-        monthlyData[m].totalHours += s.workedHours;
-        monthlyData[m].count++;
-      }
-      
-      const result = [];
-      const today = new Date();
-      for (let i = 11; i >= 0; i--) {
-        const d = new Date(today);
-        d.setMonth(d.getMonth() - i);
-        const m = monthNames[d.getMonth()];
-        const stats = monthlyData[m] || { totalHours: 0, count: 1 }; // Avoid div by 0
-        const avgHours = stats.count > 0 ? stats.totalHours / stats.count : 0;
-        
-        // Mock a typical day for that month based on the average hours
-        // Say, starting at 9 AM, ending at 9 + avgHours
-        const percentage = Math.round((avgHours / 8) * 100);
-        result.push({
-          dateStr: m,
-          percentage: Math.min(percentage, 100),
-          sessions: avgHours > 0 ? [{ start: 9, end: 9 + avgHours, type: "work" as const, zIndex: 1 }] : []
-        });
-      }
-      return result;
+    const allSessions = getPersonSessions(personId, movements);
+    const filtered: WorkPatternRow[] = [];
+    const today = new Date();
+    const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+    const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    const sessionsByDay = new Map(allSessions.map((session) => [dayKey(session.dateObj), session]));
+
+    const rangeDays = timeRange === "1Y" ? 365 : timeRange === "1M" ? 30 : 7;
+    for (let i = rangeDays - 1; i >= 0; i--) {
+      const d = new Date(today);
+      d.setDate(today.getDate() - i);
+      const session = sessionsByDay.get(dayKey(d));
+      filtered.push(session ?? {
+        dateStr: `${d.getDate()} ${monthNames[d.getMonth()]}`,
+        workedHours: 0,
+        percentage: 0,
+        sessions: []
+      });
     }
     
     return filtered;
-  }, [personId, timeRange]);
+  }, [movements, personId, timeRange]);
 
   const startAxis = 6;
   const endAxis = 22;
@@ -63,12 +43,13 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
     <div style={{
       width: "100%",
       fontSize: "12px",
-      fontFamily: "var(--admin-font)"
+      fontFamily: "var(--admin-font)",
+      color: "var(--admin-text)"
     }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", paddingBottom: "16px" }}>
         <div>
-          <h2 style={{ fontSize: "20px", fontWeight: 700, margin: "0 0 4px 0", color: "var(--text)" }}>Work Pattern</h2>
+          <h2 style={{ fontSize: "20px", fontWeight: 700, margin: "0 0 4px 0", color: "var(--admin-text)" }}>Work Pattern</h2>
         </div>
       </div>
 
@@ -77,7 +58,7 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
         {/* Left Axis - Dates */}
         <div style={{ width: "100px", flexShrink: 0, paddingRight: "12px", position: "relative" }}>
           {/* Header empty space - absolute positioned to stay at top when scrolling */}
-          <div style={{ height: "30px", position: "sticky", top: 0, background: "var(--bg)", zIndex: 5 }}></div>
+          <div style={{ height: "30px", position: "sticky", top: 0, background: "var(--admin-bg)", zIndex: 5 }}></div>
           {/* Date Rows */}
           {days.map((day, i) => (
             <div key={i} style={{
@@ -85,10 +66,10 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              color: "var(--text)"
+              color: "var(--admin-text)"
             }}>
               <span style={{ fontWeight: 600 }}>{day.dateStr}</span>
-              <span style={{ color: "var(--muted)", fontSize: "10px" }}>{day.percentage}%</span>
+              <span style={{ color: "var(--admin-muted)", fontSize: "10px" }}>{day.percentage}%</span>
             </div>
           ))}
         </div>
@@ -101,7 +82,7 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
             display: "flex",
             position: "sticky",
             top: 0,
-            background: "var(--bg)",
+            background: "var(--admin-bg)",
             zIndex: 5,
           }}>
             {Array.from({ length: totalAxisHours + 1 }).map((_, i) => (
@@ -114,7 +95,7 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
                 alignItems: "center",
                 transform: "translateX(-50%)",
                 paddingTop: "6px",
-                color: "var(--muted)",
+                color: "var(--admin-muted)",
                 fontSize: "11px",
                 fontWeight: 600
               }}>
@@ -132,8 +113,8 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
                 left: `${(i / totalAxisHours) * 100}%`,
                 top: 0,
                 bottom: 0,
-                borderLeft: "1px dashed black",
-                opacity: 0.5,
+                borderLeft: "1px dashed var(--admin-line)",
+                opacity: 0.9,
                 zIndex: 0
               }} />
             ))}
@@ -154,7 +135,7 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
                       width: `${Math.min(100 - left, width)}%`,
                       top: "4px",
                       bottom: "4px",
-                      background: session.type === "work" ? "#ea580c" : "#d8dde6",
+                      background: session.type === "work" ? "#ea580c" : "var(--admin-line)",
                       borderRadius: "2px",
                       zIndex: session.zIndex,
                       opacity: 0.9
@@ -172,7 +153,7 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
         display: "flex",
         gap: "24px",
         padding: "16px 0 0 0",
-        color: "var(--muted)",
+        color: "var(--admin-muted)",
         fontWeight: 600
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
@@ -180,7 +161,7 @@ export function WorkPatternChart({ personId, timeRange = "1W" }: WorkPatternChar
           Work session
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <div style={{ width: "12px", height: "12px", background: "#d8dde6", borderRadius: "2px" }} />
+          <div style={{ width: "12px", height: "12px", background: "var(--admin-line)", borderRadius: "2px" }} />
           Break (between sessions)
         </div>
       </div>
