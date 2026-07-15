@@ -1,34 +1,69 @@
 "use client";
 
-import { useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import { people } from "../../../lib/mockData";
-import { AdminPageFrame, PeopleTable } from "../../../components/admin/Tables";
+import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
+import { EmployeeTable } from "../../../components/admin/tables/EmployeeTable";
+import { MetricTrendChart } from "../../../components/analytics/MetricTrendChart";
+import type { TimeRange } from "../../../components/analytics/TrendChart";
+import { Download } from "lucide-react";
 
 export default function EmployeesPage() {
   const [staff, setStaff] = useState(people);
+  const [search, setSearch] = useState("");
+  const [timeRange, setTimeRange] = useState<TimeRange>("1M");
+  const deferredSearch = useDeferredValue(search);
 
-  function handleToggleInside(personId: string) {
-    setStaff((current) =>
-      current.map((person) =>
-        person.id === personId ? { ...person, inside: !person.inside } : person
-      )
+  // Filter only employees, and apply search
+  const employees = useMemo(() => {
+    const needle = deferredSearch.trim().toLowerCase();
+    return staff.filter(
+      (person) =>
+        person.type === "employee" &&
+        (!needle ||
+          person.name.toLowerCase().includes(needle) ||
+          person.barcode.toLowerCase().includes(needle))
     );
-  }
-
-  // Filter only employees
-  const employees = staff.filter(person => person.type === "employee");
+  }, [deferredSearch, staff]);
+  const insideEmployees = useMemo(() => employees.reduce((count, person) => count + (person.inside ? 1 : 0), 0), [employees]);
 
   return (
     <AdminPageFrame
       title="Employee Directory"
       description="Manage employee presence, role-linked access, and checkpoint identity records from the operations data model."
-      metric={`${employees.filter((person) => person.inside).length} inside`}
+      metric={`${insideEmployees}/${employees.length} on-site`}
+      headerRight={
+        <MetricTrendChart
+          title="Working hours"
+          valueLabel="AVG WORKING HOURS"
+          timeRange={timeRange}
+          onTimeRangeChange={setTimeRange}
+          color="#ea580c"
+          seed={18}
+          unit="h"
+        />
+      }
     >
-      <PeopleTable 
-        title="Employees" 
-        people={employees} 
-        onToggleInside={handleToggleInside} 
-      />
+      <section className="log-workspace" style={{ padding: "0 18px" }}>
+        <div className="workspace-main">
+          <div className="filter-bar">
+            <button className="ghost-button" type="button">
+              <Download />
+              Export
+            </button>
+            <label className="search-control" style={{ marginLeft: "auto" }}>
+              <span className="sr-only">Search employees</span>
+              <input
+                type="search"
+                placeholder="Search name or barcode..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </label>
+          </div>
+          <EmployeeTable people={employees} />
+        </div>
+      </section>
     </AdminPageFrame>
   );
 }

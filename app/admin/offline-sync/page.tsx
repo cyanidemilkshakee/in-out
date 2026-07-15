@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { initialMovements } from "../../../lib/mockData";
-import { AdminPageFrame, OfflineSyncTable } from "../../../components/admin/Tables";
+import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
+import { OfflineSyncTable } from "../../../components/admin/tables/OfflineSyncTable";
 import type { MovementEvent } from "../../../lib/types";
 
 export default function OfflineSyncPage() {

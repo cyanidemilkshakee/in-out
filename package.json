@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -H ::1 -p 1001",
+    "dev": "next dev -H ::1 -p 1001 --turbopack",
+    "dev:webpack": "next dev -H ::1 -p 1001",
     "build": "next build",
     "start": "next start",
     "typecheck": "tsc --noEmit"

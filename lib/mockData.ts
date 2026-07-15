@@ -4,8 +4,7 @@ import type {
   HardwareAsset,
   MovementEvent,
   Person,
-  ScanAnalytics,
-  Scanner
+  ScanAnalytics
 } from "./types";
 
 
@@ -29,7 +28,6 @@ export const checkpoints: Checkpoint[] = [
     name: "Main Entrance",
     mode: "auto",
     zone: "All Zones",
-    scannerId: "T-01",
     online: true
   },
   {
@@ -37,7 +35,6 @@ export const checkpoints: Checkpoint[] = [
     name: "Warehouse Gate",
     mode: "auto",
     zone: "Warehouse",
-    scannerId: "T-02",
     online: true
   },
   {
@@ -45,7 +42,6 @@ export const checkpoints: Checkpoint[] = [
     name: "IT Lab Exit",
     mode: "exit",
     zone: "IT Lab",
-    scannerId: "T-03",
     online: false
   },
   {
@@ -53,12 +49,11 @@ export const checkpoints: Checkpoint[] = [
     name: "Server Room Exit",
     mode: "exit",
     zone: "Server Room",
-    scannerId: "T-04",
     online: true
   }
 ];
 
-export const scanners: Scanner[] = [
+export const scanners: any[] = [
   {
     id: "T-01",
     name: "Terminal-01",
@@ -222,139 +217,51 @@ export const hardwareAssets: HardwareAsset[] = [
     allowedZones: ["Warehouse"],
     status: "restricted",
     inside: true
+  },
+  {
+    id: "hw-5108",
+    name: "MacBook-Pro-18",
+    barcode: "H5108",
+    owner: "Engineering",
+    category: "Laptop",
+    allowedZones: ["Main Entrance", "IT Lab"],
+    status: "active",
+    inside: true
+  },
+  {
+    id: "hw-6204",
+    name: "Thermal-Camera-04",
+    barcode: "H6204",
+    owner: "Security",
+    category: "Camera",
+    allowedZones: ["Main Entrance", "Server Room"],
+    status: "restricted",
+    inside: false
+  },
+  {
+    id: "hw-7311",
+    name: "Access-Tablet-11",
+    barcode: "H7311",
+    owner: "Front Desk",
+    category: "Tablet",
+    allowedZones: ["Main Entrance"],
+    status: "active",
+    inside: true
+  },
+  {
+    id: "hw-8450",
+    name: "Network-Switch-50",
+    barcode: "H8450",
+    owner: "IT",
+    category: "Network",
+    allowedZones: ["Server Room"],
+    status: "maintenance",
+    inside: true
   }
 ];
 
-export const initialMovements: MovementEvent[] = [
-  {
-    id: "EVT-000987",
-    time: "10:25:18 AM",
-    checkpointId: "cp-main",
-    checkpoint: "Main Entrance",
-    direction: "entry",
-    subjectId: "emp-1002",
-    subjectName: "John Smith",
-    subjectType: "employee",
-    barcode: "test1",
-    result: "success",
-    reason: "-",
-    scannerId: "T-01",
-    syncState: "synced",
-    hardwareIds: []
-  },
-  {
-    id: "EVT-000986",
-    time: "10:23:58 AM",
-    checkpointId: "cp-main",
-    checkpoint: "Main Entrance",
-    direction: "entry",
-    subjectId: "emp-1001",
-    subjectName: "John Doe",
-    subjectType: "employee",
-    barcode: "E1001",
-    result: "success",
-    reason: "-",
-    scannerId: "T-01",
-    syncState: "synced",
-    hardwareIds: []
-  },
-  {
-    id: "EVT-000985",
-    time: "10:23:12 AM",
-    checkpointId: "cp-main",
-    checkpoint: "Main Entrance",
-    direction: "entry",
-    subjectId: "vis-8841",
-    subjectName: "Alan Reed",
-    subjectType: "visitor",
-    barcode: "V-TEMP-8841",
-    result: "denied",
-    reason: "Not pre-approved",
-    scannerId: "T-01",
-    syncState: "synced",
-    hardwareIds: []
-  },
-  {
-    id: "EVT-000984",
-    time: "10:22:45 AM",
-    checkpointId: "cp-it-exit",
-    checkpoint: "IT Lab Exit",
-    direction: "exit",
-    subjectId: "emp-1003",
-    subjectName: "Michael Lee",
-    subjectType: "employee",
-    barcode: "E1003",
-    result: "success",
-    reason: "-",
-    scannerId: "T-03",
-    syncState: "synced",
-    hardwareIds: []
-  },
-  {
-    id: "EVT-000983",
-    time: "10:21:35 AM",
-    checkpointId: "cp-warehouse",
-    checkpoint: "Warehouse Gate",
-    direction: "exit",
-    subjectId: "hw-2001",
-    subjectName: "Laptop-045",
-    subjectType: "hardware",
-    barcode: "test3",
-    result: "manual_review",
-    reason: "Asset not expected out",
-    scannerId: "T-02",
-    syncState: "queued",
-    hardwareIds: []
-  },
-  {
-    id: "EVT-000982",
-    time: "10:20:44 AM",
-    checkpointId: "cp-main",
-    checkpoint: "Main Entrance",
-    direction: "entry",
-    subjectId: "emp-1001",
-    subjectName: "John Doe",
-    subjectType: "employee",
-    barcode: "E1001",
-    result: "duplicate",
-    reason: "Already inside",
-    scannerId: "T-01",
-    syncState: "synced",
-    hardwareIds: []
-  },
-  {
-    id: "EVT-000981",
-    time: "10:19:22 AM",
-    checkpointId: "cp-main",
-    checkpoint: "Main Entrance",
-    direction: "entry",
-    subjectId: "vis-7712",
-    subjectName: "Tom Hanks",
-    subjectType: "visitor",
-    barcode: "V-TEMP-7712",
-    result: "expired",
-    reason: "Pass expired",
-    scannerId: "T-01",
-    syncState: "synced",
-    hardwareIds: []
-  },
-  {
-    id: "EVT-000980",
-    time: "10:18:03 AM",
-    checkpointId: "cp-warehouse",
-    checkpoint: "Warehouse Gate",
-    direction: "exit",
-    subjectId: "hw-4007",
-    subjectName: "Chair-07",
-    subjectType: "hardware",
-    barcode: "H4007",
-    result: "restricted",
-    reason: "Not permitted",
-    scannerId: "T-02",
-    syncState: "queued",
-    hardwareIds: []
-  }
-];
+import initialMovementsData from "./initialMovements.json";
+export const initialMovements: MovementEvent[] = initialMovementsData as MovementEvent[];
 
 export const initialAlerts: Alert[] = [
   {
@@ -366,6 +273,7 @@ export const initialAlerts: Alert[] = [
     subjectName: "Alan Reed",
     barcode: "V-TEMP-8841",
     checkpoint: "Main Entrance",
+    date: "Jul 14, 2026",
     time: "10:23:12 AM"
   },
   {
@@ -377,29 +285,20 @@ export const initialAlerts: Alert[] = [
     subjectName: "Chair-07",
     barcode: "H4007",
     checkpoint: "Warehouse Gate",
+    date: "Jul 14, 2026",
     time: "10:18:03 AM"
   },
   {
     id: "AL-2026-0510",
-    severity: "medium",
+    severity: "critical",
     status: "open",
     title: "Unauthorized area access attempt",
     reason: "No access level",
     subjectName: "John Doe",
     barcode: "E-4819",
     checkpoint: "Server Room B",
+    date: "Jul 14, 2026",
     time: "10:15:22 AM"
-  },
-  {
-    id: "AL-2026-0509",
-    severity: "high",
-    status: "acknowledged",
-    title: "Offline scan conflict",
-    reason: "Queued denial requires reconciliation",
-    subjectName: "Laptop-045",
-    barcode: "test3",
-    checkpoint: "Warehouse Gate",
-    time: "10:11:08 AM"
   },
   {
     id: "AL-2026-0508",
@@ -410,7 +309,7 @@ export const initialAlerts: Alert[] = [
     subjectName: "Tom Hanks",
     barcode: "V-TEMP-7712",
     checkpoint: "Main Entrance",
+    date: "Jul 14, 2026",
     time: "10:09:44 AM"
   }
 ];
-

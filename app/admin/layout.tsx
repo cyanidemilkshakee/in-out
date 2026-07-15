@@ -10,7 +10,6 @@ import {
   History,
   Heart,
   Package,
-  ScanBarcode,
   UserRound,
   UsersRound,
 } from "lucide-react";
@@ -29,8 +28,7 @@ const adminRailGroups = [
     items: [
       { path: "/admin/employees", icon: UsersRound, label: "Employees" },
       { path: "/admin/visitors", icon: UserRound, label: "Visitors" },
-      { path: "/admin/hardware", icon: Package, label: "Hardware" },
-      { path: "/admin/barcodes", icon: ScanBarcode, label: "Barcodes" }
+      { path: "/admin/hardware", icon: Package, label: "Hardware" }
     ]
   }
 ];
@@ -56,6 +54,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const storedTheme = window.localStorage.getItem("inout-admin-theme");
+    if (storedTheme) {
+      document.documentElement.dataset.adminTheme = storedTheme;
+    }
     const el = scrollRef.current;
     if (!el) return;
     el.addEventListener("scroll", handleScroll, { passive: true });
@@ -90,7 +92,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               padding: "0 12px",
               backgroundColor: pathname !== "/admin" && sidebarOpen ? "#D0D8DE" : (scrolled && pathname === "/admin" ? "var(--bg)" : "transparent"),
               borderRight: "none",
-              transition: "width 0.3s cubic-bezier(0.2, 0, 0, 1), background-color 0.3s ease",
+              transition: "width 0.22s cubic-bezier(0.2, 0, 0, 1), background-color 0.22s ease",
+              willChange: "width",
               overflow: "hidden",
               whiteSpace: "nowrap"
             }}
@@ -242,7 +245,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           id="admin-scroll-container"
           ref={scrollRef}
           className={scrolled ? "scrolled-main-content" : "top-main-content"}
-          style={{ flex: 1, position: "relative", width: "auto", height: "100vh", overflowY: "auto" }}
+          style={{
+            flex: 1,
+            position: "relative",
+            width: "auto",
+            height: "100vh",
+            overflowY: "auto",
+            overscrollBehavior: "none",
+            touchAction: "pan-y",
+          }}
         >
           {children}
         </div>

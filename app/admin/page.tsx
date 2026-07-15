@@ -1,82 +1,81 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import dynamic from "next/dynamic";
-import { MovementTable } from "../../components/admin/Tables";
+import { useState, useMemo, lazy, Suspense } from "react";
+import { MovementTable } from "../../components/admin/tables/MovementTable";
 import {
   initialAlerts,
   initialMovements,
-  scanAnalytics,
 } from "../../lib/mockData";
+import { getDashboardKPIs } from "../../lib/analyticsUtils";
 import type { Alert, MovementEvent, ScanAnalytics, SortDirection, VisibleColumn } from "../../lib/types";
 
-const DashboardCharts = dynamic(
-  () => import("../../components/analytics/DashboardCharts").then((m) => ({ default: m.DashboardCharts })),
-  {
-    ssr: false,
-    loading: () => (
-      <div style={{
-        position: "absolute", inset: 0,
-        display: "flex", alignItems: "center", justifyContent: "center",
-        background: "var(--bg)",
-      }}>
-        <div style={{
-          width: 40, height: 40,
-          border: "3px solid var(--border)",
-          borderTopColor: "var(--blue)",
-          borderRadius: "50%",
-          animation: "spin 0.7s linear infinite",
-        }} />
-        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
-      </div>
-    ),
-  }
+// Lazy-load the heavy Chart.js dashboard to avoid blocking initial render
+const DashboardCharts = lazy(() =>
+  import("../../components/analytics/DashboardCharts").then((m) => ({ default: m.DashboardCharts }))
 );
+
+const dashboardVisibleColumns: Record<VisibleColumn, boolean> = {
+  date: true,
+  time: true,
+  name: true,
+  type: true,
+  direction: true,
+  checkpoint: true,
+  result: true,
+  barcode: true,
+  scanType: true,
+  eventId: true
+};
 
 function DashboardOverview({
   alerts,
-  metrics,
   scanAnalytics,
   events
 }: {
   alerts: Alert[];
-  metrics: { active: number; today: number };
   scanAnalytics: ScanAnalytics;
   events: MovementEvent[];
 }) {
-  const latestEvents = events.slice(0, 10);
+  const latestEvents = useMemo(() => events.slice(0, 10), [events]);
 
   const [sortKey, setSortKey] = useState<VisibleColumn>("time");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const [selectedEventId, setSelectedEventId] = useState<string>();
-  const visibleColumns: Record<VisibleColumn, boolean> = {
-    time: true,
-    checkpoint: true,
-    direction: true,
-    subject: true,
-    type: true,
-    barcode: true,
-    result: true,
-    reason: true,
-    scanner: false,
-    sync: true
-  };
 
   return (
     <section className="dashboard-overview" aria-label="Operational overview" style={{ margin: 0, padding: 0 }}>
+      {/* Full-viewport chart area */}
       <div style={{ position: "relative", width: "100%", height: "100vh" }}>
-        <DashboardCharts
-          alerts={alerts}
-          scanAnalytics={scanAnalytics}
-        />
+        <Suspense
+          fallback={
+            <div style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              height: "100%",
+              color: "var(--admin-muted, #667085)",
+              fontSize: "14px",
+              fontWeight: 700,
+              letterSpacing: "1px",
+              textTransform: "uppercase",
+            }}>
+              Loading charts…
+            </div>
+          }
+        >
+          <DashboardCharts alerts={alerts} scanAnalytics={scanAnalytics} />
+        </Suspense>
       </div>
-      
+
+      {/* Recent movement logs below the viewport */}
       <div style={{ padding: '40px 24px 60px' }}>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '24px', color: '#111827' }}>Recent Movement Logs</h2>
+        <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '24px', color: 'var(--admin-text, #111827)' }}>
+          Recent Movement Logs
+        </h2>
         <MovementTable
           events={latestEvents}
           selectedId={selectedEventId}
-          visibleColumns={visibleColumns}
+          visibleColumns={dashboardVisibleColumns}
           sortKey={sortKey}
           sortDirection={sortDirection}
           density="comfortable"
@@ -96,13 +95,12 @@ function DashboardOverview({
 }
 
 export default function AdminPage() {
-  const metrics = useMemo(() => ({ active: 124, today: 450 }), []);
+  const actualScanAnalytics = useMemo(() => getDashboardKPIs(), []);
 
   return (
     <DashboardOverview
       alerts={initialAlerts}
-      metrics={metrics}
-      scanAnalytics={scanAnalytics}
+      scanAnalytics={actualScanAnalytics as any}
       events={initialMovements}
     />
   );

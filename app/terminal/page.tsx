@@ -2,7 +2,10 @@
 
 import { type KeyboardEvent, useMemo, useState } from "react";
 import {
+  AlertTriangle,
+  CheckCircle2,
   Keyboard,
+  Radio,
   Wifi,
   WifiOff,
 } from "lucide-react";
@@ -12,8 +15,7 @@ import {
   checkpoints,
   hardwareAssets,
   initialMovements,
-  people,
-  scanners
+  people
 } from "../../lib/mockData";
 import { applyMovementState, evaluateScan } from "../../lib/movementLogic";
 import type { HardwareAsset, MovementEvent, Person, ScanDecision } from "../../lib/types";
@@ -30,6 +32,7 @@ const initialTerminalDecision: ScanDecision = {
   carriedHardware: [],
   event: {
     id: "EVT-001000",
+    date: "Jul 14, 2026",
     time: "10:25:18 AM",
     checkpointId: initialTerminalCheckpoint.id,
     checkpoint: initialTerminalCheckpoint.name,
@@ -38,9 +41,9 @@ const initialTerminalDecision: ScanDecision = {
     subjectName: initialTerminalSubject?.name ?? "Unknown barcode",
     subjectType: initialTerminalSubject?.type ?? "visitor",
     barcode: "test2",
-    result: "success",
+    result: "approved",
     reason: "-",
-    scannerId: initialTerminalCheckpoint.scannerId,
+    scanType: "manual",
     syncState: "synced",
     hardwareIds: []
   }
@@ -60,9 +63,24 @@ export default function TerminalPage() {
   const [toast, setToast] = useState<ToastMessage | null>(null);
 
   const checkpoint = checkpoints.find((item) => item.id === checkpointId) ?? checkpoints[0];
-  const scanner = scanners.find((item) => item.id === checkpoint.scannerId) ?? scanners[0];
-  const queuedEvents = events.filter((event) => event.syncState === "queued");
-  const conflictEvents = events.filter((event) => event.syncState === "conflict");
+  const { queuedEvents, conflictEvents, failedEvents, approvedCount } = useMemo(() => {
+    const queued: MovementEvent[] = [];
+    const conflict: MovementEvent[] = [];
+    const failed: MovementEvent[] = [];
+
+    for (const event of events) {
+      if (event.syncState === "queued") queued.push(event);
+      if (event.syncState === "conflict") conflict.push(event);
+      if (event.result !== "approved") failed.push(event);
+    }
+
+    return {
+      queuedEvents: queued,
+      conflictEvents: conflict,
+      failedEvents: failed,
+      approvedCount: events.length - failed.length
+    };
+  }, [events]);
   const subject = decision.subject;
 
   const subjectLastMovement = useMemo(() => {
@@ -90,7 +108,8 @@ export default function TerminalPage() {
       hardware: assetState,
       selectedHardwareIds,
       online,
-      eventCount: events.length + 1
+      eventCount: events.length + 1,
+      scanType: "manual"
     });
     const movementState = applyMovementState(scan.event, personState, assetState);
     setDecision(scan);
@@ -122,7 +141,7 @@ export default function TerminalPage() {
         }
         return {
           ...event,
-          syncState: event.result === "success" || event.result === "manual_review" ? "synced" : "conflict"
+          syncState: event.result === "approved" ? "synced" : "conflict"
         };
       })
     );
@@ -132,7 +151,7 @@ export default function TerminalPage() {
   function sendToManualReview() {
     const reviewEvent: MovementEvent = {
       ...decision.event,
-      result: "manual_review",
+      result: "denied",
       reason: "Security escalated for manual review",
       syncState: online ? "synced" : "queued"
     };
@@ -170,13 +189,16 @@ export default function TerminalPage() {
     <AppChrome role="security">
       <main className="terminalPage">
         <section className="terminalShell">
-          {/* Header */}
           <div className="terminalHeader">
             <div className="brand">
               <h1>Security Command Center</h1>
               <span>Terminal-01 / checkpoint operations</span>
             </div>
             <div className="headerActions">
+              <div className="terminalOperator">
+                <span>Operator</span>
+                <strong>Security Staff</strong>
+              </div>
               <button
                 className="networkToggle"
                 type="button"
@@ -189,7 +211,6 @@ export default function TerminalPage() {
             </div>
           </div>
 
-          {/* Status Grid */}
           <div className="statusGrid">
             <label className="statusItem">
               <span>Active Checkpoint</span>
@@ -212,56 +233,79 @@ export default function TerminalPage() {
               <strong>{queuedEvents.length}</strong>
             </div>
             <div className="statusItem">
-              <span>Connected Device</span>
-              <strong>{scanner.name}</strong>
+              <span>Conflicts</span>
+              <strong>{conflictEvents.length}</strong>
             </div>
           </div>
 
-          {/* Main Workspace */}
           <div className="workspace">
             <div className="mainStage">
-              
-              <div className="scanArea">
-                <div className="scanLabel">Scan Subject Barcode</div>
-                <div className="scanInputWrapper">
-                  <input
-                    value={barcode}
-                    onChange={(event) => setBarcode(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
-                        runScan();
-                      }
-                    }}
-                    autoComplete="off"
-                    aria-invalid={Boolean(scanError)}
-                    placeholder="ENTER BARCODE..."
-                  />
-                  <button type="button" onClick={() => runScan()} aria-label="Run barcode scan">
-                    <Keyboard />
-                  </button>
+              <section className="terminalHero">
+                <div className="terminalHeroCopy">
+                  <span>Live checkpoint terminal</span>
+                  <h2>{checkpoint.name}</h2>
+                  <p>{online ? "Connected to the admin event ledger." : "Local mode active. Scans queue until sync resumes."}</p>
                 </div>
-                {scanError ? (
-                  <span style={{ color: 'var(--red)', marginTop: '12px', fontSize: '14px' }}>
-                    {scanError}
-                  </span>
-                ) : null}
-                
-                <div className="samples">
-                  {["test1", "test2", "test3"].map((sample) => (
-                    <button
-                      key={sample}
-                      className={`${"sampleBtn"} ${barcode === sample ? "active" : ''}`}
-                      type="button"
-                      aria-pressed={barcode === sample}
-                      onClick={() => runScan(sample)}
-                    >
-                      {sample}
-                    </button>
-                  ))}
+                <div className="terminalHeroMetrics" aria-label="Terminal metrics">
+                  <div>
+                    <CheckCircle2 />
+                    <span>Approved</span>
+                    <strong>{approvedCount}</strong>
+                  </div>
+                  <div>
+                    <AlertTriangle />
+                    <span>Failed</span>
+                    <strong>{failedEvents.length}</strong>
+                  </div>
+                  <div>
+                    <Radio />
+                    <span>Queued</span>
+                    <strong>{queuedEvents.length}</strong>
+                  </div>
                 </div>
-              </div>
+              </section>
 
-              <DecisionPanel decision={decision} onManualReview={sendToManualReview} />
+              <section className="terminalOpsGrid">
+                <div className="terminalScanCard">
+                  <div className="terminalCardTitle">
+                    <span>Scan input</span>
+                    <strong>Subject barcode</strong>
+                  </div>
+                  <div className="scanInputWrapper">
+                    <input
+                      value={barcode}
+                      onChange={(event) => setBarcode(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          runScan();
+                        }
+                      }}
+                      autoComplete="off"
+                      aria-invalid={Boolean(scanError)}
+                      placeholder="ENTER BARCODE..."
+                    />
+                    <button type="button" onClick={() => runScan()} aria-label="Run barcode scan">
+                      <Keyboard />
+                    </button>
+                  </div>
+                  {scanError ? <span className="scanError">{scanError}</span> : null}
+                  <div className="samples" aria-label="Sample scan barcodes">
+                    {["test1", "test2", "test3"].map((sample) => (
+                      <button
+                        key={sample}
+                        className={`${"sampleBtn"} ${barcode === sample ? "active" : ''}`}
+                        type="button"
+                        aria-pressed={barcode === sample}
+                        onClick={() => runScan(sample)}
+                      >
+                        {sample}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <DecisionPanel decision={decision} onManualReview={sendToManualReview} />
+              </section>
               <RecentScansTimeline events={events} />
             </div>
 
@@ -309,11 +353,10 @@ export default function TerminalPage() {
             </aside>
           </div>
 
-          {/* Footer */}
           <footer className="footer">
             <span>TOTAL SCANS: 342 IN / 289 OUT</span>
             <span>ACTIVE INSIDE: 153</span>
-            <span>FAILED SCANS: {events.filter((event) => event.result !== "success").length}</span>
+            <span>FAILED SCANS: {failedEvents.length}</span>
             <span>OFFLINE QUEUE: {queuedEvents.length}</span>
           </footer>
         </section>

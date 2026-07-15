@@ -1,64 +1,65 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { Filter, Columns3 } from "lucide-react";
+import { useDeferredValue, useState, useMemo } from "react";
 import { initialMovements, initialAlerts } from "../../../lib/mockData";
 import type { MovementEvent, Alert, VisibleColumn, SortDirection, ResultStatus } from "../../../lib/types";
-import { AdminPageFrame, MovementTable, DetailDrawer } from "../../../components/admin/Tables";
+import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
+import { MovementTable } from "../../../components/admin/tables/MovementTable";
+import { DetailDrawer } from "../../../components/admin/tables/DetailDrawer";
+import { TrendChart, type TimeRange } from "../../../components/analytics/TrendChart";
 
-type StatusFilter = ResultStatus | "all" | "exceptions" | "queued";
+type StatusFilter = ResultStatus | "all" | "automatic" | "manual" | "entry" | "exit";
 
 const defaultVisibleColumns: Record<VisibleColumn, boolean> = {
+  date: true,
   time: true,
-  checkpoint: true,
-  direction: true,
-  subject: true,
+  name: true,
   type: true,
-  barcode: true,
+  direction: true,
+  checkpoint: true,
   result: true,
-  reason: true,
-  scanner: true,
-  sync: true
+  barcode: true,
+  scanType: true,
+  eventId: true
 };
 
 export default function LogsPage() {
-  const [events, setEvents] = useState<MovementEvent[]>(initialMovements);
+  const [events] = useState<MovementEvent[]>(initialMovements);
   const [alerts] = useState<Alert[]>(initialAlerts);
   const [search, setSearch] = useState("");
   const [checkpointFilter, setCheckpointFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [page, setPage] = useState(1);
-  const [rowsPerPage] = useState(25);
-  const [showColumns, setShowColumns] = useState(false);
-  const [visibleColumns, setVisibleColumns] = useState(defaultVisibleColumns);
+  const rowsPerPage = 25;
   const [sortKey, setSortKey] = useState<VisibleColumn>("time");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [tableDensity, setTableDensity] = useState<"comfortable" | "compact">("comfortable");
   const [selectedEventId, setSelectedEventId] = useState(initialMovements[0]?.id ?? "");
   const [eventNotes, setEventNotes] = useState<Record<string, string[]>>({});
   const [drawerDraft, setDrawerDraft] = useState("");
+  const [timeRange, setTimeRange] = useState<TimeRange>("1D");
+  const deferredSearch = useDeferredValue(search);
 
   const filteredEvents = useMemo(() => {
-    const needle = search.trim().toLowerCase();
+    const needle = deferredSearch.trim().toLowerCase();
     return events.filter((event) => {
       const checkpointMatch =
-        checkpointFilter === "all" || event.checkpointId === checkpointFilter;
+        checkpointFilter === "all" || event.checkpoint === checkpointFilter;
       const statusMatch =
         statusFilter === "all" ||
-        (statusFilter === "exceptions" && event.result !== "success") ||
-        (statusFilter === "queued" && event.syncState !== "synced") ||
-        event.result === statusFilter;
+        event.result === statusFilter ||
+        event.scanType === statusFilter ||
+        event.direction === statusFilter;
       const searchMatch =
         !needle ||
-        [event.subjectName, event.barcode, event.checkpoint, event.scannerId, event.reason]
+        [event.subjectName, event.barcode, event.checkpoint, event.scanType, event.result]
           .join(" ")
           .toLowerCase()
           .includes(needle);
       return checkpointMatch && statusMatch && searchMatch;
     });
-  }, [checkpointFilter, events, search, statusFilter]);
+  }, [checkpointFilter, deferredSearch, events, statusFilter]);
 
-  const sortedEvents = useMemo(() => {
+  const pagedEvents = useMemo(() => {
     const timeValue = (time: string) => {
       const match = time.match(/^(\d{1,2}):(\d{2}):(\d{2})\s(AM|PM)$/);
       if (!match) {
@@ -71,35 +72,29 @@ export default function LogsPage() {
 
     const valueFor = (event: MovementEvent, key: VisibleColumn) => {
       const values: Record<VisibleColumn, string | number> = {
+        date: event.date,
         time: timeValue(event.time),
-        checkpoint: event.checkpoint,
-        direction: event.direction,
-        subject: event.subjectName,
+        name: event.subjectName,
         type: event.subjectType,
-        barcode: event.barcode,
+        direction: event.direction,
+        checkpoint: event.checkpoint,
         result: event.result,
-        reason: event.reason,
-        scanner: event.scannerId,
-        sync: event.syncState
+        barcode: event.barcode,
+        scanType: event.scanType ?? "",
+        eventId: event.id
       };
       return values[key];
     };
 
+    const start = (page - 1) * rowsPerPage;
     return [...filteredEvents].sort((a, b) => {
       const aVal = valueFor(a, sortKey);
       const bVal = valueFor(b, sortKey);
       if (aVal === bVal) return 0;
       const greater = aVal > bVal;
       return sortDirection === "asc" ? (greater ? 1 : -1) : greater ? -1 : 1;
-    });
-  }, [filteredEvents, sortDirection, sortKey]);
-
-  function clearFilters() {
-    setCheckpointFilter("all");
-    setStatusFilter("all");
-    setSearch("");
-    setPage(1);
-  }
+    }).slice(start, start + rowsPerPage);
+  }, [filteredEvents, page, rowsPerPage, sortDirection, sortKey]);
 
   function updateSort(column: VisibleColumn) {
     setSortKey(column);
@@ -116,90 +111,42 @@ export default function LogsPage() {
     setDrawerDraft("");
   }
 
-  const selectedEvent = events.find((e) => e.id === selectedEventId);
-  const selectedAlert = alerts.find((a) => a.id === selectedEventId);
+  const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId), [events, selectedEventId]);
+  const selectedAlert = useMemo(() => alerts.find((a) => a.id === selectedEventId), [alerts, selectedEventId]);
+  const uniqueCheckpoints = useMemo(() => Array.from(new Set(events.map(e => e.checkpoint))).sort(), [events]);
 
   return (
     <AdminPageFrame
       title="Movement Ledger"
       description="Search every entry, exit, denial, and offline movement with row-level review for security handoff."
-      metric={`${filteredEvents.length} matching events`}
+      headerRight={<TrendChart events={filteredEvents} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
     >
     <section className="split-workspace log-workspace">
       <div className="workspace-main">
-        <div className="panel-titlebar">
-          <div>
-            <h1>Log Explorer</h1>
-            <p>
-              Showing {Math.min(filteredEvents.length, (page - 1) * rowsPerPage + 1)} to{" "}
-              {Math.min(filteredEvents.length, page * rowsPerPage)} of{" "}
-              {filteredEvents.length} results
-            </p>
-          </div>
-          <div className="toolbar">
-            <button className="ghost-button" type="button" onClick={clearFilters}>
-              <Filter />
-              Filters
-            </button>
-            <div className="column-menu" style={{ position: 'relative' }}>
-              <button
-                className="ghost-button"
-                type="button"
-                onClick={() => setShowColumns((value) => !value)}
-              >
-                <Columns3 />
-                Columns
-              </button>
-              {showColumns ? (
-                <div className="popover">
-                  {(Object.keys(visibleColumns) as VisibleColumn[]).map((column) => (
-                    <label key={column} className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={visibleColumns[column]}
-                        onChange={() =>
-                          setVisibleColumns((current) => ({
-                            ...current,
-                            [column]: !current[column]
-                          }))
-                        }
-                      />
-                      {column}
-                    </label>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-            <div className="density-toggle" aria-label="Table density">
-              <button
-                className={tableDensity === "comfortable" ? "segmented active" : "segmented"}
-                type="button"
-                aria-pressed={tableDensity === "comfortable"}
-                onClick={() => setTableDensity("comfortable")}
-              >
-                Comfortable
-              </button>
-              <button
-                className={tableDensity === "compact" ? "segmented active" : "segmented"}
-                type="button"
-                aria-pressed={tableDensity === "compact"}
-                onClick={() => setTableDensity("compact")}
-              >
-                Compact
-              </button>
-            </div>
-          </div>
-        </div>
+
 
         <div className="filter-bar">
-          <label className="search-control">
-            <span className="sr-only">Search events</span>
-            <input
-              type="search"
-              placeholder="Search subjects, barcodes, reasons..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
+          <label className="select-control">
+            <span className="sr-only">Filter by time</span>
+            <select
+              value={timeRange}
+              onChange={(e) => setTimeRange(e.target.value as TimeRange)}
+            >
+              <option value="1Y">Last 1 Year</option>
+              <option value="1M">Last 1 Month</option>
+              <option value="1W">Last 1 Week</option>
+              <option value="1D">Last 24 Hours</option>
+            </select>
+          </label>
+          <label className="select-control">
+            <span className="sr-only">Filter by checkpoint</span>
+            <select
+              value={checkpointFilter}
+              onChange={(e) => setCheckpointFilter(e.target.value)}
+            >
+              <option value="all">All Checkpoints</option>
+              {uniqueCheckpoints.map(cp => <option key={cp} value={cp}>{cp}</option>)}
+            </select>
           </label>
           <label className="select-control">
             <span className="sr-only">Filter by status</span>
@@ -208,22 +155,32 @@ export default function LogsPage() {
               onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
             >
               <option value="all">All Results</option>
-              <option value="success">Success</option>
-              <option value="exceptions">Exceptions</option>
+              <option value="approved">Approved</option>
               <option value="denied">Denied</option>
-              <option value="restricted">Restricted</option>
-              <option value="queued">Queued</option>
+              <option value="automatic">Automatic</option>
+              <option value="manual">Manual</option>
+              <option value="entry">Entry</option>
+              <option value="exit">Exit</option>
             </select>
+          </label>
+          <label className="search-control" style={{ marginLeft: 'auto' }}>
+            <span className="sr-only">Search events</span>
+            <input
+              type="search"
+              placeholder="Search subjects, barcodes, reasons..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
           </label>
         </div>
 
         <MovementTable
-          events={sortedEvents.slice((page - 1) * rowsPerPage, page * rowsPerPage)}
+          events={pagedEvents}
           selectedId={selectedEventId}
-          visibleColumns={visibleColumns}
+          visibleColumns={defaultVisibleColumns}
           sortKey={sortKey}
           sortDirection={sortDirection}
-          density={tableDensity}
+          density="compact"
           onSort={updateSort}
           onSelect={setSelectedEventId}
         />

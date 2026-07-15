@@ -39,7 +39,6 @@ The system also supports **offline mode**: scans taken while offline are queued 
 - **Employees** — Employee directory with access level and zone assignment management
 - **Visitors** — Visitor management with pre-approval workflows and temporary barcode issuance
 - **Hardware** — Asset registry (laptops, equipment, tools) with zone restrictions and ownership tracking
-- **Barcodes** — Barcode lookup and management
 - **Scanners** — Scanner device health monitoring (online / offline / warning)
 - **Checkpoints** — Checkpoint configuration (entry / exit / auto mode, zone assignment)
 - **Offline Sync** — View and manage queued movement events pending synchronisation

@@ -18,10 +18,19 @@ type ScanInput = {
   selectedHardwareIds: string[];
   online: boolean;
   eventCount: number;
+  scanType: "auto" | "manual";
 };
 
 function isHardware(subject: SubjectRecord): subject is HardwareAsset {
   return "category" in subject;
+}
+
+function currentDate() {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric"
+  }).format(new Date());
 }
 
 function currentTime() {
@@ -54,29 +63,29 @@ function statusFor(subject: SubjectRecord | undefined, checkpoint: Checkpoint, d
     return { result: "denied" as ResultStatus, reason: "Barcode not registered" };
   }
   if (isHardware(subject) && subject.status === "restricted") {
-    return { result: "restricted" as ResultStatus, reason: "Asset restricted" };
+    return { result: "denied" as ResultStatus, reason: "Asset restricted" };
   }
   if (!isHardware(subject) && subject.type === "visitor") {
     if (subject.status === "expired") {
-      return { result: "expired" as ResultStatus, reason: "Temporary barcode expired" };
+      return { result: "denied" as ResultStatus, reason: "Temporary barcode expired" };
     }
     if (subject.status !== "pre_approved") {
       return { result: "denied" as ResultStatus, reason: "Not pre-approved" };
     }
   }
   if (!zoneAllowed(subject, checkpoint)) {
-    return { result: "restricted" as ResultStatus, reason: "Checkpoint zone not permitted" };
+    return { result: "denied" as ResultStatus, reason: "Checkpoint zone not permitted" };
   }
   if (direction === "entry" && subject.inside) {
-    return { result: "duplicate" as ResultStatus, reason: "Already inside" };
+    return { result: "denied" as ResultStatus, reason: "Already inside" };
   }
   if (direction === "exit" && !subject.inside) {
-    return { result: "duplicate" as ResultStatus, reason: "No active entry found" };
+    return { result: "denied" as ResultStatus, reason: "No active entry found" };
   }
   if (isHardware(subject) && direction === "exit" && checkpoint.id === "cp-warehouse") {
-    return { result: "manual_review" as ResultStatus, reason: "Asset not expected out" };
+    return { result: "denied" as ResultStatus, reason: "Asset not expected out" };
   }
-  return { result: "success" as ResultStatus, reason: "-" };
+  return { result: "approved" as ResultStatus, reason: "-" };
 }
 
 export function findSubject(barcode: string, people: Person[], hardware: HardwareAsset[]) {
@@ -94,7 +103,8 @@ export function evaluateScan({
   hardware,
   selectedHardwareIds,
   online,
-  eventCount
+  eventCount,
+  scanType
 }: ScanInput): ScanDecision {
   const subject = findSubject(barcode, people, hardware);
   const direction = directionFor(checkpoint, subject);
@@ -103,6 +113,7 @@ export function evaluateScan({
   const syncState: SyncState = online ? "synced" : "queued";
   const event: MovementEvent = {
     id: `EVT-${String(1000 + eventCount).padStart(6, "0")}`,
+    date: currentDate(),
     time: currentTime(),
     checkpointId: checkpoint.id,
     checkpoint: checkpoint.name,
@@ -113,7 +124,7 @@ export function evaluateScan({
     barcode: barcode.trim(),
     result: decision.result,
     reason: decision.reason,
-    scannerId: checkpoint.scannerId,
+    scanType,
     syncState,
     hardwareIds: carriedHardware.map((asset) => asset.id)
   };
@@ -126,7 +137,7 @@ export function applyMovementState(
   people: Person[],
   hardware: HardwareAsset[]
 ) {
-  if (event.result !== "success") {
+  if (event.result !== "approved") {
     return { people, hardware };
   }
 

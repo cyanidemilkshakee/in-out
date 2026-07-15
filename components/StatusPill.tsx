@@ -1,4 +1,4 @@
-import type { ResultStatus, Scanner, SyncState } from "../lib/types";
+import type { ResultStatus, SyncState } from "../lib/types";
 
 type ResultPillProps = {
   value: ResultStatus;
@@ -6,13 +6,13 @@ type ResultPillProps = {
 
 export function ResultPill({ value }: ResultPillProps) {
   const labels: Record<ResultStatus, string> = {
-    success: "Success",
-    denied: "Denied",
-    duplicate: "Duplicate",
-    expired: "Expired",
-    restricted: "Restricted",
-    manual_review: "Manual Review",
-    pending: "Pending"
+    approved: "Approved",
+    denied: "Denied"
+  };
+
+  const colors: Record<ResultStatus, "green" | "red"> = {
+    approved: "green",
+    denied: "red"
   };
 
   return <span className={`pill result-${value}`}>{labels[value]}</span>;
@@ -35,12 +35,4 @@ export function SyncPill({ value }: SyncPillProps) {
       <span>{labels[value]}</span>
     </span>
   );
-}
-
-type ScannerPillProps = {
-  value: Scanner["status"];
-};
-
-export function ScannerPill({ value }: ScannerPillProps) {
-  return <span className={`pill scanner-${value}`}>{value}</span>;
 }

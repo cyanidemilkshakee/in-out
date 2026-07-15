@@ -13,7 +13,6 @@ import {
   Sun,
   UserRound
 } from "lucide-react";
-import { AdminPageFrame } from "../../../components/admin/Tables";
 
 type AdminTheme = "light" | "dark" | "high-contrast-dark";
 
@@ -64,18 +63,13 @@ export default function ProfilePage() {
     const storedTheme = window.localStorage.getItem("inout-admin-theme") as AdminTheme | null;
     if (storedTheme && themeOptions.some((option) => option.id === storedTheme)) {
       setTheme(storedTheme);
-    } else if (storedTheme) {
+    } else {
       setTheme("light");
-      window.localStorage.setItem("inout-admin-theme", "light");
     }
     const storedDensity = window.localStorage.getItem("inout-admin-density");
-    if (storedDensity) {
-      setDensity(storedDensity);
-    }
+    if (storedDensity) setDensity(storedDensity);
     const storedAutoLock = window.localStorage.getItem("inout-admin-autolock");
-    if (storedAutoLock) {
-      setAutoLock(storedAutoLock);
-    }
+    if (storedAutoLock) setAutoLock(storedAutoLock);
   }, []);
 
   useEffect(() => {
@@ -98,158 +92,171 @@ export default function ProfilePage() {
   }
 
   return (
-    <AdminPageFrame
-      title="Profile & Settings"
-      description="Tune your operator profile, security preferences, notifications, and admin console theme."
-      metric={`${activeTheme.label} theme active`}
-    >
-      <section className="profile-workspace" aria-label="Profile settings">
-        <header className="profile-identity-band">
-          <div className="profile-avatar-large">
-            <UserRound />
-          </div>
-          <div>
-            <span>Signed in as</span>
-            <h2>Ops Admin</h2>
-            <p>admin@company.com / Admin role / Full operations access</p>
-          </div>
-          <div className="profile-session-stack">
-            <span>Session</span>
-            <strong>OAuth 2.0 + OIDC</strong>
-            <small>Last verified 10:25 AM</small>
-          </div>
-        </header>
-
-        <div className="profile-grid">
-          <section className="settings-section theme-section">
-            <div className="settings-section-title">
-              <Palette />
-              <div>
-                <h2>Theme</h2>
-                <p>Changes apply immediately and persist on this browser.</p>
-              </div>
-            </div>
-            <div className="theme-option-grid">
-              {themeOptions.map((option) => {
-                const Icon = option.icon;
-                const active = option.id === theme;
-                return (
-                  <button
-                    key={option.id}
-                    className={active ? "theme-option active" : "theme-option"}
-                    type="button"
-                    aria-pressed={active}
-                    onClick={() => {
-                      setTheme(option.id);
-                      setSaved(false);
-                    }}
-                  >
-                    <span className="theme-option-icon">
-                      <Icon />
-                    </span>
-                    <span>
-                      <strong>{option.label}</strong>
-                      <small>{option.description}</small>
-                    </span>
-                    <span className="theme-swatches" aria-hidden="true">
-                      {option.swatches.map((color) => (
-                        <i key={color} style={{ backgroundColor: color }} />
-                      ))}
-                    </span>
-                    {active ? <Check className="theme-check" /> : null}
-                  </button>
-                );
-              })}
-            </div>
-          </section>
-
-          <section className="settings-section">
-            <div className="settings-section-title">
-              <Bell />
-              <div>
-                <h2>Notifications</h2>
-                <p>Choose what reaches this admin session.</p>
-              </div>
-            </div>
-            <SettingsToggle
-              checked={settings.incidentAlerts}
-              label="Critical incident alerts"
-              description="Denied access, restricted exits, and active holds."
-              onChange={() => toggleSetting("incidentAlerts")}
-            />
-            <SettingsToggle
-              checked={settings.syncAlerts}
-              label="Offline sync alerts"
-              description="Batch conflicts and replay failures."
-              onChange={() => toggleSetting("syncAlerts")}
-            />
-            <SettingsToggle
-              checked={settings.weeklyDigest}
-              label="Weekly digest"
-              description="Summary of movements, alerts, and scanner health."
-              onChange={() => toggleSetting("weeklyDigest")}
-            />
-          </section>
-
-          <section className="settings-section">
-            <div className="settings-section-title">
-              <KeyRound />
-              <div>
-                <h2>Security</h2>
-                <p>Operator safeguards for admin workflows.</p>
-              </div>
-            </div>
-            <label className="profile-field">
-              <span>Auto-lock after</span>
-              <select value={autoLock} onChange={(event) => setAutoLock(event.target.value)}>
-                <option value="5">5 minutes</option>
-                <option value="15">15 minutes</option>
-                <option value="30">30 minutes</option>
-                <option value="60">60 minutes</option>
-              </select>
-            </label>
-            <SettingsToggle
-              checked={settings.requireReviewNote}
-              label="Require manual-review notes"
-              description="Ask for an operator note before closing review cases."
-              onChange={() => toggleSetting("requireReviewNote")}
-            />
-          </section>
-
-          <section className="settings-section">
-            <div className="settings-section-title">
-              <Clock3 />
-              <div>
-                <h2>Console Preferences</h2>
-                <p>Adjust table and navigation ergonomics.</p>
-              </div>
-            </div>
-            <label className="profile-field">
-              <span>Table density</span>
-              <select value={density} onChange={(event) => setDensity(event.target.value)}>
-                <option value="comfortable">Comfortable</option>
-                <option value="compact">Compact</option>
-                <option value="audit">Audit dense</option>
-              </select>
-            </label>
-            <SettingsToggle
-              checked={settings.compactRail}
-              label="Prefer compact rail"
-              description="Keep admin navigation collapsed after selection."
-              onChange={() => toggleSetting("compactRail")}
-            />
-          </section>
+    <main className="profile-workspace" aria-label="Profile settings">
+      {/* Identity band */}
+      <header className="profile-identity-band">
+        <div className="profile-avatar-large">
+          <UserRound />
         </div>
+        <div className="profile-identity-info">
+          <span>Signed in as</span>
+          <h1>Ops Admin</h1>
+          <p>admin@company.com · Admin role · Full operations access</p>
+        </div>
+        <div className="profile-session-stack">
+          <span>Active theme</span>
+          <strong>{activeTheme.label}</strong>
+          <small>Session · OAuth 2.0 + OIDC</small>
+        </div>
+      </header>
 
-        <footer className="profile-actions">
-          <span>{saved ? "Preferences saved locally." : "Unsaved profile preference changes."}</span>
-          <button className="primary-button" type="button" onClick={savePreferences}>
-            <Save />
-            Save Preferences
-          </button>
-        </footer>
-      </section>
-    </AdminPageFrame>
+      {/* Settings grid */}
+      <div className="profile-grid">
+
+        {/* Theme — spans full width */}
+        <section className="settings-section theme-section">
+          <div className="settings-section-title">
+            <Palette />
+            <div>
+              <h2>Theme</h2>
+              <p>Changes apply immediately and persist in this browser.</p>
+            </div>
+          </div>
+          <div className="theme-option-grid">
+            {themeOptions.map((option) => {
+              const Icon = option.icon;
+              const active = option.id === theme;
+              return (
+                <button
+                  key={option.id}
+                  className={active ? "theme-option active" : "theme-option"}
+                  type="button"
+                  aria-pressed={active}
+                  onClick={() => {
+                    setTheme(option.id);
+                    setSaved(false);
+                  }}
+                >
+                  <span className="theme-option-icon"><Icon /></span>
+                  <span className="theme-option-body">
+                    <strong>{option.label}</strong>
+                    <small>{option.description}</small>
+                  </span>
+                  <span className="theme-swatches" aria-hidden="true">
+                    {option.swatches.map((color) => (
+                      <i key={color} style={{ backgroundColor: color }} />
+                    ))}
+                  </span>
+                  {active ? <Check className="theme-check" /> : null}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Notifications */}
+        <section className="settings-section">
+          <div className="settings-section-title">
+            <Bell />
+            <div>
+              <h2>Notifications</h2>
+              <p>Choose what reaches this admin session.</p>
+            </div>
+          </div>
+          <SettingsToggle
+            checked={settings.incidentAlerts}
+            label="Critical incident alerts"
+            description="Denied access, restricted exits, and active holds."
+            onChange={() => toggleSetting("incidentAlerts")}
+          />
+          <SettingsToggle
+            checked={settings.syncAlerts}
+            label="Offline sync alerts"
+            description="Batch conflicts and replay failures."
+            onChange={() => toggleSetting("syncAlerts")}
+          />
+          <SettingsToggle
+            checked={settings.weeklyDigest}
+            label="Weekly digest"
+            description="Summary of movements and alerts."
+            onChange={() => toggleSetting("weeklyDigest")}
+          />
+        </section>
+
+        {/* Security */}
+        <section className="settings-section">
+          <div className="settings-section-title">
+            <KeyRound />
+            <div>
+              <h2>Security</h2>
+              <p>Operator safeguards for admin workflows.</p>
+            </div>
+          </div>
+          <label className="profile-field">
+            <span>Auto-lock after</span>
+            <select
+              value={autoLock}
+              onChange={(event) => setAutoLock(event.target.value)}
+            >
+              <option value="5">5 minutes</option>
+              <option value="15">15 minutes</option>
+              <option value="30">30 minutes</option>
+              <option value="60">60 minutes</option>
+            </select>
+          </label>
+          <SettingsToggle
+            checked={settings.requireReviewNote}
+            label="Require manual-review notes"
+            description="Ask for a note before closing review cases."
+            onChange={() => toggleSetting("requireReviewNote")}
+          />
+        </section>
+
+        {/* Console Preferences */}
+        <section className="settings-section">
+          <div className="settings-section-title">
+            <Clock3 />
+            <div>
+              <h2>Console Preferences</h2>
+              <p>Adjust table and navigation ergonomics.</p>
+            </div>
+          </div>
+          <label className="profile-field">
+            <span>Table density</span>
+            <select
+              value={density}
+              onChange={(event) => setDensity(event.target.value)}
+            >
+              <option value="comfortable">Comfortable</option>
+              <option value="compact">Compact</option>
+              <option value="audit">Audit dense</option>
+            </select>
+          </label>
+          <SettingsToggle
+            checked={settings.compactRail}
+            label="Prefer compact rail"
+            description="Keep admin navigation collapsed after selection."
+            onChange={() => toggleSetting("compactRail")}
+          />
+        </section>
+
+      </div>
+
+      {/* Footer actions */}
+      <footer className="profile-actions">
+        <span className={saved ? "profile-save-status saved" : "profile-save-status"}>
+          {saved ? "Preferences saved." : "Unsaved changes."}
+        </span>
+        <button
+          className="primary-button"
+          type="button"
+          onClick={savePreferences}
+        >
+          <Save />
+          Save Preferences
+        </button>
+      </footer>
+    </main>
   );
 }
 

@@ -4,30 +4,23 @@ export type SubjectType = "employee" | "visitor" | "hardware";
 
 export type Direction = "entry" | "exit";
 
-export type ResultStatus =
-  | "success"
-  | "denied"
-  | "duplicate"
-  | "expired"
-  | "restricted"
-  | "manual_review"
-  | "pending";
+export type ResultStatus = "approved" | "denied";
 
 export type SyncState = "synced" | "queued" | "conflict";
 
 export type CheckpointMode = "entry" | "exit" | "auto";
 
 export type VisibleColumn =
+  | "date"
   | "time"
-  | "checkpoint"
-  | "direction"
-  | "subject"
+  | "name"
   | "type"
-  | "barcode"
+  | "direction"
+  | "checkpoint"
   | "result"
-  | "reason"
-  | "scanner"
-  | "sync";
+  | "barcode"
+  | "scanType"
+  | "eventId";
 
 export type SortDirection = "asc" | "desc";
 
@@ -66,20 +59,12 @@ export type SubjectRecord = Person | HardwareAsset;
 export type Checkpoint = {
   id: string;
   name: string;
-  mode: CheckpointMode;
+  mode: "auto" | "manual" | "entry" | "exit";
   zone: string;
-  scannerId: string;
   online: boolean;
 };
 
-export type Scanner = {
-  id: string;
-  name: string;
-  checkpointId: string;
-  status: "online" | "offline" | "warning";
-  lastSeen: string;
-  version: string;
-};
+
 
 export type ScanAnalytics = {
   totalScans: number;
@@ -96,6 +81,7 @@ export type ScanAnalytics = {
 
 export type MovementEvent = {
   id: string;
+  date: string;
   time: string;
   checkpointId: string;
   checkpoint: string;
@@ -105,8 +91,8 @@ export type MovementEvent = {
   subjectType: SubjectType;
   barcode: string;
   result: ResultStatus;
-  reason: string;
-  scannerId: string;
+  reason?: string;
+  scanType?: "auto" | "manual";
   syncState: SyncState;
   hardwareIds: string[];
 };
@@ -120,6 +106,7 @@ export type Alert = {
   subjectName: string;
   barcode: string;
   checkpoint: string;
+  date: string;
   time: string;
 };
 
