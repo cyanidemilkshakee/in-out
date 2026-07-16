@@ -142,8 +142,8 @@ export function DashboardCharts({
       <KPICards alerts={alerts} scanAnalytics={scanAnalytics} />
 
       {/* Top Left — Scan Status */}
-      <div className="analytics-donut animate-slide-up delay-100" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px" }}>
-        <div style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Status</div>
+      <div className="analytics-donut dashboard-donut dashboard-donut-quality animate-slide-up delay-100" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px" }}>
+        <div className="dashboard-donut-title" style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Status</div>
         <Doughnut
           data={chartData.quality}
           options={{
@@ -152,7 +152,7 @@ export function DashboardCharts({
             plugins: { ...sharedPlugins, legend: { display: false } }
           }}
         />
-        <div style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
+        <div className="dashboard-donut-center" style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
           <div style={{ textAlign: "center", marginBottom: "12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#12b76a", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
               <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#12b76a" }} />
@@ -171,8 +171,8 @@ export function DashboardCharts({
       </div>
 
       {/* Bottom Left — Approved Scans (Entry/Exit) */}
-      <div className="analytics-donut animate-slide-up delay-150" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px", marginBottom: "16px" }}>
-        <div style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Approved Scans</div>
+      <div className="analytics-donut dashboard-donut dashboard-donut-approved animate-slide-up delay-150" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px", marginBottom: "16px" }}>
+        <div className="dashboard-donut-title" style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Approved Scans</div>
         <Doughnut
           data={chartData.scanMix}
           options={{
@@ -181,7 +181,7 @@ export function DashboardCharts({
             plugins: { ...sharedPlugins, legend: { display: false } }
           }}
         />
-        <div style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
+        <div className="dashboard-donut-center" style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
           <div style={{ textAlign: "center", marginBottom: "12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#12b76a", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
               <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#12b76a" }} />
@@ -200,8 +200,8 @@ export function DashboardCharts({
       </div>
 
       {/* Top Right — Scan Methods */}
-      <div className="analytics-donut animate-slide-up delay-200" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1" }}>
-        <div style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Methods</div>
+      <div className="analytics-donut dashboard-donut dashboard-donut-methods animate-slide-up delay-200" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1" }}>
+        <div className="dashboard-donut-title" style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Methods</div>
         <Doughnut
           data={chartData.autoVsManual}
           options={{
@@ -210,7 +210,7 @@ export function DashboardCharts({
             plugins: { ...sharedPlugins, legend: { display: false } }
           }}
         />
-        <div style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
+        <div className="dashboard-donut-center" style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
           <div style={{ textAlign: "center", marginBottom: "12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#0b63e5", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
               <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#0b63e5" }} />
@@ -229,8 +229,8 @@ export function DashboardCharts({
       </div>
 
       {/* Bottom Right — Denied Scans */}
-      <div className="analytics-donut animate-slide-up delay-250" style={{ gridColumn: 3, gridRow: 2, alignSelf: "end", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginBottom: "16px" }}>
-        <div style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Denied Scans</div>
+      <div className="analytics-donut dashboard-donut dashboard-donut-denied animate-slide-up delay-250" style={{ gridColumn: 3, gridRow: 2, alignSelf: "end", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginBottom: "16px" }}>
+        <div className="dashboard-donut-title" style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Denied Scans</div>
         <Doughnut
           data={chartData.deniedMix}
           options={{
@@ -239,7 +239,7 @@ export function DashboardCharts({
             plugins: { ...sharedPlugins, legend: { display: false } }
           }}
         />
-        <div style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
+        <div className="dashboard-donut-center" style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
           <div style={{ textAlign: "center", marginBottom: "12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#f04438", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
               <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#f04438" }} />
@@ -261,13 +261,13 @@ export function DashboardCharts({
       <ActiveAlertsWidget openAlerts={openAlerts} />
 
       {/* Center — Drill-down Chart */}
-      <div className="analytics-donut" style={{ gridColumn: 2, gridRow: "1 / -1", alignSelf: "center", justifySelf: "center", width: "100%", height: "auto", aspectRatio: "1/1", maxWidth: "1200px", marginTop: "35px" }}>
+      <div className="analytics-donut dashboard-breakdown" style={{ gridColumn: 2, gridRow: "1 / -1", alignSelf: "center", justifySelf: "center", width: "100%", height: "auto", aspectRatio: "1/1", maxWidth: "1200px", marginTop: "35px" }}>
         <DrillDownDoughnut data={drillDownData} />
-        <div style={{ position: "absolute", top: "calc(100% + 40px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "25px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Total Scan Breakdown</div>
+        <div className="dashboard-breakdown-title" style={{ position: "absolute", top: "calc(100% + 40px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "25px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Total Scan Breakdown</div>
       </div>
 
       {/* Scroll Indicator */}
-      <div 
+      <div className="dashboard-scroll-indicator"
         style={{
           position: "absolute",
           bottom: "16px",

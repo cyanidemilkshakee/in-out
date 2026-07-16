@@ -1,12 +1,12 @@
 "use client";
 
 import { useDeferredValue, useState, useMemo } from "react";
-import { initialMovements, initialAlerts } from "../../../lib/mockData";
-import type { MovementEvent, Alert, VisibleColumn, SortDirection, ResultStatus } from "../../../lib/types";
+import type { MovementEvent, VisibleColumn, SortDirection, ResultStatus } from "../../../lib/types";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { MovementTable } from "../../../components/admin/tables/MovementTable";
 import { DetailDrawer } from "../../../components/admin/tables/DetailDrawer";
 import { TrendChart, type TimeRange } from "../../../components/analytics/TrendChart";
+import { useDataActions, useDataState } from "../../../context/DataContext";
 
 type StatusFilter = ResultStatus | "all" | "automatic" | "manual" | "entry" | "exit";
 
@@ -24,8 +24,8 @@ const defaultVisibleColumns: Record<VisibleColumn, boolean> = {
 };
 
 export default function LogsPage() {
-  const [events] = useState<MovementEvent[]>(initialMovements);
-  const [alerts] = useState<Alert[]>(initialAlerts);
+  const { movements: events, alerts, movementNotes: eventNotes } = useDataState();
+  const { addMovementNote, updateAlert } = useDataActions();
   const [search, setSearch] = useState("");
   const [checkpointFilter, setCheckpointFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -33,8 +33,7 @@ export default function LogsPage() {
   const rowsPerPage = 25;
   const [sortKey, setSortKey] = useState<VisibleColumn>("time");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [selectedEventId, setSelectedEventId] = useState(initialMovements[0]?.id ?? "");
-  const [eventNotes, setEventNotes] = useState<Record<string, string[]>>({});
+  const [selectedEventId, setSelectedEventId] = useState(events[0]?.id ?? "");
   const [drawerDraft, setDrawerDraft] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const deferredSearch = useDeferredValue(search);
@@ -104,10 +103,7 @@ export default function LogsPage() {
   function handleSaveNote(eventId: string) {
     const trimmed = drawerDraft.trim();
     if (!trimmed) return;
-    setEventNotes((current) => ({
-      ...current,
-      [eventId]: [...(current[eventId] ?? []), trimmed]
-    }));
+    void addMovementNote(eventId, trimmed);
     setDrawerDraft("");
   }
 
@@ -212,8 +208,12 @@ export default function LogsPage() {
           noteDraft={drawerDraft}
           onNoteDraftChange={setDrawerDraft}
           onAddNote={() => handleSaveNote(selectedEvent.id)}
-          onAcknowledge={() => {}}
-          onResolve={() => {}}
+          onAcknowledge={() => {
+            if (selectedAlert) void updateAlert(selectedAlert.id, { status: "acknowledged" });
+          }}
+          onResolve={() => {
+            if (selectedAlert) void updateAlert(selectedAlert.id, { status: "resolved" });
+          }}
           onClose={() => setSelectedEventId("")}
         />
       ) : null}

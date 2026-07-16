@@ -85,10 +85,11 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         .nav-rail-link { transition: background-color 0.15s ease; }
         .nav-rail-link:hover { background-color: var(--admin-panel); }
       `}</style>
-      <main className="admin-console" style={{ display: "flex", flexDirection: "row", height: "100vh", padding: 0 }}>
+      <main className="admin-console admin-shell-layout" style={{ display: "flex", flexDirection: "row", height: "100vh", padding: 0 }}>
         {/* Sidebar Container */}
-        <div style={{ flexShrink: 0, width: "72px", position: "relative", zIndex: 50, backgroundColor: "var(--admin-bg)" }}>
+        <div className="admin-rail-slot" style={{ flexShrink: 0, width: "72px", position: "relative", zIndex: 50, backgroundColor: "var(--admin-bg)" }}>
           <aside
+            className={`admin-navigation-rail${sidebarOpen ? " is-open" : ""}`}
             onMouseEnter={() => setSidebarOpen(true)}
             onMouseLeave={() => setSidebarOpen(false)}
             style={{
@@ -113,7 +114,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             aria-label="Admin quick navigation"
           >
             {/* Logo - Top */}
-            <div style={{
+            <div className="admin-rail-brand" style={{
               position: "absolute",
               top: "16px",
               left: "12px",
@@ -123,10 +124,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               justifyContent: "flex-start",
               padding: "12px",
             }}>
-              <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+              <div className="admin-rail-icon" style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
                 <Heart size={24} strokeWidth={2} />
               </div>
-              <span style={{
+              <span className="admin-rail-link-label" style={{
                 marginLeft: "20px",
                 fontSize: "15px",
                 fontWeight: 800,
@@ -140,10 +141,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
 
             {/* Top Spacer */}
-            <div style={{ flex: 1 }} />
+            <div className="admin-rail-spacer" style={{ flex: 1 }} />
 
             {/* Nav Icons */}
-            <div style={{ display: "flex", flexDirection: "column", gap: pathname === "/admin" ? "3px" : "10px", width: "100%" }}>
+            <div className="admin-rail-items" style={{ display: "flex", flexDirection: "column", gap: pathname === "/admin" ? "3px" : "10px", width: "100%" }}>
               {adminRailGroups.flatMap(group => group.items).map((item) => {
                 const Icon = item.icon;
                 const active = item.exact ? pathname === item.path : pathname.startsWith(item.path);
@@ -156,6 +157,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                     onClick={() => setSidebarOpen(false)}
                     title={sidebarOpen ? "" : item.label}
                     className="nav-rail-link"
+                    aria-current={active ? "page" : undefined}
+                    aria-label={item.label}
                     style={{
                       background: "none",
                       border: "none",
@@ -171,10 +174,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                       textDecoration: "none"
                     }}
                   >
-                    <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                    <div className="admin-rail-icon" style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
                       <Icon size={24} strokeWidth={active ? 2 : 1.25} />
                       {isAlert && (
-                        <span style={{
+                        <span className="admin-alert-dot" style={{
                           position: "absolute",
                           top: "8px",
                           left: "26px",
@@ -186,7 +189,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                         }} />
                       )}
                     </div>
-                    <span style={{
+                    <span className="admin-rail-link-label" style={{
                       marginLeft: "20px",
                       fontSize: "15px",
                       fontWeight: active ? 700 : 400,
@@ -202,13 +205,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             </div>
 
             {/* Bottom Spacer */}
-            <div style={{ flex: 1 }} />
+            <div className="admin-rail-spacer" style={{ flex: 1 }} />
 
             {/* User Profile - Bottom */}
             <Link
               href="/admin/profile"
               onClick={() => setSidebarOpen(false)}
-              className="nav-rail-link"
+              className="nav-rail-link admin-rail-profile"
+              aria-current={pathname === "/admin/profile" ? "page" : undefined}
+              aria-label="Profile"
               style={{
                 background: "none",
                 border: "none",
@@ -225,8 +230,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               }}
               title="Profile"
             >
-              <div style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
-                <div style={{
+              <div className="admin-rail-icon" style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                <div className="admin-profile-avatar" style={{
                   width: "24px",
                   height: "24px",
                   borderRadius: "50%",
@@ -239,7 +244,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   <UserRound size={16} strokeWidth={2} />
                 </div>
               </div>
-              <span style={{
+              <span className="admin-rail-link-label" style={{
                 marginLeft: "20px",
                 fontSize: "15px",
                 fontWeight: 400,
@@ -257,7 +262,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <div 
           id="admin-scroll-container"
           ref={scrollRef}
-          className={scrolled ? "scrolled-main-content" : "top-main-content"}
+          className={`admin-scroll-surface ${scrolled ? "scrolled-main-content" : "top-main-content"}`}
           style={{
             flex: 1,
             position: "relative",

@@ -39,9 +39,9 @@ function DashboardOverview({
   const [selectedEventId, setSelectedEventId] = useState<string>();
 
   return (
-    <section className="dashboard-overview" aria-label="Operational overview" style={{ margin: 0, padding: 0 }}>
+    <section className="dashboard-overview" aria-label="Operational overview">
       {/* Full-viewport chart area */}
-      <div style={{ position: "relative", width: "100%", height: "100vh" }}>
+      <div className="dashboard-chart-viewport">
         <Suspense
           fallback={
             <div style={{
@@ -64,8 +64,8 @@ function DashboardOverview({
       </div>
 
       {/* Recent movement logs below the viewport */}
-      <div style={{ padding: '40px 24px 60px' }}>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, marginBottom: '24px', color: 'var(--admin-text, #111827)' }}>
+      <div className="dashboard-log-section">
+        <h2>
           Recent Movement Logs
         </h2>
         <MovementTable
@@ -77,13 +77,13 @@ function DashboardOverview({
           density="comfortable"
           onSort={(key) => {
             if (sortKey === key) {
-              setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+              setSortDirection((current) => current === "asc" ? "desc" : "asc");
             } else {
               setSortKey(key);
               setSortDirection("desc");
             }
           }}
-          onSelect={(id) => setSelectedEventId(id === selectedEventId ? undefined : id)}
+          onSelect={(id) => setSelectedEventId((current) => id === current ? undefined : id)}
         />
       </div>
     </section>

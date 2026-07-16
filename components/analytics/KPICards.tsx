@@ -10,7 +10,7 @@ type KPICardsProps = {
 
 export function KPICards({ alerts, scanAnalytics }: KPICardsProps) {
   return (
-    <div className="animate-slide-up delay-100" style={{
+    <div className="dashboard-kpi-grid animate-slide-up delay-100" style={{
       position: "absolute",
       top: "100px",
       left: 0,
@@ -21,7 +21,7 @@ export function KPICards({ alerts, scanAnalytics }: KPICardsProps) {
       zIndex: 20
     }}>
       {/* Total Scans */}
-      <div className="metric-widget-box" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div className="metric-widget-box dashboard-kpi-card" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--admin-muted)" }}>
           <Scan size={18} />
           <span style={{ fontSize: "14px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Total Scans</span>
@@ -35,7 +35,7 @@ export function KPICards({ alerts, scanAnalytics }: KPICardsProps) {
       </div>
 
       {/* Alerts */}
-      <div className="metric-widget-box" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div className="metric-widget-box dashboard-kpi-card" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--admin-muted)" }}>
           <Bell size={18} />
           <span style={{ fontSize: "14px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Alerts</span>
@@ -49,7 +49,7 @@ export function KPICards({ alerts, scanAnalytics }: KPICardsProps) {
       </div>
 
       {/* Approved */}
-      <div className="metric-widget-box" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div className="metric-widget-box dashboard-kpi-card" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--admin-muted)" }}>
           <CheckCircle size={18} />
           <span style={{ fontSize: "14px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Approved</span>
@@ -63,7 +63,7 @@ export function KPICards({ alerts, scanAnalytics }: KPICardsProps) {
       </div>
 
       {/* Denied */}
-      <div className="metric-widget-box" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div className="metric-widget-box dashboard-kpi-card" style={{ width: "200px", padding: "16px", display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", color: "var(--admin-muted)" }}>
           <XCircle size={18} />
           <span style={{ fontSize: "14px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.5px" }}>Denied</span>

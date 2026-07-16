@@ -9,7 +9,7 @@ type ActiveAlertsWidgetProps = {
 
 export function ActiveAlertsWidget({ openAlerts }: ActiveAlertsWidgetProps) {
   return (
-    <div className="animate-slide-up delay-300 alert-widget-box" style={{
+    <div className="dashboard-alert-widget animate-slide-up delay-300 alert-widget-box" style={{
       gridColumn: 3,
       gridRow: "1 / -1",
       alignSelf: "center",
