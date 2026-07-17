@@ -22,7 +22,10 @@ export function AlertsView({
   function sortHeader(column: keyof Alert, label: string) {
     const active = sortKey === column;
     return (
-      <th aria-sort={active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
+      <th
+        className={`column-${String(column)}`}
+        aria-sort={active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+      >
         <button
           className="sort-button"
           type="button"
@@ -40,7 +43,7 @@ export function AlertsView({
 
   return (
     <div className="table-wrap table-wrap-condensed">
-      <table className="data-table data-table-condensed">
+      <table className="data-table data-table-condensed alerts-table">
         <thead>
           <tr>
             {sortHeader("id", "ID")}
@@ -50,7 +53,7 @@ export function AlertsView({
             {sortHeader("barcode", "Barcode")}
             {sortHeader("checkpoint", "Checkpoint")}
             {sortHeader("reason", "Reason")}
-            <th>Actions</th>
+            <th className="column-actions">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -66,18 +69,18 @@ export function AlertsView({
           ) : null}
           {sortedAlerts.map((alert) => (
             <tr key={alert.id}>
-              <td data-label="ID">{alert.id}</td>
-              <td data-label="Severity">
+              <td className="column-id" data-label="ID">{alert.id}</td>
+              <td className="column-severity" data-label="Severity">
                 <span className={`severity severity-${alert.severity}`}>{alert.severity}</span>
               </td>
-              <td data-label="Status">
+              <td className="column-status" data-label="Status">
                 <span className={`alert-status alert-status-${alert.status}`}>{alert.status}</span>
               </td>
-              <td data-label="Subject">{alert.subjectName}</td>
-              <td data-label="Barcode">{alert.barcode}</td>
-              <td data-label="Checkpoint">{alert.checkpoint}</td>
-              <td data-label="Reason">{alert.reason}</td>
-              <td data-label="Actions" className="row-actions">
+              <td className="column-subjectName" data-label="Subject">{alert.subjectName}</td>
+              <td className="column-barcode" data-label="Barcode">{alert.barcode}</td>
+              <td className="column-checkpoint" data-label="Checkpoint">{alert.checkpoint}</td>
+              <td className="column-reason" data-label="Reason">{alert.reason}</td>
+              <td data-label="Actions" className="column-actions row-actions">
                 <button
                   className="secondary-button compact-button"
                   type="button"

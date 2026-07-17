@@ -11,6 +11,7 @@ import {
   Heart,
   Package,
   UserRound,
+  UserCog,
   UsersRound,
 } from "lucide-react";
 
@@ -272,7 +273,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   alignItems: "center",
                   justifyContent: "center"
                 }}>
-                  <UserRound size={16} strokeWidth={2} />
+                  <UserCog size={16} strokeWidth={2} />
                 </div>
               </div>
               <span className="admin-rail-link-label" style={{

@@ -22,7 +22,10 @@ export function HardwareTable({
   function sortHeader(column: keyof HardwareAsset, label: string) {
     const active = sortKey === column;
     return (
-      <th aria-sort={active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
+      <th
+        className={`column-${String(column)}`}
+        aria-sort={active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+      >
         <button
           className="sort-button"
           type="button"
@@ -40,7 +43,7 @@ export function HardwareTable({
 
   return (
       <div className="table-wrap">
-        <table className="data-table">
+        <table className="data-table hardware-table">
           <thead>
             <tr>
               {sortHeader("name", "Name")}
@@ -54,12 +57,12 @@ export function HardwareTable({
           <tbody>
             {sortedAssets.map((asset) => (
               <tr key={asset.id}>
-                <td data-label="Name">{asset.name}</td>
-                <td data-label="Barcode">{asset.barcode}</td>
-                <td data-label="Owner">{asset.owner}</td>
-                <td data-label="Category">{asset.category}</td>
-                <td data-label="Status">{asset.status}</td>
-                <td data-label="Inside">{asset.inside ? "Inside" : "Outside"}</td>
+                <td className="column-name" data-label="Name">{asset.name}</td>
+                <td className="column-barcode" data-label="Barcode">{asset.barcode}</td>
+                <td className="column-owner" data-label="Owner">{asset.owner}</td>
+                <td className="column-category" data-label="Category">{asset.category}</td>
+                <td className="column-status" data-label="Status">{asset.status}</td>
+                <td className="column-inside" data-label="Inside">{asset.inside ? "Inside" : "Outside"}</td>
               </tr>
             ))}
           </tbody>

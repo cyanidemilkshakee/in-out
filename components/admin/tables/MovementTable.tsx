@@ -25,7 +25,10 @@ export function MovementTable({
   const sortHeader = (column: VisibleColumn, label: string) => {
     const isSorted = sortKey === column;
     return (
-      <th aria-sort={isSorted ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
+      <th
+        className={`column-${column}`}
+        aria-sort={isSorted ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+      >
         <button className="sort-button" type="button" onClick={() => onSort(column)}>
           <span>{label}</span>
           {isSorted ? (
@@ -74,24 +77,24 @@ export function MovementTable({
               onClick={() => onSelect(event.id)}
               style={{ cursor: "pointer" }}
             >
-              {visibleColumns.date ? <td data-label="Date">{event.date}</td> : null}
-              {visibleColumns.time ? <td data-label="Time">{event.time}</td> : null}
-              {visibleColumns.name ? <td data-label="Name">{event.subjectName}</td> : null}
-              {visibleColumns.type ? <td data-label="Type" style={{ textTransform: "capitalize" }}>{event.subjectType}</td> : null}
+              {visibleColumns.date ? <td className="column-date" data-label="Date">{event.date}</td> : null}
+              {visibleColumns.time ? <td className="column-time" data-label="Time">{event.time}</td> : null}
+              {visibleColumns.name ? <td className="column-name" data-label="Name">{event.subjectName}</td> : null}
+              {visibleColumns.type ? <td className="column-type" data-label="Type" style={{ textTransform: "capitalize" }}>{event.subjectType}</td> : null}
               {visibleColumns.direction ? (
-                <td data-label="Direction">
+                <td className="column-direction" data-label="Direction">
                   <span className={`direction direction-${event.direction}`}>{event.direction}</span>
                 </td>
               ) : null}
-              {visibleColumns.checkpoint ? <td data-label="Checkpoint" className="truncate">{event.checkpoint}</td> : null}
+              {visibleColumns.checkpoint ? <td data-label="Checkpoint" className="column-checkpoint truncate">{event.checkpoint}</td> : null}
               {visibleColumns.result ? (
-                <td data-label="Result">
+                <td className="column-result" data-label="Result">
                   <ResultPill value={event.result} />
                 </td>
               ) : null}
-              {visibleColumns.barcode ? <td data-label="Barcode" style={{ fontFamily: "monospace", fontSize: "0.9em" }}>{event.barcode}</td> : null}
-              {visibleColumns.scanType ? <td data-label="Scan type" style={{ textTransform: "capitalize" }}>{event.scanType}</td> : null}
-              {visibleColumns.eventId ? <td data-label="Event ID">{event.id}</td> : null}
+              {visibleColumns.barcode ? <td className="column-barcode" data-label="Barcode" style={{ fontFamily: "monospace", fontSize: "0.9em" }}>{event.barcode}</td> : null}
+              {visibleColumns.scanType ? <td className="column-scanType" data-label="Scan type" style={{ textTransform: "capitalize" }}>{event.scanType}</td> : null}
+              {visibleColumns.eventId ? <td className="column-eventId" data-label="Event ID">{event.id}</td> : null}
             </tr>
           ))}
         </tbody>

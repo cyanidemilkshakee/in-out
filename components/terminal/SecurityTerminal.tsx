@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
   ArrowDownRight,
@@ -458,6 +458,13 @@ export function SecurityTerminal() {
   const [scanError, setScanError] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [toast, setToast] = useState<ToastMessage | null>(null);
+  const barcodeInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (window.matchMedia("(min-width: 681px)").matches) {
+      barcodeInputRef.current?.focus();
+    }
+  }, []);
 
   const checkpoint =
     checkpoints.find((item) => item.id === checkpointId) ??
@@ -567,7 +574,7 @@ export function SecurityTerminal() {
               <label className={styles.scanInput}>
                 <span className="sr-only">Barcode or ID</span>
                 <input
-                  autoFocus
+                  ref={barcodeInputRef}
                   autoComplete="off"
                   value={barcode}
                   aria-invalid={Boolean(scanError)}

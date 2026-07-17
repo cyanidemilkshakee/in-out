@@ -3,6 +3,7 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { HardwareTable } from "../../../components/admin/tables/HardwareTable";
+import { HardwareCreator } from "../../../components/admin/tables/HardwareCreator";
 import { MetricTrendChart } from "../../../components/analytics/MetricTrendChart";
 import type { TimeRange } from "../../../components/analytics/TrendChart";
 import { Download } from "lucide-react";
@@ -10,7 +11,7 @@ import { useDataActions, useDataState } from "../../../context/DataContext";
 
 export default function HardwarePage() {
   const { hardwareAssets: assets } = useDataState();
-  const { updateHardwareAsset } = useDataActions();
+  const { createHardwareAsset, updateHardwareAsset } = useDataActions();
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -63,6 +64,7 @@ export default function HardwarePage() {
                 <option value="1D">Last 24 Hours</option>
               </select>
             </label>
+            <HardwareCreator onCreate={createHardwareAsset} />
             <button className="ghost-button" type="button">
               <Download />
               Export

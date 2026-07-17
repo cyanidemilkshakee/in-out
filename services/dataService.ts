@@ -22,12 +22,30 @@ export type AppDataSnapshot = {
 
 export type CreateTemporaryVisitorInput = {
   name: string;
+  barcode: string;
   company: string;
   host: string;
   hours: number;
   validFrom: string;
   validUntil: string;
   reason: string;
+};
+
+export type CreateEmployeeInput = {
+  name: string;
+  barcode: string;
+  department: string;
+  accessLevel: string;
+  allowedZone: string;
+};
+
+export type CreateHardwareAssetInput = {
+  name: string;
+  barcode: string;
+  owner: string;
+  category: string;
+  allowedZone: string;
+  status: HardwareAsset["status"];
 };
 
 export type RecordScanInput = {
@@ -54,6 +72,8 @@ export interface DataService {
   getMovementNotes(): Promise<MovementNotes>;
 
   createTemporaryVisitor(input: CreateTemporaryVisitorInput): Promise<Person>;
+  createEmployee(input: CreateEmployeeInput): Promise<Person>;
+  createHardwareAsset(input: CreateHardwareAssetInput): Promise<HardwareAsset>;
   updatePerson(personId: string, patch: Partial<Omit<Person, "id">>): Promise<Person>;
   updateHardwareAsset(
     assetId: string,

@@ -13,6 +13,8 @@ import { getDashboardKPIs } from "../lib/analyticsUtils";
 import type { Alert, HardwareAsset, MovementEvent, Person } from "../lib/types";
 import type {
   AppDataSnapshot,
+  CreateEmployeeInput,
+  CreateHardwareAssetInput,
   CreateTemporaryVisitorInput,
   DataService,
   RecordScanInput,
@@ -26,6 +28,8 @@ type DataState = AppDataSnapshot & {
 type DataActions = {
   refresh: () => Promise<void>;
   createTemporaryVisitor: (input: CreateTemporaryVisitorInput) => Promise<Person>;
+  createEmployee: (input: CreateEmployeeInput) => Promise<Person>;
+  createHardwareAsset: (input: CreateHardwareAssetInput) => Promise<HardwareAsset>;
   updatePerson: (
     personId: string,
     patch: Partial<Omit<Person, "id">>
@@ -137,6 +141,30 @@ export function DataProvider({
         people: [visitor, ...current.people],
       }));
       return visitor;
+    },
+    [service]
+  );
+
+  const createEmployee = useCallback(
+    async (input: CreateEmployeeInput) => {
+      const employee = await service.createEmployee(input);
+      setState((current) => ({
+        ...current,
+        people: [employee, ...current.people],
+      }));
+      return employee;
+    },
+    [service]
+  );
+
+  const createHardwareAsset = useCallback(
+    async (input: CreateHardwareAssetInput) => {
+      const asset = await service.createHardwareAsset(input);
+      setState((current) => ({
+        ...current,
+        hardwareAssets: [asset, ...current.hardwareAssets],
+      }));
+      return asset;
     },
     [service]
   );
@@ -256,6 +284,8 @@ export function DataProvider({
     () => ({
       refresh,
       createTemporaryVisitor,
+      createEmployee,
+      createHardwareAsset,
       updatePerson,
       updateHardwareAsset,
       updateAlert,
@@ -267,6 +297,8 @@ export function DataProvider({
     }),
     [
       addMovementNote,
+      createEmployee,
+      createHardwareAsset,
       createTemporaryVisitor,
       recordScan,
       refresh,

@@ -26,7 +26,10 @@ export function PeopleTable({
   function sortHeader(column: keyof Person, label: string) {
     const active = sortKey === column;
     return (
-      <th aria-sort={active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}>
+      <th
+        className={`column-${String(column)}`}
+        aria-sort={active ? (sortDirection === "asc" ? "ascending" : "descending") : "none"}
+      >
         <button
           className="sort-button"
           type="button"
@@ -44,12 +47,11 @@ export function PeopleTable({
 
   return (
       <div className="table-wrap">
-        <table className="data-table">
+        <table className="data-table people-table">
           <thead>
             <tr>
               {sortHeader("name", "Name")}
               {sortHeader("barcode", "Barcode")}
-              {sortHeader("accessLevel", "Access")}
               {sortHeader("company", "Department / Company")}
               {sortHeader("status", "Status")}
               {sortHeader("inside", "Inside")}
@@ -58,12 +60,11 @@ export function PeopleTable({
           <tbody>
             {sortedRows.map((person) => (
               <tr key={person.id}>
-                <td data-label="Name">{person.name}</td>
-                <td data-label="Barcode">{person.barcode}</td>
-                <td data-label="Access">{person.accessLevel}</td>
-                <td data-label="Department / Company">{person.department ?? person.company ?? "-"}</td>
-                <td data-label="Status">{person.status}</td>
-                <td data-label="Inside">{person.inside ? "Inside" : "Outside"}</td>
+                <td className="column-name" data-label="Name">{person.name}</td>
+                <td className="column-barcode" data-label="Barcode">{person.barcode}</td>
+                <td className="column-company" data-label="Department / Company">{person.department ?? person.company ?? "-"}</td>
+                <td className="column-status" data-label="Status">{person.status}</td>
+                <td className="column-inside" data-label="Inside">{person.inside ? "Inside" : "Outside"}</td>
               </tr>
             ))}
           </tbody>

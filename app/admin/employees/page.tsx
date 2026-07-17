@@ -3,13 +3,15 @@
 import { useDeferredValue, useMemo, useState } from "react";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { EmployeeTable } from "../../../components/admin/tables/EmployeeTable";
+import { EmployeeCreator } from "../../../components/admin/tables/EmployeeCreator";
 import { MetricTrendChart } from "../../../components/analytics/MetricTrendChart";
 import type { TimeRange } from "../../../components/analytics/TrendChart";
 import { Download } from "lucide-react";
-import { useDataState } from "../../../context/DataContext";
+import { useDataActions, useDataState } from "../../../context/DataContext";
 
 export default function EmployeesPage() {
   const { people: staff } = useDataState();
+  const { createEmployee } = useDataActions();
   const [search, setSearch] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>("1M");
   const deferredSearch = useDeferredValue(search);
@@ -47,6 +49,7 @@ export default function EmployeesPage() {
       <section className="log-workspace">
         <div className="workspace-main">
           <div className="filter-bar">
+            <EmployeeCreator onCreate={createEmployee} />
             <button className="ghost-button" type="button">
               <Download />
               Export

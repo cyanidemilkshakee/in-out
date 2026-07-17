@@ -8,8 +8,10 @@ import {
   Moon,
   Save,
   Sun,
+  UserCog,
   UserRound
 } from "lucide-react";
+import { AdminCreator, type CreateAdminInput } from "../../../components/admin/AdminCreator";
 
 type AdminTheme = "light" | "dark";
 
@@ -201,15 +203,49 @@ export default function ProfilePage() {
     setSaved(true);
   }
 
+  function createAdmin(input: CreateAdminInput) {
+    const email = input.email.trim().toLowerCase();
+    const storageKey = "inout-admin-accounts";
+    let accounts: Array<{ id: string; name: string; nickname: string; email: string }> = [];
+
+    try {
+      const storedAccounts = window.localStorage.getItem(storageKey);
+      if (storedAccounts) accounts = JSON.parse(storedAccounts);
+    } catch {
+      window.localStorage.removeItem(storageKey);
+    }
+
+    if (accounts.some((account) => account.email.toLowerCase() === email)) {
+      throw new Error("An admin with this email already exists.");
+    }
+
+    const account = {
+      id: `admin-${Date.now()}`,
+      name: input.name.trim(),
+      nickname: input.nickname.trim(),
+      email,
+    };
+    const nextProfile = { ...profile, ...account, avatarDataUrl: "" };
+
+    window.localStorage.setItem(storageKey, JSON.stringify([account, ...accounts]));
+    window.localStorage.setItem("inout-admin-profile", JSON.stringify(nextProfile));
+    setProfile(nextProfile);
+    setSaved(false);
+    setFormError("");
+  }
+
   return (
     <main className="profile-workspace" aria-label="Profile settings">
+      <div className="profile-top-actions">
+        <AdminCreator onCreate={createAdmin} />
+      </div>
       <header className="profile-identity-band">
         <label className="profile-avatar-picker" aria-label="Change profile picture">
           <div className="profile-avatar-large">
             {profile.avatarDataUrl ? (
               <img src={profile.avatarDataUrl} alt={`${profile.name || "Admin"} profile`} />
             ) : (
-              <UserRound aria-hidden="true" />
+              <UserCog aria-hidden="true" />
             )}
           </div>
           <span className="profile-avatar-edit-icon" aria-hidden="true">

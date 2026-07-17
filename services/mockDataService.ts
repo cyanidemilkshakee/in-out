@@ -10,6 +10,8 @@ import { applyMovementState, evaluateScan } from "../lib/movementLogic";
 import type { Alert, HardwareAsset, MovementEvent, Person } from "../lib/types";
 import type {
   AppDataSnapshot,
+  CreateEmployeeInput,
+  CreateHardwareAssetInput,
   CreateTemporaryVisitorInput,
   DataService,
   MovementNotes,
@@ -103,6 +105,11 @@ export class MockDataService implements DataService {
       suffix = String(Math.floor(1000 + Math.random() * 9000));
     }
 
+    const barcode = input.barcode.trim().toUpperCase();
+    if (this.people.some((person) => person.barcode.toUpperCase() === barcode)) {
+      throw new Error(`Barcode ${barcode} is already assigned.`);
+    }
+
     const hours = Math.min(24, Math.max(1, input.hours));
     const now = new Date();
     const requestedStart = new Date(input.validFrom);
@@ -122,7 +129,7 @@ export class MockDataService implements DataService {
       id: `vis-temp-${suffix}`,
       name: input.name.trim() || `Temporary Visitor ${suffix}`,
       type: "visitor",
-      barcode: `V-TEMP-${suffix}`,
+      barcode,
       company: input.company.trim() || "Walk-in",
       phone: "+91 00000 00000",
       accessLevel: "Visitor",
@@ -137,6 +144,60 @@ export class MockDataService implements DataService {
 
     this.people = [visitor, ...this.people];
     return clonePeople([visitor])[0];
+  }
+
+  async createEmployee(input: CreateEmployeeInput) {
+    const barcode = input.barcode.trim().toUpperCase();
+    if (this.people.some((person) => person.barcode.toUpperCase() === barcode)) {
+      throw new Error(`Barcode ${barcode} is already assigned.`);
+    }
+
+    let sequence = this.people.filter((person) => person.type === "employee").length + 1;
+    while (this.people.some((person) => person.id === `emp-${String(sequence).padStart(3, "0")}`)) {
+      sequence += 1;
+    }
+
+    const employee: Person = {
+      id: `emp-${String(sequence).padStart(3, "0")}`,
+      name: input.name.trim(),
+      type: "employee",
+      barcode,
+      department: input.department.trim(),
+      phone: "Not provided",
+      accessLevel: input.accessLevel,
+      allowedZones: [input.allowedZone],
+      status: "active",
+      inside: false,
+    };
+
+    this.people = [employee, ...this.people];
+    return clonePeople([employee])[0];
+  }
+
+  async createHardwareAsset(input: CreateHardwareAssetInput) {
+    const barcode = input.barcode.trim().toUpperCase();
+    if (this.hardwareAssets.some((asset) => asset.barcode.toUpperCase() === barcode)) {
+      throw new Error(`Barcode ${barcode} is already assigned.`);
+    }
+
+    let sequence = this.hardwareAssets.length + 1;
+    while (this.hardwareAssets.some((asset) => asset.id === `hw-${String(sequence).padStart(3, "0")}`)) {
+      sequence += 1;
+    }
+
+    const asset: HardwareAsset = {
+      id: `hw-${String(sequence).padStart(3, "0")}`,
+      name: input.name.trim(),
+      barcode,
+      owner: input.owner.trim(),
+      category: input.category.trim(),
+      allowedZones: [input.allowedZone],
+      status: input.status,
+      inside: false,
+    };
+
+    this.hardwareAssets = [asset, ...this.hardwareAssets];
+    return cloneHardware([asset])[0];
   }
 
   async updatePerson(personId: string, patch: Partial<Omit<Person, "id">>) {
