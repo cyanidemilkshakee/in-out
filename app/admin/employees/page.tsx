@@ -44,7 +44,7 @@ export default function EmployeesPage() {
         />
       }
     >
-      <section className="log-workspace" style={{ padding: "0 18px" }}>
+      <section className="log-workspace">
         <div className="workspace-main">
           <div className="filter-bar">
             <button className="ghost-button" type="button">

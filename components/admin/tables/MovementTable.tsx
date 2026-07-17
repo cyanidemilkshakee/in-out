@@ -74,24 +74,24 @@ export function MovementTable({
               onClick={() => onSelect(event.id)}
               style={{ cursor: "pointer" }}
             >
-              {visibleColumns.date ? <td>{event.date}</td> : null}
-              {visibleColumns.time ? <td>{event.time}</td> : null}
-              {visibleColumns.name ? <td>{event.subjectName}</td> : null}
-              {visibleColumns.type ? <td style={{ textTransform: "capitalize" }}>{event.subjectType}</td> : null}
+              {visibleColumns.date ? <td data-label="Date">{event.date}</td> : null}
+              {visibleColumns.time ? <td data-label="Time">{event.time}</td> : null}
+              {visibleColumns.name ? <td data-label="Name">{event.subjectName}</td> : null}
+              {visibleColumns.type ? <td data-label="Type" style={{ textTransform: "capitalize" }}>{event.subjectType}</td> : null}
               {visibleColumns.direction ? (
-                <td>
+                <td data-label="Direction">
                   <span className={`direction direction-${event.direction}`}>{event.direction}</span>
                 </td>
               ) : null}
-              {visibleColumns.checkpoint ? <td className="truncate">{event.checkpoint}</td> : null}
+              {visibleColumns.checkpoint ? <td data-label="Checkpoint" className="truncate">{event.checkpoint}</td> : null}
               {visibleColumns.result ? (
-                <td>
+                <td data-label="Result">
                   <ResultPill value={event.result} />
                 </td>
               ) : null}
-              {visibleColumns.barcode ? <td style={{ fontFamily: "monospace", fontSize: "0.9em" }}>{event.barcode}</td> : null}
-              {visibleColumns.scanType ? <td style={{ textTransform: "capitalize" }}>{event.scanType}</td> : null}
-              {visibleColumns.eventId ? <td>{event.id}</td> : null}
+              {visibleColumns.barcode ? <td data-label="Barcode" style={{ fontFamily: "monospace", fontSize: "0.9em" }}>{event.barcode}</td> : null}
+              {visibleColumns.scanType ? <td data-label="Scan type" style={{ textTransform: "capitalize" }}>{event.scanType}</td> : null}
+              {visibleColumns.eventId ? <td data-label="Event ID">{event.id}</td> : null}
             </tr>
           ))}
         </tbody>

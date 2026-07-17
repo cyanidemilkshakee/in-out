@@ -38,8 +38,7 @@ export function DashboardCharts({
   const [timeRange, setTimeRange] = useState("Today");
   const [themeColors, setThemeColors] = useState({
     border: "#f7faf9",
-    muted: "#52605d",
-    tooltip: "#18201f"
+    muted: "#52605d"
   });
 
   useEffect(() => {
@@ -49,8 +48,7 @@ export function DashboardCharts({
       const shellStyles = shell ? getComputedStyle(shell) : styles;
       setThemeColors({
         border: shellStyles.getPropertyValue("--admin-bg").trim() || "#f7faf9",
-        muted: shellStyles.getPropertyValue("--admin-muted").trim() || "#52605d",
-        tooltip: shellStyles.getPropertyValue("--admin-text").trim() || "#18201f"
+        muted: shellStyles.getPropertyValue("--admin-muted").trim() || "#52605d"
       });
     };
 
@@ -76,7 +74,7 @@ export function DashboardCharts({
       }
     },
     tooltip: {
-      backgroundColor: themeColors.tooltip,
+      backgroundColor: "#000000",
       bodyFont: { ...chartFont, size: 12 },
       cornerRadius: 8,
       displayColors: false,
@@ -330,7 +328,7 @@ export function DashboardCharts({
           <div style={{
             width: "3px",
             height: "5px",
-            backgroundColor: "#fdb022",
+            backgroundColor: "#d7ddda",
             borderRadius: "1.5px",
             boxShadow: "0 0 4px 1px rgba(253, 176, 34, 0.8)",
             animation: "scrollWheel 1.5s cubic-bezier(0.15, 0.41, 0.69, 0.94) infinite"

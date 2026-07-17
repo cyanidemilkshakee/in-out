@@ -66,18 +66,18 @@ export function AlertsView({
           ) : null}
           {sortedAlerts.map((alert) => (
             <tr key={alert.id}>
-              <td>{alert.id}</td>
-              <td>
+              <td data-label="ID">{alert.id}</td>
+              <td data-label="Severity">
                 <span className={`severity severity-${alert.severity}`}>{alert.severity}</span>
               </td>
-              <td>
+              <td data-label="Status">
                 <span className={`alert-status alert-status-${alert.status}`}>{alert.status}</span>
               </td>
-              <td>{alert.subjectName}</td>
-              <td>{alert.barcode}</td>
-              <td>{alert.checkpoint}</td>
-              <td>{alert.reason}</td>
-              <td className="row-actions">
+              <td data-label="Subject">{alert.subjectName}</td>
+              <td data-label="Barcode">{alert.barcode}</td>
+              <td data-label="Checkpoint">{alert.checkpoint}</td>
+              <td data-label="Reason">{alert.reason}</td>
+              <td data-label="Actions" className="row-actions">
                 <button
                   className="secondary-button compact-button"
                   type="button"

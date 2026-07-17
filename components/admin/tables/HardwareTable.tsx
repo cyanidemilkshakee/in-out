@@ -54,12 +54,12 @@ export function HardwareTable({
           <tbody>
             {sortedAssets.map((asset) => (
               <tr key={asset.id}>
-                <td>{asset.name}</td>
-                <td>{asset.barcode}</td>
-                <td>{asset.owner}</td>
-                <td>{asset.category}</td>
-                <td>{asset.status}</td>
-                <td>{asset.inside ? "Inside" : "Outside"}</td>
+                <td data-label="Name">{asset.name}</td>
+                <td data-label="Barcode">{asset.barcode}</td>
+                <td data-label="Owner">{asset.owner}</td>
+                <td data-label="Category">{asset.category}</td>
+                <td data-label="Status">{asset.status}</td>
+                <td data-label="Inside">{asset.inside ? "Inside" : "Outside"}</td>
               </tr>
             ))}
           </tbody>

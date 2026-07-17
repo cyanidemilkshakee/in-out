@@ -34,8 +34,7 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [lockedId, setLockedId] = useState<string | null>(null);
   const [themeColors, setThemeColors] = useState({
-    border: "#18201f",
-    tooltip: "#18201f"
+    border: "#18201f"
   });
   const chartRef = useRef<any>(null);
 
@@ -46,8 +45,7 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
       const shell = document.querySelector<HTMLElement>(".role-admin");
       const styles = shell ? getComputedStyle(shell) : getComputedStyle(document.documentElement);
       setThemeColors({
-        border: styles.getPropertyValue("--admin-bg").trim() || "#18201f",
-        tooltip: styles.getPropertyValue("--admin-text").trim() || "#18201f"
+        border: styles.getPropertyValue("--admin-bg").trim() || "#18201f"
       });
     };
 
@@ -253,7 +251,7 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
               display: false,
             },
             tooltip: {
-              backgroundColor: themeColors.tooltip,
+              backgroundColor: "#000000",
               bodyFont: { size: 13, family: "Urbanist, Arial, sans-serif" },
               cornerRadius: 8,
               displayColors: false,

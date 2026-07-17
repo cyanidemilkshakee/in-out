@@ -268,11 +268,9 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   width: "24px",
                   height: "24px",
                   borderRadius: "50%",
-                  backgroundColor: "var(--admin-lime)",
                   display: "flex",
                   alignItems: "center",
-                  justifyContent: "center",
-                  color: "var(--admin-text)"
+                  justifyContent: "center"
                 }}>
                   <UserRound size={16} strokeWidth={2} />
                 </div>

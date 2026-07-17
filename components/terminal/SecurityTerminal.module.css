@@ -3,7 +3,7 @@
   --terminal-success-soft: rgba(40, 125, 47, 0.1);
   --terminal-danger: #c72d2d;
   --terminal-danger-soft: rgba(199, 45, 45, 0.09);
-  --terminal-warning: #a95c00;
+  --terminal-warning: #66716c;
   --terminal-focus: #9dbd12;
   display: grid;
   grid-template-rows: 64px 72px minmax(0, 1fr);
@@ -849,11 +849,11 @@
 }
 
 :global(html[data-admin-theme="dark"]) .page {
-  --terminal-success: #70e28d;
-  --terminal-success-soft: rgba(112, 226, 141, 0.1);
+  --terminal-success: #e7ece9;
+  --terminal-success-soft: rgba(231, 236, 233, 0.1);
   --terminal-danger: #ff8a80;
   --terminal-danger-soft: rgba(255, 138, 128, 0.09);
-  --terminal-warning: #ffc46b;
+  --terminal-warning: #e7ece9;
   --terminal-focus: #d9ff66;
 }
 
@@ -991,8 +991,128 @@
     border-bottom: 1px solid var(--admin-line);
   }
 
-  .activityTable {
-    min-width: 660px;
+  .activityTableWrap {
+    overflow: visible;
+    border: 0;
+  }
+
+  .activityTable,
+  .activityTable tbody {
+    display: block;
+    width: 100%;
+  }
+
+  .activityTable thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .activityTable tbody {
+    display: grid;
+    gap: 12px;
+  }
+
+  .activityTable tbody tr {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    overflow: hidden;
+    border: 1px solid var(--admin-line);
+    border-radius: 8px;
+  }
+
+  .activityTable tbody td,
+  .activityTable td:nth-child(2) {
+    display: grid;
+    min-width: 0;
+    min-height: 62px;
+    align-content: center;
+    gap: 4px;
+    border-right: 0;
+    border-bottom: 1px solid var(--admin-line);
+    padding: 10px 12px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+
+  .activityTable tbody td:nth-child(odd) {
+    border-right: 1px solid var(--admin-line);
+  }
+
+  .activityTable tbody td::before {
+    content: attr(data-label);
+    color: var(--admin-muted);
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    line-height: 1.2;
+    text-transform: uppercase;
+  }
+
+  .activityTable td:nth-child(2) span {
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 480px) {
+  .statusStrip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .checkpointControl,
+  .statusCell:last-child {
+    grid-column: 1 / -1;
+  }
+
+  .checkpointControl,
+  .statusCell {
+    padding: 10px 12px;
+  }
+
+  .decisionCopy h2 {
+    font-size: 24px;
+  }
+
+  .decisionFacts div {
+    padding: 11px 12px;
+  }
+
+  .railSection {
+    padding: 17px 14px;
+  }
+
+  .hardwareSection .railHeading {
+    padding-inline: 14px;
+  }
+
+  .hardwareRow {
+    padding-inline: 14px;
+  }
+}
+
+@media (max-width: 380px) {
+  .brandLink > span:last-child {
+    display: none;
+  }
+
+  .appbar {
+    padding-inline: 10px;
+  }
+
+  .headerActions {
+    gap: 4px;
+  }
+
+  .activityTable tbody tr {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .activityTable tbody td:nth-child(odd) {
+    border-right: 0;
   }
 }
 

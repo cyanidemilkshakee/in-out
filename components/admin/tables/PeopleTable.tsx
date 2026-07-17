@@ -58,12 +58,12 @@ export function PeopleTable({
           <tbody>
             {sortedRows.map((person) => (
               <tr key={person.id}>
-                <td>{person.name}</td>
-                <td>{person.barcode}</td>
-                <td>{person.accessLevel}</td>
-                <td>{person.department ?? person.company ?? "-"}</td>
-                <td>{person.status}</td>
-                <td>{person.inside ? "Inside" : "Outside"}</td>
+                <td data-label="Name">{person.name}</td>
+                <td data-label="Barcode">{person.barcode}</td>
+                <td data-label="Access">{person.accessLevel}</td>
+                <td data-label="Department / Company">{person.department ?? person.company ?? "-"}</td>
+                <td data-label="Status">{person.status}</td>
+                <td data-label="Inside">{person.inside ? "Inside" : "Outside"}</td>
               </tr>
             ))}
           </tbody>

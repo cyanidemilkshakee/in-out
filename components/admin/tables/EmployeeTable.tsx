@@ -43,22 +43,22 @@ export function EmployeeTable({
 
               return (
                 <tr key={person.id}>
-                  <td>{person.name}</td>
-                  <td>{person.barcode}</td>
-                  <td>{person.accessLevel}</td>
-                  <td>{person.department ?? "-"}</td>
-                  <td className="mono">{mockTime}</td>
-                  <td>
+                  <td data-label="Name">{person.name}</td>
+                  <td data-label="Barcode">{person.barcode}</td>
+                  <td data-label="Access">{person.accessLevel}</td>
+                  <td data-label="Department">{person.department ?? "-"}</td>
+                  <td data-label="Latest scan" className="mono">{mockTime}</td>
+                  <td data-label="Type">
                     {person.inside ? (
                       <span style={{ color: "var(--green)", fontWeight: 600 }}>Entry</span>
                     ) : (
                       <span style={{ color: "var(--red)", fontWeight: 600 }}>Exit</span>
                     )}
                   </td>
-                  <td>
+                  <td data-label="Activity">
                     <ActivityBar seed={person.id} />
                   </td>
-                  <td>
+                  <td data-label="Profile">
                     <button 
                       className="secondary-button compact-button" 
                       type="button" 

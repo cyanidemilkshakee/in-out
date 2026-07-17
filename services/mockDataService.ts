@@ -104,8 +104,20 @@ export class MockDataService implements DataService {
     }
 
     const hours = Math.min(24, Math.max(1, input.hours));
-    const start = new Date();
-    const end = new Date(start.getTime() + hours * 60 * 60 * 1000);
+    const now = new Date();
+    const requestedStart = new Date(input.validFrom);
+    const requestedEnd = new Date(input.validUntil);
+    const start = Number.isNaN(requestedStart.getTime()) || requestedStart < now
+      ? now
+      : requestedStart;
+    const maximumEnd = start.getTime() + 24 * 60 * 60 * 1000;
+    const fallbackEnd = start.getTime() + hours * 60 * 60 * 1000;
+    const requestedEndTime = requestedEnd.getTime();
+    const end = new Date(
+      Number.isNaN(requestedEndTime) || requestedEndTime <= start.getTime()
+        ? fallbackEnd
+        : Math.min(requestedEndTime, maximumEnd)
+    );
     const visitor: Person = {
       id: `vis-temp-${suffix}`,
       name: input.name.trim() || `Temporary Visitor ${suffix}`,
@@ -117,7 +129,7 @@ export class MockDataService implements DataService {
       allowedZones: ["Main Entrance"],
       status: "pre_approved",
       host: input.host.trim() || "Security Desk",
-      purpose: "Temporary visit",
+      purpose: input.reason.trim() || "Temporary visit",
       validFrom: start.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }),
       validTo: end.toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }),
       inside: false,

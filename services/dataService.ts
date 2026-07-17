@@ -25,6 +25,9 @@ export type CreateTemporaryVisitorInput = {
   company: string;
   host: string;
   hours: number;
+  validFrom: string;
+  validUntil: string;
+  reason: string;
 };
 
 export type RecordScanInput = {

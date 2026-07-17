@@ -268,20 +268,20 @@ function ActivityTable({ events }: { events: MovementEvent[] }) {
           <tbody>
             {events.map((event) => (
               <tr key={event.id}>
-                <td>{event.time}</td>
-                <td>
+                <td data-label="Time">{event.time}</td>
+                <td data-label="Subject / ID">
                   <strong>{event.subjectName}</strong>
                   <span>{event.barcode}</span>
                 </td>
-                <td>{event.subjectType}</td>
-                <td>
+                <td data-label="Type">{event.subjectType}</td>
+                <td data-label="Direction">
                   <span className={styles.direction} data-direction={event.direction}>
                     {event.direction === "entry" ? <ArrowDownRight /> : <ArrowUpRight />}
                     {event.direction}
                   </span>
                 </td>
-                <td>{event.checkpoint}</td>
-                <td>
+                <td data-label="Checkpoint">{event.checkpoint}</td>
+                <td data-label="Result">
                   <span className={styles.result} data-result={event.result}>
                     {event.result}
                   </span>
