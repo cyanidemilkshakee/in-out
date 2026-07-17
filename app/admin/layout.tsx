@@ -18,7 +18,7 @@ const adminRailGroups = [
   {
     label: "Operations",
     items: [
-      { path: "/admin", icon: Grid2X2, label: "Dashboard", exact: true },
+      { path: "/admin/dashboard", icon: Grid2X2, label: "Dashboard", exact: true },
       { path: "/admin/logs", icon: History, label: "Movement Logs" },
       { path: "/admin/alerts", icon: Bell, label: "Alerts" }
     ]
@@ -61,6 +61,37 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const handleKeyboardScroll = useCallback((event: KeyboardEvent) => {
+    if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return;
+
+    const target = event.target;
+    if (
+      target instanceof HTMLInputElement ||
+      target instanceof HTMLTextAreaElement ||
+      target instanceof HTMLSelectElement ||
+      (target instanceof HTMLElement && target.isContentEditable)
+    ) {
+      return;
+    }
+
+    const container = scrollRef.current;
+    if (!container) return;
+
+    const pageStep = Math.max(240, Math.round(container.clientHeight * 0.8));
+    let nextTop: number | null = null;
+
+    if (event.key === "ArrowDown") nextTop = container.scrollTop + 80;
+    if (event.key === "ArrowUp") nextTop = container.scrollTop - 80;
+    if (event.key === "PageDown") nextTop = container.scrollTop + pageStep;
+    if (event.key === "PageUp") nextTop = container.scrollTop - pageStep;
+    if (event.key === "Home") nextTop = 0;
+    if (event.key === "End") nextTop = container.scrollHeight;
+
+    if (nextTop === null) return;
+    event.preventDefault();
+    container.scrollTo({ top: nextTop, behavior: "smooth" });
+  }, []);
+
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("inout-admin-theme");
     if (storedTheme === "light" || storedTheme === "dark") {
@@ -72,11 +103,13 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
     const el = scrollRef.current;
     if (!el) return;
     el.addEventListener("scroll", handleScroll, { passive: true });
+    document.addEventListener("keydown", handleKeyboardScroll);
     return () => {
       el.removeEventListener("scroll", handleScroll);
+      document.removeEventListener("keydown", handleKeyboardScroll);
       if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     };
-  }, [handleScroll]);
+  }, [handleKeyboardScroll, handleScroll]);
 
   return (
     <AppChrome role="admin">
@@ -102,7 +135,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
               flexDirection: "column",
               alignItems: "flex-start",
               padding: "0 12px",
-              backgroundColor: pathname === "/admin"
+              backgroundColor: pathname === "/admin/dashboard"
                 ? `color-mix(in srgb, var(--admin-bg) ${Math.round(scrollTint * 100)}%, transparent)`
                 : sidebarOpen ? "var(--admin-surface-strong)" : "transparent",
               borderRight: "none",
@@ -144,7 +177,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
             <div className="admin-rail-spacer" style={{ flex: 1 }} />
 
             {/* Nav Icons */}
-            <div className="admin-rail-items" style={{ display: "flex", flexDirection: "column", gap: pathname === "/admin" ? "3px" : "10px", width: "100%" }}>
+            <div className="admin-rail-items" style={{ display: "flex", flexDirection: "column", gap: pathname === "/admin/dashboard" ? "3px" : "10px", width: "100%" }}>
               {adminRailGroups.flatMap(group => group.items).map((item) => {
                 const Icon = item.icon;
                 const active = item.exact ? pathname === item.path : pathname.startsWith(item.path);
@@ -263,6 +296,8 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           id="admin-scroll-container"
           ref={scrollRef}
           className={`admin-scroll-surface ${scrolled ? "scrolled-main-content" : "top-main-content"}`}
+          tabIndex={0}
+          aria-label="Admin content"
           style={{
             flex: 1,
             position: "relative",

@@ -78,7 +78,7 @@ function TerminalHeader({
   return (
     <header className={styles.appbar}>
       <div className={styles.appbarLeft}>
-        <Link className={styles.brandLink} href="/admin" aria-label="Open admin dashboard">
+        <Link className={styles.brandLink} href="/admin/dashboard" aria-label="Open admin dashboard">
           <span className={styles.brandMark} aria-hidden="true">
             <ShieldCheck />
           </span>
@@ -92,7 +92,7 @@ function TerminalHeader({
       </div>
 
       <div className={styles.headerActions}>
-        <Link className={styles.adminLink} href="/admin">
+        <Link className={styles.adminLink} href="/admin/dashboard">
           <ShieldCheck />
           <span>Admin Console</span>
         </Link>

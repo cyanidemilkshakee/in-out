@@ -1303,8 +1303,7 @@ tbody tr:hover {
   color: var(--blue);
 }
 
-.bulk-bar,
-.sync-guidance {
+.bulk-bar {
   border-bottom: 1px solid var(--border);
   padding: 12px 16px;
   color: var(--muted);
@@ -2626,12 +2625,6 @@ tbody tr:hover {
 
 .role-admin .table-wrap {
   border-top: 0;
-}
-
-.role-admin .sync-guidance {
-  border-left: 3px solid var(--admin-lime);
-  padding: 14px 16px;
-  color: var(--admin-muted);
 }
 
 .role-admin .pagination button {

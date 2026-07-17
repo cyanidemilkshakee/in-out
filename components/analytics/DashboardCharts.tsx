@@ -267,7 +267,10 @@ export function DashboardCharts({
       </div>
 
       {/* Scroll Indicator */}
-      <div className="dashboard-scroll-indicator"
+      <button
+        type="button"
+        className="dashboard-scroll-indicator"
+        aria-label="Scroll to recent movement logs"
         style={{
           position: "absolute",
           bottom: "16px",
@@ -279,6 +282,10 @@ export function DashboardCharts({
           gap: "13px",
           cursor: "pointer",
           zIndex: 10,
+          border: 0,
+          padding: 0,
+          background: "transparent",
+          color: "inherit",
         }}
         onClick={() => {
           const tableHeader = Array.from(document.querySelectorAll('h2')).find(h => h.textContent === 'Recent Movement Logs');
@@ -329,7 +336,7 @@ export function DashboardCharts({
             animation: "scrollWheel 1.5s cubic-bezier(0.15, 0.41, 0.69, 0.94) infinite"
           }} />
         </div>
-      </div>
+      </button>
     </section>
   );
 }

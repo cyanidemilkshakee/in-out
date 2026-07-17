@@ -7,5 +7,3 @@ export { ActivityBar } from './ActivityBar';
 export { EmployeeTable } from './EmployeeTable';
 export { TemporaryVisitorCreator } from './TemporaryVisitorCreator';
 export { HardwareTable } from './HardwareTable';
-export { CheckpointTable } from './CheckpointTable';
-export { OfflineSyncTable } from './OfflineSyncTable';

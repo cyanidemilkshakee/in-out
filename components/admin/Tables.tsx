@@ -9,5 +9,3 @@ export { ActivityBar } from './tables/ActivityBar';
 export { EmployeeTable } from './tables/EmployeeTable';
 export { TemporaryVisitorCreator } from './tables/TemporaryVisitorCreator';
 export { HardwareTable } from './tables/HardwareTable';
-export { CheckpointTable } from './tables/CheckpointTable';
-export { OfflineSyncTable } from './tables/OfflineSyncTable';
