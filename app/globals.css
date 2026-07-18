@@ -2692,6 +2692,7 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
 
 
 .role-admin .log-workspace {
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 330px);
   padding: 0;
   margin-top: -22px;
 }
@@ -4652,7 +4653,7 @@ button,
 .role-admin .profile-workspace {
   display: grid;
   grid-template-rows: auto auto auto;
-  width: 100%;
+  width: 80%;
   min-height: 100vh;
   margin: 0 auto;
   padding: 0 32px;
