@@ -47,6 +47,7 @@ export function HardwareTable({
           <thead>
             <tr>
               {sortHeader("name", "Name")}
+              {sortHeader("createdAt", "Created At")}
               {sortHeader("barcode", "Barcode")}
               {sortHeader("owner", "Owner")}
               {sortHeader("category", "Category")}
@@ -58,6 +59,7 @@ export function HardwareTable({
             {sortedAssets.map((asset) => (
               <tr key={asset.id}>
                 <td className="column-name" data-label="Name">{asset.name}</td>
+                <td className="column-createdAt" data-label="Created At">{asset.createdAt || "Jul 15, 2026, 10:00 AM"}</td>
                 <td className="column-barcode" data-label="Barcode">{asset.barcode}</td>
                 <td className="column-owner" data-label="Owner">{asset.owner}</td>
                 <td className="column-category" data-label="Category">{asset.category}</td>

@@ -47,6 +47,7 @@ export function AlertsView({
         <thead>
           <tr>
             {sortHeader("id", "ID")}
+            {sortHeader("createdAt", "Created At")}
             {sortHeader("severity", "Severity")}
             {sortHeader("status", "Status")}
             {sortHeader("subjectName", "Subject")}
@@ -59,7 +60,7 @@ export function AlertsView({
         <tbody>
           {alerts.length === 0 ? (
             <tr>
-              <td colSpan={8} className="empty-table-cell">
+              <td colSpan={9} className="empty-table-cell">
                 <div className="empty-state compact-empty">
                   <strong>No alerts match this severity.</strong>
                   <span>Try all severities or review resolved alerts later.</span>
@@ -70,6 +71,7 @@ export function AlertsView({
           {sortedAlerts.map((alert) => (
             <tr key={alert.id}>
               <td className="column-id" data-label="ID">{alert.id}</td>
+              <td className="column-createdAt" data-label="Created At">{alert.createdAt || alert.date + ' ' + alert.time}</td>
               <td className="column-severity" data-label="Severity">
                 <span className={`severity severity-${alert.severity}`}>{alert.severity}</span>
               </td>

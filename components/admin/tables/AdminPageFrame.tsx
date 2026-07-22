@@ -5,12 +5,14 @@ export function AdminPageFrame({
   description,
   metric,
   headerRight,
+  preTitle,
   children
 }: {
   title: string;
   description: string;
   metric?: ReactNode;
   headerRight?: ReactNode;
+  preTitle?: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -18,6 +20,7 @@ export function AdminPageFrame({
       <section className="admin-model-hero">
         <div className="admin-hero-copy">
           <div>
+            {preTitle && <div style={{ marginBottom: "16px" }}>{preTitle}</div>}
             <h1 style={{ lineHeight: 1.25 }}>{title}</h1>
             <p style={{ lineHeight: 1.5 }}>{description}</p>
             {metric ? <div className="admin-hero-metric">{metric}</div> : null}

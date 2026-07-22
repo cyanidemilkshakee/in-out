@@ -8,7 +8,7 @@ const EmployeeProfileCard = lazy(() =>
   import('../EmployeeProfileCard').then((m) => ({ default: m.EmployeeProfileCard }))
 );
 
-type EmployeeSortKey = "name" | "barcode" | "accessLevel" | "department" | "latestScan" | "inside";
+type EmployeeSortKey = "name" | "createdAt" | "barcode" | "accessLevel" | "department" | "latestScan" | "inside";
 
 function getMockScan(person: Person) {
   const seedValue = person.id.split("").reduce((total, character) => total + character.charCodeAt(0), 0);
@@ -82,6 +82,7 @@ export function EmployeeTable({
           <thead>
             <tr>
               {sortHeader("name", "Name")}
+              {sortHeader("createdAt", "Created At")}
               {sortHeader("barcode", "Barcode")}
               {sortHeader("accessLevel", "Access", "access")}
               {sortHeader("department", "Department")}
@@ -96,6 +97,7 @@ export function EmployeeTable({
               return (
                 <tr key={person.id}>
                   <td className="column-name" data-label="Name">{person.name}</td>
+                  <td className="column-createdAt" data-label="Created At">{person.createdAt || "Jul 15, 2026, 10:00 AM"}</td>
                   <td className="column-barcode" data-label="Barcode">{person.barcode}</td>
                   <td className="column-access" data-label="Access">{person.accessLevel}</td>
                   <td className="column-department" data-label="Department">{person.department ?? "-"}</td>

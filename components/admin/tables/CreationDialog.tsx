@@ -12,6 +12,7 @@ export function CreationDialog({
   onOpen,
   onSubmit,
   children,
+  triggerClassName,
 }: {
   triggerLabel: string;
   title: string;
@@ -22,6 +23,7 @@ export function CreationDialog({
   onOpen?: () => void;
   onSubmit: () => Promise<boolean | void> | boolean | void;
   children: ReactNode;
+  triggerClassName?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -50,7 +52,7 @@ export function CreationDialog({
   return (
     <div className="temporary-id-popover">
       <button
-        className="ghost-button temporary-create-trigger"
+        className={`ghost-button temporary-create-trigger ${triggerClassName || ""}`.trim()}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}

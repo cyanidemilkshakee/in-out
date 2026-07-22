@@ -48,6 +48,7 @@ export function MovementTable({
           <tr>
             {visibleColumns.date ? sortHeader("date", "Date") : null}
             {visibleColumns.time ? sortHeader("time", "Time") : null}
+            {visibleColumns.createdAt ? sortHeader("createdAt", "Created At") : null}
             {visibleColumns.name ? sortHeader("name", "Name") : null}
             {visibleColumns.type ? sortHeader("type", "Type") : null}
             {visibleColumns.direction ? sortHeader("direction", "Direction") : null}
@@ -79,6 +80,7 @@ export function MovementTable({
             >
               {visibleColumns.date ? <td className="column-date" data-label="Date">{event.date}</td> : null}
               {visibleColumns.time ? <td className="column-time" data-label="Time">{event.time}</td> : null}
+              {visibleColumns.createdAt ? <td className="column-createdAt" data-label="Created At">{event.createdAt}</td> : null}
               {visibleColumns.name ? <td className="column-name" data-label="Name">{event.subjectName}</td> : null}
               {visibleColumns.type ? <td className="column-type" data-label="Type" style={{ textTransform: "capitalize" }}>{event.subjectType}</td> : null}
               {visibleColumns.direction ? (

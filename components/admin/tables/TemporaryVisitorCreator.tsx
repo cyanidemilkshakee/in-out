@@ -26,8 +26,10 @@ function getMinimumEndValue(validFrom: string) {
 
 export function TemporaryVisitorCreator({
   onCreate,
+  isTerminal,
 }: {
   onCreate: (input: CreateTemporaryVisitorInput) => Promise<unknown>;
+  isTerminal?: boolean;
 }) {
   const [name, setName] = useState("");
   const [barcode, setBarcode] = useState("");
@@ -131,6 +133,7 @@ export function TemporaryVisitorCreator({
       description="Issue a time-limited visitor identity and access window."
       submitLabel="Create ID"
       cardClassName="creation-dialog-visitor"
+      triggerClassName={isTerminal ? "terminal-create-btn" : undefined}
       error={formError}
       onOpen={openForm}
       onSubmit={submit}

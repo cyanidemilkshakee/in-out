@@ -51,6 +51,7 @@ export function PeopleTable({
           <thead>
             <tr>
               {sortHeader("name", "Name")}
+              {sortHeader("createdAt", "Created At")}
               {sortHeader("barcode", "Barcode")}
               {sortHeader("company", "Department / Company")}
               {sortHeader("status", "Status")}
@@ -61,6 +62,7 @@ export function PeopleTable({
             {sortedRows.map((person) => (
               <tr key={person.id}>
                 <td className="column-name" data-label="Name">{person.name}</td>
+                <td className="column-createdAt" data-label="Created At">{person.createdAt || "Jul 15, 2026, 10:00 AM"}</td>
                 <td className="column-barcode" data-label="Barcode">{person.barcode}</td>
                 <td className="column-company" data-label="Department / Company">{person.department ?? person.company ?? "-"}</td>
                 <td className="column-status" data-label="Status">{person.status}</td>
