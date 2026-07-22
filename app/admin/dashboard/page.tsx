@@ -20,6 +20,7 @@ const DashboardCharts = lazy(() =>
 const dashboardVisibleColumns: Record<VisibleColumn, boolean> = {
   date: true,
   time: true,
+  createdAt: false,
   name: true,
   type: true,
   direction: true,

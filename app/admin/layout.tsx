@@ -9,10 +9,11 @@ import {
   Grid2X2,
   History,
   Heart,
-  Package,
-  UserRound,
+  Moon,
+  Sun,
   UserCog,
-  UsersRound,
+  BookUser,
+  Key,
 } from "lucide-react";
 
 const adminRailGroups = [
@@ -21,15 +22,14 @@ const adminRailGroups = [
     items: [
       { path: "/admin/dashboard", icon: Grid2X2, label: "Dashboard", exact: true },
       { path: "/admin/logs", icon: History, label: "Movement Logs" },
+      { path: "/admin/permissions", icon: Key, label: "Permission Manager" },
       { path: "/admin/alerts", icon: Bell, label: "Alerts" }
     ]
   },
   {
     label: "Types & Forms",
     items: [
-      { path: "/admin/employees", icon: UsersRound, label: "Employees" },
-      { path: "/admin/visitors", icon: UserRound, label: "Visitors" },
-      { path: "/admin/hardware", icon: Package, label: "Hardware" }
+      { path: "/admin/registry", icon: BookUser, label: "Registry" }
     ]
   }
 ];
@@ -37,6 +37,7 @@ const adminRailGroups = [
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const pathname = usePathname();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
   const [scrolled, setScrolled] = useState(false);
   const [scrollTint, setScrollTint] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -96,8 +97,10 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   useEffect(() => {
     const storedTheme = window.localStorage.getItem("inout-admin-theme");
     if (storedTheme === "light" || storedTheme === "dark") {
+      setTheme(storedTheme);
       document.documentElement.dataset.adminTheme = storedTheme;
     } else {
+      setTheme("light");
       document.documentElement.dataset.adminTheme = "light";
       window.localStorage.setItem("inout-admin-theme", "light");
     }
@@ -236,6 +239,46 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   </Link>
                 );
               })}
+              
+              {/* Theme Toggle - Appended to main items */}
+              <button
+                onClick={() => {
+                  const nextTheme = theme === "light" ? "dark" : "light";
+                  setTheme(nextTheme);
+                  document.documentElement.dataset.adminTheme = nextTheme;
+                  window.localStorage.setItem("inout-admin-theme", nextTheme);
+                }}
+                className="nav-rail-link"
+                aria-label="Toggle Theme"
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                  padding: "8px 12px",
+                  width: "100%",
+                  borderRadius: "12px",
+                }}
+                title={sidebarOpen ? "" : (theme === "light" ? "Switch to dark theme" : "Switch to light theme")}
+              >
+                <div className="admin-rail-icon" style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
+                  {theme === "light" ? <Moon size={24} strokeWidth={1.25} color="var(--admin-muted)" /> : <Sun size={24} strokeWidth={1.25} color="var(--admin-muted)" />}
+                </div>
+                <span className="admin-rail-link-label" style={{
+                  marginLeft: "20px",
+                  fontSize: "15px",
+                  fontWeight: 400,
+                  opacity: sidebarOpen ? 1 : 0,
+                  transition: "opacity 0.2s ease",
+                  pointerEvents: sidebarOpen ? "auto" : "none",
+                  color: "var(--admin-muted)"
+                }}>
+                  {theme === "light" ? "Dark Mode" : "Light Mode"}
+                </span>
+              </button>
             </div>
 
             {/* Bottom Spacer */}

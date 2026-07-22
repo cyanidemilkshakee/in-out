@@ -5,15 +5,13 @@ import {
   Bell,
   Camera,
   KeyRound,
-  Moon,
   Save,
-  Sun,
   UserCog,
   UserRound
 } from "lucide-react";
 import { AdminCreator, type CreateAdminInput } from "../../../components/admin/AdminCreator";
 
-type AdminTheme = "light" | "dark";
+
 
 type ProfileIdentity = {
   name: string;
@@ -41,17 +39,9 @@ const defaultSettings: ProfileSettings = {
   requireReviewNote: true
 };
 
-function readStoredTheme(): AdminTheme {
-  if (typeof window === "undefined") {
-    return "light";
-  }
 
-  const storedTheme = window.localStorage.getItem("inout-admin-theme");
-  return storedTheme === "dark" || storedTheme === "light" ? storedTheme : "light";
-}
 
 export default function ProfilePage() {
-  const [theme, setTheme] = useState<AdminTheme | null>(null);
   const [profile, setProfile] = useState<ProfileIdentity>(defaultProfile);
   const [autoLock, setAutoLock] = useState("15");
   const [saved, setSaved] = useState(false);
@@ -65,8 +55,6 @@ export default function ProfilePage() {
   });
 
   useEffect(() => {
-    setTheme(readStoredTheme());
-
     const storedAutoLock = window.localStorage.getItem("inout-admin-autolock");
     const storedProfile = window.localStorage.getItem("inout-admin-profile");
     const storedSettings = window.localStorage.getItem("inout-admin-settings");
@@ -98,13 +86,6 @@ export default function ProfilePage() {
       }
     }
   }, []);
-
-  useEffect(() => {
-    if (!theme) return;
-
-    document.documentElement.dataset.adminTheme = theme;
-    window.localStorage.setItem("inout-admin-theme", theme);
-  }, [theme]);
 
   function markChanged() {
     setSaved(false);
@@ -322,34 +303,6 @@ export default function ProfilePage() {
             <div>
               <h2>Security</h2>
               <p>Operator safeguards for admin workflows.</p>
-            </div>
-            <div className="security-theme-controls">
-              <div className="theme-icon-switch" aria-label="Theme">
-                <button
-                  type="button"
-                  aria-label="Use light theme"
-                  aria-pressed={theme === "light"}
-                  title="Light theme"
-                  onClick={() => {
-                    setTheme("light");
-                    markChanged();
-                  }}
-                >
-                  <Sun aria-hidden="true" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Use dark theme"
-                  aria-pressed={theme === "dark"}
-                  title="Dark theme"
-                  onClick={() => {
-                    setTheme("dark");
-                    markChanged();
-                  }}
-                >
-                  <Moon aria-hidden="true" />
-                </button>
-              </div>
             </div>
           </div>
           <label className="profile-field">

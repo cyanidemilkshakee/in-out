@@ -1,18 +1,21 @@
 "use client";
 
-import { useDeferredValue, useState, useMemo } from "react";
+import { useDeferredValue, useEffect, useState, useMemo } from "react";
 import type { MovementEvent, VisibleColumn, SortDirection, ResultStatus } from "../../../lib/types";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { MovementTable } from "../../../components/admin/tables/MovementTable";
 import { DetailDrawer } from "../../../components/admin/tables/DetailDrawer";
 import { TrendChart, type TimeRange } from "../../../components/analytics/TrendChart";
+import { CalendarDatePicker } from "../../../components/analytics/CalendarDatePicker";
+import { ReportBuilder } from "../../../components/admin/reports/ReportBuilder";
 import { useDataActions, useDataState } from "../../../context/DataContext";
 
-type StatusFilter = ResultStatus | "all" | "automatic" | "manual" | "entry" | "exit";
+type StatusFilter = ResultStatus | "all";
 
 const defaultVisibleColumns: Record<VisibleColumn, boolean> = {
   date: true,
   time: true,
+  createdAt: false,
   name: true,
   type: true,
   direction: true,
@@ -24,11 +27,14 @@ const defaultVisibleColumns: Record<VisibleColumn, boolean> = {
 };
 
 export default function LogsPage() {
-  const { movements: events, alerts, movementNotes: eventNotes } = useDataState();
+  const { movements: events, alerts, auditEvents, movementNotes: eventNotes } = useDataState();
   const { addMovementNote, updateAlert } = useDataActions();
   const [search, setSearch] = useState("");
   const [checkpointFilter, setCheckpointFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [scanTypeFilter, setScanTypeFilter] = useState<"all" | "auto" | "manual">("all");
+  const [directionFilter, setDirectionFilter] = useState<"all" | "entry" | "exit">("all");
+  const [subjectTypeFilter, setSubjectTypeFilter] = useState<"people" | "hardware">("people");
   const [page, setPage] = useState(1);
   const rowsPerPage = 25;
   const [sortKey, setSortKey] = useState<VisibleColumn>("time");
@@ -36,7 +42,23 @@ export default function LogsPage() {
   const [selectedEventId, setSelectedEventId] = useState(events[0]?.id ?? "");
   const [drawerDraft, setDrawerDraft] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
   const deferredSearch = useDeferredValue(search);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const subject = params.get("subject");
+    const result = params.get("result");
+    const scanType = params.get("scanType");
+    const direction = params.get("direction");
+    const reason = params.get("reason");
+    if (subject === "people" || subject === "hardware") setSubjectTypeFilter(subject);
+    if (result === "approved" || result === "denied") setStatusFilter(result);
+    if (scanType === "auto" || scanType === "manual") setScanTypeFilter(scanType);
+    if (direction === "entry" || direction === "exit") setDirectionFilter(direction);
+    if (reason) setSearch(reason);
+  }, []);
 
   const filteredEvents = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
@@ -45,18 +67,26 @@ export default function LogsPage() {
         checkpointFilter === "all" || event.checkpoint === checkpointFilter;
       const statusMatch =
         statusFilter === "all" ||
-        event.result === statusFilter ||
-        event.scanType === statusFilter ||
-        event.direction === statusFilter;
+        event.result === statusFilter;
+      const scanTypeMatch = scanTypeFilter === "all" || event.scanType === scanTypeFilter;
+      const directionMatch = directionFilter === "all" || event.direction === directionFilter;
+      const typeMatch =
+        (subjectTypeFilter === "people" && (event.subjectType === "employee" || event.subjectType === "visitor")) ||
+        (subjectTypeFilter === "hardware" && event.subjectType === "hardware");
       const searchMatch =
         !needle ||
-        [event.subjectName, event.barcode, event.checkpoint, event.scanType, event.result]
+        [event.subjectName, event.barcode, event.checkpoint, event.scanType, event.result, event.reason]
           .join(" ")
           .toLowerCase()
           .includes(needle);
-      return checkpointMatch && statusMatch && searchMatch;
+          
+      // Check date range
+      const inDateRange = (!startDate || new Date(event.date) >= new Date(startDate)) &&
+                          (!endDate || new Date(event.date) <= new Date(endDate));
+                          
+      return checkpointMatch && statusMatch && scanTypeMatch && directionMatch && typeMatch && searchMatch && inDateRange;
     });
-  }, [checkpointFilter, deferredSearch, events, statusFilter]);
+  }, [checkpointFilter, deferredSearch, directionFilter, endDate, events, scanTypeFilter, startDate, statusFilter, subjectTypeFilter]);
 
   const pagedEvents = useMemo(() => {
     const timeValue = (time: string) => {
@@ -73,6 +103,7 @@ export default function LogsPage() {
       const values: Record<VisibleColumn, string | number> = {
         date: event.date,
         time: timeValue(event.time),
+        createdAt: event.createdAt ?? 0,
         name: event.subjectName,
         type: event.subjectType,
         direction: event.direction,
@@ -108,7 +139,10 @@ export default function LogsPage() {
   }
 
   const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId), [events, selectedEventId]);
-  const selectedAlert = useMemo(() => alerts.find((a) => a.id === selectedEventId), [alerts, selectedEventId]);
+  const selectedAlert = useMemo(
+    () => alerts.find((alert) => alert.id === selectedEventId || alert.sourceEventId === selectedEventId),
+    [alerts, selectedEventId]
+  );
   const uniqueCheckpoints = useMemo(() => Array.from(new Set(events.map(e => e.checkpoint))).sort(), [events]);
 
   return (
@@ -116,12 +150,28 @@ export default function LogsPage() {
       title="Movement Ledger"
       description="Search every entry, exit, denial, and offline movement with row-level review for security handoff."
       headerRight={<TrendChart events={filteredEvents} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
+      preTitle={
+        <div className="pill-segmented-group">
+          <button
+            className={`pill-segmented-button ${subjectTypeFilter === "people" ? "active" : ""}`}
+            onClick={() => setSubjectTypeFilter("people")}
+          >
+            People
+          </button>
+          <button
+            className={`pill-segmented-button ${subjectTypeFilter === "hardware" ? "active" : ""}`}
+            onClick={() => setSubjectTypeFilter("hardware")}
+          >
+            Hardware
+          </button>
+        </div>
+      }
     >
     <section className="split-workspace log-workspace">
       <div className="workspace-main">
 
-
         <div className="filter-bar">
+          <ReportBuilder movements={filteredEvents} alerts={alerts} auditEvents={auditEvents} />
           <label className="select-control">
             <span className="sr-only">Filter by time</span>
             <select
@@ -134,6 +184,11 @@ export default function LogsPage() {
               <option value="1D">Last 24 Hours</option>
             </select>
           </label>
+          <CalendarDatePicker 
+            startDate={startDate} 
+            endDate={endDate} 
+            onRangeChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+          />
           <label className="select-control">
             <span className="sr-only">Filter by checkpoint</span>
             <select
@@ -153,8 +208,26 @@ export default function LogsPage() {
               <option value="all">All Results</option>
               <option value="approved">Approved</option>
               <option value="denied">Denied</option>
-              <option value="automatic">Automatic</option>
+            </select>
+          </label>
+          <label className="select-control">
+            <span className="sr-only">Filter by scan type</span>
+            <select
+              value={scanTypeFilter}
+              onChange={(event) => setScanTypeFilter(event.target.value as typeof scanTypeFilter)}
+            >
+              <option value="all">All Scan Types</option>
+              <option value="auto">Automatic</option>
               <option value="manual">Manual</option>
+            </select>
+          </label>
+          <label className="select-control">
+            <span className="sr-only">Filter by direction</span>
+            <select
+              value={directionFilter}
+              onChange={(event) => setDirectionFilter(event.target.value as typeof directionFilter)}
+            >
+              <option value="all">All Directions</option>
               <option value="entry">Entry</option>
               <option value="exit">Exit</option>
             </select>
