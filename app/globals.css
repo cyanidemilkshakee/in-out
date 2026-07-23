@@ -5752,53 +5752,6 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   outline: 2px solid var(--admin-text);
   outline-offset: 2px;
 }
-
-/* Dashboard time range: dark theme rules */
-html[data-admin-theme="dark"] .role-admin .dashboard-time-range-selector {
-  border-color: #3a4542;
-  background: #141b1a;
-  box-shadow: inset 0 0 0 1px rgba(238, 247, 242, 0.04);
-}
-
-html[data-admin-theme="dark"] .role-admin .dashboard-time-range-button {
-  color: #aab8b3;
-}
-
-html[data-admin-theme="dark"] .role-admin .dashboard-time-range-button:hover:not(.is-active) {
-  background: #232927;
-  color: #eef7f2;
-}
-
-html[data-admin-theme="dark"] .role-admin .dashboard-time-range-button.is-active {
-  background: #fff;
-  color: #0f1413;
-}
-
-html[data-admin-theme="dark"] .role-admin .dashboard-time-range-button:focus-visible {
-  outline-color: var(--admin-lime);
-}
-
-.role-admin .metric-widget-box,
-.role-admin .alert-widget-box,
-.role-admin .alert-item-card {
-  border-style: solid !important;
-  border-color: transparent !important;
-}
-
-.role-admin .metric-widget-box:hover,
-.role-admin .alert-widget-box:hover,
-.role-admin .alert-item-card:hover {
-  border-color: rgba(184, 190, 188, 0.78) !important;
-}
-
-.role-security,
-.role-security .terminalPage,
-.role-security .terminalShell,
-.role-security .topbar,
-.role-security .footer {
-  font-family: var(--admin-font);
-}
-
 .role-security .topbar {
   min-height: 60px;
   background: var(--admin-bg);
@@ -8815,4 +8768,20 @@ button.terminal-create-btn:hover {
     min-width: 0;
   }
 }
+
+.role-admin .metric-widget-box,
+.role-admin .alert-widget-box,
+.role-admin .alert-item-card {
+  border-style: solid !important;
+  border-color: transparent !important;
+  border-width: 1px !important;
+  border-radius: 12px !important;
+}
+
+.role-admin .metric-widget-box:hover,
+.role-admin .alert-widget-box:hover,
+.role-admin .alert-item-card:hover {
+  border-color: rgba(184, 190, 188, 0.78) !important;
+}
+
 
