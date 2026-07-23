@@ -10,7 +10,16 @@ import {
   type ReactNode,
 } from "react";
 import { getDashboardKPIs } from "../lib/analyticsUtils";
-import type { Alert, HardwareAsset, MovementEvent, Person } from "../lib/types";
+import type {
+  AccessPermission,
+  Alert,
+  AlertRule,
+  HardwareAsset,
+  MovementEvent,
+  Person,
+  PermissionNotification,
+  PermissionRequest,
+} from "../lib/types";
 import type {
   AppDataSnapshot,
   CreateEmployeeInput,
@@ -18,6 +27,7 @@ import type {
   CreateTemporaryVisitorInput,
   DataService,
   RecordScanInput,
+  UpdateAccessPermissionInput,
 } from "../services/dataService";
 
 type DataState = AppDataSnapshot & {
@@ -42,6 +52,16 @@ type DataActions = {
     alertId: string,
     patch: Partial<Omit<Alert, "id">>
   ) => Promise<Alert>;
+  updateAccessPermission: (
+    input: UpdateAccessPermissionInput
+  ) => Promise<AccessPermission>;
+  decidePermissionRequest: (
+    requestId: string,
+    decision: "approved" | "denied",
+    reason: string
+  ) => Promise<PermissionRequest>;
+  updateAlertRule: (ruleId: string, enabled: boolean) => Promise<AlertRule>;
+  markNotificationRead: (notificationId: string) => Promise<PermissionNotification>;
   recordScan: (input: RecordScanInput) => ReturnType<DataService["recordScan"]>;
   saveMovement: (event: MovementEvent) => Promise<MovementEvent>;
   syncMovements: (eventIds?: string[]) => Promise<MovementEvent[]>;
@@ -68,6 +88,11 @@ const emptyData: AppDataSnapshot = {
     activeInside: 0,
   },
   movementNotes: {},
+  permissions: [],
+  permissionRequests: [],
+  notifications: [],
+  alertRules: [],
+  auditEvents: [],
 };
 
 const DataServiceContext = createContext<DataService | null>(null);
@@ -100,6 +125,11 @@ export function DataProvider({
         alerts,
         scanAnalytics,
         movementNotes,
+        permissions,
+        permissionRequests,
+        notifications,
+        alertRules,
+        auditEvents,
       ] = await Promise.all([
         service.getPeople(),
         service.getHardwareAssets(),
@@ -108,6 +138,11 @@ export function DataProvider({
         service.getAlerts(),
         service.getScanAnalytics(),
         service.getMovementNotes(),
+        service.getPermissions(),
+        service.getPermissionRequests(),
+        service.getNotifications(),
+        service.getAlertRules(),
+        service.getAuditEvents(),
       ]);
       setState({
         people,
@@ -117,6 +152,11 @@ export function DataProvider({
         alerts,
         scanAnalytics,
         movementNotes,
+        permissions,
+        permissionRequests,
+        notifications,
+        alertRules,
+        auditEvents,
         isLoading: false,
         error: null,
       });
@@ -136,13 +176,10 @@ export function DataProvider({
   const createTemporaryVisitor = useCallback(
     async (input: CreateTemporaryVisitorInput) => {
       const visitor = await service.createTemporaryVisitor(input);
-      setState((current) => ({
-        ...current,
-        people: [visitor, ...current.people],
-      }));
+      await refresh();
       return visitor;
     },
-    [service]
+    [refresh, service]
   );
 
   const createEmployee = useCallback(
@@ -211,22 +248,63 @@ export function DataProvider({
     [service]
   );
 
+  const updateAccessPermission = useCallback(
+    async (input: UpdateAccessPermissionInput) => {
+      const updated = await service.updateAccessPermission(input);
+      await refresh();
+      return updated;
+    },
+    [refresh, service]
+  );
+
+  const decidePermissionRequest = useCallback(
+    async (
+      requestId: string,
+      decision: "approved" | "denied",
+      reason: string
+    ) => {
+      const updated = await service.decidePermissionRequest(requestId, decision, reason);
+      await refresh();
+      return updated;
+    },
+    [refresh, service]
+  );
+
+  const updateAlertRule = useCallback(
+    async (ruleId: string, enabled: boolean) => {
+      const updated = await service.updateAlertRule(ruleId, enabled);
+      setState((current) => ({
+        ...current,
+        alertRules: current.alertRules.map((rule) =>
+          rule.id === ruleId ? updated : rule
+        ),
+      }));
+      return updated;
+    },
+    [service]
+  );
+
+  const markNotificationRead = useCallback(
+    async (notificationId: string) => {
+      const updated = await service.markNotificationRead(notificationId);
+      setState((current) => ({
+        ...current,
+        notifications: current.notifications.map((notification) =>
+          notification.id === notificationId ? updated : notification
+        ),
+      }));
+      return updated;
+    },
+    [service]
+  );
+
   const recordScan = useCallback(
     async (input: RecordScanInput) => {
       const result = await service.recordScan(input);
-      setState((current) => {
-        const movements = [result.decision.event, ...current.movements];
-        return {
-          ...current,
-          people: result.people,
-          hardwareAssets: result.hardwareAssets,
-          movements,
-          scanAnalytics: getDashboardKPIs(movements),
-        };
-      });
+      await refresh();
       return result;
     },
-    [service]
+    [refresh, service]
   );
 
   const saveMovement = useCallback(
@@ -289,6 +367,10 @@ export function DataProvider({
       updatePerson,
       updateHardwareAsset,
       updateAlert,
+      updateAccessPermission,
+      decidePermissionRequest,
+      updateAlertRule,
+      markNotificationRead,
       recordScan,
       saveMovement,
       syncMovements,
@@ -306,6 +388,10 @@ export function DataProvider({
       saveMovement,
       syncMovements,
       updateAlert,
+      updateAccessPermission,
+      decidePermissionRequest,
+      updateAlertRule,
+      markNotificationRead,
       updateHardwareAsset,
       updatePerson,
     ]

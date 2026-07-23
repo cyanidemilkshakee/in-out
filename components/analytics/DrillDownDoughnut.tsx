@@ -26,11 +26,12 @@ export interface ScanAnalytics {
 
 interface DrillDownDoughnutProps {
   data: ScanAnalytics;
+  onNodeClick?: (nodeId: string) => void;
 }
 
 const rootColorPalette = ["#12b76a", "#f04438", "#f79009", "#0b63e5", "#8a3ffc"];
 
-export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
+export function DrillDownDoughnut({ data, onNodeClick }: DrillDownDoughnutProps) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
   const [lockedId, setLockedId] = useState<string | null>(null);
   const [themeColors, setThemeColors] = useState({
@@ -212,9 +213,15 @@ export function DrillDownDoughnut({ data }: DrillDownDoughnutProps) {
     if (elements.length > 0) {
       const element = elements[0];
       const dataset = chartData.datasets[element.datasetIndex];
+      const selectedId = dataset.ids[element.index];
+
+      if (selectedId && onNodeClick) {
+        onNodeClick(selectedId);
+        return;
+      }
       
       if (dataset.level === 0) {
-        const id = dataset.ids[element.index];
+        const id = selectedId;
         if (lockedId === id) {
           // Toggle off
           setLockedId(null);

@@ -1,12 +1,24 @@
 "use client";
 
+import { CalendarDatePicker } from "./CalendarDatePicker";
+
 type TimeRangeSelectorProps = {
   timeRange: string;
   timeRanges: readonly string[];
   onSelect: (range: string) => void;
+  startDate?: string;
+  endDate?: string;
+  onRangeChange?: (start: string, end: string) => void;
 };
 
-export function TimeRangeSelector({ timeRange, timeRanges, onSelect }: TimeRangeSelectorProps) {
+export function TimeRangeSelector({
+  timeRange,
+  timeRanges,
+  onSelect,
+  startDate = "",
+  endDate = "",
+  onRangeChange,
+}: TimeRangeSelectorProps) {
   return (
     <div className="dashboard-time-range-selector" aria-label="Dashboard time range">
       {timeRanges.map(range => (
@@ -20,6 +32,14 @@ export function TimeRangeSelector({ timeRange, timeRanges, onSelect }: TimeRange
           {range}
         </button>
       ))}
+      {onRangeChange ? (
+        <CalendarDatePicker
+          startDate={startDate}
+          endDate={endDate}
+          onRangeChange={onRangeChange}
+          variant="segment"
+        />
+      ) : null}
     </div>
   );
 }

@@ -14,6 +14,7 @@ import {
   Keyboard,
   MapPin,
   Package,
+  Plus,
   RefreshCw,
   ScanLine,
   ShieldCheck,
@@ -21,8 +22,10 @@ import {
   Wifi,
   WifiOff,
   XCircle,
+  Trash2,
 } from "lucide-react";
 import { useDataActions, useDataState } from "../../context/DataContext";
+import { TemporaryVisitorCreator } from "../admin/tables/TemporaryVisitorCreator";
 import type {
   Checkpoint,
   HardwareAsset,
@@ -105,6 +108,12 @@ function TerminalHeader({
           {online ? <Wifi /> : <WifiOff />}
           <span>{online ? "Online" : "Offline"}</span>
         </button>
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <TemporaryVisitorCreator 
+            onCreate={(typeof window !== 'undefined' ? (window as any).createTemporaryVisitorStub : undefined) || (async () => ({}))}
+            isTerminal={true} 
+          />
+        </div>
         <div className={styles.operator}>
           <span className={styles.operatorAvatar}>SS</span>
           <span>
@@ -448,11 +457,12 @@ function SyncSection({
 
 export function SecurityTerminal() {
   const { people, hardwareAssets, movements, checkpoints } = useDataState();
-  const { recordScan, saveMovement, syncMovements, resolveMovementConflicts } =
+  const { recordScan, saveMovement, syncMovements, resolveMovementConflicts, createTemporaryVisitor } =
     useDataActions();
   const [checkpointId, setCheckpointId] = useState("cp-main");
   const [online, setOnline] = useState(true);
   const [barcode, setBarcode] = useState("test2");
+  const [hardwareBarcodes, setHardwareBarcodes] = useState<string[]>([""]);
   const [selectedHardwareIds, setSelectedHardwareIds] = useState<string[]>([]);
   const [decision, setDecision] = useState<ScanDecision | null>(null);
   const [scanError, setScanError] = useState("");
@@ -465,6 +475,13 @@ export function SecurityTerminal() {
       barcodeInputRef.current?.focus();
     }
   }, []);
+
+  useEffect(() => {
+    (window as any).createTemporaryVisitorStub = createTemporaryVisitor;
+    return () => {
+      delete (window as any).createTemporaryVisitorStub;
+    };
+  }, [createTemporaryVisitor]);
 
   const checkpoint =
     checkpoints.find((item) => item.id === checkpointId) ??
@@ -481,7 +498,7 @@ export function SecurityTerminal() {
     return { queuedEvents: queued, conflictEvents: conflicts };
   }, [movements]);
 
-  const recentEvents = movements.slice(0, 6);
+  const recentEvents = movements.slice(0, 20);
 
   function showToast(message: string) {
     setToast({ id: Date.now(), message });
@@ -497,15 +514,30 @@ export function SecurityTerminal() {
 
     setIsScanning(true);
     try {
+      const requestedHardwareBarcodes = hardwareBarcodes
+        .map((value) => value.trim().toLowerCase())
+        .filter(Boolean);
+      const hardwareFromSeries = requestedHardwareBarcodes.map((value) =>
+        hardwareAssets.find((asset) => asset.barcode.toLowerCase() === value)
+      );
+      const unresolvedBarcode = requestedHardwareBarcodes.find(
+        (_, index) => !hardwareFromSeries[index]
+      );
+      if (unresolvedBarcode) {
+        setScanError(`Hardware barcode ${unresolvedBarcode.toUpperCase()} is not registered.`);
+        return;
+      }
+      const seriesHardwareIds = hardwareFromSeries.flatMap((asset) => asset ? [asset.id] : []);
       const result = await recordScan({
         barcode: normalizedBarcode,
         checkpointId: checkpoint.id,
-        selectedHardwareIds,
+        selectedHardwareIds: [...new Set([...selectedHardwareIds, ...seriesHardwareIds])],
         online,
         scanType: "manual",
       });
       setDecision(result.decision);
       setScanError("");
+      setHardwareBarcodes([""]);
       showToast(`${result.decision.event.subjectName}: ${result.decision.event.result}.`);
     } catch (error) {
       setScanError(error instanceof Error ? error.message : "Unable to record scan.");
@@ -571,18 +603,52 @@ export function SecurityTerminal() {
               </span>
             </div>
             <form className={styles.scanForm} onSubmit={runScan}>
-              <label className={styles.scanInput}>
-                <span className="sr-only">Barcode or ID</span>
-                <input
-                  ref={barcodeInputRef}
-                  autoComplete="off"
-                  value={barcode}
-                  aria-invalid={Boolean(scanError)}
-                  placeholder="Barcode or ID"
-                  onChange={(event) => setBarcode(event.target.value)}
-                />
-                <Keyboard aria-hidden="true" />
-              </label>
+              <div className={styles.barcodeSeries}>
+                <label className={styles.scanInput}>
+                  <span className={styles.barcodeKind}>Carrier</span>
+                  <input
+                    ref={barcodeInputRef}
+                    autoComplete="off"
+                    value={barcode}
+                    aria-invalid={Boolean(scanError)}
+                    placeholder="Employee or visitor barcode"
+                    onChange={(event) => setBarcode(event.target.value)}
+                  />
+                  <Keyboard aria-hidden="true" />
+                </label>
+                {hardwareBarcodes.map((value, index) => (
+                  <label className={styles.scanInput} key={`hardware-barcode-${index}`}>
+                    <span className={styles.barcodeKind}>Item {index + 1}</span>
+                    <input
+                      autoComplete="off"
+                      value={value}
+                      placeholder="Hardware barcode"
+                      aria-label={`Hardware barcode ${index + 1}`}
+                      onChange={(event) => setHardwareBarcodes((current) =>
+                        current.map((item, itemIndex) => itemIndex === index ? event.target.value : item)
+                      )}
+                    />
+                    {hardwareBarcodes.length > 1 ? (
+                      <button
+                        type="button"
+                        className={styles.removeBarcode}
+                        aria-label={`Remove hardware barcode ${index + 1}`}
+                        onClick={() => setHardwareBarcodes((current) => current.filter((_, itemIndex) => itemIndex !== index))}
+                      >
+                        <Trash2 />
+                      </button>
+                    ) : <Package aria-hidden="true" />}
+                  </label>
+                ))}
+                <button
+                  type="button"
+                  className={styles.addBarcode}
+                  onClick={() => setHardwareBarcodes((current) => [...current, ""])}
+                >
+                  <Plus />
+                  Add hardware barcode
+                </button>
+              </div>
               <button className={styles.scanButton} type="submit" disabled={isScanning}>
                 <ScanLine />
                 {isScanning ? "Scanning" : "Run scan"}

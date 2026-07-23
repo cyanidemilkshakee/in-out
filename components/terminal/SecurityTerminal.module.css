@@ -299,6 +299,53 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) 168px;
   gap: 12px;
+  align-items: start;
+}
+
+.barcodeSeries {
+  display: grid;
+  gap: 8px;
+}
+
+.barcodeKind {
+  flex: 0 0 54px;
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.addBarcode,
+.removeBarcode {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--admin-muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.addBarcode {
+  width: fit-content;
+  gap: 7px;
+  padding: 5px 8px;
+  color: var(--admin-text);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.addBarcode:hover,
+.removeBarcode:hover {
+  color: var(--admin-lime-dark);
+}
+
+.addBarcode svg,
+.removeBarcode svg {
+  width: 16px;
+  height: 16px;
 }
 
 .scanInput {
@@ -350,6 +397,7 @@
   font-size: 15px;
   font-weight: 850;
   transition: filter 140ms ease, transform 140ms ease;
+  align-self: start;
 }
 
 .scanButton:hover:not(:disabled) {
