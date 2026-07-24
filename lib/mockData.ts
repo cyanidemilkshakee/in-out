@@ -1,10 +1,16 @@
 import type {
+  AccessPermission,
   Alert,
+  AlertRule,
+  AuditEvent,
   Checkpoint,
   HardwareAsset,
   MovementEvent,
   Person,
+  PermissionNotification,
+  PermissionRequest,
   ScanAnalytics
+  ,WorkdayStatus
 } from "./types";
 
 
@@ -184,6 +190,22 @@ export const people: Person[] = [
     validFrom: "Jul 12, 2026 10:00 AM",
     validTo: "Jul 12, 2026 04:00 PM",
     inside: false
+  },
+  {
+    id: "vis-7201",
+    name: "Julia Thompson",
+    type: "visitor",
+    barcode: "VIS-7201",
+    company: "TechConf 2026",
+    phone: "+91 90000 07201",
+    accessLevel: "Visitor",
+    allowedZones: ["Main Entrance", "Conference Wing"],
+    status: "pending_approval",
+    host: "Michael Lee",
+    purpose: "Vendor meeting with Engineering",
+    validFrom: "Jul 22, 2026 09:00 AM",
+    validTo: "Jul 22, 2026 01:00 PM",
+    inside: false
   }
 ];
 
@@ -193,6 +215,8 @@ export const hardwareAssets: HardwareAsset[] = [
     name: "Laptop-045",
     barcode: "test3",
     owner: "John Smith",
+    assignedEmployeeId: "emp-1002",
+    assignedEmployeeName: "John Smith",
     category: "Laptop",
     allowedZones: ["Main Entrance", "IT Lab"],
     status: "active",
@@ -203,6 +227,8 @@ export const hardwareAssets: HardwareAsset[] = [
     name: "Projector-12",
     barcode: "H3002",
     owner: "Facilities",
+    assignedEmployeeId: "emp-1001",
+    assignedEmployeeName: "John Doe",
     category: "Projector",
     allowedZones: ["Main Entrance", "Auditorium"],
     status: "active",
@@ -213,6 +239,8 @@ export const hardwareAssets: HardwareAsset[] = [
     name: "Chair-07",
     barcode: "H4007",
     owner: "Facilities",
+    assignedEmployeeId: "emp-1001",
+    assignedEmployeeName: "John Doe",
     category: "Furniture",
     allowedZones: ["Warehouse"],
     status: "restricted",
@@ -223,6 +251,8 @@ export const hardwareAssets: HardwareAsset[] = [
     name: "MacBook-Pro-18",
     barcode: "H5108",
     owner: "Engineering",
+    assignedEmployeeId: "emp-1003",
+    assignedEmployeeName: "Michael Lee",
     category: "Laptop",
     allowedZones: ["Main Entrance", "IT Lab"],
     status: "active",
@@ -233,6 +263,8 @@ export const hardwareAssets: HardwareAsset[] = [
     name: "Thermal-Camera-04",
     barcode: "H6204",
     owner: "Security",
+    assignedEmployeeId: "emp-1004",
+    assignedEmployeeName: "Sarah Connor",
     category: "Camera",
     allowedZones: ["Main Entrance", "Server Room"],
     status: "restricted",
@@ -243,6 +275,8 @@ export const hardwareAssets: HardwareAsset[] = [
     name: "Access-Tablet-11",
     barcode: "H7311",
     owner: "Front Desk",
+    assignedEmployeeId: "emp-1004",
+    assignedEmployeeName: "Sarah Connor",
     category: "Tablet",
     allowedZones: ["Main Entrance"],
     status: "active",
@@ -253,6 +287,8 @@ export const hardwareAssets: HardwareAsset[] = [
     name: "Network-Switch-50",
     barcode: "H8450",
     owner: "IT",
+    assignedEmployeeId: "emp-1003",
+    assignedEmployeeName: "Michael Lee",
     category: "Network",
     allowedZones: ["Server Room"],
     status: "maintenance",
@@ -312,4 +348,233 @@ export const initialAlerts: Alert[] = [
     date: "Jul 14, 2026",
     time: "10:09:44 AM"
   }
+];
+
+export const initialPermissions: AccessPermission[] = [
+  ...people.map((person) => ({
+    id: `perm-${person.id}`,
+    subjectId: person.id,
+    subjectName: person.name,
+    subjectType: person.type,
+    assignment: person.type === "employee" ? `${person.department ?? "General"} employee` : "Visitor access",
+    state:
+      person.status === "pre_approved" || person.status === "active"
+        ? "active" as const
+        : person.status === "pending_approval"
+          ? "pending_approval" as const
+          : person.status === "expired"
+            ? "expired" as const
+            : person.status === "restricted"
+              ? "restricted" as const
+              : "revoked" as const,
+    zones: [...person.allowedZones],
+    validFrom: person.validFrom ?? "Jan 1, 2016",
+    validTo: person.validTo ?? "No expiry",
+    source: person.type === "visitor" ? "request" as const : "policy" as const,
+    reason: person.status === "inactive" ? "Access removed by administrator" : undefined,
+    updatedAt: "Jul 22, 2026 10:24 AM",
+    updatedBy: person.type === "visitor" ? "Permission Manager" : "System policy",
+  })),
+  ...hardwareAssets.map((asset) => ({
+    id: `perm-${asset.id}`,
+    subjectId: asset.id,
+    subjectName: asset.name,
+    subjectType: "hardware" as const,
+    assignment: asset.assignedEmployeeName
+      ? `Assigned to ${asset.assignedEmployeeName}`
+      : asset.owner,
+    state: asset.status === "restricted" ? "restricted" as const : "active" as const,
+    zones: [...asset.allowedZones],
+    validFrom: "Jan 1, 2026",
+    validTo: "Dec 31, 2026",
+    source: "policy" as const,
+    updatedAt: "Jul 22, 2026 09:58 AM",
+    updatedBy: "Asset Manager",
+  })),
+];
+
+export const initialPermissionRequests: PermissionRequest[] = [
+  {
+    id: "REQ-VIS-7201",
+    type: "visitor",
+    subjectId: "vis-7201",
+    subjectName: "Julia Thompson",
+    requester: "Michael Lee",
+    purpose: "Vendor meeting with Engineering",
+    requestedZones: ["Main Entrance", "Conference Wing"],
+    validFrom: "Jul 22, 2026 09:00 AM",
+    validTo: "Jul 22, 2026 01:00 PM",
+    status: "pending",
+    createdAt: "Jul 22, 2026 10:16 AM",
+  },
+  {
+    id: "REQ-HW-5108",
+    type: "hardware_custody",
+    subjectId: "hw-5108",
+    subjectName: "MacBook-Pro-18",
+    requester: "Sarah Connor",
+    purpose: "Temporary off-site client demonstration",
+    requestedZones: ["Main Entrance", "Off-site"],
+    validFrom: "Jul 22, 2026 11:00 AM",
+    validTo: "Jul 23, 2026 05:00 PM",
+    status: "pending",
+    createdAt: "Jul 22, 2026 10:09 AM",
+    hardwareId: "hw-5108",
+    carrierId: "emp-1004",
+    carrierName: "Sarah Connor",
+  },
+];
+
+export const initialNotifications: PermissionNotification[] = [
+  {
+    id: "NOT-1001",
+    title: "Visitor approval requested",
+    message: "Julia Thompson was created at the security terminal and needs access approval.",
+    category: "approval_request",
+    priority: "high",
+    relatedId: "REQ-VIS-7201",
+    href: "/admin/permissions?request=REQ-VIS-7201",
+    createdAt: "Jul 22, 2026 10:16 AM",
+    read: false,
+  },
+  {
+    id: "NOT-1002",
+    title: "Hardware custody approval requested",
+    message: "Sarah Connor requested custody of MacBook-Pro-18, assigned to Michael Lee.",
+    category: "approval_request",
+    priority: "high",
+    relatedId: "REQ-HW-5108",
+    href: "/admin/permissions?request=REQ-HW-5108",
+    createdAt: "Jul 22, 2026 10:09 AM",
+    read: false,
+  },
+];
+
+export const initialAlertRules: AlertRule[] = [
+  {
+    id: "RULE-EXIT-BALANCE",
+    name: "Exit count exceeds entry count",
+    description: "Triggers when approved exits outnumber approved entries within a day.",
+    category: "presence_anomaly",
+    severity: "high",
+    enabled: true,
+    scope: "All checkpoints / daily",
+    conditionKey: "exit_balance",
+    recentTriggers: 12,
+  },
+  {
+    id: "RULE-NO-BREAK",
+    name: "No break recorded by end of day",
+    description: "Triggers after a six-hour shift ends with no qualifying break.",
+    category: "operational",
+    severity: "medium",
+    enabled: true,
+    scope: "All employees / end of shift",
+    conditionKey: "no_break",
+    recentTriggers: 31,
+  },
+  {
+    id: "RULE-HARDWARE-CARRIER",
+    name: "Unauthorized hardware carrier",
+    description: "Triggers when hardware moves with someone other than its assignee.",
+    category: "hardware_custody",
+    severity: "high",
+    enabled: true,
+    scope: "All hardware / all exits",
+    conditionKey: "unauthorized_hardware_carrier",
+    recentTriggers: 7,
+  },
+  {
+    id: "RULE-RESTRICTED-EMPLOYEE",
+    name: "Restricted employee entry",
+    description: "Triggers when a restricted employee attempts an entry scan.",
+    category: "access_violation",
+    severity: "high",
+    enabled: true,
+    scope: "All employees / all entries",
+    conditionKey: "restricted_employee_entry",
+    recentTriggers: 5,
+  },
+];
+
+export const initialAuditEvents: AuditEvent[] = [
+  {
+    id: "AUD-1004",
+    category: "permission",
+    action: "Manual permission granted",
+    subjectId: "emp-1001",
+    subjectName: "John Doe",
+    actor: "Admin User",
+    role: "Administrator",
+    decision: "granted",
+    reason: "Restored Main Entrance access after review.",
+    relatedId: "perm-emp-1001",
+    date: "Jul 22, 2026",
+    time: "10:24 AM",
+    createdAt: "2026-07-22T10:24:00+05:30",
+  },
+  {
+    id: "AUD-1003",
+    category: "permission",
+    action: "Visitor request denied",
+    subjectId: "vis-8841",
+    subjectName: "Alan Reed",
+    actor: "Admin User",
+    role: "Administrator",
+    decision: "denied",
+    reason: "Host could not verify the meeting.",
+    relatedId: "perm-vis-8841",
+    date: "Jul 22, 2026",
+    time: "10:12 AM",
+    createdAt: "2026-07-22T10:12:00+05:30",
+  },
+  {
+    id: "AUD-1002",
+    category: "permission",
+    action: "Hardware restricted",
+    subjectId: "hw-4007",
+    subjectName: "Chair-07",
+    actor: "Asset Manager",
+    role: "Administrator",
+    decision: "denied",
+    reason: "Warehouse-only asset.",
+    relatedId: "perm-hw-4007",
+    date: "Jul 22, 2026",
+    time: "9:58 AM",
+    createdAt: "2026-07-22T09:58:00+05:30",
+  },
+  {
+    id: "AUD-1001",
+    category: "permission",
+    action: "Employee entry denied",
+    subjectId: "emp-1004",
+    subjectName: "Sarah Connor",
+    actor: "Admin User",
+    role: "Administrator",
+    decision: "denied",
+    reason: "Temporary restricted-zone hold.",
+    relatedId: "perm-emp-1004",
+    date: "Jul 22, 2026",
+    time: "9:41 AM",
+    createdAt: "2026-07-22T09:41:00+05:30",
+  },
+];
+
+export const initialWorkdayStatuses: WorkdayStatus[] = [
+  {
+    employeeId: "emp-1001",
+    employeeName: "John Doe",
+    date: "Jul 14, 2026",
+    breakMinutes: 0,
+    minutesInside: 540,
+    shiftEnded: true,
+  },
+  {
+    employeeId: "emp-1003",
+    employeeName: "Michael Lee",
+    date: "Jul 14, 2026",
+    breakMinutes: 42,
+    minutesInside: 510,
+    shiftEnded: true,
+  },
 ];

@@ -1,9 +1,14 @@
 import type {
+  AccessPermission,
   Alert,
+  AlertRule,
+  AuditEvent,
   Checkpoint,
   HardwareAsset,
   MovementEvent,
   Person,
+  PermissionNotification,
+  PermissionRequest,
   ScanAnalytics,
   ScanDecision,
 } from "../lib/types";
@@ -18,6 +23,11 @@ export type AppDataSnapshot = {
   alerts: Alert[];
   scanAnalytics: ScanAnalytics;
   movementNotes: MovementNotes;
+  permissions: AccessPermission[];
+  permissionRequests: PermissionRequest[];
+  notifications: PermissionNotification[];
+  alertRules: AlertRule[];
+  auditEvents: AuditEvent[];
 };
 
 export type CreateTemporaryVisitorInput = {
@@ -62,6 +72,15 @@ export type RecordScanResult = {
   hardwareAssets: HardwareAsset[];
 };
 
+export type UpdateAccessPermissionInput = {
+  subjectId: string;
+  state: AccessPermission["state"];
+  zones?: string[];
+  validFrom?: string;
+  validTo?: string;
+  reason: string;
+};
+
 export interface DataService {
   getPeople(): Promise<Person[]>;
   getHardwareAssets(): Promise<HardwareAsset[]>;
@@ -70,6 +89,11 @@ export interface DataService {
   getAlerts(): Promise<Alert[]>;
   getScanAnalytics(): Promise<ScanAnalytics>;
   getMovementNotes(): Promise<MovementNotes>;
+  getPermissions(): Promise<AccessPermission[]>;
+  getPermissionRequests(): Promise<PermissionRequest[]>;
+  getNotifications(): Promise<PermissionNotification[]>;
+  getAlertRules(): Promise<AlertRule[]>;
+  getAuditEvents(): Promise<AuditEvent[]>;
 
   createTemporaryVisitor(input: CreateTemporaryVisitorInput): Promise<Person>;
   createEmployee(input: CreateEmployeeInput): Promise<Person>;
@@ -80,6 +104,14 @@ export interface DataService {
     patch: Partial<Omit<HardwareAsset, "id">>
   ): Promise<HardwareAsset>;
   updateAlert(alertId: string, patch: Partial<Omit<Alert, "id">>): Promise<Alert>;
+  updateAccessPermission(input: UpdateAccessPermissionInput): Promise<AccessPermission>;
+  decidePermissionRequest(
+    requestId: string,
+    decision: "approved" | "denied",
+    reason: string
+  ): Promise<PermissionRequest>;
+  updateAlertRule(ruleId: string, enabled: boolean): Promise<AlertRule>;
+  markNotificationRead(notificationId: string): Promise<PermissionNotification>;
   recordScan(input: RecordScanInput): Promise<RecordScanResult>;
   saveMovement(event: MovementEvent): Promise<MovementEvent>;
   syncMovements(eventIds?: string[]): Promise<MovementEvent[]>;

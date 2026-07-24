@@ -58,19 +58,56 @@ function zoneAllowed(subject: SubjectRecord, checkpoint: Checkpoint) {
   return subject.allowedZones.includes(checkpoint.zone) || subject.allowedZones.includes(checkpoint.name);
 }
 
-function statusFor(subject: SubjectRecord | undefined, checkpoint: Checkpoint, direction: Direction) {
+function statusFor(
+  subject: SubjectRecord | undefined,
+  checkpoint: Checkpoint,
+  direction: Direction,
+  carriedHardware: HardwareAsset[]
+) {
   if (!subject) {
     return { result: "denied" as ResultStatus, reason: "Barcode not registered" };
   }
   if (isHardware(subject) && subject.status === "restricted") {
     return { result: "denied" as ResultStatus, reason: "Asset restricted" };
   }
+  if (!isHardware(subject) && subject.type === "employee") {
+    if (subject.status === "restricted") {
+      return { result: "denied" as ResultStatus, reason: "Employee access restricted" };
+    }
+    if (subject.status === "inactive") {
+      return { result: "denied" as ResultStatus, reason: "Employee access inactive" };
+    }
+  }
   if (!isHardware(subject) && subject.type === "visitor") {
     if (subject.status === "expired") {
       return { result: "denied" as ResultStatus, reason: "Temporary barcode expired" };
     }
     if (subject.status !== "pre_approved") {
-      return { result: "denied" as ResultStatus, reason: "Not pre-approved" };
+      return {
+        result: "denied" as ResultStatus,
+        reason:
+          subject.status === "pending_approval"
+            ? "Temporary visitor approval pending"
+            : "Not pre-approved",
+      };
+    }
+  }
+  const restrictedHardware = carriedHardware.find((asset) => asset.status !== "active");
+  if (restrictedHardware) {
+    return {
+      result: "denied" as ResultStatus,
+      reason: `${restrictedHardware.name} is ${restrictedHardware.status}`,
+    };
+  }
+  if (!isHardware(subject)) {
+    const custodyMismatch = carriedHardware.find(
+      (asset) => asset.assignedEmployeeId && asset.assignedEmployeeId !== subject.id
+    );
+    if (custodyMismatch) {
+      return {
+        result: "denied" as ResultStatus,
+        reason: `Hardware assigned to ${custodyMismatch.assignedEmployeeName ?? "another employee"}; custody approval required`,
+      };
     }
   }
   if (!zoneAllowed(subject, checkpoint)) {
@@ -108,8 +145,8 @@ export function evaluateScan({
 }: ScanInput): ScanDecision {
   const subject = findSubject(barcode, people, hardware);
   const direction = directionFor(checkpoint, subject);
-  const decision = statusFor(subject, checkpoint, direction);
   const carriedHardware = hardware.filter((asset) => selectedHardwareIds.includes(asset.id));
+  const decision = statusFor(subject, checkpoint, direction, carriedHardware);
   const syncState: SyncState = online ? "synced" : "queued";
   const event: MovementEvent = {
     id: `EVT-${String(1000 + eventCount).padStart(6, "0")}`,
