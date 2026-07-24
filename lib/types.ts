@@ -8,8 +8,6 @@ export type ResultStatus = "approved" | "denied";
 
 export type SyncState = "synced" | "queued" | "conflict";
 
-export type CheckpointMode = "entry" | "exit" | "auto";
-
 export type VisibleColumn =
   | "date"
   | "time"
@@ -24,7 +22,6 @@ export type VisibleColumn =
   | "eventId";
 
 export type SortDirection = "asc" | "desc";
-
 
 export type Person = {
   id: string;
@@ -75,8 +72,6 @@ export type Checkpoint = {
   online: boolean;
   createdAt?: string;
 };
-
-
 
 export type ScanAnalytics = {
   totalScans: number;
