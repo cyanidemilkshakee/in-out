@@ -239,46 +239,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
                   </Link>
                 );
               })}
-              
-              {/* Theme Toggle - Appended to main items */}
-              <button
-                onClick={() => {
-                  const nextTheme = theme === "light" ? "dark" : "light";
-                  setTheme(nextTheme);
-                  document.documentElement.dataset.adminTheme = nextTheme;
-                  window.localStorage.setItem("inout-admin-theme", nextTheme);
-                }}
-                className="nav-rail-link"
-                aria-label="Toggle Theme"
-                style={{
-                  background: "none",
-                  border: "none",
-                  cursor: "pointer",
-                  position: "relative",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "flex-start",
-                  padding: "8px 12px",
-                  width: "100%",
-                  borderRadius: "12px",
-                }}
-                title={sidebarOpen ? "" : (theme === "light" ? "Switch to dark theme" : "Switch to light theme")}
-              >
-                <div className="admin-rail-icon" style={{ width: "24px", display: "flex", justifyContent: "center", alignItems: "center" }}>
-                  {theme === "light" ? <Moon size={24} strokeWidth={1.25} color="var(--admin-muted)" /> : <Sun size={24} strokeWidth={1.25} color="var(--admin-muted)" />}
-                </div>
-                <span className="admin-rail-link-label" style={{
-                  marginLeft: "20px",
-                  fontSize: "15px",
-                  fontWeight: 400,
-                  opacity: sidebarOpen ? 1 : 0,
-                  transition: "opacity 0.2s ease",
-                  pointerEvents: sidebarOpen ? "auto" : "none",
-                  color: "var(--admin-muted)"
-                }}>
-                  {theme === "light" ? "Dark Mode" : "Light Mode"}
-                </span>
-              </button>
             </div>
 
             {/* Bottom Spacer */}
@@ -352,6 +312,48 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         >
           {children}
         </div>
+        
+        {/* Floating Theme Toggle */}
+        <button
+          onClick={() => {
+            const nextTheme = theme === "light" ? "dark" : "light";
+            setTheme(nextTheme);
+            document.documentElement.dataset.adminTheme = nextTheme;
+            window.localStorage.setItem("inout-admin-theme", nextTheme);
+          }}
+          aria-label="Toggle Theme"
+          style={{
+            position: "fixed",
+            bottom: "16px",
+            right: "16px",
+            width: "48px",
+            height: "48px",
+            borderRadius: "50%",
+            backgroundColor: "var(--admin-bg)",
+            border: "1px solid transparent",
+            display: "flex",
+            justifyContent: "center",
+            alignItems: "center",
+            cursor: "pointer",
+            boxShadow: "none",
+            zIndex: 100,
+            color: "var(--admin-muted)",
+            transition: "background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease"
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = "scale(1.05)";
+            e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
+            e.currentTarget.style.borderColor = "var(--admin-line)";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = "scale(1)";
+            e.currentTarget.style.boxShadow = "none";
+            e.currentTarget.style.borderColor = "transparent";
+          }}
+          title={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
+        >
+          {theme === "light" ? <Moon size={20} strokeWidth={1.5} /> : <Sun size={20} strokeWidth={1.5} />}
+        </button>
       </main>
     </AppChrome>
   );

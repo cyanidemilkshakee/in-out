@@ -9,73 +9,14 @@ import type {
   Person,
   PermissionNotification,
   PermissionRequest,
-  ScanAnalytics
-  ,WorkdayStatus
+  WorkdayStatus
 } from "./types";
 
-
-
-export const scanAnalytics: ScanAnalytics = {
-  totalScans: 700,
-  totalApproved: 450,
-  totalDenied: 250,
-  totalEntries: 250,
-  totalExits: 200,
-  totalAutomatic: 550,
-  totalManual: 150,
-  totalRestricted: 180,
-  totalExpired: 70,
-  activeInside: 50
-};
-
 export const checkpoints: Checkpoint[] = [
-  {
-    id: "cp-main",
-    name: "Main Entrance",
-    mode: "auto",
-    zone: "All Zones",
-    online: true
-  },
-  {
-    id: "cp-warehouse",
-    name: "Warehouse Gate",
-    mode: "auto",
-    zone: "Warehouse",
-    online: true
-  },
-  {
-    id: "cp-it-exit",
-    name: "IT Lab Exit",
-    mode: "exit",
-    zone: "IT Lab",
-    online: false
-  },
-  {
-    id: "cp-server",
-    name: "Server Room Exit",
-    mode: "exit",
-    zone: "Server Room",
-    online: true
-  }
-];
-
-export const scanners: any[] = [
-  {
-    id: "T-01",
-    name: "Terminal-01",
-    checkpointId: "cp-main",
-    status: "online",
-    lastSeen: "10:25:18 AM",
-    version: "v1.4.2"
-  },
-  {
-    id: "T-02",
-    name: "Terminal-02",
-    checkpointId: "cp-warehouse",
-    status: "warning",
-    lastSeen: "10:21:35 AM",
-    version: "v1.4.1"
-  }
+  { id: "cp-main", name: "Main Entrance", mode: "auto", zone: "All Zones", online: true },
+  { id: "cp-warehouse", name: "Warehouse Gate", mode: "auto", zone: "Warehouse", online: true },
+  { id: "cp-it-exit", name: "IT Lab Exit", mode: "exit", zone: "IT Lab", online: false },
+  { id: "cp-server", name: "Server Room Exit", mode: "exit", zone: "Server Room", online: true }
 ];
 
 export const people: Person[] = [

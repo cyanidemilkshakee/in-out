@@ -1,5 +1,8 @@
 import type { MovementEvent, Person, ScanAnalytics } from "./types";
 
+const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+
 export interface Session {
   start: number;
   end: number;
@@ -44,7 +47,6 @@ export const getPersonSessions = (
   }
 
   const result: DayPattern[] = [];
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   for (const date of Object.keys(grouped)) {
     const events = grouped[date];
@@ -105,7 +107,6 @@ export const getDailyMovementCounts = (
 ) => {
   const now = new Date();
   const counts: Record<string, { entries: number, exits: number }> = {};
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   // Initialize the last N days with 0 counts
   for (let i = daysToLookBack - 1; i >= 0; i--) {
@@ -131,25 +132,6 @@ export const getDailyMovementCounts = (
   }
 
   return counts;
-};
-
-// Function for the dashboard DrillDownDoughnut to get zone activity
-export const getZoneActivity = (movements: MovementEvent[]) => {
-  const zoneCounts: Record<string, number> = {};
-  for (const m of movements) {
-    // Some checkpoints are zones (e.g. Warehouse). We can just use the checkpoint name directly.
-    const name = m.checkpoint || "Unknown";
-    zoneCounts[name] = (zoneCounts[name] || 0) + 1;
-  }
-  
-  // Return top 4 zones + "Other"
-  const sorted = Object.entries(zoneCounts).sort((a, b) => b[1] - a[1]);
-  const top = sorted.slice(0, 4);
-  const otherSum = sorted.slice(4).reduce((sum, [_, count]) => sum + count, 0);
-  
-  if (otherSum > 0) top.push(["Other", otherSum]);
-  
-  return top.map(([label, value]) => ({ label, value }));
 };
 
 // Function to get the overall Dashboard KPIs
@@ -306,21 +288,6 @@ export const getEmployeeKPIs = (peopleList: Person[]) => {
   };
 };
 
-export const getDepartmentStats = (peopleList: Person[]) => {
-  const employees = peopleList.filter(p => p.type === 'employee');
-  const deptCounts: Record<string, number> = {};
-  
-  employees.forEach(emp => {
-    const dept = emp.department || 'Unassigned';
-    deptCounts[dept] = (deptCounts[dept] || 0) + 1;
-  });
-
-  return {
-    labels: Object.keys(deptCounts),
-    data: Object.values(deptCounts)
-  };
-};
-
 export const getAverageShiftLengths = (
   movements: MovementEvent[],
   timeRange: "1W" | "1M" | "1Y" = "1W"
@@ -333,7 +300,6 @@ export const getAverageShiftLengths = (
   if (timeRange === "1Y") days = 365;
 
   const now = new Date();
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const cutoffTime = new Date(now);
   cutoffTime.setDate(now.getDate() - days);
   

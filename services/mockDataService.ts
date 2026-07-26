@@ -49,8 +49,8 @@ function cloneMovements(items: MovementEvent[]) {
   return items.map((item) => ({ ...item, hardwareIds: [...item.hardwareIds] }));
 }
 
-function cloneAlerts(items: Alert[]) {
-  return items.map((item) => ({ ...item }));
+function shallowCloneArray<T extends object>(items: T[]): T[] {
+  return items.map(item => ({ ...item }));
 }
 
 function clonePermissions(items: AccessPermission[]) {
@@ -59,18 +59,6 @@ function clonePermissions(items: AccessPermission[]) {
 
 function clonePermissionRequests(items: PermissionRequest[]) {
   return items.map((item) => ({ ...item, requestedZones: [...item.requestedZones] }));
-}
-
-function cloneNotifications(items: PermissionNotification[]) {
-  return items.map((item) => ({ ...item }));
-}
-
-function cloneAlertRules(items: AlertRule[]) {
-  return items.map((item) => ({ ...item }));
-}
-
-function cloneAuditEvents(items: AuditEvent[]) {
-  return items.map((item) => ({ ...item }));
 }
 
 function facilityDate(date = new Date()) {
@@ -98,7 +86,7 @@ function cloneNotes(notes: MovementNotes) {
 
 export function createMockDataSnapshot(): AppDataSnapshot {
   const movements = cloneMovements(initialMovements);
-  const baseAlerts = cloneAlerts(initialAlerts);
+  const baseAlerts = shallowCloneArray(initialAlerts);
   const scheduledAlerts = evaluateScheduledRules({
     rules: initialAlertRules,
     movements,
@@ -110,14 +98,14 @@ export function createMockDataSnapshot(): AppDataSnapshot {
     hardwareAssets: cloneHardware(hardwareAssets),
     checkpoints: checkpoints.map((item) => ({ ...item })),
     movements,
-    alerts: [...scheduledAlerts, ...baseAlerts],
+    alerts: [...scheduledAlerts, ...shallowCloneArray(initialAlerts)],
     scanAnalytics: getDashboardKPIs(movements),
     movementNotes: {},
     permissions: clonePermissions(initialPermissions),
     permissionRequests: clonePermissionRequests(initialPermissionRequests),
-    notifications: cloneNotifications(initialNotifications),
-    alertRules: cloneAlertRules(initialAlertRules),
-    auditEvents: cloneAuditEvents(initialAuditEvents),
+    notifications: shallowCloneArray(initialNotifications),
+    alertRules: shallowCloneArray(initialAlertRules),
+    auditEvents: shallowCloneArray(initialAuditEvents),
   };
 }
 
@@ -139,13 +127,13 @@ export class MockDataService implements DataService {
     this.hardwareAssets = cloneHardware(initialData.hardwareAssets);
     this.checkpoints = initialData.checkpoints.map((item) => ({ ...item }));
     this.movements = cloneMovements(initialData.movements);
-    this.alerts = cloneAlerts(initialData.alerts);
+    this.alerts = shallowCloneArray(initialData.alerts);
     this.movementNotes = cloneNotes(initialData.movementNotes);
     this.permissions = clonePermissions(initialData.permissions);
     this.permissionRequests = clonePermissionRequests(initialData.permissionRequests);
-    this.notifications = cloneNotifications(initialData.notifications);
-    this.alertRules = cloneAlertRules(initialData.alertRules);
-    this.auditEvents = cloneAuditEvents(initialData.auditEvents);
+    this.notifications = shallowCloneArray(initialData.notifications);
+    this.alertRules = shallowCloneArray(initialData.alertRules);
+    this.auditEvents = shallowCloneArray(initialData.auditEvents);
   }
 
   async getPeople() {
@@ -165,7 +153,7 @@ export class MockDataService implements DataService {
   }
 
   async getAlerts() {
-    return cloneAlerts(this.alerts);
+    return shallowCloneArray(this.alerts);
   }
 
   async getScanAnalytics() {
@@ -185,15 +173,15 @@ export class MockDataService implements DataService {
   }
 
   async getNotifications() {
-    return cloneNotifications(this.notifications);
+    return shallowCloneArray(this.notifications);
   }
 
   async getAlertRules() {
-    return cloneAlertRules(this.alertRules);
+    return shallowCloneArray(this.alertRules);
   }
 
   async getAuditEvents() {
-    return cloneAuditEvents(this.auditEvents);
+    return shallowCloneArray(this.auditEvents);
   }
 
   async createTemporaryVisitor(input: CreateTemporaryVisitorInput) {
