@@ -13,7 +13,7 @@ import { DrillDownDoughnut } from "./DrillDownDoughnut";
 import { KPICards } from "./KPICards";
 import { TimeRangeSelector } from "./TimeRangeSelector";
 import { ActiveAlertsWidget } from "./ActiveAlertsWidget";
-import { UsersRound, UserRound, Package } from "lucide-react";
+import { UsersRound, Package } from "lucide-react";
 import type { Alert, MovementEvent, ScanAnalytics } from "../../lib/types";
 import { getDrillDownData, getDashboardKPIs } from "../../lib/analyticsUtils";
 
@@ -206,66 +206,8 @@ export function DashboardCharts({
 
       <KPICards alerts={alerts} scanAnalytics={activeScanAnalytics} />
 
-      <div className="vertical-pill-segmented-group animate-slide-up delay-100" style={{
-        position: "absolute",
-        left: "295px",
-        top: "135px",
-        zIndex: 25,
-        display: "flex",
-        flexDirection: "column",
-        gap: "8px",
-        background: "transparent",
-        boxShadow: "none",
-        padding: "4px"
-      }}>
-        <style>{`
-          .vertical-pill-segmented-group {
-            border: 1px solid transparent !important;
-            transition: border-color 0.2s ease;
-          }
-          .vertical-pill-segmented-group:hover {
-            border-color: #c0c6cc !important;
-          }
-          html[data-admin-theme="dark"] .vertical-pill-segmented-group:hover {
-            border-color: #333333 !important;
-          }
-          .icon-filter-button {
-            background: transparent;
-            border: 1px solid transparent;
-            border-radius: 8px;
-            padding: 10px;
-            color: var(--admin-text);
-            cursor: pointer;
-            transition: all 0.2s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-          }
-          .icon-filter-button:hover:not(.active) {
-            border-color: rgba(82, 96, 93, 0.3);
-          }
-          .icon-filter-button.active {
-            border-color: #52605d;
-          }
-        `}</style>
-        <button
-          className={`icon-filter-button ${subjectTypeFilter === "people" ? "active" : ""}`}
-          onClick={() => setSubjectTypeFilter("people")}
-          title="People"
-        >
-          <UsersRound size={18} strokeWidth={subjectTypeFilter === "people" ? 1.6 : 1.2} />
-        </button>
-        <button
-          className={`icon-filter-button ${subjectTypeFilter === "hardware" ? "active" : ""}`}
-          onClick={() => setSubjectTypeFilter("hardware")}
-          title="Hardware"
-        >
-          <Package size={18} strokeWidth={subjectTypeFilter === "hardware" ? 1.6 : 1.2} />
-        </button>
-      </div>
-
       {/* Top Left — Scan Status */}
-      <div className="analytics-donut dashboard-donut dashboard-donut-quality animate-slide-up delay-100" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px" }}>
+      <div className="analytics-donut dashboard-donut dashboard-donut-quality animate-slide-up delay-100" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-42px" }}>
         <div className="dashboard-donut-title" style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Status</div>
         <Doughnut
           data={chartData.quality}
@@ -298,7 +240,7 @@ export function DashboardCharts({
       </div>
 
       {/* Bottom Left — Approved Scans (Entry/Exit) */}
-      <div className="analytics-donut dashboard-donut dashboard-donut-approved animate-slide-up delay-150" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-22px", marginBottom: "16px" }}>
+      <div className="analytics-donut dashboard-donut dashboard-donut-approved animate-slide-up delay-150" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-42px", marginBottom: "16px" }}>
         <div className="dashboard-donut-title" style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Approved Scans</div>
         <Doughnut
           data={chartData.scanMix}
@@ -334,9 +276,34 @@ export function DashboardCharts({
       </div>
 
       {/* Center — Drill-down Chart */}
-      <div className="analytics-donut dashboard-breakdown" style={{ gridColumn: 2, gridRow: "1 / -1", alignSelf: "center", justifySelf: "center", width: "100%", height: "auto", aspectRatio: "1/1", maxWidth: "1200px", marginTop: "35px" }}>
-        <DrillDownDoughnut data={drillDownData} onNodeClick={openDrillDown} />
-        <div className="dashboard-breakdown-title" style={{ position: "absolute", top: "calc(100% + 40px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "25px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Total Scan Breakdown</div>
+      <div className="dashboard-breakdown-cluster">
+        <div className="analytics-donut dashboard-breakdown" style={{ gridColumn: 2, gridRow: "1 / -1", alignSelf: "center", justifySelf: "center", width: "100%", height: "auto", aspectRatio: "1/1", maxWidth: "1200px", marginTop: "35px" }}>
+          <DrillDownDoughnut data={drillDownData} onNodeClick={openDrillDown} />
+          <div className="dashboard-breakdown-title" style={{ position: "absolute", top: "calc(100% + 40px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "25px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Total Scan Breakdown</div>
+        </div>
+
+        <div className="vertical-pill-segmented-group animate-slide-up delay-100">
+          <button
+            type="button"
+            className={`icon-filter-button ${subjectTypeFilter === "people" ? "active" : ""}`}
+            aria-label="Show people scans"
+            aria-pressed={subjectTypeFilter === "people"}
+            onClick={() => setSubjectTypeFilter("people")}
+            title="People"
+          >
+            <UsersRound size={18} strokeWidth={subjectTypeFilter === "people" ? 1.6 : 1.2} />
+          </button>
+          <button
+            type="button"
+            className={`icon-filter-button ${subjectTypeFilter === "hardware" ? "active" : ""}`}
+            aria-label="Show hardware scans"
+            aria-pressed={subjectTypeFilter === "hardware"}
+            onClick={() => setSubjectTypeFilter("hardware")}
+            title="Hardware"
+          >
+            <Package size={18} strokeWidth={subjectTypeFilter === "hardware" ? 1.6 : 1.2} />
+          </button>
+        </div>
       </div>
 
       {/* Top Right — Auto vs Manual */}

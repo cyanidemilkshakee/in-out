@@ -38,6 +38,7 @@ export function TimeRangeSelector({
           endDate={endDate}
           onRangeChange={onRangeChange}
           variant="segment"
+          active={timeRange === "Custom"}
         />
       ) : null}
     </div>

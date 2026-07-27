@@ -1603,7 +1603,7 @@ tbody tr:hover {
   padding: var(--admin-page-padding-block) var(--admin-page-padding-inline);
 }
 
-.role-admin .admin-console > :not(.admin-rail):not(.rail-toggle-btn):not(.rail-backdrop) {
+.role-admin .admin-console > :not(.admin-rail):not(.rail-toggle-btn):not(.rail-backdrop):not(.admin-theme-toggle) {
   min-width: 0;
   width: 100%;
   max-width: none;
@@ -5717,14 +5717,20 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   display: flex;
   gap: 6px;
   padding: 6px;
-  border: 1px solid #9ca6a3;
+  border: 1px solid transparent;
   border-radius: 20px;
-  background: #e6e6e6;
+  background: transparent;
   transform: translateX(-50%);
+  transition: border-color 0.2s ease;
+}
+
+.role-admin .dashboard-time-range-selector:hover,
+.role-admin .dashboard-time-range-selector:focus-within {
+  border-color: var(--admin-line);
 }
 
 .role-admin .dashboard-time-range-button {
-  border: 0;
+  border: 1px solid transparent;
   border-radius: 16px;
   background: transparent;
   box-shadow: none;
@@ -5734,18 +5740,19 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
-  transition: background-color 0.2s ease, color 0.2s ease;
+  transition: border-color 0.2s ease, color 0.2s ease;
 }
 
 .role-admin .dashboard-time-range-button:hover:not(.is-active) {
-  background: rgba(24, 32, 31, 0.05);
+  border-color: var(--admin-line);
+  background: transparent;
   color: var(--admin-text);
 }
 
 .role-admin .dashboard-time-range-button.is-active {
   background: #e8f1ff;
   color: #1a1f1e;
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .role-admin .dashboard-time-range-button:focus-visible {
@@ -6136,27 +6143,30 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .dashboard-time-range-selector {
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    width: min(100%, 720px);
+    display: flex;
+    width: max-content;
+    max-width: 100%;
     gap: 2px;
-    justify-content: stretch;
+    justify-content: flex-start;
     justify-self: center;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
     padding: 5px;
+    scrollbar-width: none;
   }
 
   .role-admin .dashboard-time-range-button {
     display: flex;
-    width: 100%;
-    min-width: 0;
+    width: auto;
+    min-width: max-content;
+    flex: 0 0 auto;
     align-items: center;
     justify-content: center;
-    padding: 6px 3px;
+    padding: 7px 10px;
     font-size: 16px;
     line-height: 1.1;
     text-align: center;
-    white-space: normal;
+    white-space: nowrap;
   }
 
   .role-admin .dashboard-kpi-card {
@@ -6228,49 +6238,25 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     font-size: 18px;
   }
 
+  .role-admin .dashboard-log-section .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .role-admin .dashboard-log-section .movement-table {
-    table-layout: fixed;
+    table-layout: auto;
+    width: max-content;
+    min-width: 100%;
   }
 
   .role-admin .dashboard-log-section .movement-table th,
   .role-admin .dashboard-log-section .movement-table td {
-    min-width: 0;
-    padding: 9px 7px;
-    overflow-wrap: anywhere;
+    padding: 9px 10px;
+    white-space: nowrap;
     resize: none;
-    white-space: normal;
-  }
-
-  .role-admin .dashboard-log-section .movement-table th:nth-child(1),
-  .role-admin .dashboard-log-section .movement-table td:nth-child(1),
-  .role-admin .dashboard-log-section .movement-table th:nth-child(4),
-  .role-admin .dashboard-log-section .movement-table td:nth-child(4),
-  .role-admin .dashboard-log-section .movement-table th:nth-child(6),
-  .role-admin .dashboard-log-section .movement-table td:nth-child(6),
-  .role-admin .dashboard-log-section .movement-table th:nth-child(8),
-  .role-admin .dashboard-log-section .movement-table td:nth-child(8),
-  .role-admin .dashboard-log-section .movement-table th:nth-child(9),
-  .role-admin .dashboard-log-section .movement-table td:nth-child(9),
-  .role-admin .dashboard-log-section .movement-table th:nth-child(10),
-  .role-admin .dashboard-log-section .movement-table td:nth-child(10) {
-    display: none;
-  }
-
-  .role-admin .dashboard-log-section .movement-table th:nth-child(2) {
-    width: 25%;
-  }
-
-  .role-admin .dashboard-log-section .movement-table th:nth-child(3) {
-    width: 35%;
-  }
-
-  .role-admin .dashboard-log-section .movement-table th:nth-child(5),
-  .role-admin .dashboard-log-section .movement-table th:nth-child(7) {
-    width: 20%;
   }
 
   .role-admin .dashboard-log-section .sort-button {
-    width: 100%;
     gap: 5px;
     padding: 0;
     font-size: 13px;
@@ -6622,17 +6608,15 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .dashboard-time-range-selector {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 0;
+    gap: 2px;
     padding: 4px;
   }
 
   .role-admin .dashboard-time-range-button {
-    grid-column: auto;
     min-height: 42px;
-    padding: 6px 2px;
+    padding: 6px 10px;
     font-size: 15px;
-    letter-spacing: -0.03em;
+    letter-spacing: 0;
     white-space: nowrap;
   }
 
@@ -7220,14 +7204,49 @@ html[data-admin-theme="dark"] .role-admin .pill-segmented-button.active {
 }
 
 /* Vertical Pill segmented button styles */
+.role-admin .dashboard-breakdown-cluster {
+  display: contents;
+}
+
 .role-admin .vertical-pill-segmented-group {
-  display: inline-flex;
+  position: absolute;
+  top: 135px;
+  left: 295px;
+  z-index: 25;
+  display: flex;
   flex-direction: column;
-  background-color: #e6e8eb;
-  border: 1px solid #c0c6cc;
-  border-radius: 24px;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  box-shadow: none;
   padding: 4px;
-  gap: 2px;
+  transition: border-color 0.2s ease;
+}
+
+.role-admin .vertical-pill-segmented-group:hover {
+  border-color: #c0c6cc;
+}
+
+.role-admin .icon-filter-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--admin-text);
+  padding: 10px 8px;
+  cursor: pointer;
+  transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.role-admin .icon-filter-button:hover:not(.active) {
+  border-color: rgba(82, 96, 93, 0.3);
+}
+
+.role-admin .icon-filter-button.active {
+  border-color: rgba(82, 96, 93, 0.5);
 }
 
 .role-admin .vertical-pill-segmented-button {
@@ -7254,7 +7273,11 @@ html[data-admin-theme="dark"] .role-admin .pill-segmented-button.active {
 }
 
 html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group {
-  background-color: #1a1a1a;
+  background: transparent;
+  border-color: transparent;
+}
+
+html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   border-color: #333333;
 }
 
@@ -7309,7 +7332,7 @@ button.terminal-create-btn:hover {
 .role-admin .dashboard-calendar-segment {
   display: inline-flex !important;
   align-items: center;
-  gap: 6px;
+  gap: 0;
   white-space: nowrap;
 }
 
@@ -8782,6 +8805,204 @@ button.terminal-create-btn:hover {
 .role-admin .alert-widget-box:hover,
 .role-admin .alert-item-card:hover {
   border-color: rgba(184, 190, 188, 0.78) !important;
+}
+
+/* Responsive dashboard controls and wide operational tables */
+.role-admin .admin-theme-toggle {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  z-index: 150;
+  display: flex;
+  width: 48px;
+  min-width: 48px;
+  max-width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1;
+  border: 1px solid transparent;
+  border-radius: 50%;
+  background: var(--admin-bg);
+  box-shadow: none;
+  color: var(--admin-muted);
+  padding: 0;
+  cursor: pointer;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
+}
+
+.role-admin .admin-theme-toggle:hover {
+  border-color: var(--admin-line);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  color: var(--admin-text);
+  transform: scale(1.05);
+}
+
+.role-admin .admin-theme-toggle:focus-visible {
+  outline: 2px solid var(--admin-text);
+  outline-offset: 3px;
+}
+
+html[data-admin-theme="dark"] .role-admin .admin-theme-toggle {
+  background: var(--admin-bg);
+  color: var(--admin-muted);
+}
+
+html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
+  border-color: var(--admin-lime);
+  color: var(--admin-lime);
+}
+
+.role-admin .dashboard-time-range-selector > .calendar-picker-container {
+  width: auto;
+  flex: 0 0 auto;
+}
+
+.role-admin .dashboard-calendar-segment {
+  width: auto;
+}
+
+@media (max-width: 1180px) {
+  .role-admin .dashboard-breakdown-cluster {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-row: 3;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    order: 3;
+    width: 100%;
+    align-items: center;
+    justify-content: stretch;
+    gap: 0;
+  }
+
+  .role-admin .dashboard-breakdown-cluster .dashboard-breakdown {
+    grid-column: 1 !important;
+    grid-row: 1 !important;
+    width: 100% !important;
+    max-width: 310px !important;
+    justify-self: center !important;
+  }
+
+  .role-admin .dashboard-breakdown-cluster .vertical-pill-segmented-group {
+    position: static;
+    grid-column: 2;
+    grid-row: 1;
+    align-self: center;
+    justify-self: center;
+  }
+
+  .role-admin .dashboard-calendar-segment + .calendar-popover {
+    right: 0;
+    left: auto !important;
+    transform: none !important;
+  }
+}
+
+@media (max-width: 900px) {
+  .role-admin .admin-theme-toggle {
+    right: 12px;
+    bottom: calc(var(--mobile-admin-nav-height) + 12px);
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    height: 44px;
+    flex-basis: 44px;
+    background: var(--admin-surface-strong);
+    box-shadow: 0 6px 18px rgba(24, 32, 31, 0.12);
+  }
+
+  .role-admin .log-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 760px) {
+  .role-admin .dashboard-breakdown-cluster {
+    grid-column: 1 / -1;
+    grid-row: auto;
+    grid-template-columns: minmax(0, 280px) minmax(48px, 1fr);
+    justify-content: stretch;
+    gap: 8px;
+  }
+
+  .role-admin .dashboard-breakdown-cluster .dashboard-breakdown {
+    width: min(100%, 280px) !important;
+    max-width: 280px !important;
+    justify-self: start !important;
+    margin: 2px 0 54px !important;
+  }
+
+  .role-admin .registry-workspace .table-wrap,
+  .role-admin .log-workspace .table-wrap {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    overflow-x: auto !important;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: thin;
+    touch-action: pan-x pan-y;
+  }
+
+  .role-admin .registry-workspace .data-table,
+  .role-admin .log-workspace .movement-table {
+    display: table !important;
+    width: 100%;
+    min-width: 980px !important;
+    table-layout: auto !important;
+    border-collapse: separate;
+  }
+
+  .role-admin .log-workspace .movement-table {
+    min-width: 1120px !important;
+  }
+
+  .role-admin .registry-workspace .data-table thead,
+  .role-admin .log-workspace .movement-table thead {
+    position: static;
+    display: table-header-group;
+    width: auto;
+    height: auto;
+    overflow: visible;
+    clip: auto;
+    clip-path: none;
+  }
+
+  .role-admin .registry-workspace .data-table tbody,
+  .role-admin .log-workspace .movement-table tbody {
+    display: table-row-group;
+  }
+
+  .role-admin .registry-workspace .data-table tr,
+  .role-admin .log-workspace .movement-table tr {
+    display: table-row;
+  }
+
+  .role-admin .registry-workspace .data-table th,
+  .role-admin .registry-workspace .data-table td,
+  .role-admin .log-workspace .movement-table th,
+  .role-admin .log-workspace .movement-table td,
+  .role-admin .registry-workspace .data-table [class*="column-"],
+  .role-admin .log-workspace .movement-table [class*="column-"] {
+    display: table-cell !important;
+    width: auto !important;
+    min-width: max-content;
+    white-space: nowrap !important;
+  }
+
+  .role-admin .registry-workspace .data-table td::before,
+  .role-admin .log-workspace .movement-table td::before {
+    display: none !important;
+    content: none !important;
+  }
+}
+
+@media (max-width: 460px) {
+  .role-admin .admin-theme-toggle {
+    right: 10px;
+    bottom: calc(var(--mobile-admin-nav-height) + 10px);
+  }
 }
 
 

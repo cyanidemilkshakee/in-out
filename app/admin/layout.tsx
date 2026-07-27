@@ -315,41 +315,15 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         
         {/* Floating Theme Toggle */}
         <button
+          type="button"
+          className="admin-theme-toggle"
           onClick={() => {
             const nextTheme = theme === "light" ? "dark" : "light";
             setTheme(nextTheme);
             document.documentElement.dataset.adminTheme = nextTheme;
             window.localStorage.setItem("inout-admin-theme", nextTheme);
           }}
-          aria-label="Toggle Theme"
-          style={{
-            position: "fixed",
-            bottom: "16px",
-            right: "16px",
-            width: "48px",
-            height: "48px",
-            borderRadius: "50%",
-            backgroundColor: "var(--admin-bg)",
-            border: "1px solid transparent",
-            display: "flex",
-            justifyContent: "center",
-            alignItems: "center",
-            cursor: "pointer",
-            boxShadow: "none",
-            zIndex: 100,
-            color: "var(--admin-muted)",
-            transition: "background-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease"
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.transform = "scale(1.05)";
-            e.currentTarget.style.boxShadow = "0 4px 12px rgba(0, 0, 0, 0.15)";
-            e.currentTarget.style.borderColor = "var(--admin-line)";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.transform = "scale(1)";
-            e.currentTarget.style.boxShadow = "none";
-            e.currentTarget.style.borderColor = "transparent";
-          }}
+          aria-label={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
           title={theme === "light" ? "Switch to dark theme" : "Switch to light theme"}
         >
           {theme === "light" ? <Moon size={20} strokeWidth={1.5} /> : <Sun size={20} strokeWidth={1.5} />}

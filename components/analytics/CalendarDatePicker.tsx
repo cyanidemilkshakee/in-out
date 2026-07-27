@@ -7,6 +7,7 @@ export interface CalendarDatePickerProps {
   onRangeChange: (start: string, end: string) => void;
   className?: string;
   variant?: "icon" | "segment";
+  active?: boolean;
 }
 
 const MIN_DATE_TIME = "2016-01-01T00:00";
@@ -38,10 +39,12 @@ export function CalendarDatePicker({
   onRangeChange,
   className = "",
   variant = "icon",
+  active = false,
 }: CalendarDatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
   const maximumDateTime = getFacilityNowValue();
+  const isSegment = variant === "segment";
 
   // Close when clicking outside
   useEffect(() => {
@@ -74,12 +77,13 @@ export function CalendarDatePicker({
     <div className={`calendar-picker-container ${className}`} ref={containerRef} style={{ position: "relative", display: "inline-block" }}>
       <button 
         type="button" 
-        className={`${variant === "segment" ? "dashboard-time-range-button dashboard-calendar-segment" : "icon-filter-button"} ${isOpen ? "active is-active" : ""}`}
+        className={`${isSegment ? "dashboard-time-range-button dashboard-calendar-segment" : "icon-filter-button"}${isOpen ? " active" : ""}${isSegment && active ? " is-active" : ""}`}
         onClick={() => setIsOpen(!isOpen)}
         title="Custom Date Range"
         aria-label="Custom date range"
         aria-expanded={isOpen}
-        style={{
+        aria-pressed={isSegment ? active : undefined}
+        style={isSegment ? undefined : {
           background: "transparent",
           border: isOpen ? "1.5px solid var(--admin-text)" : "1px solid transparent",
           borderRadius: "12px",
@@ -92,8 +96,8 @@ export function CalendarDatePicker({
           transition: "border-color 0.2s"
         }}
       >
-        <CalendarIcon size={18} strokeWidth={isOpen ? 1.6 : 1.2} />
-        {variant === "segment" ? <span>Custom</span> : null}
+        {!isSegment ? <CalendarIcon size={18} strokeWidth={isOpen ? 1.6 : 1.2} /> : null}
+        {isSegment ? <span>Custom</span> : null}
       </button>
 
       {isOpen && (
