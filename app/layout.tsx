@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import { Urbanist } from "next/font/google";
-import { AppProviders } from "../components/AppProviders";
 import "./globals.css";
 
 const urbanist = Urbanist({
@@ -12,7 +11,7 @@ const urbanist = Urbanist({
 
 export const metadata: Metadata = {
   title: "IN / OUT Management System",
-  description: "Mock frontend for inbound-outbound checkpoint operations"
+  description: "Database-backed prototype for inbound-outbound checkpoint operations"
 };
 
 export default function RootLayout({
@@ -23,7 +22,7 @@ export default function RootLayout({
   return (
     <html lang="en" className={urbanist.variable}>
       <body>
-        <AppProviders>{children}</AppProviders>
+        {children}
       </body>
     </html>
   );

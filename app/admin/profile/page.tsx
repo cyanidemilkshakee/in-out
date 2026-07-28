@@ -10,6 +10,12 @@ import {
   UserRound
 } from "lucide-react";
 import { AdminCreator, type CreateAdminInput } from "../../../components/admin/AdminCreator";
+import {
+  createAdminAccount,
+  getAdminProfile,
+  updateAdminProfile,
+  type ProfileSettings,
+} from "../../../services/profileService";
 
 
 
@@ -18,12 +24,6 @@ type ProfileIdentity = {
   nickname: string;
   email: string;
   avatarDataUrl: string;
-};
-
-type ProfileSettings = {
-  syncAlerts: boolean;
-  weeklyDigest: boolean;
-  requireReviewNote: boolean;
 };
 
 const defaultProfile: ProfileIdentity = {
@@ -48,6 +48,7 @@ export default function ProfilePage() {
   const [formError, setFormError] = useState("");
   const [pictureError, setPictureError] = useState("");
   const [settings, setSettings] = useState<ProfileSettings>(defaultSettings);
+  const [saving, setSaving] = useState(false);
   const [password, setPassword] = useState({
     current: "",
     next: "",
@@ -55,36 +56,29 @@ export default function ProfilePage() {
   });
 
   useEffect(() => {
-    const storedAutoLock = window.localStorage.getItem("inout-admin-autolock");
-    const storedProfile = window.localStorage.getItem("inout-admin-profile");
-    const storedSettings = window.localStorage.getItem("inout-admin-settings");
-
-    if (storedAutoLock) setAutoLock(storedAutoLock);
-
-    if (storedProfile) {
-      try {
-        const nextProfile = { ...defaultProfile, ...JSON.parse(storedProfile) };
+    let cancelled = false;
+    void getAdminProfile()
+      .then((result) => {
+        if (cancelled) return;
         setProfile({
-          ...nextProfile,
-          name: nextProfile.name === "Ops Admin" ? "Admin" : nextProfile.name
+          name: result.name,
+          nickname: result.nickname,
+          email: result.email,
+          avatarDataUrl: result.avatarDataUrl,
         });
-      } catch {
-        window.localStorage.removeItem("inout-admin-profile");
-      }
-    }
-
-    if (storedSettings) {
-      try {
-        const nextSettings = JSON.parse(storedSettings) as Partial<ProfileSettings>;
-        setSettings({
-          syncAlerts: nextSettings.syncAlerts ?? defaultSettings.syncAlerts,
-          weeklyDigest: nextSettings.weeklyDigest ?? defaultSettings.weeklyDigest,
-          requireReviewNote: nextSettings.requireReviewNote ?? defaultSettings.requireReviewNote
-        });
-      } catch {
-        window.localStorage.removeItem("inout-admin-settings");
-      }
-    }
+        setAutoLock(result.autoLock);
+        setSettings(result.settings);
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setFormError(
+            error instanceof Error ? error.message : "Unable to load the admin profile."
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function markChanged() {
@@ -132,7 +126,7 @@ export default function ProfilePage() {
     reader.readAsDataURL(file);
   }
 
-  function savePreferences() {
+  async function savePreferences() {
     const cleanName = profile.name.trim();
     const cleanNickname = profile.nickname.trim();
     const cleanEmail = profile.email.trim();
@@ -168,49 +162,53 @@ export default function ProfilePage() {
       return;
     }
 
-    const cleanProfile = {
+    const cleanProfile: ProfileIdentity = {
       ...profile,
       name: cleanName,
       nickname: cleanNickname,
       email: cleanEmail
     };
 
-    setProfile(cleanProfile);
-    window.localStorage.setItem("inout-admin-profile", JSON.stringify(cleanProfile));
-    window.localStorage.setItem("inout-admin-autolock", autoLock);
-    window.localStorage.setItem("inout-admin-settings", JSON.stringify(settings));
-    setPassword({ current: "", next: "", confirm: "" });
-    setFormError("");
-    setSaved(true);
+    setSaving(true);
+    try {
+      const result = await updateAdminProfile({
+        ...cleanProfile,
+        autoLock,
+        settings,
+        currentPassword: changingPassword ? password.current : undefined,
+        newPassword: changingPassword ? password.next : undefined,
+      });
+      setProfile({
+        name: result.name,
+        nickname: result.nickname,
+        email: result.email,
+        avatarDataUrl: result.avatarDataUrl,
+      });
+      setAutoLock(result.autoLock);
+      setSettings(result.settings);
+      setPassword({ current: "", next: "", confirm: "" });
+      setFormError("");
+      setSaved(true);
+    } catch (error) {
+      setSaved(false);
+      setFormError(
+        error instanceof Error ? error.message : "Unable to save profile preferences."
+      );
+    } finally {
+      setSaving(false);
+    }
   }
 
-  function createAdmin(input: CreateAdminInput) {
-    const email = input.email.trim().toLowerCase();
-    const storageKey = "inout-admin-accounts";
-    let accounts: Array<{ id: string; name: string; nickname: string; email: string }> = [];
-
-    try {
-      const storedAccounts = window.localStorage.getItem(storageKey);
-      if (storedAccounts) accounts = JSON.parse(storedAccounts);
-    } catch {
-      window.localStorage.removeItem(storageKey);
-    }
-
-    if (accounts.some((account) => account.email.toLowerCase() === email)) {
-      throw new Error("An admin with this email already exists.");
-    }
-
-    const account = {
-      id: `admin-${Date.now()}`,
-      name: input.name.trim(),
-      nickname: input.nickname.trim(),
-      email,
-    };
-    const nextProfile = { ...profile, ...account, avatarDataUrl: "" };
-
-    window.localStorage.setItem(storageKey, JSON.stringify([account, ...accounts]));
-    window.localStorage.setItem("inout-admin-profile", JSON.stringify(nextProfile));
-    setProfile(nextProfile);
+  async function createAdmin(input: CreateAdminInput) {
+    const result = await createAdminAccount(input);
+    setProfile({
+      name: result.name,
+      nickname: result.nickname,
+      email: result.email,
+      avatarDataUrl: result.avatarDataUrl,
+    });
+    setAutoLock(result.autoLock);
+    setSettings(result.settings);
     setSaved(false);
     setFormError("");
   }
@@ -333,7 +331,7 @@ export default function ProfilePage() {
             <KeyRound aria-hidden="true" />
             <div>
               <h2>Change password</h2>
-              <p>Password values are validated here but never stored in the browser.</p>
+              <p>Your current password is verified and the new password is hashed by the backend.</p>
             </div>
           </div>
           <div className="profile-form-grid profile-password-grid">
@@ -372,9 +370,14 @@ export default function ProfilePage() {
         <span className="sr-only" role="status" aria-live="polite">
           {formError || (saved ? "Your profile and preferences are saved." : "Unsaved profile changes.")}
         </span>
-        <button className="primary-button" type="button" onClick={savePreferences}>
+        <button
+          className="primary-button"
+          type="button"
+          onClick={() => void savePreferences()}
+          disabled={saving}
+        >
           <Save aria-hidden="true" />
-          Save preferences
+          {saving ? "Saving…" : "Save preferences"}
         </button>
       </div>
     </main>

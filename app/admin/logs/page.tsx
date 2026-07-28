@@ -1,14 +1,50 @@
 "use client";
 
-import { useDeferredValue, useEffect, useState, useMemo } from "react";
-import type { MovementEvent, VisibleColumn, SortDirection, ResultStatus } from "../../../lib/types";
+import dynamic from "next/dynamic";
+import {
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import type {
+  MovementPage,
+  VisibleColumn,
+  SortDirection,
+  ResultStatus,
+} from "../../../lib/types";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { MovementTable } from "../../../components/admin/tables/MovementTable";
-import { DetailDrawer } from "../../../components/admin/tables/DetailDrawer";
-import { TrendChart, type TimeRange } from "../../../components/analytics/TrendChart";
+import type { TimeRange } from "../../../components/analytics/TrendChart";
 import { CalendarDatePicker } from "../../../components/analytics/CalendarDatePicker";
-import { ReportBuilder } from "../../../components/admin/reports/ReportBuilder";
 import { useDataActions, useDataState } from "../../../context/DataContext";
+import {
+  compactRangeBounds,
+  parseDateInput,
+} from "../../../lib/dateRanges";
+
+const TrendChart = dynamic(
+  () =>
+    import("../../../components/analytics/TrendChart").then(
+      (module) => module.TrendChart
+    ),
+  { ssr: false }
+);
+const ReportBuilder = dynamic(
+  () =>
+    import("../../../components/admin/reports/ReportBuilder").then(
+      (module) => module.ReportBuilder
+    ),
+  { ssr: false }
+);
+const DetailDrawer = dynamic(
+  () =>
+    import("../../../components/admin/tables/DetailDrawer").then(
+      (module) => module.DetailDrawer
+    ),
+  { ssr: false }
+);
 
 type StatusFilter = ResultStatus | "all";
 
@@ -27,8 +63,14 @@ const defaultVisibleColumns: Record<VisibleColumn, boolean> = {
 };
 
 export default function LogsPage() {
-  const { movements: events, alerts, auditEvents, movementNotes: eventNotes } = useDataState();
-  const { addMovementNote, updateAlert } = useDataActions();
+  const {
+    movements: initialEvents,
+    movementPage: initialMovementPage,
+    alerts,
+    auditEvents,
+    movementNotes: initialEventNotes,
+  } = useDataState();
+  const { addMovementNote, queryMovements, updateAlert } = useDataActions();
   const [search, setSearch] = useState("");
   const [checkpointFilter, setCheckpointFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
@@ -37,14 +79,33 @@ export default function LogsPage() {
   const [subjectTypeFilter, setSubjectTypeFilter] = useState<"people" | "hardware">("people");
   const [page, setPage] = useState(1);
   const rowsPerPage = 25;
-  const [sortKey, setSortKey] = useState<VisibleColumn>("time");
+  const [sortKey, setSortKey] = useState<VisibleColumn>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [selectedEventId, setSelectedEventId] = useState(events[0]?.id ?? "");
+  const [selectedEventId, setSelectedEventId] = useState(
+    initialEvents[0]?.id ?? ""
+  );
   const [drawerDraft, setDrawerDraft] = useState("");
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const deferredSearch = useDeferredValue(search);
+  const [filtersReady, setFiltersReady] = useState(false);
+  const [isQuerying, setIsQuerying] = useState(false);
+  const [movementPage, setMovementPage] = useState<MovementPage>(() => ({
+    ...(initialMovementPage ?? {
+      items: initialEvents,
+      chartItems: initialEvents,
+      movementNotes: initialEventNotes,
+      total: initialEvents.length,
+      page: 1,
+      pageSize: rowsPerPage,
+      checkpoints: Array.from(
+        new Set(initialEvents.map((event) => event.checkpoint))
+      ).sort(),
+    }),
+  }));
+  const [queryError, setQueryError] = useState("");
+  const initialQueryPending = useRef(Boolean(initialMovementPage));
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -53,78 +114,99 @@ export default function LogsPage() {
     const scanType = params.get("scanType");
     const direction = params.get("direction");
     const reason = params.get("reason");
+    if ([subject, result, scanType, direction, reason].some(Boolean)) {
+      initialQueryPending.current = false;
+    }
     if (subject === "people" || subject === "hardware") setSubjectTypeFilter(subject);
     if (result === "approved" || result === "denied") setStatusFilter(result);
     if (scanType === "auto" || scanType === "manual") setScanTypeFilter(scanType);
     if (direction === "entry" || direction === "exit") setDirectionFilter(direction);
     if (reason) setSearch(reason);
+    setFiltersReady(true);
   }, []);
 
-  const filteredEvents = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    return events.filter((event) => {
-      const checkpointMatch =
-        checkpointFilter === "all" || event.checkpoint === checkpointFilter;
-      const statusMatch =
-        statusFilter === "all" ||
-        event.result === statusFilter;
-      const scanTypeMatch = scanTypeFilter === "all" || event.scanType === scanTypeFilter;
-      const directionMatch = directionFilter === "all" || event.direction === directionFilter;
-      const typeMatch =
-        (subjectTypeFilter === "people" && (event.subjectType === "employee" || event.subjectType === "visitor")) ||
-        (subjectTypeFilter === "hardware" && event.subjectType === "hardware");
-      const searchMatch =
-        !needle ||
-        [event.subjectName, event.barcode, event.checkpoint, event.scanType, event.result, event.reason]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle);
-          
-      // Check date range
-      const inDateRange = (!startDate || new Date(event.date) >= new Date(startDate)) &&
-                          (!endDate || new Date(event.date) <= new Date(endDate));
-                          
-      return checkpointMatch && statusMatch && scanTypeMatch && directionMatch && typeMatch && searchMatch && inDateRange;
-    });
-  }, [checkpointFilter, deferredSearch, directionFilter, endDate, events, scanTypeFilter, startDate, statusFilter, subjectTypeFilter]);
+  const rangeBounds = useMemo(() => {
+    const preset = compactRangeBounds(timeRange);
+    const rangeStart = startDate ? parseDateInput(startDate) ?? preset.start : preset.start;
+    const rangeEnd = endDate ? parseDateInput(endDate, true) ?? preset.end : preset.end;
+    return { rangeStart, rangeEnd };
+  }, [endDate, startDate, timeRange]);
 
-  const pagedEvents = useMemo(() => {
-    const timeValue = (time: string) => {
-      const match = time.match(/^(\d{1,2}):(\d{2}):(\d{2})\s(AM|PM)$/);
-      if (!match) {
-        return time;
-      }
-      const [, rawHour, minute, second, period] = match;
-      const hour = (Number(rawHour) % 12) + (period === "PM" ? 12 : 0);
-      return hour * 3600 + Number(minute) * 60 + Number(second);
+  useEffect(() => {
+    setPage(1);
+  }, [
+    checkpointFilter,
+    deferredSearch,
+    directionFilter,
+    endDate,
+    scanTypeFilter,
+    startDate,
+    statusFilter,
+    subjectTypeFilter,
+    timeRange,
+  ]);
+
+  useEffect(() => {
+    if (!filtersReady) return;
+    if (initialQueryPending.current) {
+      initialQueryPending.current = false;
+      return;
+    }
+    let cancelled = false;
+    setIsQuerying(true);
+    setQueryError("");
+    void queryMovements({
+      page,
+      pageSize: rowsPerPage,
+      search: deferredSearch.trim() || undefined,
+      checkpoint:
+        checkpointFilter === "all" ? undefined : checkpointFilter,
+      result: statusFilter === "all" ? undefined : statusFilter,
+      scanType: scanTypeFilter === "all" ? undefined : scanTypeFilter,
+      direction: directionFilter === "all" ? undefined : directionFilter,
+      subjectGroup: subjectTypeFilter,
+      startAt: new Date(rangeBounds.rangeStart).toISOString(),
+      endAt: new Date(rangeBounds.rangeEnd).toISOString(),
+      sortKey,
+      sortDirection,
+    })
+      .then((result) => {
+        if (cancelled) return;
+        setMovementPage(result);
+        setSelectedEventId((current) =>
+          result.items.some((event) => event.id === current) ? current : ""
+        );
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setQueryError(
+            error instanceof Error
+              ? error.message
+              : "Unable to update movement results."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsQuerying(false);
+      });
+    return () => {
+      cancelled = true;
     };
-
-    const valueFor = (event: MovementEvent, key: VisibleColumn) => {
-      const values: Record<VisibleColumn, string | number> = {
-        date: event.date,
-        time: timeValue(event.time),
-        createdAt: event.createdAt ?? 0,
-        name: event.subjectName,
-        type: event.subjectType,
-        direction: event.direction,
-        checkpoint: event.checkpoint,
-        result: event.result,
-        barcode: event.barcode,
-        scanType: event.scanType ?? "",
-        eventId: event.id
-      };
-      return values[key];
-    };
-
-    const start = (page - 1) * rowsPerPage;
-    return [...filteredEvents].sort((a, b) => {
-      const aVal = valueFor(a, sortKey);
-      const bVal = valueFor(b, sortKey);
-      if (aVal === bVal) return 0;
-      const greater = aVal > bVal;
-      return sortDirection === "asc" ? (greater ? 1 : -1) : greater ? -1 : 1;
-    }).slice(start, start + rowsPerPage);
-  }, [filteredEvents, page, rowsPerPage, sortDirection, sortKey]);
+  }, [
+    checkpointFilter,
+    deferredSearch,
+    directionFilter,
+    filtersReady,
+    page,
+    queryMovements,
+    rangeBounds.rangeEnd,
+    rangeBounds.rangeStart,
+    scanTypeFilter,
+    sortDirection,
+    sortKey,
+    statusFilter,
+    subjectTypeFilter,
+  ]);
 
   function updateSort(column: VisibleColumn) {
     setSortKey(column);
@@ -134,22 +216,36 @@ export default function LogsPage() {
   function handleSaveNote(eventId: string) {
     const trimmed = drawerDraft.trim();
     if (!trimmed) return;
-    void addMovementNote(eventId, trimmed);
+    void addMovementNote(eventId, trimmed).then((notes) => {
+      setMovementPage((current) => ({
+        ...current,
+        movementNotes: {
+          ...current.movementNotes,
+          [eventId]: notes,
+        },
+      }));
+    });
     setDrawerDraft("");
   }
 
-  const selectedEvent = useMemo(() => events.find((e) => e.id === selectedEventId), [events, selectedEventId]);
+  const selectedEvent = useMemo(
+    () => movementPage.items.find((event) => event.id === selectedEventId),
+    [movementPage.items, selectedEventId]
+  );
   const selectedAlert = useMemo(
     () => alerts.find((alert) => alert.id === selectedEventId || alert.sourceEventId === selectedEventId),
     [alerts, selectedEventId]
   );
-  const uniqueCheckpoints = useMemo(() => Array.from(new Set(events.map(e => e.checkpoint))).sort(), [events]);
+  const totalPages = Math.max(
+    1,
+    Math.ceil(movementPage.total / rowsPerPage)
+  );
 
   return (
     <AdminPageFrame
       title="Movement Ledger"
       description="Search every entry, exit, denial, and offline movement with row-level review for security handoff."
-      headerRight={<TrendChart events={filteredEvents} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
+      headerRight={<TrendChart events={movementPage.chartItems} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
       preTitle={
         <div className="pill-segmented-group">
           <button
@@ -167,11 +263,11 @@ export default function LogsPage() {
         </div>
       }
     >
-    <section className="split-workspace log-workspace">
+    <section className={`split-workspace log-workspace${selectedEvent ? " has-detail-drawer" : ""}`}>
       <div className="workspace-main">
 
         <div className="filter-bar">
-          <ReportBuilder movements={filteredEvents} alerts={alerts} auditEvents={auditEvents} />
+          <ReportBuilder movements={movementPage.chartItems} alerts={alerts} auditEvents={auditEvents} />
           <label className="select-control">
             <span className="sr-only">Filter by time</span>
             <select
@@ -196,7 +292,7 @@ export default function LogsPage() {
               onChange={(e) => setCheckpointFilter(e.target.value)}
             >
               <option value="all">All Checkpoints</option>
-              {uniqueCheckpoints.map(cp => <option key={cp} value={cp}>{cp}</option>)}
+              {movementPage.checkpoints.map(cp => <option key={cp} value={cp}>{cp}</option>)}
             </select>
           </label>
           <label className="select-control">
@@ -244,7 +340,7 @@ export default function LogsPage() {
         </div>
 
         <MovementTable
-          events={pagedEvents}
+          events={movementPage.items}
           selectedId={selectedEventId}
           visibleColumns={defaultVisibleColumns}
           sortKey={sortKey}
@@ -253,6 +349,12 @@ export default function LogsPage() {
           onSort={updateSort}
           onSelect={setSelectedEventId}
         />
+        <span className="sr-only" role="status" aria-live="polite">
+          {queryError ||
+          (isQuerying
+            ? "Updating movement results."
+            : `${movementPage.total} movement results loaded.`)}
+        </span>
         
         <div className="pagination">
           <button
@@ -262,10 +364,10 @@ export default function LogsPage() {
           >
             Previous
           </button>
-          <span>Page {page} of {Math.ceil(filteredEvents.length / rowsPerPage) || 1}</span>
+          <span>Page {page} of {totalPages}</span>
           <button
             type="button"
-            disabled={page >= Math.ceil(filteredEvents.length / rowsPerPage)}
+            disabled={page >= totalPages}
             onClick={() => setPage((p) => p + 1)}
           >
             Next
@@ -277,7 +379,7 @@ export default function LogsPage() {
         <DetailDrawer
           alert={selectedAlert}
           event={selectedEvent}
-          notes={eventNotes[selectedEvent.id] ?? []}
+          notes={movementPage.movementNotes[selectedEvent.id] ?? []}
           noteDraft={drawerDraft}
           onNoteDraftChange={setDrawerDraft}
           onAddNote={() => handleSaveNote(selectedEvent.id)}

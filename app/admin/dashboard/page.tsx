@@ -1,20 +1,27 @@
 "use client";
 
-import { lazy, Suspense, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import { useMemo, useState } from "react";
 import { MovementTable } from "../../../components/admin/tables/MovementTable";
 import { useDataState } from "../../../context/DataContext";
 import type {
   Alert,
   MovementEvent,
-  ScanAnalytics,
   SortDirection,
   VisibleColumn,
 } from "../../../lib/types";
 
-const DashboardCharts = lazy(() =>
-  import("../../../components/analytics/DashboardCharts").then((module) => ({
-    default: module.DashboardCharts,
-  }))
+const DashboardCharts = dynamic(
+  () =>
+    import("../../../components/analytics/DashboardCharts").then(
+      (module) => module.DashboardCharts
+    ),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="dashboard-chart-loading">Loading charts…</div>
+    ),
+  }
 );
 
 const dashboardVisibleColumns: Record<VisibleColumn, boolean> = {
@@ -33,11 +40,9 @@ const dashboardVisibleColumns: Record<VisibleColumn, boolean> = {
 
 function DashboardOverview({
   alerts,
-  scanAnalytics,
   events,
 }: {
   alerts: Alert[];
-  scanAnalytics: ScanAnalytics;
   events: MovementEvent[];
 }) {
   const latestEvents = useMemo(() => events.slice(0, 10), [events]);
@@ -48,35 +53,14 @@ function DashboardOverview({
   return (
     <section className="dashboard-overview" aria-label="Operational overview">
       <div className="dashboard-chart-viewport">
-        <Suspense
-          fallback={
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                height: "100%",
-                color: "var(--admin-muted, #667085)",
-                fontSize: "14px",
-                fontWeight: 700,
-                letterSpacing: "1px",
-                textTransform: "uppercase",
-              }}
-            >
-              Loading charts…
-            </div>
-          }
-        >
-          <DashboardCharts
-            alerts={alerts}
-            movements={events}
-            scanAnalytics={scanAnalytics}
-          />
-        </Suspense>
+        <DashboardCharts
+          alerts={alerts}
+          movements={events}
+        />
       </div>
 
       <div className="dashboard-log-section">
-        <h2>Recent Movement Logs</h2>
+        <h2 id="recent-movement-heading">Recent Movement Logs</h2>
         <MovementTable
           events={latestEvents}
           selectedId={selectedEventId}
@@ -86,14 +70,18 @@ function DashboardOverview({
           density="comfortable"
           onSort={(key) => {
             if (sortKey === key) {
-              setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+              setSortDirection((current) =>
+                current === "asc" ? "desc" : "asc"
+              );
             } else {
               setSortKey(key);
               setSortDirection("desc");
             }
           }}
           onSelect={(id) =>
-            setSelectedEventId((current) => (id === current ? undefined : id))
+            setSelectedEventId((current) =>
+              id === current ? undefined : id
+            )
           }
         />
       </div>
@@ -102,12 +90,11 @@ function DashboardOverview({
 }
 
 export default function AdminDashboardPage() {
-  const { alerts, movements, scanAnalytics } = useDataState();
+  const { alerts, movements } = useDataState();
 
   return (
     <DashboardOverview
       alerts={alerts}
-      scanAnalytics={scanAnalytics}
       events={movements}
     />
   );

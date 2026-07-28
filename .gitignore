@@ -1,8 +1,11 @@
 .next/
+.next-*/
 node_modules/
 out/
 dist/
 coverage/
+.data/
+.test-dist/
 *.tsbuildinfo
 .env*.local
 npm-debug.log*

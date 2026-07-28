@@ -1,13 +1,22 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useDeferredValue, useMemo, useState } from "react";
 import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
 import { AlertActivity } from "../../../components/admin/alerts/AlertActivity";
 import { AutomatedRules } from "../../../components/admin/alerts/AutomatedRules";
-import { MetricTrendChart } from "../../../components/analytics/MetricTrendChart";
 import type { TimeRange } from "../../../components/analytics/TrendChart";
 import type { Alert } from "../../../lib/types";
 import { useDataActions, useDataState } from "../../../context/DataContext";
+import { compactRangeBounds } from "../../../lib/dateRanges";
+
+const MetricTrendChart = dynamic(
+  () =>
+    import("../../../components/analytics/MetricTrendChart").then(
+      (module) => module.MetricTrendChart
+    ),
+  { ssr: false }
+);
 
 export default function AlertsPage() {
   const { alerts, alertRules } = useDataState();
@@ -26,15 +35,34 @@ export default function AlertsPage() {
   );
   const filteredAlerts = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
-    if (!needle) return activeAlerts;
-    return activeAlerts.filter(
-      (a) =>
-        a.subjectName.toLowerCase().includes(needle) ||
-        a.reason.toLowerCase().includes(needle) ||
-        a.title.toLowerCase().includes(needle) ||
-        a.checkpoint.toLowerCase().includes(needle)
-    );
-  }, [activeAlerts, deferredSearch]);
+    const { start, end } = compactRangeBounds(timeRange);
+    return activeAlerts.filter((alert) => {
+      const timestamp = alert.createdAt
+        ? new Date(alert.createdAt).getTime()
+        : new Date(`${alert.date} ${alert.time}`).getTime();
+      const matchesTime =
+        Number.isFinite(timestamp) && timestamp >= start && timestamp <= end;
+      const matchesSearch =
+        !needle ||
+        alert.subjectName.toLowerCase().includes(needle) ||
+        alert.reason.toLowerCase().includes(needle) ||
+        alert.title.toLowerCase().includes(needle) ||
+        alert.checkpoint.toLowerCase().includes(needle);
+      return matchesTime && matchesSearch;
+    });
+  }, [activeAlerts, deferredSearch, timeRange]);
+  const alertPoints = useMemo(
+    () =>
+      alerts.flatMap((alert) => {
+        const timestamp = alert.createdAt
+          ? new Date(alert.createdAt).getTime()
+          : new Date(`${alert.date} ${alert.time}`).getTime();
+        return Number.isFinite(timestamp)
+          ? [{ timestamp: new Date(timestamp).toISOString(), value: 1 }]
+          : [];
+      }),
+    [alerts]
+  );
 
   return (
     <AdminPageFrame
@@ -48,7 +76,7 @@ export default function AlertsPage() {
           timeRange={timeRange}
           onTimeRangeChange={setTimeRange}
           color="#ff3b30"
-          seed={31}
+          points={alertPoints}
         />
       }
     >

@@ -4,7 +4,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import type { Person } from "../../lib/types";
-import { getPersonSessions } from "../../lib/analyticsUtils";
+import { MONTH_NAMES, type DayPattern } from "../../lib/analyticsUtils";
 import { WorkPatternChart } from "./WorkPatternChart";
 import { Line } from "react-chartjs-2";
 import {
@@ -19,7 +19,7 @@ import {
   Legend,
 } from "chart.js";
 import type { ChartOptions } from "chart.js";
-import { useDataState } from "../../context/DataContext";
+import { useAdminTheme } from "../../hooks/useAdminTheme";
 
 ChartJS.register(
   CategoryScale,
@@ -34,32 +34,23 @@ ChartJS.register(
 
 export function EmployeeProfileCard({
   person,
+  sessions,
   onClose,
 }: {
   person: Person;
+  sessions: DayPattern[];
   onClose: () => void;
 }) {
-  const { movements } = useDataState();
   const [timeRange, setTimeRange] = useState("1W");
   const [mounted, setMounted] = useState(false);
-  const [darkTheme, setDarkTheme] = useState(false);
+  const darkTheme = useAdminTheme() === "dark";
   useEffect(() => {
     setMounted(true);
-    const syncTheme = () => {
-      setDarkTheme(document.documentElement.dataset.adminTheme === "dark");
-    };
-
-    syncTheme();
-    const observer = new MutationObserver(syncTheme);
-    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-admin-theme"] });
-    return () => observer.disconnect();
   }, []);
 
   let labels: string[] = [];
   let dataPoints: number[] = [];
   const now = new Date();
-  const sessions = getPersonSessions(person.id, movements);
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
   const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
   const sessionsByDay = new Map(sessions.map((session) => [dayKey(session.dateObj), session.workedHours]));
   
@@ -67,7 +58,7 @@ export function EmployeeProfileCard({
     for (let i = 6; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(now.getDate() - i);
-      labels.push(`${d.getDate()} ${monthNames[d.getMonth()]}`);
+      labels.push(`${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`);
       dataPoints.push(sessionsByDay.get(dayKey(d)) ?? 0);
     }
   } else if (timeRange === "1M") {
@@ -78,7 +69,7 @@ export function EmployeeProfileCard({
       const end = new Date(start);
       end.setDate(start.getDate() + 2);
       end.setHours(23, 59, 59, 999);
-      labels.push(`${start.getDate()} ${monthNames[start.getMonth()]}`);
+      labels.push(`${start.getDate()} ${MONTH_NAMES[start.getMonth()]}`);
 
       let threeDayTotal = 0;
       for (const session of sessions) {
@@ -91,14 +82,14 @@ export function EmployeeProfileCard({
   } else if (timeRange === "1Y") {
     const monthlyData: Record<string, number> = {};
     for (const s of sessions.slice(0, 365)) {
-      const m = monthNames[s.dateObj.getMonth()];
+      const m = MONTH_NAMES[s.dateObj.getMonth()];
       monthlyData[m] = (monthlyData[m] || 0) + s.workedHours;
     }
     const today = new Date();
     for (let i = 11; i >= 0; i--) {
       const d = new Date(today);
       d.setMonth(d.getMonth() - i);
-      const m = monthNames[d.getMonth()];
+      const m = MONTH_NAMES[d.getMonth()];
       labels.push(m);
       dataPoints.push(monthlyData[m] || 0);
     }
@@ -330,7 +321,7 @@ export function EmployeeProfileCard({
           </div>
 
           <div>
-            <WorkPatternChart personId={person.id} timeRange={timeRange} movements={movements} />
+            <WorkPatternChart timeRange={timeRange} sessions={sessions} />
           </div>
         </div>
       </div>
