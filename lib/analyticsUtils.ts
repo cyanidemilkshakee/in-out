@@ -1,6 +1,26 @@
 import type { MovementEvent, Person, ScanAnalytics } from "./types";
 
-const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const MONTH_NAMES = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
+export function movementTimestamp(movement: MovementEvent) {
+  const timestamp = movement.createdAt
+    ? new Date(movement.createdAt).getTime()
+    : new Date(`${movement.date} ${movement.time}`).getTime();
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
 
 
 export interface Session {
@@ -18,6 +38,8 @@ export interface DayPattern {
   workedHours: number;
 }
 
+export type PersonSessionIndex = Map<string, DayPattern[]>;
+
 // Helper to convert time string (e.g. "5:59:38 PM") to decimal hours
 export const timeToDecimal = (timeStr: string): number => {
   const [time, period] = timeStr.split(" ");
@@ -26,17 +48,22 @@ export const timeToDecimal = (timeStr: string): number => {
   if (period === "AM" && hours === 12) hours = 0;
   return hours + minutes / 60;
 };
-
 // Main function to calculate a person's exact worked hours and sessions per day
 export const getPersonSessions = (
   personId: string,
   movements: MovementEvent[]
 ): DayPattern[] => {
-  const userMovements = movements.filter((m) => m.subjectId === personId);
-  
+  const approvedMovements = movements.filter(
+    (movement) =>
+      movement.subjectId === personId && movement.result === "approved"
+  );
+  return buildSessions(approvedMovements);
+};
+
+function buildSessions(movements: MovementEvent[]): DayPattern[] {
   // Sort chronologically
-  const sorted = [...userMovements].sort((a, b) => {
-    return new Date(`${a.date} ${a.time}`).getTime() - new Date(`${b.date} ${b.time}`).getTime();
+  const sorted = [...movements].sort((a, b) => {
+    return movementTimestamp(a) - movementTimestamp(b);
   });
 
   // Group by date string
@@ -76,19 +103,36 @@ export const getPersonSessions = (
       }
     }
 
-    // If they never exited by the end of the day, assume they are still working (mock it to current time if today, or a default 8h shift)
+    // Only extend an open session to the real current time, and only for today.
     if (currentEntry !== null) {
-       // Just cap it at 17.0 (5 PM) for charting purposes if it's open-ended
-       const end = Math.max(currentEntry + 1, 17);
-       sessions.push({ start: currentEntry, end, type: "work", zIndex: 1 });
-       workedHours += (end - currentEntry);
+      const now = new Date();
+      const facilityDate = now.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+        timeZone: "Asia/Kolkata",
+      });
+      if (date === facilityDate) {
+        const facilityTime = now.toLocaleTimeString("en-US", {
+          hour: "numeric",
+          minute: "2-digit",
+          second: "2-digit",
+          hour12: true,
+          timeZone: "Asia/Kolkata",
+        });
+        const end = timeToDecimal(facilityTime);
+        if (end > currentEntry) {
+          sessions.push({ start: currentEntry, end, type: "work", zIndex: 1 });
+          workedHours += end - currentEntry;
+        }
+      }
     }
 
     const percentage = Math.round((workedHours / 8) * 100);
     const d = new Date(date);
 
     result.push({
-      dateStr: `${d.getDate()} ${monthNames[d.getMonth()]}`,
+      dateStr: `${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`,
       dateObj: d,
       percentage: Math.min(percentage, 100),
       sessions,
@@ -98,59 +142,63 @@ export const getPersonSessions = (
 
   // Return sorted descending by date so most recent is first
   return result.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime());
-};
+}
 
-// Function for the dashboard to get aggregate entries/exits per day
-export const getDailyMovementCounts = (
-  movements: MovementEvent[],
-  daysToLookBack: number = 14
-) => {
-  const now = new Date();
-  const counts: Record<string, { entries: number, exits: number }> = {};
-
-  // Initialize the last N days with 0 counts
-  for (let i = daysToLookBack - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(now.getDate() - i);
-    const dateStr = `${d.getDate()} ${monthNames[d.getMonth()]}`;
-    counts[dateStr] = { entries: 0, exits: 0 };
-  }
-
-  // Populate counts from real data
-  const cutoffTime = new Date(now);
-  cutoffTime.setDate(now.getDate() - daysToLookBack);
-
-  for (const m of movements) {
-    const d = new Date(`${m.date} ${m.time}`);
-    if (d >= cutoffTime) {
-      const dateStr = `${d.getDate()} ${monthNames[d.getMonth()]}`;
-      if (counts[dateStr]) {
-        if (m.direction === "entry") counts[dateStr].entries++;
-        if (m.direction === "exit") counts[dateStr].exits++;
-      }
+export function getPersonSessionIndex(
+  movements: MovementEvent[]
+): PersonSessionIndex {
+  const approvedByPerson = new Map<string, MovementEvent[]>();
+  for (const movement of movements) {
+    if (movement.result !== "approved" || movement.subjectType !== "employee") {
+      continue;
+    }
+    const existing = approvedByPerson.get(movement.subjectId);
+    if (existing) {
+      existing.push(movement);
+    } else {
+      approvedByPerson.set(movement.subjectId, [movement]);
     }
   }
 
-  return counts;
-};
+  return new Map(
+    [...approvedByPerson.entries()].map(([personId, personMovements]) => [
+      personId,
+      buildSessions(personMovements),
+    ])
+  );
+}
 
 // Function to get the overall Dashboard KPIs
-export const getDashboardKPIs = (movements: MovementEvent[]): ScanAnalytics => {
+export const getDashboardKPIs = (
+  movements: MovementEvent[],
+  people: Person[] = []
+): ScanAnalytics => {
   let totalEntries = 0;
   let totalExits = 0;
   let totalApproved = 0;
   let totalDenied = 0;
   let totalAutomatic = 0;
   let totalManual = 0;
+  let totalRestricted = 0;
+  let totalExpired = 0;
 
   for (const m of movements) {
-    if (m.direction === "entry") totalEntries++;
-    if (m.direction === "exit") totalExits++;
-    
     if (m.result === "approved") {
       totalApproved++;
+      if (m.direction === "entry") totalEntries++;
+      if (m.direction === "exit") totalExits++;
     } else {
       totalDenied++;
+      if (m.denialCode === "expired_pass") {
+        totalExpired++;
+      } else if (
+        m.denialCode === "asset_restricted" ||
+        m.denialCode === "access_restricted" ||
+        m.denialCode === "hardware_restricted" ||
+        m.denialCode === "zone_not_permitted"
+      ) {
+        totalRestricted++;
+      }
     }
 
     if (m.scanType === "auto") {
@@ -168,18 +216,22 @@ export const getDashboardKPIs = (movements: MovementEvent[]): ScanAnalytics => {
     totalExits,
     totalAutomatic,
     totalManual,
-    totalRestricted: Math.round(totalDenied * 0.7), // Mocked split for denied
-    totalExpired: Math.round(totalDenied * 0.3),    // Mocked split for denied
-    activeInside: Math.max(0, totalEntries - totalExits) // Mocked active inside
+    totalRestricted,
+    totalExpired,
+    totalOtherDenied: Math.max(0, totalDenied - totalRestricted - totalExpired),
+    activeInside:
+      people.length > 0
+        ? people.reduce((count, person) => count + (person.inside ? 1 : 0), 0)
+        : Math.max(0, totalEntries - totalExits),
   };
 };
-
 // Function for DrillDownDoughnut multi-level scan breakdown
 export const getDrillDownData = (movements: MovementEvent[]) => {
   let approvedAutoEntry = 0, approvedAutoExit = 0;
   let approvedManualEntry = 0, approvedManualExit = 0;
   let deniedAutoRestricted = 0, deniedAutoExpired = 0;
   let deniedManualRestricted = 0, deniedManualExpired = 0;
+  let deniedAutoOther = 0, deniedManualOther = 0;
   
   let approved = 0, denied = 0;
   let autoApp = 0, manualApp = 0;
@@ -199,15 +251,22 @@ export const getDrillDownData = (movements: MovementEvent[]) => {
       }
     } else {
       denied++;
-      // We don't have exact restricted/expired reasons in the data easily available, so we mock the split based on total
+      const restricted =
+        m.denialCode === "asset_restricted" ||
+        m.denialCode === "access_restricted" ||
+        m.denialCode === "hardware_restricted" ||
+        m.denialCode === "zone_not_permitted";
+      const expired = m.denialCode === "expired_pass";
       if (m.scanType === "auto") {
         autoDen++;
-        if (Math.random() > 0.3) deniedAutoRestricted++;
-        else deniedAutoExpired++;
+        if (restricted) deniedAutoRestricted++;
+        else if (expired) deniedAutoExpired++;
+        else deniedAutoOther++;
       } else {
         manualDen++;
-        if (Math.random() > 0.3) deniedManualRestricted++;
-        else deniedManualExpired++;
+        if (restricted) deniedManualRestricted++;
+        else if (expired) deniedManualExpired++;
+        else deniedManualOther++;
       }
     }
   }
@@ -251,7 +310,8 @@ export const getDrillDownData = (movements: MovementEvent[]) => {
             value: autoDen,
             children: [
               { id: "restrictedAuto", label: "Restricted", value: deniedAutoRestricted },
-              { id: "expiredAuto", label: "Expired", value: deniedAutoExpired }
+              { id: "expiredAuto", label: "Expired", value: deniedAutoExpired },
+              { id: "otherAuto", label: "Other", value: deniedAutoOther },
             ]
           },
           {
@@ -260,108 +320,12 @@ export const getDrillDownData = (movements: MovementEvent[]) => {
             value: manualDen,
             children: [
               { id: "restrictedManual", label: "Restricted", value: deniedManualRestricted },
-              { id: "expiredManual", label: "Expired", value: deniedManualExpired }
+              { id: "expiredManual", label: "Expired", value: deniedManualExpired },
+              { id: "otherManual", label: "Other", value: deniedManualOther },
             ]
           }
         ]
       }
     ]
   };
-};
-
-// Employee Dashboard Analytics
-
-export const getEmployeeKPIs = (peopleList: Person[]) => {
-  const employees = peopleList.filter(p => p.type === 'employee');
-  const totalEmployees = employees.length;
-  const insideEmployees = employees.filter(p => p.inside).length;
-  
-  // A simplistic mock for late/absences: 
-  // In a real app we'd compare scheduled shifts to actual entries.
-  // Here we mock it deterministically based on total headcount to make it look realistic.
-  const lateOrAbsent = Math.floor(totalEmployees * 0.08); // e.g. 8% are late/absent
-
-  return {
-    totalEmployees,
-    insideEmployees,
-    lateOrAbsent
-  };
-};
-
-export const getAverageShiftLengths = (
-  movements: MovementEvent[],
-  timeRange: "1W" | "1M" | "1Y" = "1W"
-) => {
-  const labels: string[] = [];
-  const averages: number[] = [];
-  // We'll calculate the average shift length per day across all employees over the given time range
-  let days = 7;
-  if (timeRange === "1M") days = 30;
-  if (timeRange === "1Y") days = 365;
-
-  const now = new Date();
-  const cutoffTime = new Date(now);
-  cutoffTime.setDate(now.getDate() - days);
-  
-  // Build a map of date string -> array of shift lengths
-  const dailyShifts: Record<string, number[]> = {};
-  
-  // Just take a sample of unique employees from movements
-  const uniqueEmployeeIds = Array.from(new Set(movements.filter(m => m.subjectType === 'employee').map(m => m.subjectId)));
-  
-  // To avoid huge computation freezing the UI, we sample up to 50 employees
-  const sampleIds = uniqueEmployeeIds.slice(0, 50);
-  
-  sampleIds.forEach(empId => {
-    const sessions = getPersonSessions(empId, movements);
-    sessions.forEach(dayPattern => {
-      if (dayPattern.workedHours > 0 && dayPattern.dateObj >= cutoffTime) {
-        const dateStr = `${dayPattern.dateObj.getDate()} ${monthNames[dayPattern.dateObj.getMonth()]}`;
-        if (!dailyShifts[dateStr]) dailyShifts[dateStr] = [];
-        dailyShifts[dateStr].push(dayPattern.workedHours);
-      }
-    });
-  });
-
-  if (timeRange === "1Y") {
-    // 12 months buckets
-    for (let i = 11; i >= 0; i--) {
-      const d = new Date(now);
-      d.setMonth(d.getMonth() - i);
-      labels.push(monthNames[d.getMonth()]);
-      
-      let sum = 0;
-      let count = 0;
-      Object.keys(dailyShifts).forEach(dateStr => {
-         if (dateStr.endsWith(monthNames[d.getMonth()])) {
-            sum += dailyShifts[dateStr].reduce((a,b) => a+b, 0);
-            count += dailyShifts[dateStr].length;
-         }
-      });
-      averages.push(count > 0 ? Number((sum/count).toFixed(1)) : 0);
-    }
-  } else {
-    // 1W or 1M
-    const step = timeRange === "1M" ? 3 : 1;
-    for (let i = days - 1; i >= 0; i -= step) {
-      const d = new Date(now);
-      d.setDate(now.getDate() - i);
-      labels.push(d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }));
-      
-      let sum = 0;
-      let count = 0;
-      for (let j = 0; j < step; j++) {
-         const curr = new Date(now);
-         curr.setDate(now.getDate() - (i - j));
-         const dateStr = `${curr.getDate()} ${monthNames[curr.getMonth()]}`;
-         if (dailyShifts[dateStr]) {
-            sum += dailyShifts[dateStr].reduce((a,b) => a+b, 0);
-            count += dailyShifts[dateStr].length;
-         }
-      }
-      averages.push(count > 0 ? Number((sum/count).toFixed(1)) : 0);
-    }
-  }
-
-  return { labels, data: averages };
 };

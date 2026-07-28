@@ -2,12 +2,19 @@
   "name": "in-out-management-frontend",
   "version": "0.1.0",
   "private": true,
+  "engines": {
+    "node": ">=22.5.0"
+  },
   "scripts": {
     "dev": "next dev -H ::1 -p 1001 --turbopack",
+    "dev:bounded": "node scripts/run-with-timeout.mjs 900 node node_modules/next/dist/bin/next dev -H ::1 -p 1001 --turbopack",
     "dev:webpack": "next dev -H ::1 -p 1001",
-    "build": "next build",
+    "build": "node scripts/run-with-timeout.mjs 600 node node_modules/next/dist/bin/next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "start:bounded": "node scripts/run-with-timeout.mjs 900 node node_modules/next/dist/bin/next start",
+    "typecheck": "node scripts/run-with-timeout.mjs 120 node node_modules/typescript/bin/tsc --noEmit",
+    "test:compile": "node scripts/run-with-timeout.mjs 120 node node_modules/typescript/bin/tsc -p tsconfig.test.json",
+    "test": "node scripts/run-with-timeout.mjs 120 node node_modules/typescript/bin/tsc -p tsconfig.test.json && node scripts/run-with-timeout.mjs 120 node .test-dist/tests/backend.integration.test.js"
   },
   "dependencies": {
     "chart.js": "^4.5.1",

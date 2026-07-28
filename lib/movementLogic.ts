@@ -1,5 +1,6 @@
 import type {
   Checkpoint,
+  DenialCode,
   Direction,
   HardwareAsset,
   MovementEvent,
@@ -25,20 +26,42 @@ function isHardware(subject: SubjectRecord): subject is HardwareAsset {
   return "category" in subject;
 }
 
-function currentDate() {
+function currentDate(date: Date) {
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
-    year: "numeric"
-  }).format(new Date());
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  }).format(date);
 }
 
-function currentTime() {
+function currentTime(date: Date) {
   return new Intl.DateTimeFormat("en-US", {
     hour: "numeric",
     minute: "2-digit",
-    second: "2-digit"
-  }).format(new Date());
+    second: "2-digit",
+    timeZone: "Asia/Kolkata",
+  }).format(date);
+}
+
+export function denialCodeForReason(reason?: string): DenialCode {
+  const normalized = reason?.toLowerCase() ?? "";
+  if (normalized.includes("not registered")) return "barcode_not_registered";
+  if (normalized.includes("temporary barcode expired")) return "expired_pass";
+  if (normalized.includes("approval pending")) return "approval_pending";
+  if (normalized.includes("not pre-approved")) return "not_preapproved";
+  if (normalized.includes("assigned to")) return "custody_mismatch";
+  if (normalized.includes("checkpoint zone")) return "zone_not_permitted";
+  if (normalized.includes("already inside")) return "already_inside";
+  if (normalized.includes("no active entry")) return "no_active_entry";
+  if (normalized.includes("not expected out")) return "asset_not_expected_out";
+  if (normalized.includes("asset restricted")) return "asset_restricted";
+  if (normalized.includes("hardware") && normalized.includes("restricted")) {
+    return "hardware_restricted";
+  }
+  if (normalized.includes("employee access restricted")) return "access_restricted";
+  if (normalized.includes("employee access inactive")) return "access_inactive";
+  return "manual_review";
 }
 
 function directionFor(checkpoint: Checkpoint, subject?: SubjectRecord): Direction {
@@ -143,6 +166,7 @@ export function evaluateScan({
   eventCount,
   scanType
 }: ScanInput): ScanDecision {
+  const now = new Date();
   const subject = findSubject(barcode, people, hardware);
   const direction = directionFor(checkpoint, subject);
   const carriedHardware = hardware.filter((asset) => selectedHardwareIds.includes(asset.id));
@@ -150,8 +174,8 @@ export function evaluateScan({
   const syncState: SyncState = online ? "synced" : "queued";
   const event: MovementEvent = {
     id: `EVT-${String(1000 + eventCount).padStart(6, "0")}`,
-    date: currentDate(),
-    time: currentTime(),
+    date: currentDate(now),
+    time: currentTime(now),
     checkpointId: checkpoint.id,
     checkpoint: checkpoint.name,
     direction,
@@ -161,9 +185,12 @@ export function evaluateScan({
     barcode: barcode.trim(),
     result: decision.result,
     reason: decision.reason,
+    denialCode:
+      decision.result === "denied" ? denialCodeForReason(decision.reason) : undefined,
     scanType,
     syncState,
-    hardwareIds: carriedHardware.map((asset) => asset.id)
+    hardwareIds: carriedHardware.map((asset) => asset.id),
+    createdAt: now.toISOString(),
   };
 
   return { event, subject, carriedHardware };

@@ -6,6 +6,7 @@ import type {
   Person,
   WorkdayStatus,
 } from "./types";
+import { movementTimestamp } from "./analyticsUtils";
 
 type ScheduledRuleInput = {
   rules: AlertRule[];
@@ -24,6 +25,77 @@ function nextAlertId(existingAlerts: Alert[], offset = 1) {
 
 function findEnabledRule(rules: AlertRule[], conditionKey: AlertRule["conditionKey"]) {
   return rules.find((rule) => rule.conditionKey === conditionKey && rule.enabled);
+}
+
+export function buildWorkdayStatuses(
+  movements: MovementEvent[],
+  people: Person[]
+): WorkdayStatus[] {
+  const employeeById = new Map(
+    people
+      .filter((person) => person.type === "employee")
+      .map((person) => [person.id, person])
+  );
+  const eventsByEmployeeDay = new Map<string, MovementEvent[]>();
+
+  for (const movement of movements) {
+    if (
+      movement.result !== "approved" ||
+      movement.subjectType !== "employee" ||
+      !employeeById.has(movement.subjectId)
+    ) {
+      continue;
+    }
+    const key = `${movement.subjectId}\u0000${movement.date}`;
+    const events = eventsByEmployeeDay.get(key);
+    if (events) events.push(movement);
+    else eventsByEmployeeDay.set(key, [movement]);
+  }
+
+  const workdays: WorkdayStatus[] = [];
+  for (const [key, events] of eventsByEmployeeDay) {
+    const [employeeId, date] = key.split("\u0000");
+    const employee = employeeById.get(employeeId);
+    if (!employee) continue;
+
+    events.sort((left, right) => movementTimestamp(left) - movementTimestamp(right));
+    let entryAt: number | undefined;
+    let lastExitAt: number | undefined;
+    let minutesInside = 0;
+    let breakMinutes = 0;
+    let shiftEnded = false;
+
+    for (const event of events) {
+      const occurredAt = movementTimestamp(event);
+      if (event.direction === "entry" && entryAt === undefined) {
+        if (lastExitAt !== undefined && occurredAt > lastExitAt) {
+          breakMinutes += (occurredAt - lastExitAt) / 60_000;
+        }
+        entryAt = occurredAt;
+        shiftEnded = false;
+      } else if (
+        event.direction === "exit" &&
+        entryAt !== undefined &&
+        occurredAt > entryAt
+      ) {
+        minutesInside += (occurredAt - entryAt) / 60_000;
+        entryAt = undefined;
+        lastExitAt = occurredAt;
+        shiftEnded = true;
+      }
+    }
+
+    workdays.push({
+      employeeId,
+      employeeName: employee.name,
+      date,
+      breakMinutes: Math.round(breakMinutes),
+      minutesInside: Math.round(minutesInside),
+      shiftEnded,
+    });
+  }
+
+  return workdays;
 }
 
 export function evaluateScheduledRules({
@@ -114,12 +186,14 @@ export function createScanAlert({
   carriedHardware,
   rules,
   existingAlerts,
+  alertId,
 }: {
   event: MovementEvent;
   subject?: Person | HardwareAsset;
   carriedHardware: HardwareAsset[];
   rules: AlertRule[];
   existingAlerts: Alert[];
+  alertId?: string;
 }) {
   if (event.result !== "denied") return undefined;
 
@@ -154,7 +228,7 @@ export function createScanAlert({
 
   const hardwareNames = carriedHardware.map((asset) => asset.name).join(", ");
   return {
-    id: nextAlertId(existingAlerts),
+    id: alertId ?? nextAlertId(existingAlerts),
     severity: rule?.severity ?? "medium",
     status: "open" as const,
     title,
@@ -167,6 +241,7 @@ export function createScanAlert({
     category,
     ruleId: rule?.id,
     sourceEventId: event.id,
+    createdAt: event.createdAt ?? new Date().toISOString(),
     explanation: hardwareNames
       ? `Carrier and assigned custodian do not match for ${hardwareNames}.`
       : "The access decision matched an enabled security rule.",

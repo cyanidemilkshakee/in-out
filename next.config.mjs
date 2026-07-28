@@ -5,6 +5,7 @@ const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.NEXT_DIST_DIR || ".next",
   outputFileTracingRoot: projectRoot,
   output: "standalone",
   poweredByHeader: false,
@@ -17,9 +18,9 @@ const nextConfig = {
       "chart.js",
       "react-chartjs-2",
     ],
-    // optimizeCss adds critters inlining pass which is slow in dev — disable it.
-    // It's useful for prod builds only; enable via `next build` env if needed.
-    optimizeCss: false,
+    // Critters is opt-in because the inlining pass dominated recent build time.
+    // Enable it only for a measured release build with NEXT_OPTIMIZE_CSS=1.
+    optimizeCss: process.env.NEXT_OPTIMIZE_CSS === "1",
   },
 };
 

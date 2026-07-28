@@ -1,161 +1,81 @@
 # IN / OUT Management System
 
-A Next.js application (frontend as of now) for recording, monitoring and managing employee, visitor, and hardware movement through secured facility checkpoints.
+A database-backed Next.js prototype for recording and reviewing employee, visitor, and hardware movement through secured facility checkpoints.
 
-The application has two connected interfaces:
+The project has two connected interfaces:
 
 | Role | Interface | Path |
 |---|---|---|
-| Administrator | Admin console | `/admin` |
+| Administrator | Dashboard and operations console | `/admin` |
 | Security staff | Checkpoint terminal | `/terminal` |
 
-The current implementation uses an in-memory mock service and not a backend connected to a real database. Admin pages and the terminal share the same application state through React Context, so changes made in one interface are immediately visible in the other during the same browser session.
+Both interfaces read and mutate the same local SQLite database through Next.js API routes. The database is seeded with deterministic demonstration records the first time it is opened.
 
-## Tech Stack
+## Stack
 
-| Technology | Purpose |
-|---|---|
-| Next.js 15 | App Router, layouts, and standalone production output |
-| React 19 | Component and Context state model |
-| TypeScript | Domain and service contract type safety |
-| Chart.js and react-chartjs-2 | Dashboard and trend visualizations |
-| Lucide React | Interface icons |
-| Urbanist | Application typeface through `next/font` |
-| Vanilla CSS | Design tokens, themes, responsive layout, and component styling |
+- Next.js 15 and React 19
+- TypeScript
+- Node.js built-in SQLite
+- Chart.js and react-chartjs-2
+- Lucide React
+- Route-scoped vanilla CSS and CSS Modules
+
+Node.js 22.5 or newer is required because the server uses `node:sqlite`.
 
 ## Routes
 
 | Path | Purpose |
 |---|---|
-| `/admin` | Analytics dashboard and recent movements |
-| `/admin/logs` | Movement ledger and detail review |
-| `/admin/alerts` | Alert command view |
-| `/admin/offline-sync` | Queue synchronization and conflict resolution |
-| `/admin/checkpoints` | Checkpoint rules |
-| `/admin/employees` | Employee directory |
-| `/admin/visitors` | Visitor access and temporary IDs |
-| `/admin/hardware` | Hardware custody |
-| `/admin/profile` | Theme, notifications, and security preferences |
-| `/terminal` | Security checkpoint terminal |
+| `/admin/dashboard` | Time-filtered KPIs, scan breakdowns, and recent movements |
+| `/admin/logs` | Searchable movement ledger, alert workflow, and review notes |
+| `/admin/registry` | Employee, visitor, hardware, alert, and permission registries |
+| `/admin/permissions` | Permission assignments and request decisions |
+| `/admin/alerts` | Active alerts and automated alert rules |
+| `/admin/profile` | Admin identity, password, preferences, and account creation |
+| `/terminal` | Checkpoint scanning, offline queue, and conflict resolution |
 
-`/` redirects to `/admin`. The compatibility route `/admin/[view]` currently renders the dashboard.
+`/` and `/admin` redirect to the dashboard.
 
-## Current Limitations
-
-- There is no backend, authentication service, or database yet.
-- Domain state is in memory and resets on a full refresh.
-- Offline mode simulates synchronization state; it does not disable the browser network.
-- The mock scan engine runs in the browser through the injected mock service.
-- Export buttons are presentational in the current phase.
-
-## Project Structure
-
-```text
-app/
-  admin/                         Admin dashboard and management routes
-  terminal/                      Security checkpoint terminal
-  layout.tsx                     Root layout and provider mount
-  globals.css                    Global design tokens and component styles
-
-components/
-  admin/                         Admin tables and employee profile views
-  analytics/                     Chart.js dashboard and trend components
-  terminal/                      Terminal panels
-  AppProviders.tsx               Application provider composition
-  AppChrome.tsx                  Role-specific application shell
-
-context/
-  DataContext.tsx                Service, shared-state, and action contexts
-
-services/
-  dataService.ts                 API contract and request/response types
-  mockDataService.ts             In-memory Phase 1 service implementation
-
-lib/
-  types.ts                       Shared domain types
-  mockData.ts                    Seed people, assets, checkpoints, and alerts
-  initialMovements.json          Seed movement ledger
-  movementLogic.ts               Scan evaluation and presence transitions
-  analyticsUtils.ts              Pure analytics derived from injected movements
-```
-
-## Installation
-
-### Local Development
-
-Requirements:
-
-- Node.js 20 or newer
-- npm
-
-Install dependencies:
+## Local development
 
 ```bash
 npm install
-```
-
-Start the development server:
-
-```bash
 npm run dev
 ```
 
-The configured development URL is `http://localhost:1001`. The development command binds to IPv6 localhost (`::1`), so `http://[::1]:1001` may be required on some systems.
+The development server is configured for `http://[::1]:1001`.
 
-Available scripts:
+Useful commands:
 
 | Command | Purpose |
 |---|---|
-| `npm run dev` | Start the Turbopack development server |
-| `npm run dev:webpack` | Start the development server with Webpack |
-| `npm run typecheck` | Run TypeScript validation without output |
-| `npm run build` | Create the standalone production build |
-| `npm run start` | Start an existing production build |
+| `npm run dev` | Start persistent Turbopack development |
+| `npm run dev:bounded` | Start Turbopack development with a 15-minute limit |
+| `npm run dev:webpack` | Start persistent Webpack development |
+| `npm run typecheck` | Validate TypeScript with a 2-minute limit |
+| `npm test` | Compile and run backend integration tests; each stage has a 2-minute limit |
+| `npm run build` | Create the standalone production build with a 10-minute limit |
+| `npm run start` | Start an existing persistent production build |
+| `npm run start:bounded` | Start an existing build with a 15-minute limit |
 
-### Docker
-
-Build the production image:
-
-```bash
-docker build -t in-out-management-frontend .
-```
-
-Run the container:
+The default database path is `.data/inout.sqlite`. Override it with:
 
 ```bash
-docker run -p 1001:1001 in-out-management-frontend
+INOUT_DB_PATH=/absolute/path/inout.sqlite npm run dev
 ```
 
-Open `http://localhost:1001`.
+On PowerShell:
 
-The multi-stage image installs dependencies, builds the Next.js standalone output, and runs it as the non-root `nextjs` user.
+```powershell
+$env:INOUT_DB_PATH="C:\data\inout.sqlite"
+npm run dev
+```
 
-## Current Features
+Delete the prototype database while the app is stopped to regenerate the deterministic fixture on the next start.
 
-### Admin console
+## Seed access
 
-- Dashboard metrics, active alerts, drill-down charts, and recent movement activity
-- Searchable, sortable, filterable, and paginated movement ledger
-- Movement detail review and shared movement notes
-- Alert status updates
-- Employee directory and employee work-pattern profiles
-- Temporary visitor ID creation and visitor access records
-- Hardware custody and presence records
-- Checkpoint rule listing
-- Offline queue synchronization and conflict resolution
-- Light and dark themes with profile security and notification preferences
-
-### Checkpoint terminal
-
-- Checkpoint selection and online/offline simulation
-- Barcode-based employee, visitor, and hardware lookup
-- Entry and exit decision evaluation
-- Carried-hardware selection
-- Recent activity, offline queue, and conflict panels
-- Manual security review
-- Shared movement, presence, and synchronization state with the admin console
-
-Sample barcodes are available in the terminal:
+The security terminal starts with these demonstration barcodes:
 
 | Barcode | Subject |
 |---|---|
@@ -163,93 +83,59 @@ Sample barcodes are available in the terminal:
 | `test2` | Visitor |
 | `test3` | Hardware asset |
 
-## State Management and API Layer
+The seeded admin profile uses:
 
-The application uses React Context as its lightweight global state manager. Zustand is not currently required because the domain is small enough for a single provider, and Context avoids introducing another dependency.
+- Email: `admin@company.com`
+- Password: `admin1234`
 
-Domain data is not stored in page-level `useState` hooks. Local component state is reserved for temporary UI concerns such as search text, filters, selected rows, open dialogs, chart ranges, and theme controls.
+Change the password from `/admin/profile` after starting the app.
 
-### Data flow
+## Architecture
 
 ```text
-lib/mockData.ts
-       |
-       v
-services/MockDataService
-       |
-       v
-context/DataProvider
-       |
-       +--> useDataState()   --> render shared domain data
-       |
-       +--> useDataActions() --> perform mutations and update shared state
-       |
-       +--> useDataService() --> access the injected service when needed
+React pages and components
+        |
+        v
+context/DataContext.tsx
+        |
+        v
+services/httpDataService.ts
+        |
+        v
+app/api/data + app/api/profile
+        |
+        v
+server/dataRepository + server/profileRepository
+        |
+        v
+.data/inout.sqlite
 ```
 
-### Service contract
+- `lib/types.ts` is the single source for domain and service-contract types.
+- `server/database.ts` creates the relational schema, manages password hashing, and seeds an empty database.
+- `server/dataRepository.ts` owns movement, permission, alert, registry, synchronization, and note mutations.
+- `server/profileRepository.ts` owns admin profile and credential mutations.
+- `server/seedData.ts` generates coherent fixture history without shipping a large JSON payload to the browser.
+- `lib/movementLogic.ts` and `lib/ruleEngine.ts` contain deterministic domain decisions.
+- `context/DataContext.tsx` fetches only the data slice needed by the active route.
 
-`services/dataService.ts` defines the `DataService` interface used by the component tree. It covers all current domain fetching and mutations.
+The browser no longer imports fixture JSON or holds the canonical domain store. Mutations persist across browser refreshes and across the admin and terminal interfaces.
 
-Fetch operations:
+## Docker
 
-- People
-- Hardware assets
-- Checkpoints
-- Movement events
-- Alerts
-- Scan analytics
-- Movement notes
-
-Mutation operations:
-
-- Create a temporary visitor
-- Update a person
-- Update a hardware asset
-- Update an alert
-- Record a terminal scan
-- Save a movement or manual-review result
-- Synchronize queued movements
-- Resolve movement conflicts
-- Add a movement note
-
-`services/mockDataService.ts` is the Phase 1 in-memory implementation. It owns the mutable mock records and uses `lib/movementLogic.ts` for scan evaluation.
-
-### Context boundaries
-
-`context/DataContext.tsx` intentionally separates three contexts:
-
-| Context | Responsibility |
-|---|---|
-| `DataServiceContext` | Supplies the injected `DataService` implementation |
-| `DataStateContext` | Supplies the current application snapshot, loading state, and load error |
-| `DataActionsContext` | Supplies stable mutation and refresh functions |
-
-The public hooks are:
-
-```ts
-const data = useDataState();
-const actions = useDataActions();
-const service = useDataService();
+```bash
+docker build -t in-out-management .
+docker run --rm -p 1001:1001 -v inout-data:/app/.data in-out-management
 ```
 
-Splitting actions from state means components that only dispatch mutations do not need to depend on the state object.
+Open `http://localhost:1001`. The image runs as a non-root user and stores SQLite data in `/app/.data`.
 
-### Provider composition
+## Prototype limitations
 
-`components/AppProviders.tsx` creates the current `MockDataService` and passes it to `DataProvider`. The root layout mounts `AppProviders` once, above both `/admin` and `/terminal`.
+- The API routes do not yet have authentication or authorization middleware.
+- SQLite is suitable for this local/mock phase, not a horizontally scaled multi-instance deployment.
+- Schema-version changes currently rebuild and reseed the prototype database instead of running production migrations.
+- Offline mode queues movements in the database but does not emulate a fully disconnected browser.
+- Profile avatars are stored as data URLs; production storage should use an object store.
 
-This placement provides session-level persistence across client-side navigation. A full browser refresh recreates the in-memory mock service and resets the data to its fixtures. Theme and profile preferences use browser storage separately from domain state.
-
-### API injection
-
-To connect a backend without rewriting components:
-
-1. Create an HTTP implementation such as `HttpDataService` that implements `DataService`.
-2. Implement each method with the corresponding API request.
-3. Replace the mock service instance in `components/AppProviders.tsx`.
-4. Optionally pass server-provided `initialData` to avoid an initial loading state.
-
-The pages and components can continue using `useDataState()` and `useDataActions()` unchanged.
-
-For a substantially larger application, consider Zustand when selector-based subscriptions, multiple independent stores, or more granular render control become necessary. The `DataService` interface should remain independent of the chosen state manager.
+Before production use, add authenticated sessions, role checks, CSRF protection, rate limiting, durable migrations, backups, and a production database selected for the deployment topology.
