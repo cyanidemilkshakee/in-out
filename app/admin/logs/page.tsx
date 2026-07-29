@@ -14,11 +14,11 @@ import type {
   SortDirection,
   ResultStatus,
 } from "../../../lib/types";
-import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
-import { MovementTable } from "../../../components/admin/tables/MovementTable";
-import type { TimeRange } from "../../../components/analytics/TrendChart";
-import { CalendarDatePicker } from "../../../components/analytics/CalendarDatePicker";
-import { useDataActions, useDataState } from "../../../context/DataContext";
+import { AdminPageFrame } from "../../../frontend/components/admin/tables/AdminPageFrame";
+import { MovementTable } from "../../../frontend/components/admin/tables/MovementTable";
+import type { TimeRange } from "../../../frontend/components/analytics/TrendChart";
+import { CalendarDatePicker } from "../../../frontend/components/analytics/CalendarDatePicker";
+import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import {
   compactRangeBounds,
   parseDateInput,
@@ -26,21 +26,21 @@ import {
 
 const TrendChart = dynamic(
   () =>
-    import("../../../components/analytics/TrendChart").then(
+    import("../../../frontend/components/analytics/TrendChart").then(
       (module) => module.TrendChart
     ),
   { ssr: false }
 );
 const ReportBuilder = dynamic(
   () =>
-    import("../../../components/admin/reports/ReportBuilder").then(
+    import("../../../frontend/components/admin/reports/ReportBuilder").then(
       (module) => module.ReportBuilder
     ),
   { ssr: false }
 );
 const DetailDrawer = dynamic(
   () =>
-    import("../../../components/admin/tables/DetailDrawer").then(
+    import("../../../frontend/components/admin/tables/DetailDrawer").then(
       (module) => module.DetailDrawer
     ),
   { ssr: false }

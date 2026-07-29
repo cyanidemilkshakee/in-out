@@ -2,44 +2,44 @@
 
 import dynamic from "next/dynamic";
 import { useDeferredValue, useMemo, useState } from "react";
-import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
-import { EmployeeTable } from "../../../components/admin/tables/EmployeeTable";
-import { EmployeeCreator } from "../../../components/admin/tables/EmployeeCreator";
-import { HardwareCreator } from "../../../components/admin/tables/HardwareCreator";
-import type { MetricTrendPoint } from "../../../components/analytics/MetricTrendChart";
-import type { TimeRange } from "../../../components/analytics/TrendChart";
+import { AdminPageFrame } from "../../../frontend/components/admin/tables/AdminPageFrame";
+import { EmployeeTable } from "../../../frontend/components/admin/tables/EmployeeTable";
+import { EmployeeCreator } from "../../../frontend/components/admin/tables/EmployeeCreator";
+import { HardwareCreator } from "../../../frontend/components/admin/tables/HardwareCreator";
+import type { MetricTrendPoint } from "../../../frontend/components/analytics/MetricTrendChart";
+import type { TimeRange } from "../../../frontend/components/analytics/TrendChart";
 import { Download } from "lucide-react";
-import { useDataActions, useDataState } from "../../../context/DataContext";
+import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import { getPersonSessionIndex } from "../../../lib/analyticsUtils";
 import { eventTimestamp } from "../../../lib/dateRanges";
 
 const PeopleTable = dynamic(
   () =>
-    import("../../../components/admin/tables/PeopleTable").then(
+    import("../../../frontend/components/admin/tables/PeopleTable").then(
       (module) => module.PeopleTable
     )
 );
 const HardwareTable = dynamic(
   () =>
-    import("../../../components/admin/tables/HardwareTable").then(
+    import("../../../frontend/components/admin/tables/HardwareTable").then(
       (module) => module.HardwareTable
     )
 );
 const AlertHistoryTable = dynamic(
   () =>
-    import("../../../components/admin/registry/RegistryLogTables").then(
+    import("../../../frontend/components/admin/registry/RegistryLogTables").then(
       (module) => module.AlertHistoryTable
     )
 );
 const PermissionHistoryTable = dynamic(
   () =>
-    import("../../../components/admin/registry/RegistryLogTables").then(
+    import("../../../frontend/components/admin/registry/RegistryLogTables").then(
       (module) => module.PermissionHistoryTable
     )
 );
 const MetricTrendChart = dynamic(
   () =>
-    import("../../../components/analytics/MetricTrendChart").then(
+    import("../../../frontend/components/analytics/MetricTrendChart").then(
       (module) => module.MetricTrendChart
     ),
   { ssr: false }

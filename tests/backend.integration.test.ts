@@ -7,18 +7,18 @@ import {
   closeDatabaseForTests,
   verifyPassword,
   hashPassword,
-} from "../server/database";
+} from "../backend/database";
 import {
   decidePermissionRequest,
   getSnapshot,
   queryMovements,
   recordScan,
-} from "../server/dataRepository";
+} from "../backend/dataRepository";
 import {
   getCurrentAdminProfile,
   updateCurrentAdminProfile,
-} from "../server/profileRepository";
-import { buildSeedData } from "../server/seedData";
+} from "../backend/profileRepository";
+import { buildSeedData } from "../backend/seedData";
 import { getPersonSessions } from "../lib/analyticsUtils";
 import { parseDateInput } from "../lib/dateRanges";
 import type { MovementEvent } from "../lib/types";

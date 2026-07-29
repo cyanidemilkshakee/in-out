@@ -34,8 +34,8 @@ import {
   updateAlertRule,
   updateHardwareAsset,
   updatePerson,
-} from "../../../server/dataRepository";
-import { ServerTiming } from "../../../server/timing";
+} from "../../../backend/dataRepository";
+import { ServerTiming } from "../../../backend/timing";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

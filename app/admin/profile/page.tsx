@@ -9,7 +9,7 @@ import {
   UserCog,
   UserRound
 } from "lucide-react";
-import { AdminCreator, type CreateAdminInput } from "../../../components/admin/AdminCreator";
+import { AdminCreator, type CreateAdminInput } from "../../../frontend/components/admin/AdminCreator";
 import {
   createAdminAccount,
   getAdminProfile,

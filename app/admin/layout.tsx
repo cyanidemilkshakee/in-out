@@ -8,8 +8,8 @@ import {
   type ReactNode,
 } from "react";
 import { Moon, Sun } from "lucide-react";
-import { AppChrome } from "../../components/AppChrome";
-import { AdminNavRail } from "../../components/admin/AdminNavRail";
+import { AppChrome } from "../../frontend/components/AppChrome";
+import { AdminNavRail } from "../../frontend/components/admin/AdminNavRail";
 import "./admin.css";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {

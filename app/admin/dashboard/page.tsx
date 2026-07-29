@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
-import { MovementTable } from "../../../components/admin/tables/MovementTable";
-import { useDataState } from "../../../context/DataContext";
+import { MovementTable } from "../../../frontend/components/admin/tables/MovementTable";
+import { useDataState } from "../../../frontend/context/DataContext";
 import type {
   Alert,
   MovementEvent,
@@ -13,7 +13,7 @@ import type {
 
 const DashboardCharts = dynamic(
   () =>
-    import("../../../components/analytics/DashboardCharts").then(
+    import("../../../frontend/components/analytics/DashboardCharts").then(
       (module) => module.DashboardCharts
     ),
   {

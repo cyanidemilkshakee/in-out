@@ -2,17 +2,17 @@
 
 import dynamic from "next/dynamic";
 import { useDeferredValue, useMemo, useState } from "react";
-import { AdminPageFrame } from "../../../components/admin/tables/AdminPageFrame";
-import { AlertActivity } from "../../../components/admin/alerts/AlertActivity";
-import { AutomatedRules } from "../../../components/admin/alerts/AutomatedRules";
-import type { TimeRange } from "../../../components/analytics/TrendChart";
+import { AdminPageFrame } from "../../../frontend/components/admin/tables/AdminPageFrame";
+import { AlertActivity } from "../../../frontend/components/admin/alerts/AlertActivity";
+import { AutomatedRules } from "../../../frontend/components/admin/alerts/AutomatedRules";
+import type { TimeRange } from "../../../frontend/components/analytics/TrendChart";
 import type { Alert } from "../../../lib/types";
-import { useDataActions, useDataState } from "../../../context/DataContext";
+import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import { compactRangeBounds } from "../../../lib/dateRanges";
 
 const MetricTrendChart = dynamic(
   () =>
-    import("../../../components/analytics/MetricTrendChart").then(
+    import("../../../frontend/components/analytics/MetricTrendChart").then(
       (module) => module.MetricTrendChart
     ),
   { ssr: false }
@@ -72,7 +72,7 @@ export default function AlertsPage() {
       headerRight={
         <MetricTrendChart
           title="Alerts"
-          valueLabel="AVG ALERTS"
+          valueLabel="ALERTS IN RANGE"
           timeRange={timeRange}
           onTimeRangeChange={setTimeRange}
           color="#ff3b30"

@@ -13,7 +13,7 @@ import {
   UsersRound,
   X,
 } from "lucide-react";
-import { useDataActions, useDataState } from "../../../context/DataContext";
+import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import type { AccessPermission, PermissionRequest } from "../../../lib/types";
 
 type DirectoryTab = "employee" | "visitor" | "hardware";

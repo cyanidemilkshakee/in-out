@@ -7,7 +7,7 @@ import {
   createAdminAccount,
   getCurrentAdminProfile,
   updateCurrentAdminProfile,
-} from "../../../server/profileRepository";
+} from "../../../backend/profileRepository";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";

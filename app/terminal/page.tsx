@@ -1,5 +1,5 @@
-import { AppChrome } from "../../components/AppChrome";
-import { SecurityTerminal } from "../../components/terminal/SecurityTerminal";
+import { AppChrome } from "../../frontend/components/AppChrome";
+import { SecurityTerminal } from "../../frontend/components/terminal/SecurityTerminal";
 
 export default function TerminalPage() {
   return (

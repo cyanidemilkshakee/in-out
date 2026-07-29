@@ -12,7 +12,7 @@
   "include": [
     "tests/**/*.ts",
     "lib/**/*.ts",
-    "server/**/*.ts",
+    "backend/**/*.ts",
     "services/profileService.ts"
   ],
   "exclude": ["node_modules", ".next"]
