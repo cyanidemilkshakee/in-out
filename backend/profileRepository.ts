@@ -1,11 +1,19 @@
 import { randomUUID } from "node:crypto";
+import type { Pool, PoolClient } from "pg";
 import type {
   AdminProfile,
   CreateAdminAccountInput,
   ProfileSettings,
   UpdateAdminProfileInput,
 } from "../services/profileService";
-import { getDatabase, hashPassword, verifyPassword } from "./database";
+import {
+  getDatabase,
+  hashPassword,
+  verifyPassword,
+  withTransaction,
+} from "./database";
+
+type Queryable = Pick<Pool | PoolClient, "query">;
 
 type AdminRow = {
   id: string;
@@ -15,7 +23,7 @@ type AdminRow = {
   password_hash: string;
   avatar_data_url: string;
   auto_lock: string;
-  settings_json: string;
+  settings: ProfileSettings;
 };
 
 function toProfile(row: AdminRow): AdminProfile {
@@ -26,21 +34,19 @@ function toProfile(row: AdminRow): AdminProfile {
     email: row.email,
     avatarDataUrl: row.avatar_data_url,
     autoLock: row.auto_lock,
-    settings: JSON.parse(row.settings_json) as ProfileSettings,
+    settings: row.settings,
   };
 }
 
-function currentRow() {
-  const database = getDatabase();
-  const row = database
-    .prepare(
-      `SELECT id, name, nickname, email, password_hash, avatar_data_url,
-              auto_lock, settings_json
-       FROM admin_accounts
-       WHERE is_current = 1
-       LIMIT 1`
-    )
-    .get() as AdminRow | undefined;
+async function currentRow(database: Queryable) {
+  const result = await database.query<AdminRow>(
+    `SELECT id, name, nickname, email, password_hash, avatar_data_url,
+            auto_lock, settings
+     FROM admin_accounts
+     WHERE is_current
+     LIMIT 1`
+  );
+  const row = result.rows[0];
   if (!row) throw new Error("No current admin profile is configured.");
   return row;
 }
@@ -54,74 +60,87 @@ function validateIdentity(name: string, nickname: string, email: string) {
   }
 }
 
-export function getCurrentAdminProfile() {
-  return toProfile(currentRow());
+export async function getCurrentAdminProfile() {
+  const database = await getDatabase();
+  return toProfile(await currentRow(database));
 }
 
-export function updateCurrentAdminProfile(input: UpdateAdminProfileInput) {
+export async function updateCurrentAdminProfile(
+  input: UpdateAdminProfileInput
+) {
   validateIdentity(input.name, input.nickname, input.email);
-  const database = getDatabase();
-  const existing = currentRow();
+  const database = await getDatabase();
+  const existing = await currentRow(database);
   if (input.newPassword) {
     if (input.newPassword.length < 8) {
       throw new Error("Your new password must contain at least 8 characters.");
     }
-    if (!input.currentPassword || !verifyPassword(input.currentPassword, existing.password_hash)) {
+    if (
+      !input.currentPassword ||
+      !verifyPassword(input.currentPassword, existing.password_hash)
+    ) {
       throw new Error("The current password is incorrect.");
     }
   }
-  const duplicate = database
-    .prepare(
-      "SELECT id FROM admin_accounts WHERE LOWER(email) = LOWER(?) AND id <> ?"
-    )
-    .get(input.email.trim(), existing.id) as { id: string } | undefined;
-  if (duplicate) throw new Error("An admin with this email already exists.");
+  const email = input.email.trim().toLowerCase();
+  const duplicate = await database.query<{ id: string }>(
+    "SELECT id FROM admin_accounts WHERE lower(email) = lower($1) AND id <> $2",
+    [email, existing.id]
+  );
+  if (duplicate.rows[0]) {
+    throw new Error("An admin with this email already exists.");
+  }
   const passwordHash = input.newPassword
     ? hashPassword(input.newPassword)
     : existing.password_hash;
-  database
-    .prepare(
-      `UPDATE admin_accounts
-       SET name = ?, nickname = ?, email = ?, password_hash = ?,
-           avatar_data_url = ?, auto_lock = ?, settings_json = ?
-       WHERE id = ?`
-    )
-    .run(
+  const result = await database.query<AdminRow>(
+    `UPDATE admin_accounts
+     SET name = $1, nickname = $2, email = $3, password_hash = $4,
+         avatar_data_url = $5, auto_lock = $6, settings = $7::jsonb
+     WHERE id = $8
+     RETURNING id, name, nickname, email, password_hash, avatar_data_url,
+               auto_lock, settings`,
+    [
       input.name.trim(),
       input.nickname.trim(),
-      input.email.trim().toLowerCase(),
+      email,
       passwordHash,
       input.avatarDataUrl,
       input.autoLock,
       JSON.stringify(input.settings),
-      existing.id
-    );
-  return getCurrentAdminProfile();
+      existing.id,
+    ]
+  );
+  return toProfile(result.rows[0]);
 }
 
-export function createAdminAccount(input: CreateAdminAccountInput) {
+export async function createAdminAccount(input: CreateAdminAccountInput) {
   validateIdentity(input.name, input.nickname, input.email);
   if (input.password.length < 8) {
     throw new Error("Password must contain at least 8 characters.");
   }
-  const database = getDatabase();
   const email = input.email.trim().toLowerCase();
-  const duplicate = database
-    .prepare("SELECT id FROM admin_accounts WHERE LOWER(email) = LOWER(?)")
-    .get(email) as { id: string } | undefined;
-  if (duplicate) throw new Error("An admin with this email already exists.");
   const id = `admin-${randomUUID()}`;
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    database.prepare("UPDATE admin_accounts SET is_current = 0").run();
-    database
-      .prepare(
-        `INSERT INTO admin_accounts
-          (id, name, nickname, email, password_hash, avatar_data_url,
-           auto_lock, settings_json, is_current, created_at)
-         VALUES (?, ?, ?, ?, ?, '', '15', ?, 1, ?)`
-      )
-      .run(
+  return withTransaction(async (database) => {
+    const duplicate = await database.query<{ id: string }>(
+      "SELECT id FROM admin_accounts WHERE lower(email) = lower($1)",
+      [email]
+    );
+    if (duplicate.rows[0]) {
+      throw new Error("An admin with this email already exists.");
+    }
+    await database.query(
+      "UPDATE admin_accounts SET is_current = false WHERE is_current"
+    );
+    const result = await database.query<AdminRow>(
+      `INSERT INTO admin_accounts (
+         id, name, nickname, email, password_hash, avatar_data_url,
+         auto_lock, settings, is_current, created_at
+       )
+       VALUES ($1, $2, $3, $4, $5, '', '15', $6::jsonb, true, $7)
+       RETURNING id, name, nickname, email, password_hash, avatar_data_url,
+                 auto_lock, settings`,
+      [
         id,
         input.name.trim(),
         input.nickname.trim(),
@@ -132,12 +151,9 @@ export function createAdminAccount(input: CreateAdminAccountInput) {
           weeklyDigest: false,
           requireReviewNote: true,
         } satisfies ProfileSettings),
-        new Date().toISOString()
-      );
-    database.exec("COMMIT");
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
-  }
-  return getCurrentAdminProfile();
+        new Date().toISOString(),
+      ]
+    );
+    return toProfile(result.rows[0]);
+  });
 }
