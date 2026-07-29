@@ -93,10 +93,10 @@ Change the password from `/admin/profile` after starting the app.
 ## Architecture
 
 ```text
-React pages and components
+app routes + frontend components
         |
         v
-context/DataContext.tsx
+frontend/context/DataContext.tsx
         |
         v
 services/httpDataService.ts
@@ -105,19 +105,20 @@ services/httpDataService.ts
 app/api/data + app/api/profile
         |
         v
-server/dataRepository + server/profileRepository
+backend/dataRepository + backend/profileRepository
         |
         v
 .data/inout.sqlite
 ```
 
 - `lib/types.ts` is the single source for domain and service-contract types.
-- `server/database.ts` creates the relational schema, manages password hashing, and seeds an empty database.
-- `server/dataRepository.ts` owns movement, permission, alert, registry, synchronization, and note mutations.
-- `server/profileRepository.ts` owns admin profile and credential mutations.
-- `server/seedData.ts` generates coherent fixture history without shipping a large JSON payload to the browser.
+- `frontend/components`, `frontend/context`, and `frontend/hooks` contain browser-facing UI and state.
+- `backend/database.ts` creates the relational schema, manages password hashing, and seeds an empty database.
+- `backend/dataRepository.ts` owns movement, permission, alert, registry, synchronization, and note mutations.
+- `backend/profileRepository.ts` owns admin profile and credential mutations.
+- `backend/seedData.ts` generates coherent fixture history without shipping a large JSON payload to the browser.
 - `lib/movementLogic.ts` and `lib/ruleEngine.ts` contain deterministic domain decisions.
-- `context/DataContext.tsx` fetches only the data slice needed by the active route.
+- `frontend/context/DataContext.tsx` hydrates route-scoped data and merges mutation deltas.
 
 The browser no longer imports fixture JSON or holds the canonical domain store. Mutations persist across browser refreshes and across the admin and terminal interfaces.
 
