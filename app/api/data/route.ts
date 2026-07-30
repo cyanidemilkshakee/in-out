@@ -126,13 +126,13 @@ export async function GET(request: NextRequest) {
             ? (sortDirection as SortDirection)
             : undefined,
       };
-      return response(queryMovements(query, timing.add), timing);
+      return response(await queryMovements(query, timing.add), timing);
     }
     const rawScope = request.nextUrl.searchParams.get("scope") ?? "all";
     const scope = DATA_SCOPES.has(rawScope as DataScope)
       ? (rawScope as DataScope)
       : "all";
-    return response(getSnapshot(scope, timing.add), timing);
+    return response(await getSnapshot(scope, timing.add), timing);
   } catch (error) {
     return errorResponse(
       error instanceof Error
@@ -156,32 +156,32 @@ export async function POST(request: NextRequest) {
     switch (action) {
       case "createTemporaryVisitor":
         return send(
-          createTemporaryVisitor(
+          await createTemporaryVisitor(
             requireObject(body.input, "Visitor input") as CreateTemporaryVisitorInput
           )
         );
       case "createEmployee":
         return send(
-          createEmployee(
+          await createEmployee(
             requireObject(body.input, "Employee input") as CreateEmployeeInput
           )
         );
       case "createHardwareAsset":
         return send(
-          createHardwareAsset(
+          await createHardwareAsset(
             requireObject(body.input, "Hardware input") as CreateHardwareAssetInput
           )
         );
       case "updatePerson":
         return send(
-          updatePerson(
+          await updatePerson(
             requireString(body.personId, "Person id"),
             requireObject(body.patch, "Person patch") as Partial<Omit<Person, "id">>
           )
         );
       case "updateHardwareAsset":
         return send(
-          updateHardwareAsset(
+          await updateHardwareAsset(
             requireString(body.assetId, "Asset id"),
             requireObject(
               body.patch,
@@ -191,14 +191,14 @@ export async function POST(request: NextRequest) {
         );
       case "updateAlert":
         return send(
-          updateAlert(
+          await updateAlert(
             requireString(body.alertId, "Alert id"),
             requireObject(body.patch, "Alert patch") as Partial<Omit<Alert, "id">>
           )
         );
       case "updateAccessPermission":
         return send(
-          updateAccessPermission(
+          await updateAccessPermission(
             requireObject(
               body.input,
               "Permission input"
@@ -211,7 +211,7 @@ export async function POST(request: NextRequest) {
           throw new Error("Decision must be approved or denied.");
         }
         return send(
-          decidePermissionRequest(
+          await decidePermissionRequest(
             requireString(body.requestId, "Request id"),
             decision,
             requireString(body.reason, "Decision reason")
@@ -223,33 +223,33 @@ export async function POST(request: NextRequest) {
           throw new Error("Alert rule enabled state is required.");
         }
         return send(
-          updateAlertRule(
+          await updateAlertRule(
             requireString(body.ruleId, "Rule id"),
             body.enabled
           )
         );
       case "markNotificationRead":
         return send(
-          markNotificationRead(
+          await markNotificationRead(
             requireString(body.notificationId, "Notification id")
           )
         );
       case "recordScan":
         return send(
-          recordScan(
+          await recordScan(
             requireObject(body.input, "Scan input") as RecordScanInput,
             timing.add
           )
         );
       case "saveMovement":
         return send(
-          saveMovement(
+          await saveMovement(
             requireObject(body.event, "Movement event") as MovementEvent
           )
         );
       case "syncMovements":
         return send(
-          syncMovements(
+          await syncMovements(
             Array.isArray(body.eventIds)
               ? body.eventIds.filter((id): id is string => typeof id === "string")
               : undefined
@@ -257,7 +257,7 @@ export async function POST(request: NextRequest) {
         );
       case "resolveMovementConflicts":
         return send(
-          resolveMovementConflicts(
+          await resolveMovementConflicts(
             Array.isArray(body.eventIds)
               ? body.eventIds.filter((id): id is string => typeof id === "string")
               : []
@@ -265,7 +265,7 @@ export async function POST(request: NextRequest) {
         );
       case "addMovementNote":
         return send(
-          addMovementNote(
+          await addMovementNote(
             requireString(body.eventId, "Movement id"),
             requireString(body.note, "Movement note")
           )

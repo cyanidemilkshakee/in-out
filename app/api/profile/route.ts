@@ -24,9 +24,9 @@ function errorResponse(error: unknown) {
   );
 }
 
-export function GET() {
+export async function GET() {
   try {
-    return response(getCurrentAdminProfile());
+    return response(await getCurrentAdminProfile());
   } catch (error) {
     return errorResponse(error);
   }
@@ -35,7 +35,9 @@ export function GET() {
 export async function PATCH(request: NextRequest) {
   try {
     return response(
-      updateCurrentAdminProfile((await request.json()) as UpdateAdminProfileInput)
+      await updateCurrentAdminProfile(
+        (await request.json()) as UpdateAdminProfileInput
+      )
     );
   } catch (error) {
     return errorResponse(error);
@@ -45,7 +47,7 @@ export async function PATCH(request: NextRequest) {
 export async function POST(request: NextRequest) {
   try {
     return response(
-      createAdminAccount((await request.json()) as CreateAdminAccountInput)
+      await createAdminAccount((await request.json()) as CreateAdminAccountInput)
     );
   } catch (error) {
     return errorResponse(error);
