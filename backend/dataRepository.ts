@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { DatabaseSync } from "node:sqlite";
+import type { Pool, PoolClient } from "pg";
 import { denialCodeForReason, evaluateScan } from "../lib/movementLogic";
 import { startOfFacilityDay } from "../lib/dateRanges";
 import {
@@ -35,10 +35,11 @@ import type {
   RecordScanResult,
   UpdateAccessPermissionInput,
 } from "../lib/types";
-import { getDatabase } from "./database";
+import { getDatabase, withTransaction } from "./database";
 import type { TimingSink } from "./timing";
 
-type JsonRow = { data: string };
+type Queryable = Pick<Pool | PoolClient, "query">;
+type JsonRow<T> = { data: T };
 type NoteRow = { event_id: string; note: string };
 
 const FACILITY_TIME_ZONE = "Asia/Kolkata";
@@ -58,61 +59,50 @@ const EMPTY_ANALYTICS = {
   activeInside: 0,
 };
 
-function jsonRows<T>(database: DatabaseSync, sql: string, ...params: unknown[]) {
-  return queryJsonRows<T>(database, sql, params);
-}
-
-function queryJsonRows<T>(
-  database: DatabaseSync,
+async function queryJsonRows<T>(
+  database: Queryable,
   sql: string,
   params: unknown[] = [],
   timing?: TimingSink
 ) {
   const queryStartedAt = performance.now();
-  const rows = database
-    .prepare(sql)
-    .all(...(params as never[])) as unknown as JsonRow[];
+  const result = await database.query<JsonRow<T>>(sql, params);
   timing?.("db_query", performance.now() - queryStartedAt);
-
-  const parseStartedAt = performance.now();
-  const parsed = rows.map((row) => JSON.parse(row.data) as T);
-  timing?.("json_parse", performance.now() - parseStartedAt);
-  return parsed;
+  return result.rows.map((row) => row.data);
 }
 
-function jsonRow<T>(
-  database: DatabaseSync,
+async function jsonRow<T>(
+  database: Queryable,
   sql: string,
   ...params: unknown[]
-): T | undefined {
-  const row = database.prepare(sql).get(...(params as never[])) as
-    | JsonRow
-    | undefined;
-  return row ? (JSON.parse(row.data) as T) : undefined;
+) {
+  const result = await database.query<JsonRow<T>>(sql, params);
+  return result.rows[0]?.data;
 }
 
-function updateJson(
-  database: DatabaseSync,
+async function updateJson(
+  database: Queryable,
   table: string,
   idColumn: string,
   id: string,
   value: unknown
 ) {
-  database
-    .prepare(`UPDATE ${table} SET data = ? WHERE ${idColumn} = ?`)
-    .run(JSON.stringify(value), id);
-}
-
-function withTransaction<T>(database: DatabaseSync, operation: () => T) {
-  database.exec("BEGIN IMMEDIATE");
-  try {
-    const result = operation();
-    database.exec("COMMIT");
-    return result;
-  } catch (error) {
-    database.exec("ROLLBACK");
-    throw error;
+  const allowed = new Set([
+    "people:subject_id",
+    "hardware_assets:subject_id",
+    "alerts:id",
+    "access_permissions:id",
+    "permission_requests:id",
+    "alert_rules:id",
+    "notifications:id",
+  ]);
+  if (!allowed.has(`${table}:${idColumn}`)) {
+    throw new Error(`Unsupported JSON update target: ${table}.${idColumn}`);
   }
+  await database.query(
+    `UPDATE ${table} SET data = $1::jsonb WHERE ${idColumn} = $2`,
+    [JSON.stringify(value), id]
+  );
 }
 
 function facilityDate(date = new Date()) {
@@ -141,7 +131,7 @@ function clone<T>(value: T): T {
   return structuredClone(value);
 }
 
-function getPeople(database: DatabaseSync, timing?: TimingSink) {
+function getPeople(database: Queryable, timing?: TimingSink) {
   return queryJsonRows<Person>(
     database,
     "SELECT data FROM people ORDER BY subject_id",
@@ -150,7 +140,7 @@ function getPeople(database: DatabaseSync, timing?: TimingSink) {
   );
 }
 
-function getHardware(database: DatabaseSync, timing?: TimingSink) {
+function getHardware(database: Queryable, timing?: TimingSink) {
   return queryJsonRows<HardwareAsset>(
     database,
     "SELECT data FROM hardware_assets ORDER BY subject_id",
@@ -159,7 +149,7 @@ function getHardware(database: DatabaseSync, timing?: TimingSink) {
   );
 }
 
-function getCheckpoints(database: DatabaseSync, timing?: TimingSink) {
+function getCheckpoints(database: Queryable, timing?: TimingSink) {
   return queryJsonRows<Checkpoint>(
     database,
     "SELECT data FROM checkpoints ORDER BY id",
@@ -169,28 +159,28 @@ function getCheckpoints(database: DatabaseSync, timing?: TimingSink) {
 }
 
 function getMovements(
-  database: DatabaseSync,
+  database: Queryable,
   limit?: number,
   timing?: TimingSink
 ) {
   return queryJsonRows<MovementEvent>(
     database,
-    `SELECT data FROM movements ORDER BY occurred_at DESC${limit ? " LIMIT ?" : ""}`,
+    `SELECT data FROM movements ORDER BY occurred_at DESC${limit ? " LIMIT $1" : ""}`,
     limit ? [limit] : [],
     timing
   );
 }
 
-function getAlerts(database: DatabaseSync, limit?: number, timing?: TimingSink) {
+function getAlerts(database: Queryable, limit?: number, timing?: TimingSink) {
   return queryJsonRows<Alert>(
     database,
-    `SELECT data FROM alerts ORDER BY created_at DESC${limit ? " LIMIT ?" : ""}`,
+    `SELECT data FROM alerts ORDER BY created_at DESC${limit ? " LIMIT $1" : ""}`,
     limit ? [limit] : [],
     timing
   );
 }
 
-function getPermissions(database: DatabaseSync, timing?: TimingSink) {
+function getPermissions(database: Queryable, timing?: TimingSink) {
   return queryJsonRows<AccessPermission>(
     database,
     "SELECT data FROM access_permissions ORDER BY id",
@@ -199,7 +189,7 @@ function getPermissions(database: DatabaseSync, timing?: TimingSink) {
   );
 }
 
-function getPermissionRequests(database: DatabaseSync, timing?: TimingSink) {
+function getPermissionRequests(database: Queryable, timing?: TimingSink) {
   return queryJsonRows<PermissionRequest>(
     database,
     "SELECT data FROM permission_requests ORDER BY created_at DESC",
@@ -208,7 +198,7 @@ function getPermissionRequests(database: DatabaseSync, timing?: TimingSink) {
   );
 }
 
-function getNotifications(database: DatabaseSync, timing?: TimingSink) {
+function getNotifications(database: Queryable, timing?: TimingSink) {
   return queryJsonRows<PermissionNotification>(
     database,
     "SELECT data FROM notifications ORDER BY created_at DESC",
@@ -217,7 +207,7 @@ function getNotifications(database: DatabaseSync, timing?: TimingSink) {
   );
 }
 
-function getAlertRules(database: DatabaseSync, timing?: TimingSink) {
+function getAlertRules(database: Queryable, timing?: TimingSink) {
   return queryJsonRows<AlertRule>(
     database,
     "SELECT data FROM alert_rules ORDER BY id",
@@ -227,37 +217,35 @@ function getAlertRules(database: DatabaseSync, timing?: TimingSink) {
 }
 
 function getAuditEvents(
-  database: DatabaseSync,
+  database: Queryable,
   limit?: number,
   timing?: TimingSink
 ) {
   return queryJsonRows<AuditEvent>(
     database,
-    `SELECT data FROM audit_events ORDER BY created_at DESC${limit ? " LIMIT ?" : ""}`,
+    `SELECT data FROM audit_events ORDER BY created_at DESC${limit ? " LIMIT $1" : ""}`,
     limit ? [limit] : [],
     timing
   );
 }
 
-function getMovementNotes(
-  database: DatabaseSync,
+async function getMovementNotes(
+  database: Queryable,
   eventIds: string[],
   timing?: TimingSink
-): MovementNotes {
+): Promise<MovementNotes> {
   if (eventIds.length === 0) return {};
-  const placeholders = eventIds.map(() => "?").join(", ");
   const startedAt = performance.now();
-  const rows = database
-    .prepare(
-      `SELECT event_id, note
-       FROM movement_notes
-       WHERE event_id IN (${placeholders})
-       ORDER BY id`
-    )
-    .all(...(eventIds as never[])) as unknown as NoteRow[];
+  const result = await database.query<NoteRow>(
+    `SELECT event_id, note
+     FROM movement_notes
+     WHERE event_id = ANY($1::text[])
+     ORDER BY id`,
+    [eventIds]
+  );
   timing?.("db_query", performance.now() - startedAt);
   const notes: MovementNotes = {};
-  for (const row of rows) {
+  for (const row of result.rows) {
     notes[row.event_id] = [...(notes[row.event_id] ?? []), row.note];
   }
   return notes;
@@ -282,52 +270,49 @@ function recordLimitForScope(scope: DataScope) {
   return undefined;
 }
 
-function getScanAnalytics(
-  database: DatabaseSync,
+async function getScanAnalytics(
+  database: Queryable,
   timing?: TimingSink
-): ScanAnalytics {
+): Promise<ScanAnalytics> {
   const startedAt = performance.now();
-  const row = database
-    .prepare(
+  const [movementResult, insideResult] = await Promise.all([
+    database.query<Record<string, string>>(
       `SELECT
-         COUNT(*) AS totalScans,
-         SUM(result = 'approved') AS totalApproved,
-         SUM(result = 'denied') AS totalDenied,
-         SUM(
-           result = 'approved'
-           AND direction = 'entry'
-         ) AS totalEntries,
-         SUM(
-           result = 'approved'
-           AND direction = 'exit'
-         ) AS totalExits,
-         SUM(scan_type = 'auto') AS totalAutomatic,
-         SUM(scan_type = 'manual') AS totalManual,
-         SUM(
-           result = 'denied'
-           AND denial_code IN (
-             'asset_restricted',
-             'access_restricted',
-             'hardware_restricted',
-             'zone_not_permitted'
-           )
-         ) AS totalRestricted,
-         SUM(
-           result = 'denied'
-           AND denial_code = 'expired_pass'
-         ) AS totalExpired
+         count(*) AS "totalScans",
+         count(*) FILTER (WHERE result = 'approved') AS "totalApproved",
+         count(*) FILTER (WHERE result = 'denied') AS "totalDenied",
+         count(*) FILTER (
+           WHERE result = 'approved' AND direction = 'entry'
+         ) AS "totalEntries",
+         count(*) FILTER (
+           WHERE result = 'approved' AND direction = 'exit'
+         ) AS "totalExits",
+         count(*) FILTER (WHERE scan_type = 'auto') AS "totalAutomatic",
+         count(*) FILTER (WHERE scan_type = 'manual') AS "totalManual",
+         count(*) FILTER (
+           WHERE result = 'denied'
+             AND denial_code IN (
+               'asset_restricted',
+               'access_restricted',
+               'hardware_restricted',
+               'zone_not_permitted'
+             )
+         ) AS "totalRestricted",
+         count(*) FILTER (
+           WHERE result = 'denied' AND denial_code = 'expired_pass'
+         ) AS "totalExpired"
        FROM movements`
-    )
-    .get() as Record<string, number | null>;
-  const insideRow = database
-    .prepare(
-      `SELECT COUNT(*) AS activeInside
+    ),
+    database.query<{ activeInside: string }>(
+      `SELECT count(*) AS "activeInside"
        FROM people
-       WHERE json_extract(data, '$.inside') = 1`
-    )
-    .get() as { activeInside: number };
+       WHERE data ->> 'inside' = 'true'`
+    ),
+  ]);
   timing?.("db_aggregate", performance.now() - startedAt);
 
+  const row = movementResult.rows[0] ?? {};
+  const insideRow = insideResult.rows[0] ?? { activeInside: "0" };
   const totalDenied = Number(row.totalDenied ?? 0);
   const totalRestricted = Number(row.totalRestricted ?? 0);
   const totalExpired = Number(row.totalExpired ?? 0);
@@ -349,23 +334,22 @@ function getScanAnalytics(
   };
 }
 
-export function getSnapshot(
+export async function getSnapshot(
   scope: DataScope = "all",
   timing?: TimingSink
-): AppDataSnapshot {
-  const database = getDatabase();
+): Promise<AppDataSnapshot> {
+  const database = await getDatabase();
   if (hasScope(scope, "dashboard", "alerts")) {
-    evaluateAndPersistScheduledRules(database, false, timing);
+    await evaluateAndPersistScheduledRules(database, false, timing);
   }
   const includePeople = hasScope(scope, "terminal", "registry", "permissions");
   const includeHardware = hasScope(scope, "terminal", "registry", "permissions");
   const includeMovements = hasScope(scope, "dashboard", "logs", "registry", "terminal");
   const includeAlerts = hasScope(scope, "dashboard", "logs", "registry", "alerts");
-  const people = includePeople ? getPeople(database, timing) : [];
-  const hardwareAssets = includeHardware ? getHardware(database, timing) : [];
-  const initialMovementPage =
+  const initialMovementPagePromise =
     scope === "logs"
-      ? queryMovements(
+      ? queryMovementPage(
+          database,
           {
             page: 1,
             pageSize: 25,
@@ -378,9 +362,10 @@ export function getSnapshot(
           timing
         )
       : undefined;
-  const dashboardMovementPage =
+  const dashboardMovementPagePromise =
     scope === "dashboard"
-      ? queryMovements(
+      ? queryMovementPage(
+          database,
           {
             page: 1,
             pageSize: 100,
@@ -391,49 +376,82 @@ export function getSnapshot(
           },
           timing
         )
-      : undefined;
+      : Promise.resolve(undefined);
+  const recordLimit = recordLimitForScope(scope);
+  const [
+    people,
+    hardwareAssets,
+    checkpoints,
+    initialMovementPage,
+    dashboardMovementPage,
+    scopedMovements,
+    alerts,
+    scanAnalytics,
+    permissions,
+    permissionRequests,
+    notifications,
+    alertRules,
+    auditEvents,
+  ] = await Promise.all([
+    includePeople ? getPeople(database, timing) : Promise.resolve([]),
+    includeHardware ? getHardware(database, timing) : Promise.resolve([]),
+    hasScope(scope, "terminal")
+      ? getCheckpoints(database, timing)
+      : Promise.resolve([]),
+    initialMovementPagePromise,
+    dashboardMovementPagePromise,
+    includeMovements && scope !== "logs" && scope !== "dashboard"
+      ? getMovements(database, movementLimitForScope(scope), timing)
+      : Promise.resolve([]),
+    includeAlerts
+      ? getAlerts(database, recordLimit, timing)
+      : Promise.resolve([]),
+    hasScope(scope, "dashboard", "terminal")
+      ? getScanAnalytics(database, timing)
+      : Promise.resolve(EMPTY_ANALYTICS),
+    hasScope(scope, "permissions")
+      ? getPermissions(database, timing)
+      : Promise.resolve([]),
+    hasScope(scope, "permissions")
+      ? getPermissionRequests(database, timing)
+      : Promise.resolve([]),
+    hasScope(scope, "permissions")
+      ? getNotifications(database, timing)
+      : Promise.resolve([]),
+    hasScope(scope, "alerts")
+      ? getAlertRules(database, timing)
+      : Promise.resolve([]),
+    hasScope(scope, "logs", "registry", "permissions")
+      ? getAuditEvents(database, recordLimit, timing)
+      : Promise.resolve([]),
+  ]);
   const movements =
     initialMovementPage?.items ??
     dashboardMovementPage?.chartItems ??
-    (includeMovements
-      ? getMovements(database, movementLimitForScope(scope), timing)
-      : []);
-  const recordLimit = recordLimitForScope(scope);
+    scopedMovements;
 
   return {
     people,
     hardwareAssets,
-    checkpoints: hasScope(scope, "terminal")
-      ? getCheckpoints(database, timing)
-      : [],
+    checkpoints,
     movements,
     movementPage: initialMovementPage,
-    alerts: includeAlerts ? getAlerts(database, recordLimit, timing) : [],
-    scanAnalytics: hasScope(scope, "dashboard", "terminal")
-      ? getScanAnalytics(database, timing)
-      : EMPTY_ANALYTICS,
+    alerts,
+    scanAnalytics,
     movementNotes: initialMovementPage
       ? initialMovementPage.movementNotes
       : hasScope(scope, "logs")
-      ? getMovementNotes(
+      ? await getMovementNotes(
           database,
           movements.map((movement) => movement.id),
           timing
         )
       : {},
-    permissions: hasScope(scope, "permissions")
-      ? getPermissions(database, timing)
-      : [],
-    permissionRequests: hasScope(scope, "permissions")
-      ? getPermissionRequests(database, timing)
-      : [],
-    notifications: hasScope(scope, "permissions")
-      ? getNotifications(database, timing)
-      : [],
-    alertRules: hasScope(scope, "alerts") ? getAlertRules(database, timing) : [],
-    auditEvents: hasScope(scope, "logs", "registry", "permissions")
-      ? getAuditEvents(database, recordLimit, timing)
-      : [],
+    permissions,
+    permissionRequests,
+    notifications,
+    alertRules,
+    auditEvents,
   };
 }
 
@@ -444,12 +462,12 @@ const MOVEMENT_SORT_COLUMNS: Record<
   date: "occurred_at",
   time: "occurred_at",
   createdAt: "occurred_at",
-  name: "json_extract(data, '$.subjectName')",
+  name: "data ->> 'subjectName'",
   type: "subject_type",
   direction: "direction",
-  checkpoint: "json_extract(data, '$.checkpoint')",
+  checkpoint: "data ->> 'checkpoint'",
   result: "result",
-  barcode: "json_extract(data, '$.barcode')",
+  barcode: "data ->> 'barcode'",
   scanType: "scan_type",
   eventId: "id",
 };
@@ -458,39 +476,39 @@ function escapeLike(value: string) {
   return value.replace(/[\\%_]/g, (character) => `\\${character}`);
 }
 
-export function queryMovements(
+async function queryMovementPage(
+  database: Queryable,
   query: MovementQuery,
   timing?: TimingSink
-): MovementPage {
-  const database = getDatabase();
+): Promise<MovementPage> {
   const page = Math.max(1, Math.floor(query.page || 1));
   const pageSize = Math.min(100, Math.max(1, Math.floor(query.pageSize || 25)));
   const where: string[] = [];
   const params: unknown[] = [];
 
   if (query.startAt) {
-    where.push("occurred_at >= ?");
     params.push(query.startAt);
+    where.push(`occurred_at >= $${params.length}`);
   }
   if (query.endAt) {
-    where.push("occurred_at <= ?");
     params.push(query.endAt);
+    where.push(`occurred_at <= $${params.length}`);
   }
   if (query.checkpoint) {
-    where.push("json_extract(data, '$.checkpoint') = ?");
     params.push(query.checkpoint);
+    where.push(`data ->> 'checkpoint' = $${params.length}`);
   }
   if (query.result) {
-    where.push("result = ?");
     params.push(query.result);
+    where.push(`result = $${params.length}`);
   }
   if (query.scanType) {
-    where.push("scan_type = ?");
     params.push(query.scanType);
+    where.push(`scan_type = $${params.length}`);
   }
   if (query.direction) {
-    where.push("direction = ?");
     params.push(query.direction);
+    where.push(`direction = $${params.length}`);
   }
   if (query.subjectGroup === "hardware") {
     where.push("subject_type = 'hardware'");
@@ -500,15 +518,16 @@ export function queryMovements(
   const search = query.search?.trim().toLowerCase();
   if (search) {
     const needle = `%${escapeLike(search)}%`;
+    params.push(needle);
+    const searchParameter = `$${params.length}`;
     where.push(
       `(
-        LOWER(json_extract(data, '$.subjectName')) LIKE ? ESCAPE '\\'
-        OR LOWER(json_extract(data, '$.barcode')) LIKE ? ESCAPE '\\'
-        OR LOWER(json_extract(data, '$.checkpoint')) LIKE ? ESCAPE '\\'
-        OR LOWER(COALESCE(json_extract(data, '$.reason'), '')) LIKE ? ESCAPE '\\'
+        data ->> 'subjectName' ILIKE ${searchParameter} ESCAPE E'\\\\'
+        OR data ->> 'barcode' ILIKE ${searchParameter} ESCAPE E'\\\\'
+        OR data ->> 'checkpoint' ILIKE ${searchParameter} ESCAPE E'\\\\'
+        OR COALESCE(data ->> 'reason', '') ILIKE ${searchParameter} ESCAPE E'\\\\'
       )`
     );
-    params.push(needle, needle, needle, needle);
   }
 
   const whereSql = where.length ? ` WHERE ${where.join(" AND ")}` : "";
@@ -516,21 +535,23 @@ export function queryMovements(
     MOVEMENT_SORT_COLUMNS[query.sortKey ?? "createdAt"] ?? "occurred_at";
   const sortDirection = query.sortDirection === "asc" ? "ASC" : "DESC";
   const queryStartedAt = performance.now();
-  const countRow = database
-    .prepare(`SELECT COUNT(*) AS count FROM movements${whereSql}`)
-    .get(...(params as never[])) as { count: number };
+  const countResult = await database.query<{ count: string }>(
+    `SELECT count(*)::text AS count FROM movements${whereSql}`,
+    params
+  );
   timing?.("db_query", performance.now() - queryStartedAt);
 
-  const items = queryJsonRows<MovementEvent>(
+  const itemParams = [...params, pageSize, (page - 1) * pageSize];
+  const items = await queryJsonRows<MovementEvent>(
     database,
     `SELECT data
      FROM movements${whereSql}
      ORDER BY ${sortColumn} ${sortDirection}, occurred_at DESC
-     LIMIT ? OFFSET ?`,
-    [...params, pageSize, (page - 1) * pageSize],
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    itemParams,
     timing
   );
-  const chartItems = queryJsonRows<MovementEvent>(
+  const chartItems = await queryJsonRows<MovementEvent>(
     database,
     `SELECT data
      FROM movements${whereSql}
@@ -540,69 +561,87 @@ export function queryMovements(
     timing
   );
   const checkpointStartedAt = performance.now();
-  const checkpointRows = database
-    .prepare(
-      `SELECT DISTINCT json_extract(data, '$.checkpoint') AS checkpoint
-       FROM movements
-       WHERE json_extract(data, '$.checkpoint') IS NOT NULL
-       ORDER BY checkpoint`
-    )
-    .all() as Array<{ checkpoint: string }>;
+  const checkpointResult = await database.query<{ checkpoint: string }>(
+    `SELECT DISTINCT data ->> 'checkpoint' AS checkpoint
+     FROM movements
+     WHERE data ? 'checkpoint'
+     ORDER BY checkpoint`
+  );
   timing?.("db_query", performance.now() - checkpointStartedAt);
 
   return {
     items,
     chartItems,
-    movementNotes: getMovementNotes(
+    movementNotes: await getMovementNotes(
       database,
       items.map((movement) => movement.id),
       timing
     ),
-    total: Number(countRow.count),
+    total: Number(countResult.rows[0]?.count ?? 0),
     page,
     pageSize,
-    checkpoints: checkpointRows.map((row) => row.checkpoint),
+    checkpoints: checkpointResult.rows.map((row) => row.checkpoint),
   };
 }
 
-function assertBarcodeAvailable(database: DatabaseSync, barcode: string, exceptId?: string) {
-  const existing = database
-    .prepare("SELECT id FROM subjects WHERE UPPER(barcode) = UPPER(?)")
-    .get(barcode) as { id: string } | undefined;
+export async function queryMovements(
+  query: MovementQuery,
+  timing?: TimingSink
+) {
+  return queryMovementPage(await getDatabase(), query, timing);
+}
+
+async function assertBarcodeAvailable(
+  database: Queryable,
+  barcode: string,
+  exceptId?: string
+) {
+  const result = await database.query<{ id: string }>(
+    "SELECT id FROM subjects WHERE lower(barcode) = lower($1)",
+    [barcode]
+  );
+  const existing = result.rows[0];
   if (existing && existing.id !== exceptId) {
     throw new Error(`Barcode ${barcode} is already assigned.`);
   }
 }
 
-function insertPermission(database: DatabaseSync, permission: AccessPermission) {
-  database
-    .prepare(
-      "INSERT INTO access_permissions (id, subject_id, data) VALUES (?, ?, ?)"
-    )
-    .run(permission.id, permission.subjectId, JSON.stringify(permission));
+async function insertPermission(
+  database: Queryable,
+  permission: AccessPermission
+) {
+  await database.query(
+    `INSERT INTO access_permissions (id, subject_id, data)
+     VALUES ($1, $2, $3::jsonb)`,
+    [permission.id, permission.subjectId, JSON.stringify(permission)]
+  );
 }
 
-function insertNotification(
-  database: DatabaseSync,
+async function insertNotification(
+  database: Queryable,
   notification: PermissionNotification
 ) {
-  database
-    .prepare(
-      "INSERT INTO notifications (id, created_at, data) VALUES (?, ?, ?)"
-    )
-    .run(notification.id, notification.createdAt, JSON.stringify(notification));
+  await database.query(
+    `INSERT INTO notifications (id, created_at, data)
+     VALUES ($1, $2, $3::jsonb)`,
+    [
+      notification.id,
+      notification.createdAt,
+      JSON.stringify(notification),
+    ]
+  );
 }
 
-function insertAudit(database: DatabaseSync, audit: AuditEvent) {
-  database
-    .prepare(
-      "INSERT INTO audit_events (id, created_at, data) VALUES (?, ?, ?)"
-    )
-    .run(audit.id, audit.createdAt, JSON.stringify(audit));
+async function insertAudit(database: Queryable, audit: AuditEvent) {
+  await database.query(
+    `INSERT INTO audit_events (id, created_at, data)
+     VALUES ($1, $2, $3::jsonb)`,
+    [audit.id, audit.createdAt, JSON.stringify(audit)]
+  );
 }
 
-function evaluateAndPersistScheduledRules(
-  database: DatabaseSync,
+async function evaluateAndPersistScheduledRules(
+  database: Queryable,
   force: boolean,
   timing?: TimingSink
 ) {
@@ -612,40 +651,40 @@ function evaluateAndPersistScheduledRules(
   scheduledRuleRuns.set(database as object, now.getTime());
 
   const since = new Date(now.getTime() - 48 * 60 * 60 * 1000).toISOString();
-  const rules = queryJsonRows<AlertRule>(
+  const rules = await queryJsonRows<AlertRule>(
     database,
     `SELECT data
      FROM alert_rules
-     WHERE json_extract(data, '$.enabled') = 1
-       AND json_extract(data, '$.conditionKey') IN ('exit_balance', 'no_break')`,
+     WHERE data ->> 'enabled' = 'true'
+       AND data ->> 'conditionKey' IN ('exit_balance', 'no_break')`,
     [],
     timing
   );
   if (rules.length === 0) return [] as Alert[];
 
-  const movements = queryJsonRows<MovementEvent>(
+  const movements = await queryJsonRows<MovementEvent>(
     database,
     `SELECT data
      FROM movements
-     WHERE occurred_at >= ?
+     WHERE occurred_at >= $1
      ORDER BY occurred_at`,
     [since],
     timing
   );
-  const people = queryJsonRows<Person>(
+  const people = await queryJsonRows<Person>(
     database,
     `SELECT data
      FROM people
-     WHERE json_extract(data, '$.type') = 'employee'`,
+     WHERE data ->> 'type' = 'employee'`,
     [],
     timing
   );
-  const existingAlerts = queryJsonRows<Alert>(
+  const existingAlerts = await queryJsonRows<Alert>(
     database,
     `SELECT data
      FROM alerts
-     WHERE created_at >= ?
-       AND json_extract(data, '$.ruleId') IS NOT NULL`,
+     WHERE created_at >= $1
+       AND data ? 'ruleId'`,
     [since],
     timing
   );
@@ -659,25 +698,26 @@ function evaluateAndPersistScheduledRules(
   timing?.("rule_evaluation", performance.now() - ruleStartedAt);
   if (candidates.length === 0) return [] as Alert[];
 
-  return withTransaction(database, () =>
-    candidates.map((candidate) => {
+  return withTransaction(async (transaction) => {
+    const alerts: Alert[] = [];
+    for (const candidate of candidates) {
       const createdAt = candidate.createdAt ?? now.toISOString();
       const alert: Alert = {
         ...candidate,
         id: makeId("AL"),
         createdAt,
       };
-      database
-        .prepare(
-          "INSERT INTO alerts (id, source_event_id, created_at, data) VALUES (?, ?, ?, ?)"
-        )
-        .run(
+      await transaction.query(
+        `INSERT INTO alerts (id, source_event_id, created_at, data)
+         VALUES ($1, $2, $3, $4::jsonb)`,
+        [
           alert.id,
           alert.sourceEventId ?? null,
           createdAt,
-          JSON.stringify(alert)
-        );
-      insertAudit(database, {
+          JSON.stringify(alert),
+        ]
+      );
+      await insertAudit(transaction, {
         id: makeId("AUD"),
         category: "alert",
         action: "Scheduled alert raised",
@@ -691,16 +731,17 @@ function evaluateAndPersistScheduledRules(
         time: alert.time,
         createdAt,
       });
-      return clone(alert);
-    })
-  );
+      alerts.push(clone(alert));
+    }
+    return alerts;
+  });
 }
 
-export function createTemporaryVisitor(input: CreateTemporaryVisitorInput) {
-  const database = getDatabase();
+export async function createTemporaryVisitor(input: CreateTemporaryVisitorInput) {
+  const database = await getDatabase();
   const barcode = input.barcode.trim().toUpperCase();
   if (!barcode) throw new Error("Visitor barcode is required.");
-  assertBarcodeAvailable(database, barcode);
+  await assertBarcodeAvailable(database, barcode);
   const now = new Date();
   const requestedStart = new Date(input.validFrom);
   const requestedEnd = new Date(input.validUntil);
@@ -774,32 +815,33 @@ export function createTemporaryVisitor(input: CreateTemporaryVisitorInput) {
     read: false,
   };
 
-  return withTransaction(database, () => {
-    database
-      .prepare("INSERT INTO subjects (id, kind, barcode) VALUES (?, ?, ?)")
-      .run(visitor.id, visitor.type, visitor.barcode);
-    database
-      .prepare("INSERT INTO people (subject_id, data) VALUES (?, ?)")
-      .run(visitor.id, JSON.stringify(visitor));
-    database
-      .prepare(
-        `INSERT INTO permission_requests
-          (id, subject_id, created_at, data) VALUES (?, ?, ?, ?)`
-      )
-      .run(request.id, request.subjectId, request.createdAt, JSON.stringify(request));
-    insertPermission(database, permission);
-    insertNotification(database, notification);
+  return withTransaction(async (transaction) => {
+    await transaction.query(
+      "INSERT INTO subjects (id, kind, barcode) VALUES ($1, $2, $3)",
+      [visitor.id, visitor.type, visitor.barcode]
+    );
+    await transaction.query(
+      "INSERT INTO people (subject_id, data) VALUES ($1, $2::jsonb)",
+      [visitor.id, JSON.stringify(visitor)]
+    );
+    await transaction.query(
+      `INSERT INTO permission_requests
+        (id, subject_id, created_at, data) VALUES ($1, $2, $3, $4::jsonb)`,
+      [request.id, request.subjectId, request.createdAt, JSON.stringify(request)]
+    );
+    await insertPermission(transaction, permission);
+    await insertNotification(transaction, notification);
     return clone(visitor);
   });
 }
 
-export function createEmployee(input: CreateEmployeeInput) {
-  const database = getDatabase();
+export async function createEmployee(input: CreateEmployeeInput) {
+  const database = await getDatabase();
   const barcode = input.barcode.trim().toUpperCase();
   if (!barcode || !input.name.trim()) {
     throw new Error("Employee name and barcode are required.");
   }
-  assertBarcodeAvailable(database, barcode);
+  await assertBarcodeAvailable(database, barcode);
   const now = new Date();
   const employee: Person = {
     id: makeId("emp"),
@@ -828,27 +870,29 @@ export function createEmployee(input: CreateEmployeeInput) {
     updatedAt: now.toISOString(),
     updatedBy: "Admin User",
   };
-  return withTransaction(database, () => {
-    database
-      .prepare("INSERT INTO subjects (id, kind, barcode) VALUES (?, ?, ?)")
-      .run(employee.id, employee.type, employee.barcode);
-    database
-      .prepare("INSERT INTO people (subject_id, data) VALUES (?, ?)")
-      .run(employee.id, JSON.stringify(employee));
-    insertPermission(database, permission);
+  return withTransaction(async (transaction) => {
+    await transaction.query(
+      "INSERT INTO subjects (id, kind, barcode) VALUES ($1, $2, $3)",
+      [employee.id, employee.type, employee.barcode]
+    );
+    await transaction.query(
+      "INSERT INTO people (subject_id, data) VALUES ($1, $2::jsonb)",
+      [employee.id, JSON.stringify(employee)]
+    );
+    await insertPermission(transaction, permission);
     return clone(employee);
   });
 }
 
-export function createHardwareAsset(input: CreateHardwareAssetInput) {
-  const database = getDatabase();
+export async function createHardwareAsset(input: CreateHardwareAssetInput) {
+  const database = await getDatabase();
   const barcode = input.barcode.trim().toUpperCase();
   if (!barcode || !input.name.trim()) {
     throw new Error("Hardware name and barcode are required.");
   }
-  assertBarcodeAvailable(database, barcode);
+  await assertBarcodeAvailable(database, barcode);
   const now = new Date();
-  const people = getPeople(database);
+  const people = await getPeople(database);
   const assignedEmployee = people.find(
     (person) =>
       person.type === "employee" &&
@@ -883,26 +927,28 @@ export function createHardwareAsset(input: CreateHardwareAssetInput) {
     updatedAt: now.toISOString(),
     updatedBy: "Asset Manager",
   };
-  return withTransaction(database, () => {
-    database
-      .prepare("INSERT INTO subjects (id, kind, barcode) VALUES (?, ?, ?)")
-      .run(asset.id, "hardware", asset.barcode);
-    database
-      .prepare("INSERT INTO hardware_assets (subject_id, data) VALUES (?, ?)")
-      .run(asset.id, JSON.stringify(asset));
-    insertPermission(database, permission);
+  return withTransaction(async (transaction) => {
+    await transaction.query(
+      "INSERT INTO subjects (id, kind, barcode) VALUES ($1, 'hardware', $2)",
+      [asset.id, asset.barcode]
+    );
+    await transaction.query(
+      "INSERT INTO hardware_assets (subject_id, data) VALUES ($1, $2::jsonb)",
+      [asset.id, JSON.stringify(asset)]
+    );
+    await insertPermission(transaction, permission);
     return clone(asset);
   });
 }
 
-export function updatePerson(
+export async function updatePerson(
   personId: string,
   patch: Partial<Omit<Person, "id">>
 ) {
-  const database = getDatabase();
-  const existing = jsonRow<Person>(
+  const database = await getDatabase();
+  const existing = await jsonRow<Person>(
     database,
-    "SELECT data FROM people WHERE subject_id = ?",
+    "SELECT data FROM people WHERE subject_id = $1",
     personId
   );
   if (!existing) throw new Error(`Person ${personId} was not found.`);
@@ -910,25 +956,26 @@ export function updatePerson(
     typeof patch.barcode === "string"
       ? patch.barcode.trim().toUpperCase()
       : existing.barcode;
-  assertBarcodeAvailable(database, barcode, personId);
+  await assertBarcodeAvailable(database, barcode, personId);
   const updated: Person = { ...existing, ...patch, id: existing.id, barcode };
-  return withTransaction(database, () => {
-    updateJson(database, "people", "subject_id", personId, updated);
-    database
-      .prepare("UPDATE subjects SET barcode = ? WHERE id = ?")
-      .run(updated.barcode, personId);
+  return withTransaction(async (transaction) => {
+    await updateJson(transaction, "people", "subject_id", personId, updated);
+    await transaction.query("UPDATE subjects SET barcode = $1 WHERE id = $2", [
+      updated.barcode,
+      personId,
+    ]);
     return clone(updated);
   });
 }
 
-export function updateHardwareAsset(
+export async function updateHardwareAsset(
   assetId: string,
   patch: Partial<Omit<HardwareAsset, "id">>
 ) {
-  const database = getDatabase();
-  const existing = jsonRow<HardwareAsset>(
+  const database = await getDatabase();
+  const existing = await jsonRow<HardwareAsset>(
     database,
-    "SELECT data FROM hardware_assets WHERE subject_id = ?",
+    "SELECT data FROM hardware_assets WHERE subject_id = $1",
     assetId
   );
   if (!existing) throw new Error(`Hardware asset ${assetId} was not found.`);
@@ -936,37 +983,47 @@ export function updateHardwareAsset(
     typeof patch.barcode === "string"
       ? patch.barcode.trim().toUpperCase()
       : existing.barcode;
-  assertBarcodeAvailable(database, barcode, assetId);
+  await assertBarcodeAvailable(database, barcode, assetId);
   const updated: HardwareAsset = { ...existing, ...patch, id: existing.id, barcode };
-  return withTransaction(database, () => {
-    updateJson(database, "hardware_assets", "subject_id", assetId, updated);
-    database
-      .prepare("UPDATE subjects SET barcode = ? WHERE id = ?")
-      .run(updated.barcode, assetId);
+  return withTransaction(async (transaction) => {
+    await updateJson(
+      transaction,
+      "hardware_assets",
+      "subject_id",
+      assetId,
+      updated
+    );
+    await transaction.query("UPDATE subjects SET barcode = $1 WHERE id = $2", [
+      updated.barcode,
+      assetId,
+    ]);
     return clone(updated);
   });
 }
 
-export function updateAlert(alertId: string, patch: Partial<Omit<Alert, "id">>) {
-  const database = getDatabase();
-  const existing = jsonRow<Alert>(
+export async function updateAlert(
+  alertId: string,
+  patch: Partial<Omit<Alert, "id">>
+) {
+  const database = await getDatabase();
+  const existing = await jsonRow<Alert>(
     database,
-    "SELECT data FROM alerts WHERE id = ?",
+    "SELECT data FROM alerts WHERE id = $1",
     alertId
   );
   if (!existing) throw new Error(`Alert ${alertId} was not found.`);
   const updated: Alert = { ...existing, ...patch, id: existing.id };
-  updateJson(database, "alerts", "id", alertId, updated);
+  await updateJson(database, "alerts", "id", alertId, updated);
   return clone(updated);
 }
 
-export function updateAccessPermission(
+export async function updateAccessPermission(
   input: UpdateAccessPermissionInput
-): AccessPermissionMutationResult {
-  const database = getDatabase();
-  const existing = jsonRow<AccessPermission>(
+): Promise<AccessPermissionMutationResult> {
+  const database = await getDatabase();
+  const existing = await jsonRow<AccessPermission>(
     database,
-    "SELECT data FROM access_permissions WHERE subject_id = ?",
+    "SELECT data FROM access_permissions WHERE subject_id = $1",
     input.subjectId
   );
   if (!existing) throw new Error(`Permission for ${input.subjectId} was not found.`);
@@ -1012,12 +1069,18 @@ export function updateAccessPermission(
     read: false,
   };
 
-  return withTransaction(database, () => {
-    updateJson(database, "access_permissions", "id", updated.id, updated);
+  return withTransaction(async (transaction) => {
+    await updateJson(
+      transaction,
+      "access_permissions",
+      "id",
+      updated.id,
+      updated
+    );
     let updatedPerson: Person | undefined;
-    const person = jsonRow<Person>(
-      database,
-      "SELECT data FROM people WHERE subject_id = ?",
+    const person = await jsonRow<Person>(
+      transaction,
+      "SELECT data FROM people WHERE subject_id = $1",
       input.subjectId
     );
     if (person) {
@@ -1038,8 +1101,8 @@ export function updateAccessPermission(
         status,
         allowedZones: [...updated.zones],
       };
-      updateJson(
-        database,
+      await updateJson(
+        transaction,
         "people",
         "subject_id",
         person.id,
@@ -1047,9 +1110,9 @@ export function updateAccessPermission(
       );
     }
     let updatedHardwareAsset: HardwareAsset | undefined;
-    const hardware = jsonRow<HardwareAsset>(
-      database,
-      "SELECT data FROM hardware_assets WHERE subject_id = ?",
+    const hardware = await jsonRow<HardwareAsset>(
+      transaction,
+      "SELECT data FROM hardware_assets WHERE subject_id = $1",
       input.subjectId
     );
     if (hardware) {
@@ -1061,16 +1124,16 @@ export function updateAccessPermission(
             : "active",
         allowedZones: [...updated.zones],
       };
-      updateJson(
-        database,
+      await updateJson(
+        transaction,
         "hardware_assets",
         "subject_id",
         hardware.id,
         updatedHardwareAsset
       );
     }
-    insertAudit(database, audit);
-    insertNotification(database, notification);
+    await insertAudit(transaction, audit);
+    await insertNotification(transaction, notification);
     return clone({
       permission: updated,
       person: updatedPerson,
@@ -1081,15 +1144,15 @@ export function updateAccessPermission(
   });
 }
 
-export function decidePermissionRequest(
+export async function decidePermissionRequest(
   requestId: string,
   decision: "approved" | "denied",
   reason: string
-): PermissionDecisionMutationResult {
-  const database = getDatabase();
-  const existing = jsonRow<PermissionRequest>(
+): Promise<PermissionDecisionMutationResult> {
+  const database = await getDatabase();
+  const existing = await jsonRow<PermissionRequest>(
     database,
-    "SELECT data FROM permission_requests WHERE id = ?",
+    "SELECT data FROM permission_requests WHERE id = $1",
     requestId
   );
   if (!existing) throw new Error(`Permission request ${requestId} was not found.`);
@@ -1125,13 +1188,19 @@ export function decidePermissionRequest(
     read: false,
   };
 
-  return withTransaction(database, () => {
-    updateJson(database, "permission_requests", "id", requestId, updated);
+  return withTransaction(async (transaction) => {
+    await updateJson(
+      transaction,
+      "permission_requests",
+      "id",
+      requestId,
+      updated
+    );
     let updatedPerson: Person | undefined;
     if (existing.type === "visitor") {
-      const person = jsonRow<Person>(
-        database,
-        "SELECT data FROM people WHERE subject_id = ?",
+      const person = await jsonRow<Person>(
+        transaction,
+        "SELECT data FROM people WHERE subject_id = $1",
         existing.subjectId
       );
       if (person) {
@@ -1139,8 +1208,8 @@ export function decidePermissionRequest(
           ...person,
           status: decision === "approved" ? "pre_approved" : "inactive",
         };
-        updateJson(
-          database,
+        await updateJson(
+          transaction,
           "people",
           "subject_id",
           person.id,
@@ -1150,9 +1219,9 @@ export function decidePermissionRequest(
     }
     let updatedHardwareAsset: HardwareAsset | undefined;
     if (existing.type === "hardware_custody" && existing.hardwareId) {
-      const asset = jsonRow<HardwareAsset>(
-        database,
-        "SELECT data FROM hardware_assets WHERE subject_id = ?",
+      const asset = await jsonRow<HardwareAsset>(
+        transaction,
+        "SELECT data FROM hardware_assets WHERE subject_id = $1",
         existing.hardwareId
       );
       if (asset && decision === "approved") {
@@ -1161,8 +1230,8 @@ export function decidePermissionRequest(
           assignedEmployeeId: existing.carrierId,
           assignedEmployeeName: existing.carrierName,
         };
-        updateJson(
-          database,
+        await updateJson(
+          transaction,
           "hardware_assets",
           "subject_id",
           asset.id,
@@ -1170,9 +1239,9 @@ export function decidePermissionRequest(
         );
       }
     }
-    const permission = jsonRow<AccessPermission>(
-      database,
-      "SELECT data FROM access_permissions WHERE subject_id = ?",
+    const permission = await jsonRow<AccessPermission>(
+      transaction,
+      "SELECT data FROM access_permissions WHERE subject_id = $1",
       existing.subjectId
     );
     const updatedPermission = permission
@@ -1186,16 +1255,16 @@ export function decidePermissionRequest(
         } satisfies AccessPermission
       : undefined;
     if (updatedPermission) {
-      updateJson(
-        database,
+      await updateJson(
+        transaction,
         "access_permissions",
         "id",
         updatedPermission.id,
         updatedPermission
       );
     }
-    insertAudit(database, audit);
-    insertNotification(database, notification);
+    await insertAudit(transaction, audit);
+    await insertNotification(transaction, notification);
     return clone({
       request: updated,
       permission: updatedPermission,
@@ -1207,54 +1276,45 @@ export function decidePermissionRequest(
   });
 }
 
-export function updateAlertRule(ruleId: string, enabled: boolean) {
-  const database = getDatabase();
-  const existing = jsonRow<AlertRule>(
+export async function updateAlertRule(ruleId: string, enabled: boolean) {
+  const database = await getDatabase();
+  const existing = await jsonRow<AlertRule>(
     database,
-    "SELECT data FROM alert_rules WHERE id = ?",
+    "SELECT data FROM alert_rules WHERE id = $1",
     ruleId
   );
   if (!existing) throw new Error(`Alert rule ${ruleId} was not found.`);
   const updated = { ...existing, enabled };
-  updateJson(database, "alert_rules", "id", ruleId, updated);
+  await updateJson(database, "alert_rules", "id", ruleId, updated);
   return clone(updated);
 }
 
-export function markNotificationRead(notificationId: string) {
-  const database = getDatabase();
-  const existing = jsonRow<PermissionNotification>(
+export async function markNotificationRead(notificationId: string) {
+  const database = await getDatabase();
+  const existing = await jsonRow<PermissionNotification>(
     database,
-    "SELECT data FROM notifications WHERE id = ?",
+    "SELECT data FROM notifications WHERE id = $1",
     notificationId
   );
   if (!existing) {
     throw new Error(`Notification ${notificationId} was not found.`);
   }
   const updated = { ...existing, read: true };
-  updateJson(database, "notifications", "id", notificationId, updated);
+  await updateJson(database, "notifications", "id", notificationId, updated);
   return clone(updated);
 }
 
-function insertMovement(database: DatabaseSync, movement: MovementEvent) {
-  database
-    .prepare(
-      `INSERT INTO movements
-        (
-          id,
-          subject_id,
-          checkpoint_id,
-          occurred_at,
-          denial_code,
-          result,
-          direction,
-          scan_type,
-          subject_type,
-          sync_state,
-          data
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-    .run(
+async function insertMovement(
+  database: Queryable,
+  movement: MovementEvent
+) {
+  await database.query(
+    `INSERT INTO movements (
+       id, subject_id, checkpoint_id, occurred_at, denial_code, result,
+       direction, scan_type, subject_type, sync_state, data
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)`,
+    [
       movement.id,
       movement.subjectId,
       movement.checkpointId,
@@ -1265,55 +1325,55 @@ function insertMovement(database: DatabaseSync, movement: MovementEvent) {
       movement.scanType ?? "manual",
       movement.subjectType,
       movement.syncState,
-      JSON.stringify(movement)
-    );
+      JSON.stringify(movement),
+    ]
+  );
 }
 
-function getSubjectByBarcode(database: DatabaseSync, barcode: string) {
+function getSubjectByBarcode(database: Queryable, barcode: string) {
   return jsonRow<Person | HardwareAsset>(
     database,
     `SELECT COALESCE(people.data, hardware_assets.data) AS data
      FROM subjects
      LEFT JOIN people ON people.subject_id = subjects.id
      LEFT JOIN hardware_assets ON hardware_assets.subject_id = subjects.id
-     WHERE UPPER(subjects.barcode) = UPPER(?)
+     WHERE lower(subjects.barcode) = lower($1)
      LIMIT 1`,
     barcode.trim()
   );
 }
 
-function getHardwareByIds(database: DatabaseSync, assetIds: string[]) {
+function getHardwareByIds(database: Queryable, assetIds: string[]) {
   const uniqueIds = [...new Set(assetIds)];
-  if (uniqueIds.length === 0) return [] as HardwareAsset[];
-  const placeholders = uniqueIds.map(() => "?").join(", ");
-  return jsonRows<HardwareAsset>(
+  if (uniqueIds.length === 0) return Promise.resolve([] as HardwareAsset[]);
+  return queryJsonRows<HardwareAsset>(
     database,
     `SELECT data
      FROM hardware_assets
-     WHERE subject_id IN (${placeholders})`,
-    ...uniqueIds
+     WHERE subject_id = ANY($1::text[])`,
+    [uniqueIds]
   );
 }
 
-export function recordScan(
+export async function recordScan(
   input: RecordScanInput,
   timing?: TimingSink
-): RecordScanResult {
-  const database = getDatabase();
+): Promise<RecordScanResult> {
+  const database = await getDatabase();
   const lookupStartedAt = performance.now();
-  const subject = getSubjectByBarcode(database, input.barcode);
-  const checkpoint = jsonRow<Checkpoint>(
-    database,
-    "SELECT data FROM checkpoints WHERE id = ?",
-    input.checkpointId
-  );
+  const [subject, checkpoint, selectedHardware, rules] = await Promise.all([
+    getSubjectByBarcode(database, input.barcode),
+    jsonRow<Checkpoint>(
+      database,
+      "SELECT data FROM checkpoints WHERE id = $1",
+      input.checkpointId
+    ),
+    getHardwareByIds(database, input.selectedHardwareIds),
+    getAlertRules(database, timing),
+  ]);
   if (!checkpoint) {
     throw new Error(`Checkpoint ${input.checkpointId} was not found.`);
   }
-  const selectedHardware = getHardwareByIds(
-    database,
-    input.selectedHardwareIds
-  );
   timing?.("scan_lookup", performance.now() - lookupStartedAt);
 
   const people =
@@ -1366,7 +1426,6 @@ export function recordScan(
     }
   }
 
-  const rules = getAlertRules(database, timing);
   const ruleStartedAt = performance.now();
   let generatedAlert = createScanAlert({
     event,
@@ -1377,40 +1436,45 @@ export function recordScan(
     alertId: makeId("AL"),
   });
   if (generatedAlert?.ruleId) {
-    const duplicate = database
-      .prepare(
-        `SELECT id
-         FROM alerts
-         WHERE json_extract(data, '$.ruleId') = ?
-           AND json_extract(data, '$.status') = 'open'
-         LIMIT 1`
-      )
-      .get(generatedAlert.ruleId);
-    if (duplicate) generatedAlert = undefined;
+    const duplicate = await database.query<{ id: string }>(
+      `SELECT id
+       FROM alerts
+       WHERE data ->> 'ruleId' = $1
+         AND data ->> 'status' = 'open'
+       LIMIT 1`,
+      [generatedAlert.ruleId]
+    );
+    if (duplicate.rows[0]) generatedAlert = undefined;
   }
   timing?.("rule_evaluation", performance.now() - ruleStartedAt);
 
   const writeStartedAt = performance.now();
-  const scanResult = withTransaction(database, () => {
-    insertMovement(database, event);
+  const scanResult = await withTransaction(async (transaction) => {
+    await insertMovement(transaction, event);
     for (const person of updatedPeople) {
-      updateJson(database, "people", "subject_id", person.id, person);
+      await updateJson(transaction, "people", "subject_id", person.id, person);
     }
     for (const asset of updatedHardwareAssets) {
-      updateJson(database, "hardware_assets", "subject_id", asset.id, asset);
+      await updateJson(
+        transaction,
+        "hardware_assets",
+        "subject_id",
+        asset.id,
+        asset
+      );
     }
     if (generatedAlert) {
-      database
-        .prepare(
-          "INSERT INTO alerts (id, source_event_id, created_at, data) VALUES (?, ?, ?, ?)"
-        )
-        .run(
+      await transaction.query(
+        `INSERT INTO alerts (id, source_event_id, created_at, data)
+         VALUES ($1, $2, $3, $4::jsonb)`,
+        [
           generatedAlert.id,
           generatedAlert.sourceEventId ?? null,
           generatedAlert.createdAt ?? now.toISOString(),
-          JSON.stringify(generatedAlert)
-        );
-      insertAudit(database, {
+          JSON.stringify(generatedAlert),
+        ]
+      );
+      await insertAudit(transaction, {
         id: makeId("AUD"),
         category: "alert",
         action: "Automated alert raised",
@@ -1437,17 +1501,16 @@ export function recordScan(
         asset.assignedEmployeeId !== carrier.id
     );
     if (carrier && custodyAsset && event.denialCode === "custody_mismatch") {
-      const duplicate = database
-        .prepare(
-          `SELECT id FROM permission_requests
-           WHERE json_extract(data, '$.type') = 'hardware_custody'
-             AND json_extract(data, '$.hardwareId') = ?
-             AND json_extract(data, '$.carrierId') = ?
-             AND json_extract(data, '$.status') = 'pending'
-           LIMIT 1`
-        )
-        .get(custodyAsset.id, carrier.id);
-      if (!duplicate) {
+      const duplicate = await transaction.query<{ id: string }>(
+        `SELECT id FROM permission_requests
+         WHERE data ->> 'type' = 'hardware_custody'
+           AND data ->> 'hardwareId' = $1
+           AND data ->> 'carrierId' = $2
+           AND data ->> 'status' = 'pending'
+         LIMIT 1`,
+        [custodyAsset.id, carrier.id]
+      );
+      if (!duplicate.rows[0]) {
         const request: PermissionRequest = {
           id: makeId("REQ-HW"),
           type: "hardware_custody",
@@ -1464,18 +1527,18 @@ export function recordScan(
           carrierId: carrier.id,
           carrierName: carrier.name,
         };
-        database
-          .prepare(
-            `INSERT INTO permission_requests
-              (id, subject_id, created_at, data) VALUES (?, ?, ?, ?)`
-          )
-          .run(
+        await transaction.query(
+          `INSERT INTO permission_requests
+            (id, subject_id, created_at, data)
+           VALUES ($1, $2, $3, $4::jsonb)`,
+          [
             request.id,
             request.subjectId,
             request.createdAt,
-            JSON.stringify(request)
-          );
-        insertNotification(database, {
+            JSON.stringify(request),
+          ]
+        );
+        await insertNotification(transaction, {
           id: makeId("NOT"),
           title: "Hardware custody approval requested",
           message: `${carrier.name} attempted to move ${custodyAsset.name}, assigned to ${custodyAsset.assignedEmployeeName}.`,
@@ -1497,7 +1560,7 @@ export function recordScan(
   });
   timing?.("scan_write", performance.now() - writeStartedAt);
 
-  const scheduledAlerts = evaluateAndPersistScheduledRules(
+  const scheduledAlerts = await evaluateAndPersistScheduledRules(
     database,
     true,
     timing
@@ -1508,11 +1571,8 @@ export function recordScan(
   };
 }
 
-export function saveMovement(event: MovementEvent) {
-  const database = getDatabase();
-  const existing = database
-    .prepare("SELECT id FROM movements WHERE id = ?")
-    .get(event.id);
+export async function saveMovement(event: MovementEvent) {
+  const database = await getDatabase();
   const saved = {
     ...event,
     hardwareIds: [...event.hardwareIds],
@@ -1522,51 +1582,75 @@ export function saveMovement(event: MovementEvent) {
         ? event.denialCode ?? denialCodeForReason(event.reason)
         : undefined,
   };
-  if (existing) {
-    database
-      .prepare(
-        `UPDATE movements
-         SET
-           occurred_at = ?,
-           denial_code = ?,
-           result = ?,
-           direction = ?,
-           scan_type = ?,
-           subject_type = ?,
-           sync_state = ?,
-           data = ?
-         WHERE id = ?`
-      )
-      .run(
-        saved.createdAt,
-        saved.denialCode ?? null,
-        saved.result,
-        saved.direction,
-        saved.scanType ?? "manual",
-        saved.subjectType,
-        saved.syncState,
-        JSON.stringify(saved),
-        saved.id
-      );
-  } else {
-    insertMovement(database, saved);
-  }
+  await database.query(
+    `INSERT INTO movements (
+       id, subject_id, checkpoint_id, occurred_at, denial_code, result,
+       direction, scan_type, subject_type, sync_state, data
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+     ON CONFLICT (id) DO UPDATE SET
+       subject_id = EXCLUDED.subject_id,
+       checkpoint_id = EXCLUDED.checkpoint_id,
+       occurred_at = EXCLUDED.occurred_at,
+       denial_code = EXCLUDED.denial_code,
+       result = EXCLUDED.result,
+       direction = EXCLUDED.direction,
+       scan_type = EXCLUDED.scan_type,
+       subject_type = EXCLUDED.subject_type,
+       sync_state = EXCLUDED.sync_state,
+       data = EXCLUDED.data`,
+    [
+      saved.id,
+      saved.subjectId,
+      saved.checkpointId,
+      saved.createdAt,
+      saved.denialCode ?? null,
+      saved.result,
+      saved.direction,
+      saved.scanType ?? "manual",
+      saved.subjectType,
+      saved.syncState,
+      JSON.stringify(saved),
+    ]
+  );
   return clone(saved);
 }
 
-export function syncMovements(eventIds?: string[]) {
-  const database = getDatabase();
+async function persistMovementStates(
+  database: Queryable,
+  movements: MovementEvent[]
+) {
+  if (movements.length === 0) return;
+  await database.query(
+    `UPDATE movements AS movement
+     SET sync_state = item.sync_state,
+         data = item.data
+     FROM jsonb_to_recordset($1::jsonb)
+       AS item(id text, sync_state text, data jsonb)
+     WHERE movement.id = item.id`,
+    [
+      JSON.stringify(
+        movements.map((movement) => ({
+          id: movement.id,
+          sync_state: movement.syncState,
+          data: movement,
+        }))
+      ),
+    ]
+  );
+}
+
+export async function syncMovements(eventIds?: string[]) {
+  const database = await getDatabase();
   const ids = eventIds ? [...new Set(eventIds)] : [];
   if (eventIds && ids.length === 0) return [] as MovementEvent[];
-  const idFilter = ids.length
-    ? ` AND id IN (${ids.map(() => "?").join(", ")})`
-    : "";
-  const movements = jsonRows<MovementEvent>(
+  const idFilter = ids.length ? " AND id = ANY($1::text[])" : "";
+  const movements = await queryJsonRows<MovementEvent>(
     database,
     `SELECT data
      FROM movements
      WHERE sync_state = 'queued'${idFilter}`,
-    ...ids
+    ids.length ? [ids] : []
   );
   const updates = movements.map(
     (event): MovementEvent => ({
@@ -1574,29 +1658,21 @@ export function syncMovements(eventIds?: string[]) {
       syncState: event.result === "approved" ? "synced" : "conflict",
     })
   );
-  return withTransaction(database, () => {
-    for (const updated of updates) {
-      database
-        .prepare(
-          "UPDATE movements SET sync_state = ?, data = ? WHERE id = ?"
-        )
-        .run(updated.syncState, JSON.stringify(updated), updated.id);
-    }
-    return clone(updates);
-  });
+  await persistMovementStates(database, updates);
+  return clone(updates);
 }
 
-export function resolveMovementConflicts(eventIds: string[]) {
-  const database = getDatabase();
+export async function resolveMovementConflicts(eventIds: string[]) {
+  const database = await getDatabase();
   const ids = [...new Set(eventIds)];
   if (ids.length === 0) return [] as MovementEvent[];
-  const movements = jsonRows<MovementEvent>(
+  const movements = await queryJsonRows<MovementEvent>(
     database,
     `SELECT data
      FROM movements
      WHERE sync_state = 'conflict'
-       AND id IN (${ids.map(() => "?").join(", ")})`,
-    ...ids
+       AND id = ANY($1::text[])`,
+    [ids]
   );
   const updates = movements.map(
     (event): MovementEvent => ({
@@ -1604,31 +1680,24 @@ export function resolveMovementConflicts(eventIds: string[]) {
       syncState: "synced",
     })
   );
-  return withTransaction(database, () => {
-    for (const updated of updates) {
-      database
-        .prepare(
-          "UPDATE movements SET sync_state = ?, data = ? WHERE id = ?"
-        )
-        .run(updated.syncState, JSON.stringify(updated), updated.id);
-    }
-    return clone(updates);
-  });
+  await persistMovementStates(database, updates);
+  return clone(updates);
 }
 
-export function addMovementNote(eventId: string, note: string) {
-  const database = getDatabase();
+export async function addMovementNote(eventId: string, note: string) {
+  const database = await getDatabase();
   const trimmed = note.trim();
-  const event = database
-    .prepare("SELECT id FROM movements WHERE id = ?")
-    .get(eventId);
-  if (!event) throw new Error(`Movement ${eventId} was not found.`);
+  const event = await database.query<{ id: string }>(
+    "SELECT id FROM movements WHERE id = $1",
+    [eventId]
+  );
+  if (!event.rows[0]) throw new Error(`Movement ${eventId} was not found.`);
   if (trimmed) {
-    database
-      .prepare(
-        "INSERT INTO movement_notes (event_id, note, created_at) VALUES (?, ?, ?)"
-      )
-      .run(eventId, trimmed, new Date().toISOString());
+    await database.query(
+      `INSERT INTO movement_notes (event_id, note, created_at)
+       VALUES ($1, $2, $3)`,
+      [eventId, trimmed, new Date().toISOString()]
+    );
   }
-  return getMovementNotes(database, [eventId])[eventId] ?? [];
+  return (await getMovementNotes(database, [eventId]))[eventId] ?? [];
 }

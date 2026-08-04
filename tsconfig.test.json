@@ -4,6 +4,7 @@
     "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node",
+    "allowJs": true,
     "noEmit": false,
     "incremental": false,
     "outDir": ".test-dist",
@@ -13,6 +14,7 @@
     "tests/**/*.ts",
     "lib/**/*.ts",
     "backend/**/*.ts",
+    "backend/**/*.cjs",
     "services/profileService.ts"
   ],
   "exclude": ["node_modules", ".next"]

@@ -1,6 +1,6 @@
-export const POSTGRES_SCHEMA_VERSION = "1";
+exports.POSTGRES_SCHEMA_VERSION = "1";
 
-export const POSTGRES_SCHEMA_SQL = `
+exports.POSTGRES_SCHEMA_SQL = `
   CREATE TABLE IF NOT EXISTS app_metadata (
     key text PRIMARY KEY,
     value text NOT NULL

@@ -4,7 +4,7 @@ import { buildSeedData, type SeedBundle } from "./seedData";
 import {
   POSTGRES_SCHEMA_SQL,
   POSTGRES_SCHEMA_VERSION,
-} from "./postgresSchema.mjs";
+} from "./postgresSchema.cjs";
 
 type GlobalDatabase = typeof globalThis & {
   __inOutPool?: Pool;

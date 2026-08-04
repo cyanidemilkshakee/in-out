@@ -1,26 +1,24 @@
 # IN / OUT Management System
 
-A database-backed Next.js prototype for recording and reviewing employee, visitor, and hardware movement through secured facility checkpoints.
-
-The project has two connected interfaces:
+A PostgreSQL-backed Next.js application for recording and reviewing employee, visitor, and hardware movement through secured facility checkpoints.
 
 | Role | Interface | Path |
 |---|---|---|
 | Administrator | Dashboard and operations console | `/admin` |
 | Security staff | Checkpoint terminal | `/terminal` |
 
-Both interfaces read and mutate the same local SQLite database through Next.js API routes. The database is seeded with deterministic demonstration records the first time it is opened.
+Both interfaces use the same PostgreSQL database through server-only Next.js API routes. A new empty database receives deterministic demonstration records on first use.
 
 ## Stack
 
 - Next.js 15 and React 19
 - TypeScript
-- Node.js built-in SQLite
+- PostgreSQL 17 with the `pg` connection pool
 - Chart.js and react-chartjs-2
 - Lucide React
 - Route-scoped vanilla CSS and CSS Modules
 
-Node.js 22.5 or newer is required because the server uses `node:sqlite`.
+Node.js 22.5 or newer is required.
 
 ## Routes
 
@@ -38,40 +36,81 @@ Node.js 22.5 or newer is required because the server uses `node:sqlite`.
 
 ## Local development
 
-```bash
+Copy `.env.example` to `.env.local`, then start PostgreSQL and the app:
+
+```powershell
+Copy-Item .env.example .env.local
 npm install
+npm run db:up
 npm run dev
 ```
 
 The development server is configured for `http://[::1]:1001`.
 
+`DATABASE_URL` is required by the server. The example file points to the local Compose database:
+
+```text
+postgresql://inout:inout@127.0.0.1:5432/inout
+```
+
+For a hosted database, replace that URL and enable TLS when required:
+
+```text
+PGSSL=true
+PGSSL_REJECT_UNAUTHORIZED=true
+```
+
 Useful commands:
 
 | Command | Purpose |
 |---|---|
+| `npm run db:up` | Start and health-check the local PostgreSQL database |
+| `npm run db:down` | Stop the Compose services without deleting PostgreSQL data |
+| `npm run db:migrate:sqlite` | Import the legacy SQLite database into PostgreSQL |
 | `npm run dev` | Start persistent Turbopack development |
 | `npm run dev:bounded` | Start Turbopack development with a 15-minute limit |
 | `npm run dev:webpack` | Start persistent Webpack development |
 | `npm run typecheck` | Validate TypeScript with a 2-minute limit |
-| `npm test` | Compile and run backend integration tests; each stage has a 2-minute limit |
+| `npm run test:postgres` | Start the isolated PostgreSQL test service and run integration tests |
+| `npm test` | Run integration tests against `TEST_DATABASE_URL` or local port 5433 |
 | `npm run build` | Create the standalone production build with a 10-minute limit |
 | `npm run start` | Start an existing persistent production build |
-| `npm run start:bounded` | Start an existing build with a 15-minute limit |
 
-The default database path is `.data/inout.sqlite`. Override it with:
+## Import the existing SQLite data
 
-```bash
-INOUT_DB_PATH=/absolute/path/inout.sqlite npm run dev
-```
-
-On PowerShell:
+Run the importer before the application auto-seeds a new PostgreSQL database:
 
 ```powershell
-$env:INOUT_DB_PATH="C:\data\inout.sqlite"
-npm run dev
+npm run db:up
+$env:DATABASE_URL="postgresql://inout:inout@127.0.0.1:5432/inout"
+npm run db:migrate:sqlite -- .data/inout.sqlite
 ```
 
-Delete the prototype database while the app is stopped to regenerate the deterministic fixture on the next start.
+The importer:
+
+- creates the PostgreSQL schema;
+- copies subjects, movements, alerts, permissions, rules, audits, notes, and admin credentials in one transaction;
+- verifies and reports destination row counts;
+- refuses to write into a non-empty destination;
+- leaves the SQLite file untouched as a backup.
+
+To intentionally replace an already populated IN / OUT PostgreSQL database, append `--replace`. This truncates only this application's tables in the selected database:
+
+```powershell
+npm run db:migrate:sqlite -- .data/inout.sqlite --replace
+```
+
+Check `DATABASE_URL` carefully before using `--replace`.
+
+## Integration tests
+
+The tests reset a separate database and will never reset the development database unless explicitly pointed at it:
+
+```powershell
+npm run test:postgres
+```
+
+The default test URL is `postgresql://inout:inout@127.0.0.1:5433/inout_test`. Override it with `TEST_DATABASE_URL`.
 
 ## Seed access
 
@@ -108,35 +147,41 @@ app/api/data + app/api/profile
 backend/dataRepository + backend/profileRepository
         |
         v
-.data/inout.sqlite
+backend/database.ts (pooled transactions + schema initialization)
+        |
+        v
+PostgreSQL
 ```
 
 - `lib/types.ts` is the single source for domain and service-contract types.
 - `frontend/components`, `frontend/context`, and `frontend/hooks` contain browser-facing UI and state.
-- `backend/database.ts` creates the relational schema, manages password hashing, and seeds an empty database.
+- `backend/database.ts` owns pooling, transaction boundaries, password hashing, schema initialization, and first-run seeding.
+- `backend/postgresSchema.cjs` defines the PostgreSQL schema and indexes shared by the app and migration tool.
 - `backend/dataRepository.ts` owns movement, permission, alert, registry, synchronization, and note mutations.
 - `backend/profileRepository.ts` owns admin profile and credential mutations.
 - `backend/seedData.ts` generates coherent fixture history without shipping a large JSON payload to the browser.
 - `lib/movementLogic.ts` and `lib/ruleEngine.ts` contain deterministic domain decisions.
 - `frontend/context/DataContext.tsx` hydrates route-scoped data and merges mutation deltas.
 
-The browser no longer imports fixture JSON or holds the canonical domain store. Mutations persist across browser refreshes and across the admin and terminal interfaces.
+Flexible domain payloads use `jsonb`; relationships, timestamps, scan state, and filter fields remain typed columns with indexes. All SQL values are parameterized, and every multi-statement mutation uses one checked-out PostgreSQL client.
 
 ## Docker
 
+Run the full stack:
+
 ```bash
-docker build -t in-out-management .
-docker run --rm -p 1001:1001 -v inout-data:/app/.data in-out-management
+docker compose up -d --build --wait app
 ```
 
-Open `http://localhost:1001`. The image runs as a non-root user and stores SQLite data in `/app/.data`.
+Open `http://localhost:1001`. PostgreSQL data is stored in the `postgres-data` volume; the application image is stateless.
 
-## Prototype limitations
+For production, supply a strong `POSTGRES_PASSWORD` or an external `DATABASE_URL`. Do not use the example password outside local development.
+
+## Current limitations
 
 - The API routes do not yet have authentication or authorization middleware.
-- SQLite is suitable for this local/mock phase, not a horizontally scaled multi-instance deployment.
-- Schema-version changes currently rebuild and reseed the prototype database instead of running production migrations.
-- Offline mode queues movements in the database but does not emulate a fully disconnected browser.
+- Schema initialization is idempotent, but future schema changes should use a versioned migration runner before production rollout.
+- Offline mode queues movements in PostgreSQL but does not emulate a fully disconnected browser.
 - Profile avatars are stored as data URLs; production storage should use an object store.
 
-Before production use, add authenticated sessions, role checks, CSRF protection, rate limiting, durable migrations, backups, and a production database selected for the deployment topology.
+Before production use, add authenticated sessions, role checks, CSRF protection, rate limiting, automated backups, restore drills, and deployment-managed schema migrations.

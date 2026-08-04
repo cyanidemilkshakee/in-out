@@ -35,8 +35,8 @@ RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
 # Set the correct permission for prerender cache
-RUN mkdir -p .next .data
-RUN chown nextjs:nodejs .next .data
+RUN mkdir -p .next
+RUN chown nextjs:nodejs .next
 
 # Automatically leverage output traces to reduce image size
 # https://nextjs.org/docs/advanced-features/output-file-tracing
@@ -50,11 +50,8 @@ USER nextjs
 EXPOSE 1001
 
 ENV PORT=1001
-ENV INOUT_DB_PATH=/app/.data/inout.sqlite
 # set hostname to localhost
 ENV HOSTNAME="0.0.0.0"
-
-VOLUME ["/app/.data"]
 
 # server.js is created by next build from the standalone output
 # https://nextjs.org/docs/pages/api-reference/next-config-js/output

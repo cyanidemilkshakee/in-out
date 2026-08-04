@@ -1,18 +1,29 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import { after, test } from "node:test";
+import { after, before, test } from "node:test";
 import {
   closeDatabaseForTests,
+  resetDatabaseForTests,
   verifyPassword,
   hashPassword,
 } from "../backend/database";
 import {
+  addMovementNote,
+  createEmployee,
+  createHardwareAsset,
+  createTemporaryVisitor,
   decidePermissionRequest,
   getSnapshot,
+  markNotificationRead,
   queryMovements,
   recordScan,
+  resolveMovementConflicts,
+  saveMovement,
+  syncMovements,
+  updateAccessPermission,
+  updateAlert,
+  updateAlertRule,
+  updateHardwareAsset,
+  updatePerson,
 } from "../backend/dataRepository";
 import {
   getCurrentAdminProfile,
@@ -23,16 +34,21 @@ import { getPersonSessions } from "../lib/analyticsUtils";
 import { parseDateInput } from "../lib/dateRanges";
 import type { MovementEvent } from "../lib/types";
 
-const databaseDirectory = mkdtempSync(path.join(tmpdir(), "inout-backend-test-"));
-process.env.INOUT_DB_PATH = path.join(databaseDirectory, "inout.sqlite");
+process.env.ALLOW_DATABASE_RESET = "true";
+process.env.DATABASE_URL =
+  process.env.TEST_DATABASE_URL ??
+  "postgresql://inout:inout@127.0.0.1:5433/inout_test";
 
-after(() => {
-  closeDatabaseForTests();
-  rmSync(databaseDirectory, { recursive: true, force: true });
+before(async () => {
+  await resetDatabaseForTests();
 });
 
-test("seeds coherent scoped snapshots from SQLite", () => {
-  const all = getSnapshot("all");
+after(async () => {
+  await closeDatabaseForTests();
+});
+
+test("seeds coherent scoped snapshots from PostgreSQL", async () => {
+  const all = await getSnapshot("all");
   assert.ok(all.people.length >= 10);
   assert.ok(all.hardwareAssets.length >= 5);
   assert.ok(all.movements.length > 100);
@@ -45,7 +61,7 @@ test("seeds coherent scoped snapshots from SQLite", () => {
       all.scanAnalytics.totalOtherDenied
   );
 
-  const profileScope = getSnapshot("profile");
+  const profileScope = await getSnapshot("profile");
   assert.equal(profileScope.people.length, 0);
   assert.equal(profileScope.movements.length, 0);
   assert.equal(profileScope.alerts.length, 0);
@@ -63,8 +79,8 @@ test("does not generate current-day movement records in the future", () => {
   );
 });
 
-test("records approved and denied scans as persistent movements", () => {
-  const before = getSnapshot("all");
+test("records approved and denied scans as persistent movements", async () => {
+  const before = await getSnapshot("all");
   const checkpoint = before.checkpoints.find((item) =>
     before.people.some(
       (person) =>
@@ -78,7 +94,7 @@ test("records approved and denied scans as persistent movements", () => {
   );
   assert.ok(subject);
 
-  const approved = recordScan({
+  const approved = await recordScan({
     barcode: subject.barcode,
     checkpointId: checkpoint.id,
     selectedHardwareIds: [],
@@ -90,7 +106,7 @@ test("records approved and denied scans as persistent movements", () => {
   assert.ok(approved.updatedHardwareAssets.length <= 1);
   assert.equal("people" in approved, false);
 
-  const denied = recordScan({
+  const denied = await recordScan({
     barcode: "NOT-A-REAL-BARCODE",
     checkpointId: checkpoint.id,
     selectedHardwareIds: [],
@@ -100,7 +116,7 @@ test("records approved and denied scans as persistent movements", () => {
   assert.equal(denied.decision.event.result, "denied");
   assert.equal(denied.decision.event.denialCode, "barcode_not_registered");
 
-  const afterScans = getSnapshot("all");
+  const afterScans = await getSnapshot("all");
   assert.equal(afterScans.movements.length, before.movements.length + 2);
   assert.ok(
     afterScans.movements.some(
@@ -109,8 +125,8 @@ test("records approved and denied scans as persistent movements", () => {
   );
 });
 
-test("filters and paginates movement queries in SQLite", () => {
-  const firstPage = queryMovements({
+test("filters and paginates movement queries in PostgreSQL", async () => {
+  const firstPage = await queryMovements({
     page: 1,
     pageSize: 10,
     result: "approved",
@@ -118,7 +134,7 @@ test("filters and paginates movement queries in SQLite", () => {
     sortKey: "createdAt",
     sortDirection: "desc",
   });
-  const secondPage = queryMovements({
+  const secondPage = await queryMovements({
     page: 2,
     pageSize: 10,
     result: "approved",
@@ -143,6 +159,23 @@ test("filters and paginates movement queries in SQLite", () => {
     false
   );
   assert.ok(firstPage.chartItems.length <= 2_000);
+
+  const searchable = firstPage.items[0];
+  assert.ok(searchable);
+  const searched = await queryMovements({
+    page: 1,
+    pageSize: 25,
+    search: searchable.subjectName,
+    checkpoint: searchable.checkpoint,
+    sortKey: "createdAt",
+    sortDirection: "desc",
+  });
+  assert.ok(searched.items.some((movement) => movement.id === searchable.id));
+  assert.ok(
+    searched.items.every(
+      (movement) => movement.checkpoint === searchable.checkpoint
+    )
+  );
 });
 
 test("ignores denied movements when calculating worked sessions", () => {
@@ -193,21 +226,21 @@ test("parses facility datetime-local values without falling back", () => {
   );
 });
 
-test("persists permission decisions and their audit record", () => {
-  const before = getSnapshot("permissions");
+test("persists permission decisions and their audit record", async () => {
+  const before = await getSnapshot("permissions");
   const request = before.permissionRequests.find(
     (item) => item.status === "pending"
   );
   assert.ok(request);
 
-  const decided = decidePermissionRequest(
+  const decided = await decidePermissionRequest(
     request.id,
     "approved",
     "Approved in integration test"
   );
   assert.equal(decided.request.status, "approved");
 
-  const afterDecision = getSnapshot("permissions");
+  const afterDecision = await getSnapshot("permissions");
   assert.equal(
     afterDecision.permissionRequests.find((item) => item.id === request.id)?.status,
     "approved"
@@ -219,13 +252,13 @@ test("persists permission decisions and their audit record", () => {
   );
 });
 
-test("hashes credentials and verifies profile password changes server-side", () => {
+test("hashes credentials and verifies profile password changes server-side", async () => {
   const hash = hashPassword("correct horse battery staple", "fixed-test-salt");
   assert.equal(verifyPassword("correct horse battery staple", hash), true);
   assert.equal(verifyPassword("wrong password", hash), false);
 
-  const profile = getCurrentAdminProfile();
-  assert.throws(
+  const profile = await getCurrentAdminProfile();
+  await assert.rejects(
     () =>
       updateCurrentAdminProfile({
         ...profile,
@@ -235,11 +268,130 @@ test("hashes credentials and verifies profile password changes server-side", () 
     /current password is incorrect/i
   );
 
-  const updated = updateCurrentAdminProfile({
+  const updated = await updateCurrentAdminProfile({
     ...profile,
     nickname: "Ops Test",
     currentPassword: "admin1234",
     newPassword: "new-password-123",
   });
   assert.equal(updated.nickname, "Ops Test");
+});
+
+test("persists registry records and permission deltas in PostgreSQL", async () => {
+  const snapshot = await getSnapshot("all");
+  const zone = snapshot.checkpoints[0]?.zone;
+  assert.ok(zone);
+
+  const employee = await createEmployee({
+    name: "PostgreSQL Integration Employee",
+    barcode: "PG-EMP-INTEGRATION",
+    department: "Engineering",
+    accessLevel: "Employee",
+    allowedZone: zone,
+  });
+  const renamedEmployee = await updatePerson(employee.id, {
+    name: "PostgreSQL Integration Employee Updated",
+  });
+  assert.equal(
+    renamedEmployee.name,
+    "PostgreSQL Integration Employee Updated"
+  );
+
+  const asset = await createHardwareAsset({
+    name: "PostgreSQL Integration Laptop",
+    barcode: "PG-HW-INTEGRATION",
+    owner: renamedEmployee.name,
+    category: "Laptop",
+    allowedZone: zone,
+    status: "active",
+  });
+  const updatedAsset = await updateHardwareAsset(asset.id, {
+    status: "maintenance",
+  });
+  assert.equal(updatedAsset.status, "maintenance");
+
+  const now = new Date();
+  const visitor = await createTemporaryVisitor({
+    name: "PostgreSQL Integration Visitor",
+    barcode: "PG-VIS-INTEGRATION",
+    company: "Integration Test",
+    host: renamedEmployee.name,
+    hours: 2,
+    validFrom: now.toISOString(),
+    validUntil: new Date(now.getTime() + 2 * 60 * 60 * 1000).toISOString(),
+    reason: "PostgreSQL integration test",
+  });
+  const permissionResult = await updateAccessPermission({
+    subjectId: visitor.id,
+    state: "active",
+    zones: [zone],
+    reason: "Approved by PostgreSQL integration test",
+  });
+  assert.equal(permissionResult.permission.state, "active");
+  assert.equal(permissionResult.person?.status, "pre_approved");
+
+  const registry = await getSnapshot("registry");
+  assert.ok(registry.people.some((person) => person.id === employee.id));
+  assert.ok(
+    registry.hardwareAssets.some((candidate) => candidate.id === asset.id)
+  );
+});
+
+test("persists alert, rule, and notification changes in PostgreSQL", async () => {
+  const alertsSnapshot = await getSnapshot("alerts");
+  const alert = alertsSnapshot.alerts[0];
+  const rule = alertsSnapshot.alertRules[0];
+  assert.ok(alert);
+  assert.ok(rule);
+
+  const updatedAlert = await updateAlert(alert.id, {
+    status: "acknowledged",
+  });
+  assert.equal(updatedAlert.status, "acknowledged");
+  const updatedRule = await updateAlertRule(rule.id, !rule.enabled);
+  assert.equal(updatedRule.enabled, !rule.enabled);
+
+  const permissionSnapshot = await getSnapshot("permissions");
+  const notification = permissionSnapshot.notifications[0];
+  assert.ok(notification);
+  const readNotification = await markNotificationRead(notification.id);
+  assert.equal(readNotification.read, true);
+});
+
+test("persists movement upserts, sync states, conflicts, and notes", async () => {
+  const snapshot = await getSnapshot("all");
+  const approved = snapshot.movements.find(
+    (movement) => movement.result === "approved"
+  );
+  const denied = snapshot.movements.find(
+    (movement) => movement.result === "denied"
+  );
+  assert.ok(approved);
+  assert.ok(denied);
+
+  const queuedApproved = await saveMovement({
+    ...approved,
+    id: "integration-queued-approved",
+    syncState: "queued",
+    createdAt: new Date().toISOString(),
+  });
+  const synced = await syncMovements([queuedApproved.id]);
+  assert.equal(synced[0]?.syncState, "synced");
+
+  const queuedDenied = await saveMovement({
+    ...denied,
+    id: "integration-queued-denied",
+    syncState: "queued",
+    createdAt: new Date().toISOString(),
+  });
+  const conflicted = await syncMovements([queuedDenied.id]);
+  assert.equal(conflicted[0]?.syncState, "conflict");
+  const resolved = await resolveMovementConflicts([queuedDenied.id]);
+  assert.equal(resolved[0]?.syncState, "synced");
+
+  const notes = await addMovementNote(
+    queuedApproved.id,
+    "PostgreSQL integration note"
+  );
+  assert.deepEqual(notes, ["PostgreSQL integration note"]);
 });
