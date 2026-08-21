@@ -1,17 +1,14 @@
 services:
   postgres-primary:
-    image: bitnami/postgresql:17
+    image: postgres:17-alpine
     environment:
-      - POSTGRESQL_REPLICATION_MODE=master
-      - POSTGRESQL_REPLICATION_USER=repl_user
-      - POSTGRESQL_REPLICATION_PASSWORD=${PG_REPL_PASSWORD:-repl_pass}
-      - POSTGRESQL_USERNAME=inout
-      - POSTGRESQL_PASSWORD=${POSTGRES_PASSWORD:-inout}
-      - POSTGRESQL_DATABASE=inout
+      - POSTGRES_DB=inout
+      - POSTGRES_USER=inout
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-inout}
     ports:
       - "5432:5432"
     volumes:
-      - pg-primary-data:/bitnami/postgresql
+      - pg-primary-data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U inout -d inout"]
       interval: 5s
@@ -102,6 +99,23 @@ services:
       - "8000:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
+
+  db-test:
+    image: postgres:17-alpine
+    profiles: ["test"]
+    environment:
+      POSTGRES_DB: inout_test
+      POSTGRES_USER: inout
+      POSTGRES_PASSWORD: inout
+    ports:
+      - "5433:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inout -d inout_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
 
 volumes:
   pg-primary-data:
