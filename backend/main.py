@@ -1,5 +1,5 @@
-import os
-import asyncio
+import logging
+import uuid
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -10,22 +10,22 @@ from config import settings
 from database import get_db, get_read_db, engine, read_engine
 from schemas import ScanPayload, ScanResponse
 from scan_service import ScanProcessingService
-import logging
-import uuid
+from redis_client import get_redis_pool, close_redis_pool
+from routers import presence, movements, registry
 
 logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Manage startup and graceful shutdown of DB connection pools."""
+    """Manage startup and graceful shutdown of DB and Redis connection pools."""
+    # Warm up Redis connection pool on startup
+    get_redis_pool()
     yield
     await engine.dispose()
     await read_engine.dispose()
-    logger.info("Database connection pools closed.")
-
-
-app = FastAPI(title="InOut Backend", lifespan=lifespan)
+    await close_redis_pool()
+    logger.info("All connection pools closed.")
 
 
 async def verify_mtls_terminal(request: Request) -> str:
@@ -53,6 +53,14 @@ async def verify_mtls_terminal(request: Request) -> str:
         raise HTTPException(status_code=401, detail="Client DN header missing")
 
     return client_dn
+
+
+app = FastAPI(title="InOut Backend", lifespan=lifespan)
+
+app.include_router(presence.router)
+app.include_router(movements.router)
+app.include_router(registry.router, dependencies=[Depends(verify_mtls_terminal)])
+
 
 
 @app.post("/v1/scans", response_model=ScanResponse)

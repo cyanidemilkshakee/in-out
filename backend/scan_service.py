@@ -1,4 +1,5 @@
 import uuid
+import json
 import logging
 from datetime import datetime, timezone
 
@@ -8,6 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from models import Subject, PresenceState, ScanRequest, AccessPermission, Movement
 from schemas import ScanPayload, ScanResponse
+from redis_client import publish_presence_update
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +114,14 @@ class ScanProcessingService:
 
         response = ScanResponse(allowed=True, subject_id=subject.id)
         await self._record_outcome(idempotency_key, subject, payload, response, 200)
+
+        await publish_presence_update(json.dumps({
+            "subject_id": subject.id,
+            "kind": subject.kind,
+            "barcode": payload.barcode,
+            "state": new_state,
+            "timestamp": now.isoformat(),
+        }))
 
         logger.info(
             "Scan approved: subject=%s direction=%s checkpoint=%s",

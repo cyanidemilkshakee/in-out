@@ -15,6 +15,30 @@ class Subject(Base):
 
     presence_state = relationship("PresenceState", back_populates="subject", uselist=False)
     permissions = relationship("AccessPermission", back_populates="subject")
+    person = relationship("Person", back_populates="subject", uselist=False, cascade="all, delete-orphan")
+    hardware = relationship("HardwareAsset", back_populates="subject", uselist=False, cascade="all, delete-orphan")
+
+
+class Person(Base):
+    __tablename__ = "people"
+
+    subject_id: str = Column(
+        String, ForeignKey("subjects.id", ondelete="CASCADE"), primary_key=True
+    )
+    data = Column(JSONB, nullable=False)
+
+    subject = relationship("Subject", back_populates="person")
+
+
+class HardwareAsset(Base):
+    __tablename__ = "hardware_assets"
+
+    subject_id: str = Column(
+        String, ForeignKey("subjects.id", ondelete="CASCADE"), primary_key=True
+    )
+    data = Column(JSONB, nullable=False)
+
+    subject = relationship("Subject", back_populates="hardware")
 
 
 class PresenceState(Base):

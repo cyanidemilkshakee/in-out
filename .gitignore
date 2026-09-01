@@ -30,3 +30,9 @@ env/
 .mypy_cache/
 .ruff_cache/
 
+
+*.egg-info/
+.eggs/
+build/
+.tox/
+
