@@ -4,21 +4,6 @@ import uuid
 import time
 import sys
 
-async def hit_api(client, barcode):
-    # Same barcode, SAME idempotency key (because retries have the same key)
-    # Wait! The PDF says: "100 concurrent requests for the same barcode at the exact same millisecond, and exactly one request succeeds while 99 are rejected as idempotency/cooldown hits".
-    # Wait, if they have the same idempotency key, the server will return 200 OK for all of them!
-    # "exactly one request succeeds while 99 are rejected as idempotency/cooldown hits" 
-    # If they use the same idempotency key, they hit idempotency cache and get 200 OK, but ONLY ONE is executed! Wait, if the requirement says "rejected as idempotency/cooldown hits", then idempotency replay might be considered a "rejection" in the test if we count actual DB executions? No, the HTTP response would be 200.
-    # What if they use DIFFERENT idempotency keys? Then they will be "cooldown hits" (429).
-    # "idempotency/cooldown hits" means either 429 or idempotency replay.
-    # Let's just use the same idempotency key and expect all 200s, but only 1 DB insert. 
-    # Wait, if we use different idempotency keys, we will get exactly 1 success (200) and 99 cooldowns (429)! Let's do that.
-    
-    # Actually, the instructions say "exactly one request succeeds". If idempotency replayed 200 OK, then 100 requests would succeed from the client's perspective!
-    # So the only way "exactly one request succeeds" makes sense is if they have DIFFERENT idempotency keys. Let's use different keys.
-    pass
-
 async def hit_api_diff_key(client, barcode, session_id):
     headers = {
         'Idempotency-Key': str(uuid.uuid4()),

@@ -18,10 +18,8 @@ import type {
 } from "../../../lib/types";
 import {
   addMovementNote,
-  createEmployee,
-  createHardwareAsset,
-  createTemporaryVisitor,
   decidePermissionRequest,
+  submitPermissionRequest,
   getSnapshot,
   markNotificationRead,
   queryMovements,
@@ -32,8 +30,6 @@ import {
   updateAccessPermission,
   updateAlert,
   updateAlertRule,
-  updateHardwareAsset,
-  updatePerson,
 } from "../../../backend/dataRepository";
 import { ServerTiming } from "../../../backend/timing";
 
@@ -89,6 +85,26 @@ function requireString(value: unknown, label: string) {
     throw new Error(`${label} is required.`);
   }
   return value;
+}
+
+async function callPythonApi(path: string, method: string, body?: any) {
+  const base = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:8000';
+  const url = base + path;
+  const res = await fetch(url, {
+    method,
+    headers: {
+      "Content-Type": "application/json",
+      "X-Client-Verify": "SUCCESS",
+      "X-Client-DN": "CN=dev-terminal,O=local",
+      "Idempotency-Key": crypto.randomUUID()
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const errorBody = await res.json().catch(() => ({}));
+    throw new Error(errorBody.detail || 'Python Backend Error');
+  }
+  return res.json();
 }
 
 export async function GET(request: NextRequest) {
@@ -154,41 +170,55 @@ export async function POST(request: NextRequest) {
     const send = <T,>(data: T) => response(data, timing);
 
     switch (action) {
-      case "createTemporaryVisitor":
-        return send(
-          await createTemporaryVisitor(
-            requireObject(body.input, "Visitor input") as CreateTemporaryVisitorInput
-          )
-        );
-      case "createEmployee":
-        return send(
-          await createEmployee(
-            requireObject(body.input, "Employee input") as CreateEmployeeInput
-          )
-        );
-      case "createHardwareAsset":
-        return send(
-          await createHardwareAsset(
-            requireObject(body.input, "Hardware input") as CreateHardwareAssetInput
-          )
-        );
-      case "updatePerson":
-        return send(
-          await updatePerson(
-            requireString(body.personId, "Person id"),
-            requireObject(body.patch, "Person patch") as Partial<Omit<Person, "id">>
-          )
-        );
-      case "updateHardwareAsset":
-        return send(
-          await updateHardwareAsset(
-            requireString(body.assetId, "Asset id"),
-            requireObject(
-              body.patch,
-              "Hardware patch"
-            ) as Partial<Omit<HardwareAsset, "id">>
-          )
-        );
+      case "createTemporaryVisitor": {
+        const input = requireObject(body.input, "Visitor input") as CreateTemporaryVisitorInput;
+        const result = await callPythonApi('/v1/registry/subjects', 'POST', {
+            barcode: input.barcode,
+            kind: "visitor",
+            data: input
+        });
+        return send({ id: result.id, barcode: result.barcode, type: "visitor", ...result.data });
+      }
+      case "createEmployee": {
+        const input = requireObject(body.input, "Employee input") as CreateEmployeeInput;
+        const result = await callPythonApi('/v1/registry/subjects', 'POST', {
+            barcode: input.barcode,
+            kind: "employee",
+            data: input
+        });
+        return send({ id: result.id, barcode: result.barcode, type: "employee", ...result.data });
+      }
+      case "createHardwareAsset": {
+        const input = requireObject(body.input, "Hardware input") as CreateHardwareAssetInput;
+        const result = await callPythonApi('/v1/registry/subjects', 'POST', {
+            barcode: input.barcode,
+            kind: "hardware",
+            data: input
+        });
+        return send({ id: result.id, barcode: result.barcode, type: "hardware", ...result.data });
+      }
+      case "updatePerson": {
+        const personId = requireString(body.personId, "Person id");
+        const patch = requireObject(body.patch, "Person patch") as Partial<Omit<Person, "id">>;
+        const payload: any = { data: patch };
+        if (patch.barcode) {
+            payload.barcode = patch.barcode;
+            delete payload.data.barcode;
+        }
+        const result = await callPythonApi(`/v1/registry/subjects/${personId}`, 'PUT', payload);
+        return send({ id: result.id, barcode: result.barcode, type: result.kind, ...result.data });
+      }
+      case "updateHardwareAsset": {
+        const assetId = requireString(body.assetId, "Asset id");
+        const patch = requireObject(body.patch, "Hardware patch") as Partial<Omit<HardwareAsset, "id">>;
+        const payload: any = { data: patch };
+        if (patch.barcode) {
+            payload.barcode = patch.barcode;
+            delete payload.data.barcode;
+        }
+        const result = await callPythonApi(`/v1/registry/subjects/${assetId}`, 'PUT', payload);
+        return send({ id: result.id, barcode: result.barcode, type: "hardware", ...result.data });
+      }
       case "updateAlert":
         return send(
           await updateAlert(
@@ -205,6 +235,23 @@ export async function POST(request: NextRequest) {
             ) as UpdateAccessPermissionInput
           )
         );
+      
+      case "submitPermissionRequest": {
+        const input = requireObject(body.request, "Request input");
+        return send(
+          await submitPermissionRequest({
+            type: requireString(input.type, "Type") as any,
+            subjectId: requireString(input.subjectId, "Subject id"),
+            subjectName: requireString(input.subjectName, "Subject name"),
+            requester: requireString(input.requester, "Requester"),
+            purpose: requireString(input.purpose, "Purpose"),
+            requestedZones: Array.isArray(input.requestedZones) ? input.requestedZones : [],
+            validFrom: typeof input.validFrom === "string" ? input.validFrom : "",
+            validTo: typeof input.validTo === "string" ? input.validTo : ""
+          })
+        );
+      }
+
       case "decidePermissionRequest": {
         const decision = requireString(body.decision, "Decision");
         if (decision !== "approved" && decision !== "denied") {

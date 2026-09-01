@@ -238,7 +238,7 @@ function DecisionRegion({
           <h2>{title}</h2>
           <p>{description}</p>
         </div>
-        {decision ? (
+        {decision && !approved ? (
           <button className={styles.reviewButton} type="button" onClick={onManualReview}>
             <RefreshCw />
             Send to manual review
@@ -461,7 +461,7 @@ function SyncSection({
 
 export function SecurityTerminal() {
   const { hardwareAssets, movements, checkpoints } = useDataState();
-  const { recordScan, saveMovement, syncMovements, resolveMovementConflicts, createTemporaryVisitor } =
+  const { recordScan, saveMovement, submitPermissionRequest, syncMovements, resolveMovementConflicts, createTemporaryVisitor } =
     useDataActions();
   const [checkpointId, setCheckpointId] = useState("cp-main");
   const [online, setOnline] = useState(true);
@@ -530,7 +530,7 @@ export function SecurityTerminal() {
         checkpointId: checkpoint.id,
         selectedHardwareIds: [...new Set([...selectedHardwareIds, ...seriesHardwareIds])],
         online,
-        scanType: "manual",
+        scanType: "auto",
       });
       setDecision(result.decision);
       setScanError("");
@@ -552,25 +552,30 @@ export function SecurityTerminal() {
     );
   }
 
-  async function sendToManualReview() {
-    if (!decision) return;
+  
+  async function requestAdminOverride() {
+    if (!decision || !decision.subject) return;
     try {
-      const saved = await saveMovement({
-        ...decision.event,
-        result: "denied",
-        reason: "Security escalated for manual review",
-        syncState: online ? "synced" : "queued",
+      await submitPermissionRequest({
+        type: "manual_override",
+        subjectId: decision.subject.id,
+        subjectName: decision.subject.name,
+        requester: "Terminal Operator",
+        purpose: "Requested manual override for denied " + decision.event.direction,
+        requestedZones: [checkpoint.id],
+        validFrom: new Date().toISOString(),
+        validTo: new Date(Date.now() + 1000 * 60 * 60).toISOString(), // 1 hour validity
       });
-      setDecision({ ...decision, event: saved });
-      showToast("Scan sent to manual review.");
+      showToast("Manual override request sent to Admin.");
     } catch (error) {
       setScanError(
         error instanceof Error
           ? error.message
-          : "Unable to send the scan to manual review."
+          : "Unable to request override."
       );
     }
   }
+
 
   async function syncQueue() {
     if (!online) return;
@@ -672,7 +677,7 @@ export function SecurityTerminal() {
             checkpoint={checkpoint}
             online={online}
             hardwareCount={selectedHardwareIds.length}
-            onManualReview={() => void sendToManualReview()}
+            onManualReview={() => void requestAdminOverride()}
           />
 
           <ActivityTable events={recentEvents} />

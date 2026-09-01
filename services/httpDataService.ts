@@ -15,6 +15,7 @@ import type {
   Person,
   PermissionNotification,
   PermissionDecisionMutationResult,
+  PermissionRequest,
   RecordScanInput,
   RecordScanResult,
   UpdateAccessPermissionInput,
@@ -28,6 +29,8 @@ type Command =
   | { action: "updateHardwareAsset"; assetId: string; patch: Partial<Omit<HardwareAsset, "id">> }
   | { action: "updateAlert"; alertId: string; patch: Partial<Omit<Alert, "id">> }
   | { action: "updateAccessPermission"; input: UpdateAccessPermissionInput }
+  | { action: "submitPermissionRequest"; request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'> }
+
   | {
       action: "decidePermissionRequest";
       requestId: string;
@@ -122,6 +125,14 @@ export class HttpDataService implements DataService {
     return this.command<AccessPermissionMutationResult>({
       action: "updateAccessPermission",
       input,
+    });
+  }
+
+
+  submitPermissionRequest(request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'>) {
+    return this.command<PermissionRequest>({
+      action: "submitPermissionRequest",
+      request,
     });
   }
 

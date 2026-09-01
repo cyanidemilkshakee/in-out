@@ -36,7 +36,11 @@ function permissionAction(permission: AccessPermission) {
 }
 
 function requestLabel(request: PermissionRequest) {
-  return request.type === "visitor" ? "Visitor request" : "Hardware custody request";
+  
+  if (request.type === "visitor") return "Visitor request";
+  if (request.type === "manual_override") return "Manual override request";
+  return "Hardware custody request";
+
 }
 
 function formatLocalInput(date: Date) {

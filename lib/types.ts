@@ -170,7 +170,7 @@ export type AccessPermission = {
 
 export type PermissionRequest = {
   id: string;
-  type: "visitor" | "hardware_custody";
+  type: "visitor" | "hardware_custody" | "manual_override";
   subjectId: string;
   subjectName: string;
   requester: string;
@@ -381,6 +381,7 @@ export interface DataService {
   updateAccessPermission(
     input: UpdateAccessPermissionInput
   ): Promise<AccessPermissionMutationResult>;
+  submitPermissionRequest(request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'>): Promise<PermissionRequest>;
   decidePermissionRequest(
     requestId: string,
     decision: "approved" | "denied",

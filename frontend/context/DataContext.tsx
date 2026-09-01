@@ -59,7 +59,8 @@ type DataActions = {
   updateAccessPermission: (
     input: UpdateAccessPermissionInput
   ) => Promise<AccessPermission>;
-  decidePermissionRequest: (
+    submitPermissionRequest: (request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'>) => Promise<PermissionRequest>;
+decidePermissionRequest: (
     requestId: string,
     decision: "approved" | "denied",
     reason: string
@@ -215,6 +216,23 @@ export function DataProvider({
     void refresh();
   }, [refresh, scope]);
 
+  useEffect(() => {
+    // Connect real-time Python SSE stream for live updates on relevant pages
+    if (scope !== "dashboard" && scope !== "logs" && scope !== "all" && scope !== "terminal") return;
+    
+    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
+    const es = new EventSource(`${apiBase}/v1/presence/stream`);
+    es.onmessage = (e) => {
+      try {
+        if (e.data && e.data.trim() !== "") {
+           // Live event received from Python backend - trigger React re-fetch
+           void refresh();
+        }
+      } catch (err) {}
+    };
+    return () => es.close();
+  }, [scope, refresh]);
+
   const queryMovements = useCallback(
     (query: MovementQuery) => service.queryMovements(query),
     [service]
@@ -318,7 +336,20 @@ export function DataProvider({
     [service]
   );
 
-  const decidePermissionRequest = useCallback(
+  
+  const submitPermissionRequest = useCallback(
+    async (request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'>) => {
+      const result = await service.submitPermissionRequest(request);
+      setState((current) => ({
+        ...current,
+        permissionRequests: [result, ...current.permissionRequests],
+      }));
+      return result;
+    },
+    []
+  );
+
+const decidePermissionRequest = useCallback(
     async (
       requestId: string,
       decision: "approved" | "denied",
@@ -475,6 +506,7 @@ export function DataProvider({
       updateHardwareAsset,
       updateAlert,
       updateAccessPermission,
+      submitPermissionRequest,
       decidePermissionRequest,
       updateAlertRule,
       markNotificationRead,

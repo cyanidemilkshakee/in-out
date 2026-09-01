@@ -10,15 +10,18 @@ A PostgreSQL-backed Next.js application for recording and reviewing employee, vi
 Both interfaces use the same PostgreSQL database through server-only Next.js API routes. A new empty database receives deterministic demonstration records on first use.
 
 ## Stack
-
-- Next.js 15 and React 19
-- TypeScript
-- PostgreSQL 17 with the `pg` connection pool
-- Chart.js and react-chartjs-2
-- Lucide React
-- Route-scoped vanilla CSS and CSS Modules
-
-Node.js 22.5 or newer is required.
+ 
+ - Next.js 15 and React 19 (Frontend & Legacy API Proxy)
+ - TypeScript
+ - **Python 3.10+, FastAPI, and SQLAlchemy (New Core Backend)**
+ - PostgreSQL 17 (Shared by TS and Python layers)
+ - **Redis 5.0+ (Pub/Sub for Real-Time Dashboard)**
+ - Alembic (Database Migrations)
+ - Chart.js and react-chartjs-2
+ - Lucide React
+ - Route-scoped vanilla CSS and CSS Modules
+ 
+ Node.js 22.5+ and `uv` (Python package manager) are required.
 
 ## Routes
 
@@ -36,16 +39,23 @@ Node.js 22.5 or newer is required.
 
 ## Local development
 
-Copy `.env.example` to `.env.local`, then start PostgreSQL and the app:
+Copy `.env.example` to `.env.local`, then start PostgreSQL, Redis, the Python backend, and the Next.js app:
 
 ```powershell
 Copy-Item .env.example .env.local
 npm install
 npm run db:up
+
+# In terminal 1: Start the Python FastAPI backend
+cd backend
+uv run uvicorn main:app --port 8000
+
+# In terminal 2: Start the Next.js frontend
 npm run dev
 ```
 
-The development server is configured for `http://[::1]:1001`.
+The Next.js development server is configured for `http://[::1]:1001`.
+The Python API runs on `http://127.0.0.1:8000`.
 
 `DATABASE_URL` is required by the server. The example file points to the local Compose database:
 
@@ -131,51 +141,66 @@ Change the password from `/admin/profile` after starting the app.
 
 ## Architecture
 
+The system is currently undergoing a **Strangler Fig** migration from a pure-TypeScript monolithic API to a high-performance Python FastAPI service.
+
 ```text
 app routes + frontend components
-        |
+        | 
         v
-frontend/context/DataContext.tsx
-        |
-        v
-services/httpDataService.ts
-        |
-        v
-app/api/data + app/api/profile
-        |
-        v
-backend/dataRepository + backend/profileRepository
-        |
-        v
-backend/database.ts (pooled transactions + schema initialization)
-        |
-        v
-PostgreSQL
+frontend/context/DataContext.tsx  <------- (Live SSE Stream) -------+
+        |                                                           |
+        v                                                           |
+services/httpDataService.ts                                         |
+        |                                                           |
+        v                                                           |
+app/api/data (Next.js Reverse Proxy)                                |
+        |                                                           |
+        +-- [Legacy queries & Alerts] --> backend/dataRepository    |
+        |                                        |                  |
+        +-- [Scans, Movements, Registry]         v                  |
+        |                                  PostgreSQL               |
+        v                                        ^                  |
+Python FastAPI (127.0.0.1:8000)                  |                  |
+        |                                        |                  |
+        +--> SQLAlchemy (models.py) -------------+                  |
+        |                                                           |
+        +--> Redis Pub/Sub (redis_client.py) -----------------------+
 ```
 
 - `lib/types.ts` is the single source for domain and service-contract types.
-- `frontend/components`, `frontend/context`, and `frontend/hooks` contain browser-facing UI and state.
-- `backend/database.ts` owns pooling, transaction boundaries, password hashing, schema initialization, and first-run seeding.
-- `backend/postgresSchema.cjs` defines the PostgreSQL schema and indexes shared by the app and migration tool.
-- `backend/dataRepository.ts` owns movement, permission, alert, registry, synchronization, and note mutations.
-- `backend/profileRepository.ts` owns admin profile and credential mutations.
-- `backend/seedData.ts` generates coherent fixture history without shipping a large JSON payload to the browser.
-- `lib/movementLogic.ts` and `lib/ruleEngine.ts` contain deterministic domain decisions.
-- `frontend/context/DataContext.tsx` hydrates route-scoped data and merges mutation deltas.
+- `backend/main.py` is the new Python FastAPI entry point.
+- `backend/models.py` and `backend/schemas.py` manage the SQLAlchemy ORM and Pydantic validation.
+- `app/api/data/route.ts` acts as a smart reverse-proxy, conditionally routing traffic to Python or the legacy TS layer.
+- `frontend/context/DataContext.tsx` hooks into the Python Server-Sent Events (SSE) stream for live updates.
 
 Flexible domain payloads use `jsonb`; relationships, timestamps, scan state, and filter fields remain typed columns with indexes. All SQL values are parameterized, and every multi-statement mutation uses one checked-out PostgreSQL client.
 
-## Docker
+## Deployment via Docker
+
+The entire hybrid stack is orchestrated using Docker Compose, making it the easiest and most consistent way to deploy the system in production.
 
 Run the full stack:
 
 ```bash
-docker compose up -d --build --wait app
+docker compose up --build
 ```
 
-Open `http://localhost:1001`. PostgreSQL data is stored in the `postgres-data` volume; the application image is stateless.
+The orchestration includes:
+- **`app`**: The Next.js frontend and legacy API proxy (exposed on port `1001`).
+- **`python-api`**: The high-performance FastAPI service (internal port `8000`).
+- **`postgres-primary`**: The main PostgreSQL 17 database.
+- **`postgres-replica`**: A read-replica for horizontal scaling.
+- **`redis`**: Redis 7 for real-time pub/sub features and SSE presence streams.
+- **`pgbouncer`**: Connection pooler for PostgreSQL.
+- **`api-gateway`**: Nginx acting as a reverse proxy (exposed on port `8001` and `8443`).
+- **`keycloak`** & **`step-ca`**: Identity and Certificate Authority services for mTLS.
 
-For production, supply a strong `POSTGRES_PASSWORD` or an external `DATABASE_URL`. Do not use the example password outside local development.
+Open `http://localhost:1001` to view the application. PostgreSQL data is stored in the persistent `pg-primary-data` and `pg-replica-data` volumes; the application images are stateless.
+
+**Production Requirements**:
+- Supply a strong `POSTGRES_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`, and `STEPCA_PASSWORD` via environment variables or a `.env` file. Do not use the example passwords outside local development.
+- For external databases, override `DATABASE_URL` in the environment block.
+- Ensure the `python-api` service has `ENV=production` set to enforce strict mTLS validation on the security terminal endpoints.
 
 ## Current limitations
 

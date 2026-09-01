@@ -101,17 +101,6 @@ class ScanProcessingService:
         presence.state = new_state
         presence.last_scan_timestamp = now
 
-        movement = Movement(
-            subject_id=subject.id,
-            checkpoint_id=payload.checkpoint_id,
-            result="approved",
-            direction=payload.direction,
-            scan_type="auto",
-            subject_type=subject.kind,
-            data={"terminal_id": payload.terminal_id},
-        )
-        self.db.add(movement)
-
         response = ScanResponse(allowed=True, subject_id=subject.id)
         await self._record_outcome(idempotency_key, subject, payload, response, 200)
 

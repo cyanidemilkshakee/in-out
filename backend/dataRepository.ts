@@ -1144,6 +1144,43 @@ export async function updateAccessPermission(
   });
 }
 
+
+export async function submitPermissionRequest(
+  request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'>
+): Promise<PermissionRequest> {
+  const now = new Date();
+  const id = makeId('REQ');
+  const fullRequest = {
+    ...request,
+    id,
+    status: 'pending',
+  } as PermissionRequest;
+  
+  const notification = {
+    id: makeId('NOT'),
+    title: 'Manual Override Request',
+    message: request.subjectName + ' requested manual override for ' + request.purpose,
+    category: 'permission_change',
+    priority: 'high',
+    relatedId: id,
+    href: '/admin/permissions?request=' + id,
+    createdAt: now.toISOString(),
+    read: false,
+  };
+
+  return withTransaction(async (tx) => {
+    await tx.query(
+      'INSERT INTO permission_requests (id, subject_id, created_at, data) VALUES ($1, $2, $3, $4::jsonb)',
+      [id, request.subjectId, now.toISOString(), JSON.stringify(fullRequest)]
+    );
+    await tx.query(
+      'INSERT INTO notifications (id, created_at, data) VALUES ($1, $2, $3::jsonb)',
+      [notification.id, now.toISOString(), JSON.stringify(notification)]
+    );
+    return fullRequest;
+  });
+}
+
 export async function decidePermissionRequest(
   requestId: string,
   decision: "approved" | "denied",
