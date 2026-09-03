@@ -50,6 +50,8 @@ services:
     environment:
       - DATABASE_URL=postgresql://inout:inout@postgres-primary:5432/inout
       - PYTHON_API_URL=http://python-api:8000
+      - AUTH_TRUST_HOST=true
+      - AUTH_SECRET=dev_secret_key_for_testing
     ports:
       - "1001:1001"
     depends_on:

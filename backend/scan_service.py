@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from models import Subject, PresenceState, ScanRequest, AccessPermission, Movement
+from models import Subject, PresenceState, ScanRequest, AccessPermission, Movement, Checkpoint
 from schemas import ScanPayload, ScanResponse
 from redis_client import publish_presence_update
 
@@ -152,6 +152,7 @@ class ScanProcessingService:
             denial_code=None if response.allowed else response.reason,
             direction=payload.direction,
             scan_type="auto",
+            sync_state="queued",
             subject_type=subject.kind,
             data={"terminal_id": payload.terminal_id},
         )

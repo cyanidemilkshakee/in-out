@@ -12,7 +12,7 @@ from database import get_db, get_read_db, engine, read_engine
 from schemas import ScanPayload, ScanResponse
 from scan_service import ScanProcessingService
 from redis_client import get_redis_pool, close_redis_pool
-from routers import presence, movements, registry
+from routers import presence, movements, registry, permissions
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,25 @@ async def verify_mtls_terminal(request: Request) -> str:
     return client_dn
 
 
+async def verify_admin_request(request: Request) -> None:
+    """
+    Lightweight guard for admin/BFF-originated requests.
+
+    The Next.js BFF forwards X-Client-Verify: SUCCESS from its server-side
+    requests. In dev mode we allow all traffic through so the Python API can
+    be tested directly (e.g. via /docs or curl).
+
+    NOTE: This is a placeholder — replace with a proper JWT/session check
+    once an identity provider (Keycloak) is integrated.
+    """
+    verify = request.headers.get("X-Client-Verify", "NONE")
+    if verify != "SUCCESS":
+        if settings.ENV == "dev":
+            logger.warning("Admin check bypassed — ENV=dev.")
+            return
+        raise HTTPException(status_code=401, detail="Admin request authentication required")
+
+
 app = FastAPI(title="InOut Backend", lifespan=lifespan)
 
 app.add_middleware(
@@ -68,8 +87,8 @@ app.add_middleware(
 
 app.include_router(presence.router)
 app.include_router(movements.router)
-app.include_router(registry.router, dependencies=[Depends(verify_mtls_terminal)])
-
+app.include_router(registry.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(permissions.router, dependencies=[Depends(verify_admin_request)])
 
 
 @app.post("/v1/scans", response_model=ScanResponse)

@@ -75,3 +75,13 @@ class SubjectListResponse(BaseModel):
     limit: int
     offset: int
 
+class PermissionRequestCreate(BaseModel):
+    subject_id: str
+    checkpoint_id: str
+    request_type: str = Field(..., description="'manual_override' or 'zone_access'")
+    reason: str
+
+class PermissionDecision(BaseModel):
+    decision: str = Field(..., pattern="^(approved|denied)$", description="'approved' or 'denied'")
+    reason: Optional[str] = None
+    admin_id: str

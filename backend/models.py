@@ -41,6 +41,14 @@ class HardwareAsset(Base):
     subject = relationship("Subject", back_populates="hardware")
 
 
+
+class Checkpoint(Base):
+    __tablename__ = "checkpoints"
+
+    id: str = Column(String, primary_key=True)
+    data = Column(JSONB, nullable=False)
+
+
 class PresenceState(Base):
     __tablename__ = "presence_state"
 
@@ -90,4 +98,13 @@ class Movement(Base):
     scan_type: str = Column(String, nullable=False)    # 'auto' | 'manual'
     subject_type: str = Column(String, nullable=False) # 'employee' | 'visitor' | 'hardware'
     sync_state: str = Column(String, nullable=False, default="queued")
+    data = Column(JSONB, nullable=False)
+
+
+class PermissionRequestModel(Base):
+    __tablename__ = "permission_requests"
+
+    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    subject_id: str = Column(String, ForeignKey("subjects.id"), nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     data = Column(JSONB, nullable=False)

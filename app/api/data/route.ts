@@ -238,18 +238,14 @@ export async function POST(request: NextRequest) {
       
       case "submitPermissionRequest": {
         const input = requireObject(body.request, "Request input");
-        return send(
-          await submitPermissionRequest({
-            type: requireString(input.type, "Type") as any,
-            subjectId: requireString(input.subjectId, "Subject id"),
-            subjectName: requireString(input.subjectName, "Subject name"),
-            requester: requireString(input.requester, "Requester"),
-            purpose: requireString(input.purpose, "Purpose"),
-            requestedZones: Array.isArray(input.requestedZones) ? input.requestedZones : [],
-            validFrom: typeof input.validFrom === "string" ? input.validFrom : "",
-            validTo: typeof input.validTo === "string" ? input.validTo : ""
-          })
-        );
+        // Forward to Python backend
+        const pyRes = await callPythonApi('/v1/permission-requests', 'POST', {
+          subject_id: requireString(input.subjectId, "Subject id"),
+          checkpoint_id: input.checkpointId || "unknown",
+          request_type: requireString(input.type, "Type"),
+          reason: requireString(input.purpose, "Purpose")
+        });
+        return send(pyRes);
       }
 
       case "decidePermissionRequest": {
@@ -257,13 +253,14 @@ export async function POST(request: NextRequest) {
         if (decision !== "approved" && decision !== "denied") {
           throw new Error("Decision must be approved or denied.");
         }
-        return send(
-          await decidePermissionRequest(
-            requireString(body.requestId, "Request id"),
-            decision,
-            requireString(body.reason, "Decision reason")
-          )
-        );
+        const reqId = requireString(body.requestId, "Request id");
+        // Forward to Python backend
+        const pyRes = await callPythonApi(`/v1/permission-requests/${reqId}/decide`, 'POST', {
+          decision: decision,
+          reason: requireString(body.reason, "Decision reason"),
+          admin_id: "admin-1"
+        });
+        return send({ request: pyRes });
       }
       case "updateAlertRule":
         if (typeof body.enabled !== "boolean") {
