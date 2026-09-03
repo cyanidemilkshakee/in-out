@@ -124,6 +124,8 @@ The default test URL is `postgresql://inout:inout@127.0.0.1:5433/inout_test`. Ov
 
 ## Seed access
 
+**Local Login Bypass:** To make local development easier without Keycloak running, click the **"Sign in as Local Admin (Dev)"** button on the `/login` page. This uses a hardcoded bypass to log you in instantly.
+
 The security terminal starts with these demonstration barcodes:
 
 | Barcode | Subject |
@@ -198,7 +200,7 @@ The orchestration includes:
 Open `http://localhost:1001` to view the application. PostgreSQL data is stored in the persistent `pg-primary-data` and `pg-replica-data` volumes; the application images are stateless.
 
 **Production Requirements**:
-- Supply a strong `POSTGRES_PASSWORD`, `KEYCLOAK_ADMIN_PASSWORD`, and `STEPCA_PASSWORD` via environment variables or a `.env` file. Do not use the example passwords outside local development.
+- Supply a strong `POSTGRES_PASSWORD` via environment variables or a `.env` file. Do not use the example passwords outside local development.
 - For external databases, override `DATABASE_URL` in the environment block.
 - Ensure the `python-api` service has `ENV=production` set to enforce strict mTLS validation on the security terminal endpoints.
 
