@@ -49,11 +49,6 @@ export default function ProfilePage() {
   const [pictureError, setPictureError] = useState("");
   const [settings, setSettings] = useState<ProfileSettings>(defaultSettings);
   const [saving, setSaving] = useState(false);
-  const [password, setPassword] = useState({
-    current: "",
-    next: "",
-    confirm: ""
-  });
 
   useEffect(() => {
     let cancelled = false;
@@ -91,11 +86,6 @@ export default function ProfilePage() {
     markChanged();
   }
 
-  function updatePassword(key: keyof typeof password, value: string) {
-    setPassword((current) => ({ ...current, [key]: value }));
-    markChanged();
-  }
-
   function toggleSetting(key: keyof ProfileSettings) {
     setSettings((current) => ({ ...current, [key]: !current[key] }));
     markChanged();
@@ -130,8 +120,6 @@ export default function ProfilePage() {
     const cleanName = profile.name.trim();
     const cleanNickname = profile.nickname.trim();
     const cleanEmail = profile.email.trim();
-    const changingPassword = Boolean(password.current || password.next || password.confirm);
-
     if (!cleanName || !cleanNickname || !cleanEmail) {
       setSaved(false);
       setFormError("Name, nickname, and email are required.");
@@ -141,24 +129,6 @@ export default function ProfilePage() {
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
       setSaved(false);
       setFormError("Enter a valid email address.");
-      return;
-    }
-
-    if (changingPassword && !password.current) {
-      setSaved(false);
-      setFormError("Enter your current password before choosing a new one.");
-      return;
-    }
-
-    if (changingPassword && password.next.length < 8) {
-      setSaved(false);
-      setFormError("Your new password must contain at least 8 characters.");
-      return;
-    }
-
-    if (changingPassword && password.next !== password.confirm) {
-      setSaved(false);
-      setFormError("New password and confirmation do not match.");
       return;
     }
 
@@ -175,8 +145,6 @@ export default function ProfilePage() {
         ...cleanProfile,
         autoLock,
         settings,
-        currentPassword: changingPassword ? password.current : undefined,
-        newPassword: changingPassword ? password.next : undefined,
       });
       setProfile({
         name: result.name,
@@ -186,7 +154,6 @@ export default function ProfilePage() {
       });
       setAutoLock(result.autoLock);
       setSettings(result.settings);
-      setPassword({ current: "", next: "", confirm: "" });
       setFormError("");
       setSaved(true);
     } catch (error) {
@@ -326,44 +293,6 @@ export default function ProfilePage() {
           />
         </section>
 
-        <section className="settings-section password-section">
-          <div className="settings-section-title">
-            <KeyRound aria-hidden="true" />
-            <div>
-              <h2>Change password</h2>
-              <p>Your current password is verified and the new password is hashed by the backend.</p>
-            </div>
-          </div>
-          <div className="profile-form-grid profile-password-grid">
-            <label className="profile-field">
-              <span>Current password</span>
-              <input
-                type="password"
-                autoComplete="current-password"
-                value={password.current}
-                onChange={(event) => updatePassword("current", event.target.value)}
-              />
-            </label>
-            <label className="profile-field">
-              <span>New password</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={password.next}
-                onChange={(event) => updatePassword("next", event.target.value)}
-              />
-            </label>
-            <label className="profile-field">
-              <span>Confirm new password</span>
-              <input
-                type="password"
-                autoComplete="new-password"
-                value={password.confirm}
-                onChange={(event) => updatePassword("confirm", event.target.value)}
-              />
-            </label>
-          </div>
-        </section>
       </div>
 
       <div className="profile-save-action">

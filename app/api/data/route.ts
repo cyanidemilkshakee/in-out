@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import type {
-  Alert,
   HardwareAsset,
-  MovementEvent,
   MovementQuery,
   Person,
   SortDirection,
@@ -16,22 +14,12 @@ import type {
   RecordScanInput,
   UpdateAccessPermissionInput,
 } from "../../../lib/types";
-import {
-  addMovementNote,
-  decidePermissionRequest,
-  submitPermissionRequest,
-  getSnapshot,
-  markNotificationRead,
-  queryMovements,
-  recordScan,
-  resolveMovementConflicts,
-  saveMovement,
-  syncMovements,
-  updateAccessPermission,
-  updateAlert,
-  updateAlertRule,
-} from "../../../backend/dataRepository";
-import { ServerTiming } from "../../../backend/timing";
+
+class ServerTiming {
+  private timings: Record<string, number> = {};
+  add = (name: string, ms: number) => { this.timings[name] = (this.timings[name] || 0) + ms; };
+  header = () => Object.entries(this.timings).map(([k, v]) => `${k};dur=${v.toFixed(2)}`).join(", ");
+}
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -87,75 +75,60 @@ function requireString(value: unknown, label: string) {
   return value;
 }
 
-async function callPythonApi(path: string, method: string, body?: any) {
-  const base = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:8000';
-  const url = base + path;
-  const res = await fetch(url, {
-    method,
-    headers: {
-      "Content-Type": "application/json",
-      "X-Client-Verify": "SUCCESS",
-      "X-Client-DN": "CN=dev-terminal,O=local",
-      "Idempotency-Key": crypto.randomUUID()
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({}));
-    throw new Error(errorBody.detail || 'Python Backend Error');
-  }
-  return res.json();
-}
+import { callPythonApi, PythonApiError } from "../pythonApi";
+import {
+  normalizeDashboardMovement,
+  normalizeDashboardSnapshot,
+  normalizeAlertsSnapshot,
+  normalizePermissionsSnapshot,
+  normalizeLogsSnapshot,
+  normalizeRegistrySnapshot,
+  normalizeTerminalSnapshot,
+} from "../../../lib/normalizeDashboard";
+
+const SCOPE_TO_ENDPOINT: Partial<Record<DataScope, string>> = {
+  dashboard:   "/v1/dashboard",
+  all:         "/v1/dashboard",
+  alerts:      "/v1/alerts",
+  permissions: "/v1/permissions",
+  logs:        "/v1/audit-events",
+  registry:    "/v1/registry/bundle",
+  terminal:    "/v1/terminal/bundle",
+};
 
 export async function GET(request: NextRequest) {
   const timing = new ServerTiming();
   try {
     if (request.nextUrl.searchParams.get("resource") === "movements") {
       const params = request.nextUrl.searchParams;
-      const result = params.get("result");
-      const scanType = params.get("scanType");
-      const direction = params.get("direction");
-      const subjectGroup = params.get("subjectGroup");
-      const sortDirection = params.get("sortDirection");
-      const query: MovementQuery = {
-        page: Number(params.get("page") ?? 1),
-        pageSize: Number(params.get("pageSize") ?? 25),
-        search: params.get("search") ?? undefined,
-        checkpoint: params.get("checkpoint") ?? undefined,
-        result:
-          result === "approved" || result === "denied" ? result : undefined,
-        scanType:
-          scanType === "auto" || scanType === "manual" ? scanType : undefined,
-        direction:
-          direction === "entry" || direction === "exit" ? direction : undefined,
-        subjectGroup:
-          subjectGroup === "people" || subjectGroup === "hardware"
-            ? subjectGroup
-            : undefined,
-        startAt: params.get("startAt") ?? undefined,
-        endAt: params.get("endAt") ?? undefined,
-        sortKey: (params.get("sortKey") ?? undefined) as
-          | VisibleColumn
-          | undefined,
-        sortDirection:
-          sortDirection === "asc" || sortDirection === "desc"
-            ? (sortDirection as SortDirection)
-            : undefined,
-      };
-      return response(await queryMovements(query, timing.add), timing);
+      const queryParams = new URLSearchParams(params.toString());
+      queryParams.delete("resource");
+      const page = await callPythonApi(`/v1/movements?${queryParams.toString()}`, "GET");
+      return response({ ...page, items: page.items.map(normalizeDashboardMovement), chartItems: page.chartItems.map(normalizeDashboardMovement) }, timing);
     }
+
     const rawScope = request.nextUrl.searchParams.get("scope") ?? "all";
-    const scope = DATA_SCOPES.has(rawScope as DataScope)
-      ? (rawScope as DataScope)
-      : "all";
-    return response(await getSnapshot(scope, timing.add), timing);
+    const scope = DATA_SCOPES.has(rawScope as DataScope) ? (rawScope as DataScope) : "all";
+
+    const endpoint = SCOPE_TO_ENDPOINT[scope] ?? "/v1/dashboard";
+    const raw = await callPythonApi(endpoint, "GET");
+
+    let snapshot;
+    switch (scope) {
+      case "alerts":      snapshot = normalizeAlertsSnapshot(raw);      break;
+      case "permissions": snapshot = normalizePermissionsSnapshot(raw); break;
+      case "logs":        snapshot = normalizeLogsSnapshot(raw);        break;
+      case "registry":    snapshot = normalizeRegistrySnapshot(raw);    break;
+      case "terminal":    snapshot = normalizeTerminalSnapshot(raw);    break;
+      default:            snapshot = normalizeDashboardSnapshot(raw);   break;
+    }
+
+    return response(snapshot, timing);
   } catch (error) {
     return errorResponse(
-      error instanceof Error
-        ? error.message
-        : "Unable to load application data.",
+      error instanceof Error ? error.message : "Unable to load application data.",
       timing,
-      500
+      error instanceof PythonApiError ? error.status : 500
     );
   }
 }
@@ -220,22 +193,11 @@ export async function POST(request: NextRequest) {
         return send({ id: result.id, barcode: result.barcode, type: "hardware", ...result.data });
       }
       case "updateAlert":
-        return send(
-          await updateAlert(
-            requireString(body.alertId, "Alert id"),
-            requireObject(body.patch, "Alert patch") as Partial<Omit<Alert, "id">>
-          )
-        );
-      case "updateAccessPermission":
-        return send(
-          await updateAccessPermission(
-            requireObject(
-              body.input,
-              "Permission input"
-            ) as UpdateAccessPermissionInput
-          )
-        );
-      
+        return send(await callPythonApi('/v1/alerts/' + body.alertId, 'PATCH', body.patch));
+      case "updateAccessPermission": {
+        const input = requireObject(body.input, "Permission input") as UpdateAccessPermissionInput;
+        return send(await callPythonApi('/v1/permissions/' + input.subjectId, 'PATCH', input));
+      }
       case "submitPermissionRequest": {
         const input = requireObject(body.request, "Request input");
         // Forward to Python backend
@@ -266,54 +228,30 @@ export async function POST(request: NextRequest) {
         if (typeof body.enabled !== "boolean") {
           throw new Error("Alert rule enabled state is required.");
         }
-        return send(
-          await updateAlertRule(
-            requireString(body.ruleId, "Rule id"),
-            body.enabled
-          )
-        );
+        return send(await callPythonApi('/v1/alert-rules/' + body.ruleId, 'PATCH', { enabled: body.enabled }));
       case "markNotificationRead":
-        return send(
-          await markNotificationRead(
-            requireString(body.notificationId, "Notification id")
-          )
-        );
+        return send(await callPythonApi('/v1/notifications/' + body.notificationId + '/read', 'PATCH', {}));
       case "recordScan":
-        return send(
-          await recordScan(
-            requireObject(body.input, "Scan input") as RecordScanInput,
-            timing.add
-          )
-        );
+        return send(await callPythonApi('/v1/terminal/scans', 'POST', body.input, request.headers.get('Idempotency-Key') ?? crypto.randomUUID()));
+      case "requestBarcodeManualReview":
+        return send(await callPythonApi('/v1/terminal/manual-reviews', 'POST', body.input));
       case "saveMovement":
-        return send(
-          await saveMovement(
-            requireObject(body.event, "Movement event") as MovementEvent
-          )
-        );
+        {
+        const event = requireObject(body.event, "Movement event");
+        const saved = await callPythonApi('/v1/movements/save', 'POST', {
+          id: event.id, subject_id: event.subjectId, checkpoint_id: event.checkpointId,
+          occurred_at: event.createdAt, result: event.result, direction: event.direction,
+          scan_type: event.scanType, subject_type: event.subjectType, sync_state: event.syncState,
+          denial_code: event.denialCode, data: event,
+        });
+        return send(normalizeDashboardMovement(saved));
+      }
       case "syncMovements":
-        return send(
-          await syncMovements(
-            Array.isArray(body.eventIds)
-              ? body.eventIds.filter((id): id is string => typeof id === "string")
-              : undefined
-          )
-        );
+        return send(await callPythonApi('/v1/movements/sync', 'POST', { eventIds: body.eventIds || [] }));
       case "resolveMovementConflicts":
-        return send(
-          await resolveMovementConflicts(
-            Array.isArray(body.eventIds)
-              ? body.eventIds.filter((id): id is string => typeof id === "string")
-              : []
-          )
-        );
+        return send(await callPythonApi('/v1/movements/conflicts/resolve', 'POST', { eventIds: body.eventIds || [] }));
       case "addMovementNote":
-        return send(
-          await addMovementNote(
-            requireString(body.eventId, "Movement id"),
-            requireString(body.note, "Movement note")
-          )
-        );
+        return send(await callPythonApi('/v1/movements/' + body.eventId + '/notes', 'POST', { note: body.note }));
       default:
         return errorResponse(
           `Unsupported command: ${action}.`,
@@ -326,6 +264,6 @@ export async function POST(request: NextRequest) {
     const conflict =
       message.includes("already assigned") ||
       message.includes("already exists");
-    return errorResponse(message, timing, conflict ? 409 : 400);
+    return errorResponse(message, timing, error instanceof PythonApiError ? error.status : conflict ? 409 : 400);
   }
 }

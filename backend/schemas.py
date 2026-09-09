@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import Optional
 from datetime import datetime
 import uuid
@@ -9,6 +9,24 @@ class ScanPayload(BaseModel):
     terminal_id: str = Field(..., min_length=1, max_length=128, strip_whitespace=True)
     checkpoint_id: str = Field(..., min_length=1, max_length=128, strip_whitespace=True)
     direction: str = Field(..., pattern="^(entry|exit)$")
+    selected_hardware_ids: list[str] = Field(default_factory=list)
+    online: bool = True
+    scan_type: str = Field("auto", pattern="^(auto|manual)$")
+
+
+class BrowserScanPayload(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+    barcode: str = Field(min_length=1, max_length=256)
+    checkpoint_id: str = Field(alias="checkpointId", min_length=1)
+    selected_hardware_ids: list[str] = Field(default_factory=list, alias="selectedHardwareIds")
+    online: bool = True
+    scan_type: str = Field("auto", alias="scanType", pattern="^(auto|manual)$")
+    direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
+
+
+class ManualReviewPayload(BaseModel):
+    barcode: str = Field(min_length=1, max_length=256, strip_whitespace=True)
+    checkpoint_id: str = Field(alias="checkpointId", min_length=1, max_length=128)
 
 
 class ScanResponse(BaseModel):

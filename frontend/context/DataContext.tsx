@@ -30,6 +30,7 @@ import type {
   PermissionNotification,
   PermissionRequest,
   RecordScanInput,
+  BarcodeManualReviewInput,
   UpdateAccessPermissionInput,
 } from "../../lib/types";
 
@@ -68,6 +69,7 @@ decidePermissionRequest: (
   updateAlertRule: (ruleId: string, enabled: boolean) => Promise<AlertRule>;
   markNotificationRead: (notificationId: string) => Promise<PermissionNotification>;
   recordScan: (input: RecordScanInput) => ReturnType<DataService["recordScan"]>;
+  requestBarcodeManualReview: (input: BarcodeManualReviewInput) => ReturnType<DataService["requestBarcodeManualReview"]>;
   saveMovement: (event: MovementEvent) => Promise<MovementEvent>;
   syncMovements: (eventIds?: string[]) => Promise<MovementEvent[]>;
   resolveMovementConflicts: (eventIds: string[]) => Promise<MovementEvent[]>;
@@ -194,6 +196,7 @@ export function DataProvider({
     try {
       const snapshot = await service.getSnapshot(scope);
       setState({
+        ...emptyData,
         ...snapshot,
         isLoading: false,
         error: null,
@@ -220,8 +223,7 @@ export function DataProvider({
     // Connect real-time Python SSE stream for live updates on relevant pages
     if (scope !== "dashboard" && scope !== "logs" && scope !== "all" && scope !== "terminal") return;
     
-    const apiBase = process.env.NEXT_PUBLIC_API_URL ?? "http://127.0.0.1:8000";
-    const es = new EventSource(`${apiBase}/v1/presence/stream`);
+    const es = new EventSource("/api/presence");
     es.onmessage = (e) => {
       try {
         if (e.data && e.data.trim() !== "") {
@@ -438,6 +440,11 @@ const decidePermissionRequest = useCallback(
     [service]
   );
 
+  const requestBarcodeManualReview = useCallback(
+    (input: BarcodeManualReviewInput) => service.requestBarcodeManualReview(input),
+    [service]
+  );
+
   const saveMovement = useCallback(
     async (event: MovementEvent) => {
       const saved = await service.saveMovement(event);
@@ -511,6 +518,7 @@ const decidePermissionRequest = useCallback(
       updateAlertRule,
       markNotificationRead,
       recordScan,
+      requestBarcodeManualReview,
       saveMovement,
       syncMovements,
       resolveMovementConflicts,
@@ -523,6 +531,7 @@ const decidePermissionRequest = useCallback(
       createTemporaryVisitor,
       queryMovements,
       recordScan,
+      requestBarcodeManualReview,
       refresh,
       resolveMovementConflicts,
       saveMovement,

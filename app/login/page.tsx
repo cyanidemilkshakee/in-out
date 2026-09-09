@@ -1,14 +1,13 @@
 import { signIn } from "../../auth"
 import { keycloakEnabled } from "../../auth"
-import { AuthError } from "next-auth"
-import { redirect } from "next/navigation"
 import styles from "./login.module.css"
 
 export default async function LoginPage(props: {
   searchParams: Promise<{ from?: string; error?: string }>
 }) {
   const searchParams = await props.searchParams
-  const redirectTo = searchParams?.from || "/admin"
+  const from = searchParams?.from;
+  const redirectTo = from?.startsWith("/") && !from.startsWith("//") ? from : "/admin"
   const errorCode = searchParams?.error
 
   const errorMessages: Record<string, string> = {
@@ -50,57 +49,6 @@ export default async function LoginPage(props: {
           </div>
         )}
 
-        <form
-          className={styles.form}
-          action={async (formData: FormData) => {
-            "use server"
-            const email = formData.get("email") as string
-            const password = formData.get("password") as string
-            try {
-              await signIn("credentials", { email, password, redirectTo })
-            } catch (err) {
-              if (err instanceof AuthError) {
-                redirect(`/login?from=${encodeURIComponent(redirectTo)}&error=${err.type}`)
-              }
-              throw err
-            }
-          }}
-        >
-          <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="email">
-              Email
-            </label>
-            <input
-              id="email"
-              name="email"
-              type="email"
-              autoComplete="email"
-              required
-              className={styles.input}
-              placeholder="admin@inout.local"
-              defaultValue=""
-            />
-          </div>
-
-          <div className={styles.fieldGroup}>
-            <label className={styles.label} htmlFor="password">
-              Password
-            </label>
-            <input
-              id="password"
-              name="password"
-              type="password"
-              autoComplete="current-password"
-              required
-              className={styles.input}
-              placeholder="••••••••"
-            />
-          </div>
-
-          <button type="submit" className={styles.button}>
-            Sign in
-          </button>
-        </form>
 
         <div className={styles.divider} aria-hidden="true">
           <span>or</span>
@@ -137,9 +85,7 @@ export default async function LoginPage(props: {
           </button>
         )}
 
-        <p className={styles.hint}>
-          Dev credentials: <code>admin@inout.local</code> / <code>admin</code>
-        </p>
+<p className={styles.hint}>Use your organization’s Keycloak account.</p>
       </div>
     </div>
   )

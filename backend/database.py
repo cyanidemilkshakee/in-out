@@ -56,6 +56,7 @@ AsyncReadSessionLocal = async_sessionmaker(
     autoflush=False,
 )
 
+async_session = AsyncSessionLocal
 
 async def get_db():
     async with AsyncSessionLocal() as session:

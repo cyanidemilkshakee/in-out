@@ -308,6 +308,11 @@ export type RecordScanInput = {
   scanType: "auto" | "manual";
 };
 
+export type BarcodeManualReviewInput = {
+  barcode: string;
+  checkpointId: string;
+};
+
 export type RecordScanResult = {
   decision: ScanDecision;
   updatedPeople: Person[];
@@ -390,6 +395,7 @@ export interface DataService {
   updateAlertRule(ruleId: string, enabled: boolean): Promise<AlertRule>;
   markNotificationRead(notificationId: string): Promise<PermissionNotification>;
   recordScan(input: RecordScanInput): Promise<RecordScanResult>;
+  requestBarcodeManualReview(input: BarcodeManualReviewInput): Promise<Alert>;
   saveMovement(event: MovementEvent): Promise<MovementEvent>;
   syncMovements(eventIds?: string[]): Promise<MovementEvent[]>;
   resolveMovementConflicts(eventIds: string[]): Promise<MovementEvent[]>;

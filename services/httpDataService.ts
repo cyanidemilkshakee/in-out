@@ -2,6 +2,7 @@ import type {
   AccessPermissionMutationResult,
   Alert,
   AlertRule,
+  BarcodeManualReviewInput,
   AppDataSnapshot,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
@@ -40,6 +41,7 @@ type Command =
   | { action: "updateAlertRule"; ruleId: string; enabled: boolean }
   | { action: "markNotificationRead"; notificationId: string }
   | { action: "recordScan"; input: RecordScanInput }
+  | { action: "requestBarcodeManualReview"; input: BarcodeManualReviewInput }
   | { action: "saveMovement"; event: MovementEvent }
   | { action: "syncMovements"; eventIds?: string[] }
   | { action: "resolveMovementConflicts"; eventIds: string[] }
@@ -91,7 +93,7 @@ export class HttpDataService implements DataService {
   private async command<T>(command: Command) {
     const response = await fetch("/api/data", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
       body: JSON.stringify(command),
     });
     return readResponse<T>(response);
@@ -162,6 +164,10 @@ export class HttpDataService implements DataService {
 
   recordScan(input: RecordScanInput) {
     return this.command<RecordScanResult>({ action: "recordScan", input });
+  }
+
+  requestBarcodeManualReview(input: BarcodeManualReviewInput) {
+    return this.command<Alert>({ action: "requestBarcodeManualReview", input });
   }
 
   saveMovement(event: MovementEvent) {

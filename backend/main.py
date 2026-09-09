@@ -1,5 +1,8 @@
 import logging
 import uuid
+import asyncio
+import secrets
+import json
 from contextlib import asynccontextmanager
 from typing import AsyncIterator
 
@@ -7,12 +10,17 @@ from fastapi import FastAPI, Depends, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import verify_admin_request, verify_authenticated_request, verify_terminal_operator_request
 from config import settings
 from database import get_db, get_read_db, engine, read_engine
 from schemas import ScanPayload, ScanResponse
-from scan_service import ScanProcessingService
-from redis_client import get_redis_pool, close_redis_pool
+from terminal_scans import record_scan
+from redis_client import get_redis_pool, close_redis_pool, publish_presence_update
 from routers import presence, movements, registry, permissions
+from routers import dashboard, alerts, notifications, audit, checkpoints, terminal, admin_profile
+from temporal_worker import run_worker, get_temporal_client, TASK_QUEUE
+from workflows.alert_rule_cron import AlertRuleCronWorkflow
+from temporalio.client import WorkflowFailureError
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +30,30 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """Manage startup and graceful shutdown of DB and Redis connection pools."""
     # Warm up Redis connection pool on startup
     get_redis_pool()
+
+    # Start Temporal worker
+    worker_task = asyncio.create_task(run_worker())
+
+    # Start the cron workflow (it will run every 5 mins)
+    try:
+        client = await get_temporal_client()
+        await client.start_workflow(
+            AlertRuleCronWorkflow.run,
+            id="alert-rule-cron",
+            task_queue=TASK_QUEUE,
+            cron_schedule="*/5 * * * *",
+        )
+        logger.info("AlertRuleCronWorkflow scheduled")
+    except Exception as e:
+        logger.warning(f"Cron workflow could not be started (might already be running): {e}")
+
     yield
+
+    worker_task.cancel()
     await engine.dispose()
     await read_engine.dispose()
     await close_redis_pool()
     logger.info("All connection pools closed.")
-
 
 async def verify_mtls_terminal(request: Request) -> str:
     """
@@ -39,15 +65,17 @@ async def verify_mtls_terminal(request: Request) -> str:
 
     SECURITY: The API Gateway MUST strip these headers from inbound external
     requests before forwarding. They must only be set by the Gateway itself.
-    In development (ENV=dev) we skip the check to allow unproxied curl testing.
+    The gateway must also inject the configured shared proxy secret.
     """
     verify = request.headers.get("X-Client-Verify", "NONE")
     client_dn = request.headers.get("X-Client-DN", "")
 
+    if not settings.MTLS_PROXY_SECRET or not secrets.compare_digest(
+        request.headers.get("X-Proxy-Secret", ""), settings.MTLS_PROXY_SECRET
+    ):
+        raise HTTPException(status_code=401, detail="Trusted certificate gateway required")
+
     if verify != "SUCCESS":
-        if settings.ENV == "dev":
-            logger.warning("mTLS check bypassed — ENV=dev, no certificate presented.")
-            return "CN=dev-terminal,O=local"
         raise HTTPException(status_code=401, detail="mTLS client certificate required or invalid")
 
     if not client_dn:
@@ -56,39 +84,30 @@ async def verify_mtls_terminal(request: Request) -> str:
     return client_dn
 
 
-async def verify_admin_request(request: Request) -> None:
-    """
-    Lightweight guard for admin/BFF-originated requests.
-
-    The Next.js BFF forwards X-Client-Verify: SUCCESS from its server-side
-    requests. In dev mode we allow all traffic through so the Python API can
-    be tested directly (e.g. via /docs or curl).
-
-    NOTE: This is a placeholder — replace with a proper JWT/session check
-    once an identity provider (Keycloak) is integrated.
-    """
-    verify = request.headers.get("X-Client-Verify", "NONE")
-    if verify != "SUCCESS":
-        if settings.ENV == "dev":
-            logger.warning("Admin check bypassed — ENV=dev.")
-            return
-        raise HTTPException(status_code=401, detail="Admin request authentication required")
-
-
 app = FastAPI(title="InOut Backend", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-app.include_router(presence.router)
-app.include_router(movements.router)
-app.include_router(registry.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(presence.router, dependencies=[Depends(verify_authenticated_request)])
+app.include_router(movements.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(registry.router)
+app.include_router(registry.bundle_router, dependencies=[Depends(verify_admin_request)])
 app.include_router(permissions.router, dependencies=[Depends(verify_admin_request)])
+
+# Phase 2 — new routers
+app.include_router(dashboard.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(alerts.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(notifications.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(audit.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(checkpoints.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(terminal.router, dependencies=[Depends(verify_terminal_operator_request)])
+app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
 
 
 @app.post("/v1/scans", response_model=ScanResponse)
@@ -119,11 +138,15 @@ async def process_scan(
             detail="terminal_id in request body does not match authenticated certificate CN",
         )
 
-    service = ScanProcessingService(db)
-
     try:
-        response = await service.process_scan(idempotency_key, payload)
+        response = ScanResponse(**await record_scan(db, idempotency_key, payload, payload.terminal_id))
         await db.commit()
+        if response.allowed:
+            try:
+                await publish_presence_update(json.dumps({"subject_id": response.subject_id,
+                    "state": "inside" if payload.direction == "entry" else "outside"}))
+            except Exception:
+                logger.exception("Presence publication failed after scan commit")
         return response
     except HTTPException:
         await db.rollback()

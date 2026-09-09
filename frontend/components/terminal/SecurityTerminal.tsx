@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
   AlertTriangle,
@@ -85,12 +84,12 @@ function TerminalHeader({
   return (
     <header className={styles.appbar}>
       <div className={styles.appbarLeft}>
-        <Link className={styles.brandLink} href="/admin/dashboard" aria-label="Open admin dashboard">
+        <div className={styles.brandLink} aria-label="IN / OUT security terminal">
           <span className={styles.brandMark} aria-hidden="true">
             <ShieldCheck />
           </span>
           <span>IN / OUT</span>
-        </Link>
+        </div>
         <span className={styles.appbarDivider} aria-hidden="true" />
         <div className={styles.pageIdentity}>
           <strong>Security Terminal</strong>
@@ -99,10 +98,6 @@ function TerminalHeader({
       </div>
 
       <div className={styles.headerActions}>
-        <Link className={styles.adminLink} href="/admin/dashboard">
-          <ShieldCheck />
-          <span>Admin Console</span>
-        </Link>
         <button
           className={styles.networkButton}
           type="button"
@@ -461,7 +456,7 @@ function SyncSection({
 
 export function SecurityTerminal() {
   const { hardwareAssets, movements, checkpoints } = useDataState();
-  const { recordScan, saveMovement, submitPermissionRequest, syncMovements, resolveMovementConflicts, createTemporaryVisitor } =
+  const { recordScan, requestBarcodeManualReview, saveMovement, submitPermissionRequest, syncMovements, resolveMovementConflicts, createTemporaryVisitor } =
     useDataActions();
   const [checkpointId, setCheckpointId] = useState("cp-main");
   const [online, setOnline] = useState(true);
@@ -521,7 +516,28 @@ export function SecurityTerminal() {
         (_, index) => !hardwareFromSeries[index]
       );
       if (unresolvedBarcode) {
-        setScanError(`Hardware barcode ${unresolvedBarcode.toUpperCase()} is not registered.`);
+        setDecision({
+          event: {
+            id: `unregistered-${Date.now()}`,
+            date: new Date().toISOString().slice(0, 10),
+            time: new Date().toLocaleTimeString(),
+            checkpointId: checkpoint.id,
+            checkpoint: checkpoint.name,
+            direction: checkpoint.mode === "exit" ? "exit" : "entry",
+            subjectId: "unregistered",
+            subjectName: "Unregistered barcode",
+            subjectType: "visitor",
+            barcode: unresolvedBarcode.toUpperCase(),
+            result: "denied",
+            reason: "Hardware barcode is not registered.",
+            denialCode: "barcode_not_registered",
+            scanType: "auto",
+            syncState: "synced",
+            hardwareIds: [],
+          },
+          carriedHardware: [],
+        });
+        setScanError("");
         return;
       }
       const seriesHardwareIds = hardwareFromSeries.flatMap((asset) => asset ? [asset.id] : []);
@@ -538,7 +554,33 @@ export function SecurityTerminal() {
       setSelectedHardwareIds([]);
       showToast(`${result.decision.event.subjectName}: ${result.decision.event.result}.`);
     } catch (error) {
-      setScanError(error instanceof Error ? error.message : "Unable to record scan.");
+      const message = error instanceof Error ? error.message : "Unable to record scan.";
+      if (/barcode not registered/i.test(message)) {
+        setDecision({
+          event: {
+            id: `unregistered-${Date.now()}`,
+            date: new Date().toISOString().slice(0, 10),
+            time: new Date().toLocaleTimeString(),
+            checkpointId: checkpoint.id,
+            checkpoint: checkpoint.name,
+            direction: checkpoint.mode === "exit" ? "exit" : "entry",
+            subjectId: "unregistered",
+            subjectName: "Unregistered barcode",
+            subjectType: "visitor",
+            barcode: normalizedBarcode,
+            result: "denied",
+            reason: "Barcode is not registered.",
+            denialCode: "barcode_not_registered",
+            scanType: "auto",
+            syncState: "synced",
+            hardwareIds: [],
+          },
+          carriedHardware: [],
+        });
+        setScanError("");
+      } else {
+        setScanError(message);
+      }
     } finally {
       setIsScanning(false);
     }
@@ -554,8 +596,16 @@ export function SecurityTerminal() {
 
   
   async function requestAdminOverride() {
-    if (!decision || !decision.subject) return;
+    if (!decision) return;
     try {
+      if (!decision.subject) {
+        await requestBarcodeManualReview({
+          barcode: decision.event.barcode,
+          checkpointId: checkpoint.id,
+        });
+        showToast("Denied scan sent to the administrator review queue.");
+        return;
+      }
       await submitPermissionRequest({
         type: "manual_override",
         subjectId: decision.subject.id,

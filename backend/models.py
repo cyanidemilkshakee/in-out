@@ -68,7 +68,7 @@ class ScanRequest(Base):
     __tablename__ = "scan_requests"
 
     idempotency_key = Column(UUID(as_uuid=True), primary_key=True)
-    subject_id: str = Column(String, ForeignKey("subjects.id"), nullable=False)
+    subject_id: str | None = Column(String, ForeignKey("subjects.id"), nullable=True)
     terminal_id: str = Column(String, nullable=False)
     status_code: int = Column(Integer, nullable=False)
     response_body = Column(JSONB, nullable=False)
@@ -89,7 +89,7 @@ class Movement(Base):
     __tablename__ = "movements"
 
     id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    subject_id: str = Column(String, ForeignKey("subjects.id"), nullable=False)
+    subject_id: str | None = Column(String, ForeignKey("subjects.id"), nullable=True)
     checkpoint_id: str = Column(String, nullable=False)
     occurred_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     denial_code: str | None = Column(String, nullable=True)
@@ -108,3 +108,58 @@ class PermissionRequestModel(Base):
     subject_id: str = Column(String, ForeignKey("subjects.id"), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     data = Column(JSONB, nullable=False)
+
+
+class Alert(Base):
+    __tablename__ = "alerts"
+    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    source_event_id: str | None = Column(String, ForeignKey("movements.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    data = Column(JSONB, nullable=False, default=dict)
+
+
+class AlertRule(Base):
+    __tablename__ = "alert_rules"
+    id: str = Column(String, primary_key=True)
+    data = Column(JSONB, nullable=False, default=dict)
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    data = Column(JSONB, nullable=False, default=dict)
+
+
+class AuditEvent(Base):
+    __tablename__ = "audit_events"
+    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    data = Column(JSONB, nullable=False, default=dict)
+
+
+class MovementNote(Base):
+    __tablename__ = "movement_notes"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id: str = Column(String, ForeignKey("movements.id", ondelete="CASCADE"), nullable=False)
+    note: str = Column(String, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AdminAccount(Base):
+    __tablename__ = "admin_accounts"
+    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    name: str = Column(String, nullable=False)
+    nickname: str = Column(String, nullable=False)
+    email: str = Column(String, nullable=False, unique=True)
+    avatar_data_url: str = Column(String, nullable=False, default="")
+    auto_lock: str = Column(String, nullable=False, default="15")
+    settings = Column(JSONB, nullable=False, default=dict)
+    is_current: bool = Column(Boolean, nullable=False, default=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class AppMetadata(Base):
+    __tablename__ = "app_metadata"
+    key: str = Column(String, primary_key=True)
+    value: str = Column(String, nullable=False)

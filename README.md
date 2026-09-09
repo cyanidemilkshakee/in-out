@@ -1,214 +1,136 @@
 # IN / OUT Management System
 
-A PostgreSQL-backed Next.js application for recording and reviewing employee, visitor, and hardware movement through secured facility checkpoints.
+Run the complete local system with Docker: Next.js frontend, FastAPI backend, PostgreSQL, Redis, Temporal, and Keycloak.
 
-| Role | Interface | Path |
-|---|---|---|
-| Administrator | Dashboard and operations console | `/admin` |
-| Security staff | Checkpoint terminal | `/terminal` |
+## Requirements
 
-Both interfaces use the same PostgreSQL database through server-only Next.js API routes. A new empty database receives deterministic demonstration records on first use.
+- Docker Desktop running
+- Node.js 22.5+ (used once to generate `AUTH_SECRET`)
 
-## Stack
- 
- - Next.js 15 and React 19 (Frontend & Legacy API Proxy)
- - TypeScript
- - **Python 3.10+, FastAPI, and SQLAlchemy (New Core Backend)**
- - PostgreSQL 17 (Shared by TS and Python layers)
- - **Redis 5.0+ (Pub/Sub for Real-Time Dashboard)**
- - Alembic (Database Migrations)
- - Chart.js and react-chartjs-2
- - Lucide React
- - Route-scoped vanilla CSS and CSS Modules
- 
- Node.js 22.5+ and `uv` (Python package manager) are required.
+## Start the project
 
-## Routes
-
-| Path | Purpose |
-|---|---|
-| `/admin/dashboard` | Time-filtered KPIs, scan breakdowns, and recent movements |
-| `/admin/logs` | Searchable movement ledger, alert workflow, and review notes |
-| `/admin/registry` | Employee, visitor, hardware, alert, and permission registries |
-| `/admin/permissions` | Permission assignments and request decisions |
-| `/admin/alerts` | Active alerts and automated alert rules |
-| `/admin/profile` | Admin identity, password, preferences, and account creation |
-| `/terminal` | Checkpoint scanning, offline queue, and conflict resolution |
-
-`/` and `/admin` redirect to the dashboard.
-
-## Local development
-
-Copy `.env.example` to `.env.local`, then start PostgreSQL, Redis, the Python backend, and the Next.js app:
+From the project folder, create your local configuration file:
 
 ```powershell
-Copy-Item .env.example .env.local
-npm install
-npm run db:up
-
-# In terminal 1: Start the Python FastAPI backend
-cd backend
-uv run uvicorn main:app --port 8000
-
-# In terminal 2: Start the Next.js frontend
-npm run dev
+Copy-Item .env.example .env
 ```
 
-The Next.js development server is configured for `http://[::1]:1001`.
-The Python API runs on `http://127.0.0.1:8000`.
-
-`DATABASE_URL` is required by the server. The example file points to the local Compose database:
-
-```text
-postgresql://inout:inout@127.0.0.1:5432/inout
-```
-
-For a hosted database, replace that URL and enable TLS when required:
-
-```text
-PGSSL=true
-PGSSL_REJECT_UNAUTHORIZED=true
-```
-
-Useful commands:
-
-| Command | Purpose |
-|---|---|
-| `npm run db:up` | Start and health-check the local PostgreSQL database |
-| `npm run db:down` | Stop the Compose services without deleting PostgreSQL data |
-| `npm run db:migrate:sqlite` | Import the legacy SQLite database into PostgreSQL |
-| `npm run dev` | Start persistent Turbopack development |
-| `npm run dev:bounded` | Start Turbopack development with a 15-minute limit |
-| `npm run dev:webpack` | Start persistent Webpack development |
-| `npm run typecheck` | Validate TypeScript with a 2-minute limit |
-| `npm run test:postgres` | Start the isolated PostgreSQL test service and run integration tests |
-| `npm test` | Run integration tests against `TEST_DATABASE_URL` or local port 5433 |
-| `npm run build` | Create the standalone production build with a 10-minute limit |
-| `npm run start` | Start an existing persistent production build |
-
-## Import the existing SQLite data
-
-Run the importer before the application auto-seeds a new PostgreSQL database:
+Generate an Auth.js secret and write it directly into `.env`:
 
 ```powershell
-npm run db:up
-$env:DATABASE_URL="postgresql://inout:inout@127.0.0.1:5432/inout"
-npm run db:migrate:sqlite -- .data/inout.sqlite
+$secret = node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+(Get-Content .env) -replace '^AUTH_SECRET=.*$', "AUTH_SECRET=$secret" | Set-Content .env
 ```
 
-The importer:
+Open `.env` and choose local values for these settings before the first start:
 
-- creates the PostgreSQL schema;
-- copies subjects, movements, alerts, permissions, rules, audits, notes, and admin credentials in one transaction;
-- verifies and reports destination row counts;
-- refuses to write into a non-empty destination;
-- leaves the SQLite file untouched as a backup.
+```env
+POSTGRES_PASSWORD=choose-a-local-database-password
+KEYCLOAK_ADMIN_USERNAME=admin
+KEYCLOAK_ADMIN_PASSWORD=choose-a-keycloak-master-password
+AUTH_SECRET=the-generated-secret
+AUTH_URL=http://localhost:1001
+```
 
-To intentionally replace an already populated IN / OUT PostgreSQL database, append `--replace`. This truncates only this application's tables in the selected database:
+These settings have different purposes:
+
+| Setting | Used for | When it is used |
+| --- | --- | --- |
+| `POSTGRES_PASSWORD` | Password for the local PostgreSQL service | Docker services connecting to PostgreSQL |
+| `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` | Keycloak **master administrator** login | The first time Keycloak initializes its database |
+| `AUTH_SECRET` | Signs the application's Auth.js session cookies | Every application start |
+| `AUTH_URL` | The browser-facing application URL used for Keycloak callbacks | Every application start |
+
+Application-user passwords are not entered in `.env`. Create those users and passwords in Keycloak after the services start.
+
+Build and start all services:
 
 ```powershell
-npm run db:migrate:sqlite -- .data/inout.sqlite --replace
+docker compose up --build -d
 ```
 
-Check `DATABASE_URL` carefully before using `--replace`.
-
-## Integration tests
-
-The tests reset a separate database and will never reset the development database unless explicitly pointed at it:
+Check that services are running:
 
 ```powershell
-npm run test:postgres
+docker compose ps
 ```
 
-The default test URL is `postgresql://inout:inout@127.0.0.1:5433/inout_test`. Override it with `TEST_DATABASE_URL`.
+Open:
 
-## Seed access
+- Application: http://localhost:1001
+- Keycloak administration console: http://localhost:8081/admin
+- Temporal UI: http://localhost:8233
 
-**Local Login Bypass:** To make local development easier without Keycloak running, click the **"Sign in as Local Admin (Dev)"** button on the `/login` page. This uses a hardcoded bypass to log you in instantly.
+## First login and application user
 
-The security terminal starts with these demonstration barcodes:
+Sign in to Keycloak at http://localhost:8081/admin with the `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` values from `.env`.
 
-| Barcode | Subject |
-|---|---|
-| `test1` | Employee |
-| `test2` | Visitor |
-| `test3` | Hardware asset |
+Then create an application administrator:
 
-The seeded admin profile uses:
+1. Select the `inout` realm.
+2. Go to **Users** and create a user.
+3. In **Credentials**, set a password and turn **Temporary** off.
+4. In **Role mapping**, assign the `admin` realm role.
+5. Sign in to the application at http://localhost:1001 with that user.
 
-- Email: `admin@company.com`
-- Password: `admin1234`
+Role access is intentionally separated:
 
-Change the password from `/admin/profile` after starting the app.
+| Keycloak realm role | Application area |
+| --- | --- |
+| `admin` | Admin dashboard at `/admin` |
+| `operator` | Security terminal at `/terminal` |
 
-## Architecture
+Create an operator with the same steps, assigning the `operator` role instead. Assign each application user one of these roles. After changing a user's role, have that user sign out and sign in again so their session receives the new role.
 
-The system is currently undergoing a **Strangler Fig** migration from a pure-TypeScript monolithic API to a high-performance Python FastAPI service.
+## Users and data
 
-```text
-app routes + frontend components
-        | 
-        v
-frontend/context/DataContext.tsx  <------- (Live SSE Stream) -------+
-        |                                                           |
-        v                                                           |
-services/httpDataService.ts                                         |
-        |                                                           |
-        v                                                           |
-app/api/data (Next.js Reverse Proxy)                                |
-        |                                                           |
-        +-- [Legacy queries & Alerts] --> backend/dataRepository    |
-        |                                        |                  |
-        +-- [Scans, Movements, Registry]         v                  |
-        |                                  PostgreSQL               |
-        v                                        ^                  |
-Python FastAPI (127.0.0.1:8000)                  |                  |
-        |                                        |                  |
-        +--> SQLAlchemy (models.py) -------------+                  |
-        |                                                           |
-        +--> Redis Pub/Sub (redis_client.py) -----------------------+
+Users created in Keycloak are shared only by people using the same Keycloak server and database. For example, users you create at your own `http://localhost:8081` are available to the application on your computer, but they are not copied to a guide's fresh clone and local Docker installation.
+
+To let multiple people use the same accounts, they must all use one shared deployment with the same Keycloak and PostgreSQL database. For a project review, each reviewer should normally create their own local Keycloak master account and their own `inout` application administrator.
+
+PostgreSQL is the persistent source of truth for both kinds of data in this Docker setup:
+
+| Data | Owner | PostgreSQL location |
+| --- | --- | --- |
+| Application records such as people, hardware, scans, movements, and alerts | IN / OUT backend | Application tables in the default schema |
+| Login users, password hashes, roles, and Keycloak sessions | Keycloak | `keycloak` schema |
+
+The frontend does not maintain a separate user database. It signs users in through Keycloak, and the backend accepts access tokens only when they contain the required realm role. The application's `admin_accounts` table stores profile metadata; it does not control login passwords.
+
+## Stop and restart
+
+Stop the services while keeping database data:
+
+```powershell
+docker compose stop
 ```
 
-- `lib/types.ts` is the single source for domain and service-contract types.
-- `backend/main.py` is the new Python FastAPI entry point.
-- `backend/models.py` and `backend/schemas.py` manage the SQLAlchemy ORM and Pydantic validation.
-- `app/api/data/route.ts` acts as a smart reverse-proxy, conditionally routing traffic to Python or the legacy TS layer.
-- `frontend/context/DataContext.tsx` hooks into the Python Server-Sent Events (SSE) stream for live updates.
+Start them again:
 
-Flexible domain payloads use `jsonb`; relationships, timestamps, scan state, and filter fields remain typed columns with indexes. All SQL values are parameterized, and every multi-statement mutation uses one checked-out PostgreSQL client.
-
-## Deployment via Docker
-
-The entire hybrid stack is orchestrated using Docker Compose, making it the easiest and most consistent way to deploy the system in production.
-
-Run the full stack:
-
-```bash
-docker compose up --build
+```powershell
+docker compose start
 ```
 
-The orchestration includes:
-- **`app`**: The Next.js frontend and legacy API proxy (exposed on port `1001`).
-- **`python-api`**: The high-performance FastAPI service (internal port `8000`).
-- **`postgres-primary`**: The main PostgreSQL 17 database.
-- **`postgres-replica`**: A read-replica for horizontal scaling.
-- **`redis`**: Redis 7 for real-time pub/sub features and SSE presence streams.
-- **`pgbouncer`**: Connection pooler for PostgreSQL.
-- **`api-gateway`**: Nginx acting as a reverse proxy (exposed on port `8001` and `8443`).
-- **`keycloak`** & **`step-ca`**: Identity and Certificate Authority services for mTLS.
+View logs when something fails to start:
 
-Open `http://localhost:1001` to view the application. PostgreSQL data is stored in the persistent `pg-primary-data` and `pg-replica-data` volumes; the application images are stateless.
+```powershell
+docker compose logs -f
+```
 
-**Production Requirements**:
-- Supply a strong `POSTGRES_PASSWORD` via environment variables or a `.env` file. Do not use the example passwords outside local development.
-- For external databases, override `DATABASE_URL` in the environment block.
-- Ensure the `python-api` service has `ENV=production` set to enforce strict mTLS validation on the security terminal endpoints.
+Reset the entire local installation, including Keycloak users and database data:
 
-## Current limitations
+```powershell
+docker compose down -v
+```
 
-- The API routes do not yet have authentication or authorization middleware.
-- Schema initialization is idempotent, but future schema changes should use a versioned migration runner before production rollout.
-- Offline mode queues movements in PostgreSQL but does not emulate a fully disconnected browser.
-- Profile avatars are stored as data URLs; production storage should use an object store.
+Run `docker compose up --build -d` again after a reset. The Keycloak bootstrap username and password are only used the first time its database is created.
 
-Before production use, add authenticated sessions, role checks, CSRF protection, rate limiting, automated backups, restore drills, and deployment-managed schema migrations.
+## Why `-d` is used
+
+`-d` means detached mode. Docker starts the services in the background, returns the PowerShell prompt immediately, and keeps the application running while you use the browser. Use `docker compose logs -f` to watch logs afterward.
+
+Without `-d`, Docker prints live logs in the current terminal and keeps that terminal occupied until you press `Ctrl+C`. Pressing `Ctrl+C` also stops the stack, which is useful when diagnosing startup problems.
+
+## Do not commit `.env`
+
+`.env` holds local passwords and `AUTH_SECRET`; it is ignored by Git. Commit `.env.example` only.

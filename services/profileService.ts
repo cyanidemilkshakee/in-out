@@ -21,15 +21,12 @@ export type UpdateAdminProfileInput = {
   avatarDataUrl: string;
   autoLock: string;
   settings: ProfileSettings;
-  currentPassword?: string;
-  newPassword?: string;
 };
 
 export type CreateAdminAccountInput = {
   name: string;
   nickname: string;
   email: string;
-  password: string;
 };
 
 async function readResponse<T>(response: Response): Promise<T> {

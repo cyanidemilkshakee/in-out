@@ -206,11 +206,10 @@ export function DashboardCharts({
       }]
     },
     deniedMix: {
-      labels: ["Restricted", "Expired", "Other"],
+      labels: ["Restricted", "Other"],
       datasets: [{
         data: [
           activeScanAnalytics.totalRestricted,
-          activeScanAnalytics.totalExpired,
           activeScanAnalytics.totalOtherDenied,
         ],
         backgroundColor: ["#f04438", "#912018", "#667085"],
@@ -419,9 +418,7 @@ export function DashboardCharts({
               if (!elements.length) return;
               openMovementLogs({
                 result: "denied",
-                ...(elements[0].index < 2
-                  ? { reason: elements[0].index === 0 ? "restricted" : "expired" }
-                  : {}),
+                ...(elements[0].index === 0 ? { reason: "restricted" } : {}),
               });
             },
             plugins: { ...sharedPlugins, legend: { display: false } }
@@ -434,13 +431,6 @@ export function DashboardCharts({
               Restricted
             </div>
             <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalRestricted.toLocaleString()}</div>
-          </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#912018", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#912018" }} />
-              Expired
-            </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalExpired.toLocaleString()}</div>
           </div>
           <div style={{ textAlign: "center", marginTop: "12px" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#667085", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
