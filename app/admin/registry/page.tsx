@@ -236,10 +236,12 @@ export default function RegistryPage() {
             ? movement.subjectType === "visitor"
             : movement.subjectType === "hardware"
         )
-        .map((movement) => ({
-          timestamp: new Date(eventTimestamp(movement)).toISOString(),
-          value: 1,
-        }));
+        .flatMap((movement) => {
+          const timestamp = eventTimestamp(movement);
+          return timestamp > 0
+            ? [{ timestamp: new Date(timestamp).toISOString(), value: 1 }]
+            : [];
+        });
     }
     if (activeTab === "alerts") {
       return alerts.flatMap((alert) => {

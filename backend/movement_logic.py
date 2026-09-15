@@ -14,7 +14,7 @@ apply_movement_state(...)-> dict
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from typing import Any, Literal, Optional, TypedDict
+from typing import Any, Literal, TypedDict
 
 # ---------------------------------------------------------------------------
 # TypedDicts (mirror of types.ts)
@@ -169,6 +169,7 @@ def _status_for(
     checkpoint: Checkpoint,
     direction: Direction,
     carried_hardware: list[HardwareAsset],
+    now: datetime,
 ) -> dict[str, str]:
     """
     Core access decision logic — mirrors statusFor() in movementLogic.ts.
@@ -176,6 +177,22 @@ def _status_for(
     """
     if subject is None:
         return {"result": "denied", "reason": "Barcode not registered"}
+
+    for field, label, predicate in (
+        ("validFrom", "Access pass is not active yet", lambda value: now < value),
+        ("validTo", "Access pass has expired", lambda value: now > value),
+    ):
+        raw_value = subject.get(field)
+        if not raw_value:
+            continue
+        try:
+            parsed = datetime.fromisoformat(str(raw_value).replace("Z", "+00:00"))
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=_IST)
+            if predicate(parsed):
+                return {"result": "denied", "reason": label}
+        except (TypeError, ValueError):
+            return {"result": "denied", "reason": "Access pass has an invalid validity window"}
 
     # Hardware-specific restrictions
     if _is_hardware(subject) and subject.get("status") == "restricted":
@@ -341,7 +358,7 @@ def evaluate_scan(
     carried_hardware: list[HardwareAsset] = [
         a for a in hardware if a.get("id") in selected_hardware_ids
     ]
-    decision = _status_for(subject, checkpoint, direction, carried_hardware)
+    decision = _status_for(subject, checkpoint, direction, carried_hardware, datetime.now(tz=timezone.utc))
 
     sync_state: SyncState = "synced" if online else "queued"
 

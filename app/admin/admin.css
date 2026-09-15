@@ -641,7 +641,16 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
   color: var(--amber);
 }
 
-.role-admin .severity-medium,
+.role-admin .alert-status-warned {
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
+.role-admin .severity-medium {
+  background: var(--blue-soft);
+  color: var(--blue);
+}
+
 .role-admin .alert-status-resolved {
   background: var(--green-soft);
   color: var(--green);
@@ -1357,6 +1366,8 @@ html[data-admin-theme="dark"] .role-admin {
   --admin-surface-strong: #17201e;
   --admin-panel: #141b1a;
   --admin-line: rgba(196, 211, 204, 0.24);
+  --admin-border: #2f3d39;
+  --admin-line-strong: #52615d;
   --admin-text: #eef7f2;
   --admin-muted: #aab8b3;
   --admin-lime: #e7ece9;
@@ -1752,7 +1763,7 @@ html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected td {
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected .direction-entry {
-  color: #e7ece9;
+  color: #70e28d;
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected .direction-exit {
@@ -1787,19 +1798,28 @@ html[data-admin-theme="dark"] .role-admin .alert-status-open {
 
 html[data-admin-theme="dark"] .role-admin .severity-high,
 html[data-admin-theme="dark"] .role-admin .alert-status-acknowledged {
-  background: rgba(231, 236, 233, 0.14);
-  color: #e7ece9;
+  background: rgba(247, 144, 9, 0.18);
+  color: #fdb022;
 }
 
-html[data-admin-theme="dark"] .role-admin .severity-medium,
+html[data-admin-theme="dark"] .role-admin .alert-status-warned {
+  background: rgba(247, 144, 9, 0.18);
+  color: #fdb022;
+}
+
+html[data-admin-theme="dark"] .role-admin .severity-medium {
+  background: rgba(11, 99, 229, 0.18);
+  color: #66a8ff;
+}
+
 html[data-admin-theme="dark"] .role-admin .alert-status-resolved {
   background: rgba(15, 143, 46, 0.18);
-  color: #e7ece9;
+  color: #70e28d;
 }
 
 html[data-admin-theme="dark"] .role-admin .result-approved {
   background: rgba(15, 143, 46, 0.18);
-  color: #e7ece9;
+  color: #70e28d;
   box-shadow: inset 0 0 0 1px rgba(112, 226, 141, 0.22);
 }
 
@@ -1816,7 +1836,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   position: absolute;
   top: 32px;
   left: 50%;
-  z-index: 10;
+  z-index: 1000;
   display: flex;
   gap: 6px;
   padding: 6px;
@@ -1952,18 +1972,19 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     width: 100% !important;
     height: auto !important;
     padding: 20px 16px 36px !important;
-    overflow: hidden;
+    overflow: visible;
   }
 
   .role-admin .dashboard-time-range-selector {
-    position: static;
+    position: relative;
+    z-index: 1000;
     grid-column: 1 / -1;
     grid-row: auto;
     order: 1;
     width: 100%;
     max-width: 100%;
     justify-content: center;
-    overflow-x: auto;
+    overflow: visible;
     transform: none;
     scrollbar-width: none;
     overscroll-behavior-inline: contain;
@@ -2248,8 +2269,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     gap: 2px;
     justify-content: flex-start;
     justify-self: center;
-    overflow-x: auto;
-    overflow-y: hidden;
+    overflow: visible;
     padding: 5px;
     scrollbar-width: none;
   }
@@ -3735,6 +3755,15 @@ button.terminal-create-btn:hover {
   font-size: 11px;
 }
 
+.role-admin .permission-request-barcode {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--admin-text);
+  font-family: var(--admin-mono, ui-monospace, monospace);
+  font-weight: 800;
+}
+
 .role-admin .permission-request-list dl {
   display: grid;
   gap: 5px;
@@ -3847,8 +3876,12 @@ button.terminal-create-btn:hover {
   content: "";
 }
 
-.role-admin .rule-severity[data-severity="medium"]::before {
+.role-admin .rule-severity[data-severity="high"]::before {
   background: #f79009;
+}
+
+.role-admin .rule-severity[data-severity="medium"]::before {
+  background: #0b63e5;
 }
 
 /* Alert activity replaces the former alert table */
@@ -3917,6 +3950,34 @@ button.terminal-create-btn:hover {
   font-size: 13px;
 }
 
+.role-admin .alert-rules-savebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--admin-border);
+  border-bottom: 1px solid var(--admin-border);
+  padding: 10px 20px;
+  color: var(--admin-muted);
+  font-size: 12px;
+}
+
+.role-admin .alert-rules-savebar button {
+  border: 1px solid var(--admin-text);
+  border-radius: 7px;
+  background: var(--admin-text);
+  color: var(--admin-bg);
+  padding: 7px 10px;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.role-admin .alert-rules-savebar button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .role-admin .alert-activity-list {
   border-top: 1px solid var(--admin-border);
 }
@@ -3983,7 +4044,11 @@ button.terminal-create-btn:hover {
 }
 
 .role-admin .alert-activity-dot[data-severity="high"] {
-  background: #f04438;
+  background: #f79009;
+}
+
+.role-admin .alert-activity-dot[data-severity="medium"] {
+  background: #0b63e5;
 }
 
 .role-admin .alert-activity-title-row {
@@ -4477,6 +4542,112 @@ button.terminal-create-btn:hover {
   cursor: not-allowed;
 }
 
+.role-admin .calendar-picker-container {
+  position: relative;
+  display: inline-block;
+}
+
+.role-admin .calendar-popover {
+  position: absolute;
+  top: calc(100% + 10px);
+  left: 50%;
+  z-index: 1100;
+  display: grid;
+  width: min(340px, calc(100vw - 32px));
+  gap: 16px;
+  border: 1px solid var(--admin-border);
+  border-radius: 12px;
+  background: var(--admin-bg) !important;
+  color: var(--admin-text);
+  padding: 16px;
+  box-shadow: 0 18px 50px rgba(14, 20, 19, 0.18);
+  transform: translateX(-50%);
+}
+
+.role-admin .calendar-popover-heading,
+.role-admin .calendar-popover-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.role-admin .calendar-popover-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.role-admin .calendar-popover-heading small,
+.role-admin .calendar-timezone-note,
+.role-admin .calendar-range-error {
+  color: var(--admin-muted);
+  font-size: 11px;
+}
+
+.role-admin .calendar-range-error {
+  color: var(--red);
+}
+
+.role-admin .calendar-popover-heading button {
+  display: grid;
+  border: 0;
+  background: transparent;
+  color: var(--admin-muted);
+  cursor: pointer;
+}
+
+.role-admin .calendar-date-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.role-admin .calendar-date-fields label {
+  display: grid;
+  gap: 6px;
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.role-admin .calendar-date-fields input {
+  width: 100%;
+  min-height: 38px;
+  border: 1px solid var(--admin-border);
+  border-radius: 7px;
+  background: var(--admin-panel);
+  color: var(--admin-text);
+  padding: 7px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.role-admin .calendar-clear-button,
+.role-admin .calendar-apply-button {
+  min-height: 36px;
+  border-radius: 7px;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.role-admin .calendar-clear-button {
+  border: 1px solid var(--admin-border);
+  background: transparent;
+  color: var(--admin-text);
+}
+
+.role-admin .calendar-apply-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--admin-text);
+  background: var(--admin-text);
+  color: var(--admin-bg);
+}
+
 @media (max-width: 1380px) {
   .role-admin .alerts-command-grid {
     grid-template-columns: 1fr;
@@ -4888,13 +5059,13 @@ button.terminal-create-btn:hover {
 }
 
 .role-admin .alert-severity-icon.severity-high {
-  background: rgba(240, 68, 56, 0.1);
-  color: #f04438;
+  background: rgba(247, 144, 9, 0.12);
+  color: #dc6803;
 }
 
 .role-admin .alert-severity-icon.severity-medium {
-  background: rgba(247, 144, 9, 0.12);
-  color: #dc6803;
+  background: rgba(11, 99, 229, 0.1);
+  color: #0b63e5;
 }
 
 .role-admin .alert-item-main {
@@ -4940,11 +5111,11 @@ button.terminal-create-btn:hover {
 }
 
 .role-admin .alert-severity-label.severity-high {
-  color: #f04438;
+  color: #dc6803;
 }
 
 .role-admin .alert-severity-label.severity-medium {
-  color: #dc6803;
+  color: #0b63e5;
 }
 
 .role-admin .alert-status-label {
@@ -4998,6 +5169,75 @@ button.terminal-create-btn:hover {
 .role-admin .alert-widget-empty span:last-child {
   margin-top: 2px;
   font-size: 14px;
+}
+
+.role-admin .pending-decision-card {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+  padding: 9px 4px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.role-admin .pending-decision-card:hover,
+.role-admin .pending-decision-card:focus-within {
+  border-color: var(--admin-line-strong);
+}
+
+.role-admin .pending-decision-icon {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  background: rgba(11, 99, 229, 0.1);
+  color: #0b63e5;
+}
+
+.role-admin .pending-decision-barcode {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-family: var(--admin-mono, ui-monospace, monospace);
+}
+
+.role-admin .pending-decision-actions {
+  display: flex;
+  gap: 5px;
+}
+
+.role-admin .pending-decision-actions button {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.role-admin .pending-decision-actions button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.role-admin .pending-decision-approve {
+  border-color: rgba(18, 183, 106, 0.45) !important;
+  background: rgba(18, 183, 106, 0.12);
+  color: #12b76a;
+}
+
+.role-admin .pending-decision-deny {
+  border-color: rgba(240, 68, 56, 0.45) !important;
+  background: rgba(240, 68, 56, 0.1);
+  color: #f04438;
 }
 
 @media (max-width: 1180px) {
@@ -5065,6 +5305,8 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 }
 
 .role-admin .dashboard-time-range-selector > .calendar-picker-container {
+  position: relative;
+  z-index: 1101;
   width: auto;
   flex: 0 0 auto;
 }
@@ -5645,6 +5887,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
   .role-admin .chart-range-controls {
     width: 100%;
-    overflow-x: auto;
+    overflow: visible;
   }
 }

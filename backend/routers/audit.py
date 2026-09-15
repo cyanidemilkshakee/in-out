@@ -4,7 +4,6 @@ Audit event endpoints.
 GET /v1/audit-events — paginated list of audit events with optional category filter
 """
 
-import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -13,8 +12,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db
 from models import AuditEvent
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/audit-events", tags=["audit"])
 
@@ -47,7 +44,16 @@ async def list_audit_events(
     events = rows_res.scalars().all()
 
     return {
-        "items":  [e.data for e in events],
+        "items":  [
+            {
+                **(e.data or {}),
+                "id": (e.data or {}).get("id") or e.id,
+                "createdAt": (e.data or {}).get("createdAt") or (
+                    e.created_at.isoformat() if e.created_at else None
+                ),
+            }
+            for e in events
+        ],
         "total":  total,
         "limit":  limit,
         "offset": offset,

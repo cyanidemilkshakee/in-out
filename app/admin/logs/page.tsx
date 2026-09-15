@@ -155,6 +155,14 @@ export default function LogsPage() {
     let cancelled = false;
     setIsQuerying(true);
     setQueryError("");
+    const rangeQuery = {
+      ...(Number.isFinite(rangeBounds.rangeStart)
+        ? { startAt: new Date(rangeBounds.rangeStart).toISOString() }
+        : {}),
+      ...(Number.isFinite(rangeBounds.rangeEnd)
+        ? { endAt: new Date(rangeBounds.rangeEnd).toISOString() }
+        : {}),
+    };
     void queryMovements({
       page,
       pageSize: rowsPerPage,
@@ -165,8 +173,7 @@ export default function LogsPage() {
       scanType: scanTypeFilter === "all" ? undefined : scanTypeFilter,
       direction: directionFilter === "all" ? undefined : directionFilter,
       subjectGroup: subjectTypeFilter,
-      startAt: new Date(rangeBounds.rangeStart).toISOString(),
-      endAt: new Date(rangeBounds.rangeEnd).toISOString(),
+      ...rangeQuery,
       sortKey,
       sortDirection,
     })
@@ -250,12 +257,14 @@ export default function LogsPage() {
         <div className="pill-segmented-group">
           <button
             className={`pill-segmented-button ${subjectTypeFilter === "people" ? "active" : ""}`}
+            type="button"
             onClick={() => setSubjectTypeFilter("people")}
           >
             People
           </button>
           <button
             className={`pill-segmented-button ${subjectTypeFilter === "hardware" ? "active" : ""}`}
+            type="button"
             onClick={() => setSubjectTypeFilter("hardware")}
           >
             Hardware

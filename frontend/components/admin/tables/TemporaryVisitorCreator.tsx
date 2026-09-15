@@ -6,6 +6,15 @@ const DEFAULT_VISIT_HOURS = 4;
 const MAX_VISIT_HOURS = 24;
 const HOUR_IN_MS = 60 * 60 * 1000;
 const MINIMUM_VISIT_MS = 60 * 1000;
+const BARCODE_MAX_LENGTH = 64;
+const BARCODE_PATTERN = /^[A-Za-z0-9._:/-]+$/;
+
+function validateText(value: string, label: string, maximum: number, required = false) {
+  const normalized = value.trim();
+  if (required && !normalized) return `${label} is required.`;
+  if (normalized.length > maximum) return `${label} must be ${maximum} characters or fewer.`;
+  return "";
+}
 
 function toDateTimeLocal(date: Date) {
   const localTime = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
@@ -79,6 +88,29 @@ export function TemporaryVisitorCreator({
   }
 
   async function submit() {
+    const normalizedName = name.trim();
+    const normalizedBarcode = barcode.trim();
+    const normalizedCompany = company.trim();
+    const normalizedHost = host.trim();
+    const normalizedReason = reason.trim();
+    const textError =
+      validateText(normalizedName, "Name", 100, true) ||
+      validateText(normalizedHost, "Host", 100, true) ||
+      validateText(normalizedCompany, "Company", 120) ||
+      validateText(normalizedReason, "Reason", 240, true);
+    if (textError) {
+      setFormError(textError);
+      return false;
+    }
+    if (!normalizedBarcode) {
+      setFormError("Barcode is required.");
+      return false;
+    }
+    if (normalizedBarcode.length > BARCODE_MAX_LENGTH || !BARCODE_PATTERN.test(normalizedBarcode)) {
+      setFormError("Barcode must be 1–64 characters and use only letters, numbers, dot, underscore, colon, slash, or hyphen.");
+      return false;
+    }
+
     const start = new Date(validFrom);
     const end = new Date(validUntil);
     const duration = end.getTime() - start.getTime();
@@ -103,14 +135,14 @@ export function TemporaryVisitorCreator({
     setFormError("");
     try {
       await onCreate({
-        name,
-        barcode,
-        company,
-        host,
+        name: normalizedName,
+        barcode: normalizedBarcode,
+        company: normalizedCompany,
+        host: normalizedHost,
         hours: Math.max(1, Math.ceil(duration / HOUR_IN_MS)),
         validFrom,
         validUntil,
-        reason,
+        reason: normalizedReason,
       });
       setName("");
       setBarcode("");
@@ -141,19 +173,19 @@ export function TemporaryVisitorCreator({
       <div className="creation-dialog-grid creation-dialog-grid-two">
         <label>
           <span>Name</span>
-          <input value={name} onChange={(event) => { setName(event.target.value); setFormError(""); }} placeholder="Visitor name" required autoFocus />
+          <input value={name} onChange={(event) => { setName(event.target.value); setFormError(""); }} placeholder="Visitor name" maxLength={100} required autoFocus />
         </label>
         <label>
           <span>Barcode</span>
-          <input value={barcode} onChange={(event) => { setBarcode(event.target.value); setFormError(""); }} placeholder="Visitor barcode" required />
+          <input value={barcode} onChange={(event) => { setBarcode(event.target.value); setFormError(""); }} placeholder="Visitor barcode" maxLength={BARCODE_MAX_LENGTH} pattern="[A-Za-z0-9._:/-]+" title="Use letters, numbers, dot, underscore, colon, slash, or hyphen (maximum 64 characters)." required />
         </label>
         <label>
           <span>Company</span>
-          <input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Company or walk-in" />
+          <input value={company} onChange={(event) => setCompany(event.target.value)} placeholder="Company or walk-in" maxLength={120} />
         </label>
         <label>
           <span>Host</span>
-          <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="Host employee" required />
+          <input value={host} onChange={(event) => setHost(event.target.value)} placeholder="Host employee" maxLength={100} required />
         </label>
       </div>
       <div className="temporary-id-date-grid">

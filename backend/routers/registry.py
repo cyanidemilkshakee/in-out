@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db, get_read_db
 from auth import verify_admin_or_operator_request, verify_admin_request, has_admin_role
-from models import AccessPermission, Alert, Subject, Person, HardwareAsset
+from models import AccessPermission, Alert, Subject, Person, HardwareAsset, PermissionRequestModel, Checkpoint
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
 from temporal_worker import get_temporal_client, TASK_QUEUE
 from workflows.visitor_approval import VisitorApprovalWorkflow
@@ -28,6 +28,51 @@ bundle_router = APIRouter(prefix="/v1/registry", tags=["registry"])
 
 _MAX_LIMIT = 200
 _DEFAULT_LIMIT = 50
+_METADATA_LIMITS = {
+    "name": 100,
+    "company": 120,
+    "host": 100,
+    "reason": 240,
+    "purpose": 240,
+    "department": 100,
+    "owner": 100,
+    "category": 80,
+}
+
+
+def _validated_metadata(payload: SubjectCreate) -> dict[str, Any]:
+    """Normalize user-entered metadata before it reaches the JSON columns."""
+    incoming = dict(payload.data or {})
+    for field, limit in _METADATA_LIMITS.items():
+        value = incoming.get(field)
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise HTTPException(status_code=422, detail=f"{field} must be text")
+        value = value.strip()
+        if not value:
+            raise HTTPException(status_code=422, detail=f"{field} cannot be empty")
+        if len(value) > limit:
+            raise HTTPException(status_code=422, detail=f"{field} must be {limit} characters or fewer")
+        incoming[field] = value
+
+    if payload.kind in {"employee", "visitor"}:
+        for field in ("name", "host") if payload.kind == "visitor" else ("name",):
+            if not str(incoming.get(field) or "").strip():
+                raise HTTPException(status_code=422, detail=f"{field} is required")
+
+    if payload.kind == "visitor":
+        hours = incoming.get("hours")
+        if isinstance(hours, bool) or not isinstance(hours, (int, float)) or not 1 <= hours <= 24:
+            raise HTTPException(status_code=422, detail="hours must be between 1 and 24")
+
+    for field in ("validFrom", "validUntil"):
+        value = incoming.get(field)
+        if value is not None:
+            if not isinstance(value, str) or not value.strip() or len(value) > 40:
+                raise HTTPException(status_code=422, detail=f"{field} must be a valid date-time")
+            incoming[field] = value.strip()
+    return incoming
 
 
 @router.get("", response_model=SubjectListResponse)
@@ -107,11 +152,25 @@ async def create_subject(
     if not has_admin_role(actor) and payload.kind != "visitor":
         raise HTTPException(status_code=403, detail="Terminal operators may create temporary visitors only")
     subject_id = str(uuid.uuid4())
-    data = {"status": "pending_approval" if payload.kind == "visitor" else "active",
-        "inside": False, "phone": "", "accessLevel": "Standard",
-        "allowedZones": [payload.data["allowedZone"]] if payload.data.get("allowedZone") else [],
-        "createdAt": datetime.now(timezone.utc).isoformat(), **payload.data,
-        "id": subject_id, "barcode": payload.barcode, "type": payload.kind}
+    incoming = _validated_metadata(payload)
+    requested_zones = incoming.get("allowedZones")
+    if not isinstance(requested_zones, list):
+        requested_zones = []
+    data = {
+        **incoming,
+        # Server-owned fields must be applied last. Operators cannot create an
+        # already-approved visitor or smuggle a different identity into the
+        # registry payload.
+        "status": "pending_approval" if payload.kind == "visitor" else "active",
+        "inside": False,
+        "phone": str(incoming.get("phone") or ""),
+        "accessLevel": str(incoming.get("accessLevel") or "Standard"),
+        "allowedZones": [zone for zone in requested_zones if isinstance(zone, str)] if has_admin_role(actor) else [],
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "id": subject_id,
+        "barcode": payload.barcode,
+        "type": payload.kind,
+    }
     new_sub = Subject(id=subject_id, kind=payload.kind, barcode=payload.barcode)
     
     if payload.kind in ("employee", "visitor"):
@@ -120,6 +179,26 @@ async def create_subject(
         new_sub.hardware = HardwareAsset(data=data)
 
     db.add(new_sub)
+    if payload.kind == "visitor":
+        permission_id = str(uuid.uuid4())
+        db.add(AccessPermission(
+            id=permission_id,
+            subject_id=subject_id,
+            data={
+                "id": permission_id,
+                "subjectId": subject_id,
+                "subjectName": data.get("name") or payload.barcode,
+                "subjectType": "visitor",
+                "assignment": "Temporary visitor",
+                "state": "pending_approval",
+                "zones": data.get("allowedZones") or [],
+                "validFrom": data.get("validFrom") or "",
+                "validTo": data.get("validTo") or data.get("validUntil") or "",
+                "source": "request",
+                "updatedAt": datetime.now(timezone.utc).isoformat(),
+                "updatedBy": actor.get("sub", "Terminal Operator"),
+            },
+        ))
     try:
         await db.commit()
         await db.refresh(new_sub)
@@ -132,12 +211,36 @@ async def create_subject(
         raise HTTPException(status_code=500, detail="Internal server error")
 
     if payload.kind == "visitor":
+        request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+        now = datetime.now(timezone.utc)
+        checkpoint_result = await db.execute(select(Checkpoint).order_by(Checkpoint.id).limit(1))
+        checkpoint = checkpoint_result.scalar_one_or_none()
+        checkpoint_id = checkpoint.id if checkpoint else "main-gate"
+        checkpoint_name = checkpoint.data.get("name", checkpoint_id) if checkpoint else checkpoint_id
+        visitor_request = {
+            "id": request_id,
+            "subjectId": subject_id,
+            "subjectName": data.get("name") or payload.barcode,
+            "subjectType": "visitor",
+            "type": "visitor",
+            "purpose": data.get("purpose") or data.get("reason") or "Temporary visitor access",
+            "checkpointId": checkpoint_id,
+            "checkpoint": checkpoint_name,
+            "requester": actor.get("sub", "Terminal Operator"),
+            "requestedZones": data.get("allowedZones") or [checkpoint.data.get("zone", "public")] if checkpoint else ["public"],
+            "validFrom": data.get("validFrom") or now.isoformat(),
+            "validTo": data.get("validTo") or data.get("validUntil") or now.isoformat(),
+            "status": "pending",
+            "createdAt": now.isoformat(),
+        }
+        db.add(PermissionRequestModel(id=request_id, subject_id=subject_id, data=visitor_request, created_at=now))
+        await db.commit()
         try:
             client = await get_temporal_client()
             await client.start_workflow(
                 VisitorApprovalWorkflow.run,
-                args=[new_sub.id],
-                id=f"visitor-{new_sub.id}",
+                args=[request_id],
+                id=f"visitor-{request_id}",
                 task_queue=TASK_QUEUE,
             )
         except Exception as e:
@@ -234,8 +337,14 @@ async def registry_bundle(db: AsyncSession = Depends(get_read_db)) -> dict[str, 
     )).scalars().all()
     people = [{**(subject.person.data or {}), "id": subject.id} for subject in subjects if subject.person]
     hardware = [{**(subject.hardware.data or {}), "id": subject.id} for subject in subjects if subject.hardware]
+    manual_review_alert = (
+        (Alert.data["manualReview"].astext == "true")
+        | (Alert.data["ruleId"].astext == "rule-manual-review")
+        | (Alert.data["ruleId"].astext == "rule-unknown-barcode")
+        | Alert.data["title"].astext.ilike("Unknown barcode%")
+    )
     alerts = [alert.data for alert in (await db.execute(
-        select(Alert).order_by(Alert.created_at.desc()).limit(200)
+        select(Alert).where(~manual_review_alert).order_by(Alert.created_at.desc()).limit(200)
     )).scalars().all()]
     permissions = [permission.data for permission in (await db.execute(
         select(AccessPermission).order_by(AccessPermission.id)

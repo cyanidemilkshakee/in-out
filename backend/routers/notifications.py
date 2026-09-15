@@ -5,7 +5,6 @@ GET   /v1/notifications          — list notifications, optional ?read=false fi
 PATCH /v1/notifications/{id}/read — mark notification as read
 """
 
-import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,8 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db, get_read_db
 from models import Notification
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/notifications", tags=["notifications"])
 

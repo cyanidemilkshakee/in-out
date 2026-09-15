@@ -38,16 +38,26 @@ export function parseDateInput(value: string, endOfDay = false) {
     /^(\d{4})-(\d{2})-(\d{2})(?:T(\d{2}):(\d{2})(?::(\d{2}))?)?$/
   );
   if (!match) return undefined;
-  const start =
-    Date.UTC(
-      Number(match[1]),
-      Number(match[2]) - 1,
-      Number(match[3]),
-      Number(match[4] ?? 0),
-      Number(match[5] ?? 0),
-      Number(match[6] ?? 0)
-    ) -
-    FACILITY_OFFSET_MS;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  const hour = Number(match[4] ?? 0);
+  const minute = Number(match[5] ?? 0);
+  const second = Number(match[6] ?? 0);
+  const facilityUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const check = new Date(facilityUtc);
+  if (
+    !Number.isFinite(facilityUtc) ||
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day ||
+    check.getUTCHours() !== hour ||
+    check.getUTCMinutes() !== minute ||
+    check.getUTCSeconds() !== second
+  ) {
+    return undefined;
+  }
+  const start = facilityUtc - FACILITY_OFFSET_MS;
   return endOfDay && !match[4] ? start + DAY_IN_MS - 1 : start;
 }
 
@@ -95,8 +105,9 @@ export function compactRangeBounds(
 }
 
 export function eventTimestamp(event: MovementEvent) {
-  const timestamp = event.createdAt
-    ? new Date(event.createdAt).getTime()
+  const createdAt = event.createdAt ? new Date(event.createdAt).getTime() : NaN;
+  const timestamp = Number.isFinite(createdAt)
+    ? createdAt
     : new Date(`${event.date} ${event.time}`).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
 }

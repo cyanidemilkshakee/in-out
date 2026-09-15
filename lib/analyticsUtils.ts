@@ -49,17 +49,6 @@ export const timeToDecimal = (timeStr: string): number => {
   return hours + minutes / 60;
 };
 // Main function to calculate a person's exact worked hours and sessions per day
-export const getPersonSessions = (
-  personId: string,
-  movements: MovementEvent[]
-): DayPattern[] => {
-  const approvedMovements = movements.filter(
-    (movement) =>
-      movement.subjectId === personId && movement.result === "approved"
-  );
-  return buildSessions(approvedMovements);
-};
-
 function buildSessions(movements: MovementEvent[]): DayPattern[] {
   // Sort chronologically
   const sorted = [...movements].sort((a, b) => {
@@ -77,6 +66,8 @@ function buildSessions(movements: MovementEvent[]): DayPattern[] {
 
   for (const date of Object.keys(grouped)) {
     const events = grouped[date];
+    const dateObj = new Date(date);
+    if (!Number.isFinite(dateObj.getTime())) continue;
     const sessions: Session[] = [];
     let currentEntry: number | null = null;
     let workedHours = 0;
@@ -129,11 +120,9 @@ function buildSessions(movements: MovementEvent[]): DayPattern[] {
     }
 
     const percentage = Math.round((workedHours / 8) * 100);
-    const d = new Date(date);
-
     result.push({
-      dateStr: `${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`,
-      dateObj: d,
+      dateStr: `${dateObj.getDate()} ${MONTH_NAMES[dateObj.getMonth()]}`,
+      dateObj,
       percentage: Math.min(percentage, 100),
       sessions,
       workedHours

@@ -55,6 +55,9 @@ export function AlertActivity({
                   {alert.status === "open" ? (
                     <button type="button" onClick={() => onUpdate(alert.id, "acknowledged")}>Acknowledge</button>
                   ) : null}
+                  {alert.status !== "warned" ? (
+                    <button type="button" onClick={() => onUpdate(alert.id, "warned")}>Warn</button>
+                  ) : null}
                   <button type="button" onClick={() => onUpdate(alert.id, "resolved")}>Resolve</button>
                 </>
               )}

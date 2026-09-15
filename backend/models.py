@@ -14,7 +14,7 @@ class Subject(Base):
     barcode: str = Column(String, nullable=False, unique=True)
 
     presence_state = relationship("PresenceState", back_populates="subject", uselist=False)
-    permissions = relationship("AccessPermission", back_populates="subject")
+    permissions = relationship("AccessPermission", back_populates="subject", uselist=False)
     person = relationship("Person", back_populates="subject", uselist=False, cascade="all, delete-orphan")
     hardware = relationship("HardwareAsset", back_populates="subject", uselist=False, cascade="all, delete-orphan")
 
@@ -105,7 +105,10 @@ class PermissionRequestModel(Base):
     __tablename__ = "permission_requests"
 
     id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    subject_id: str = Column(String, ForeignKey("subjects.id"), nullable=False)
+    # A manual review may be raised for an unregistered barcode, so it does
+    # not always have a subject row yet. Known-subject requests still carry
+    # the foreign key when one is available.
+    subject_id: str | None = Column(String, ForeignKey("subjects.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     data = Column(JSONB, nullable=False)
 

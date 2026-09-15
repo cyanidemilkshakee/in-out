@@ -256,6 +256,7 @@ export function EmployeeProfileCard({
             </div>
             <button
               className="icon-button"
+              type="button"
               onClick={onClose}
               style={{
                 background: "transparent",

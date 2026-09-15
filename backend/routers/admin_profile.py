@@ -6,21 +6,18 @@ PATCH /v1/admin/profile          — update profile / change password (auth-prot
 POST /v1/admin/profile/accounts  — create new admin account (auth-protected)
 """
 
-import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_admin_request
 from database import get_db
 from models import AdminAccount
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 

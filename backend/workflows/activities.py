@@ -6,22 +6,17 @@ from __future__ import annotations
 
 import json
 import uuid
-import logging
 from datetime import datetime, timezone
 
 from temporalio import activity
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 from database import async_session  # use the session factory directly in activities
 from models import (
-    PermissionRequestModel, AccessPermission, AdminAccount,
-    Alert, Notification, AuditEvent, Movement, PresenceState, Subject
+    PermissionRequestModel, AccessPermission, Notification,
+    AuditEvent, Movement, PresenceState, Subject, Person
 )
 from redis_client import publish_presence_update
-
-logger = logging.getLogger(__name__)
-
 
 @activity.defn
 async def notify_admins_of_override(request_id: str) -> None:
@@ -32,10 +27,12 @@ async def notify_admins_of_override(request_id: str) -> None:
         if not req:
             raise ValueError(f"Permission request {request_id} not found")
         notif_id = f"NOT-{uuid.uuid4().hex[:8].upper()}"
-        now = datetime.now(timezone.utc).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
         notif_data = req.data or {}
         notification = Notification(
             id=notif_id,
+            created_at=now_dt,
             data={
                 "id": notif_id,
                 "title": "Manual Override Pending",
@@ -65,42 +62,81 @@ async def approve_override(request_id: str, admin_id: str, reason: str) -> dict:
         data["status"] = "approved"
         req.data = data
 
-        subject_id = data["subjectId"]
+        subject_id = data.get("subjectId") or None
         checkpoint_id = data.get("checkpointId", "unknown")
 
-        subject_stmt = select(Subject).where(Subject.id == subject_id)
-        subject_obj = (await db.execute(subject_stmt)).scalar_one_or_none()
-        subject_kind = subject_obj.kind if subject_obj else "employee"
-        subject_barcode = subject_obj.barcode if subject_obj else "unknown"
+        subject_obj = None
+        if subject_id:
+            subject_stmt = select(Subject).where(Subject.id == subject_id)
+            subject_obj = (await db.execute(subject_stmt)).scalar_one_or_none()
+        subject_kind = subject_obj.kind if subject_obj else data.get("subjectType", "visitor")
+        subject_barcode = subject_obj.barcode if subject_obj else data.get("barcode", "unknown")
 
-        lock_stmt = select(PresenceState).where(PresenceState.subject_id == subject_id).with_for_update()
-        presence = (await db.execute(lock_stmt)).scalar_one_or_none()
-        if not presence:
-            presence = PresenceState(subject_id=subject_id, state="outside")
-            db.add(presence)
-            await db.flush()
+        existing_movement = await db.execute(
+            select(Movement).where(Movement.data["overrideRequestId"].astext == request_id).limit(1)
+        )
+        if existing_movement.scalars().first():
+            await db.commit()
+            return data
 
-        new_state = "inside" if presence.state == "outside" else "outside"
         now = datetime.now(timezone.utc)
-        presence.state = new_state
-        presence.last_scan_timestamp = now
+        presence = None
+        if subject_id:
+            lock_stmt = select(PresenceState).where(PresenceState.subject_id == subject_id).with_for_update()
+            presence = (await db.execute(lock_stmt)).scalar_one_or_none()
+            if not presence:
+                presence = PresenceState(subject_id=subject_id, state="outside")
+                db.add(presence)
+                await db.flush()
+
+        direction = data.get("direction") if data.get("direction") in {"entry", "exit"} else ("entry" if not presence or presence.state == "outside" else "exit")
+        new_state = "inside" if direction == "entry" else "outside"
+        if presence:
+            presence.state = new_state
+            presence.last_scan_timestamp = now
+
+        event_id = f"MAN-{uuid.uuid4().hex[:10].upper()}"
+        event = {
+            "id": event_id,
+            "date": now.date().isoformat(),
+            "time": now.strftime("%H:%M:%S"),
+            "checkpointId": checkpoint_id,
+            "checkpoint": data.get("checkpoint", checkpoint_id),
+            "direction": direction,
+            "subjectId": subject_id or "unregistered",
+            "subjectName": data.get("subjectName") or subject_barcode,
+            "subjectType": subject_kind,
+            "barcode": subject_barcode,
+            "result": "approved",
+            "reason": reason or "Approved by administrator during manual review.",
+            "scanType": "manual",
+            "syncState": "queued",
+            "hardwareIds": [],
+            "createdAt": now.isoformat(),
+            "overrideRequestId": request_id,
+            "adminId": admin_id,
+        }
 
         movement = Movement(
+            id=event_id,
             subject_id=subject_id,
             checkpoint_id=checkpoint_id,
             occurred_at=now,
             result="approved",
-            direction="entry" if new_state == "inside" else "exit",
+            direction=direction,
             scan_type="manual",
             sync_state="queued",
             subject_type=subject_kind,
-            data={"overrideRequestId": request_id, "adminId": admin_id, "reason": reason},
+            data=event,
         )
         db.add(movement)
 
+        audit_id = f"AUD-{uuid.uuid4().hex[:8].upper()}"
         audit = AuditEvent(
-            id=f"AUD-{uuid.uuid4().hex[:8].upper()}",
+            id=audit_id,
+            created_at=now,
             data={
+                "id": audit_id,
                 "category": "permission",
                 "action": "Manual override approved",
                 "subjectId": subject_id,
@@ -116,10 +152,12 @@ async def approve_override(request_id: str, admin_id: str, reason: str) -> dict:
         await db.commit()
 
         await publish_presence_update(json.dumps({
+            "type": "manual_review_decision",
+            "requestId": request_id,
             "subject_id": subject_id,
             "kind": subject_kind,
             "barcode": subject_barcode,
-            "state": new_state,
+            "state": new_state if subject_id else "unchanged",
             "timestamp": now.isoformat(),
         }))
         return data
@@ -134,12 +172,73 @@ async def deny_override(request_id: str, reason: str) -> dict:
         if not req:
             raise ValueError(f"Permission request {request_id} not found")
         data = dict(req.data)
+        # A timeout can race with an already-persisted admin approval while
+        # Temporal is reconnecting. Never turn an approved request into a
+        # denial during that race.
+        if data.get("status") == "approved":
+            await db.commit()
+            return data
+        # The API applies a manual denial immediately and then signals the
+        # waiting workflow. Keep the activity idempotent when that signal is
+        # delivered after the direct application, but still repair older
+        # denied requests that never got their manual movement.
+        existing_movement_result = await db.execute(
+            select(Movement).where(Movement.data["overrideRequestId"].astext == request_id).limit(1)
+        )
+        existing_movement = existing_movement_result.scalars().first()
+        if data.get("status") == "denied" and existing_movement:
+            await db.commit()
+            return data
         data["status"] = "denied"
         req.data = data
-        now = datetime.now(timezone.utc).isoformat()
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        subject_id = data.get("subjectId") or None
+        subject_result = await db.execute(select(Subject).where(Subject.id == subject_id))
+        subject = subject_result.scalar_one_or_none()
+        subject_kind = subject.kind if subject else "visitor"
+        subject_barcode = subject.barcode if subject else data.get("barcode", "unknown")
+        checkpoint_id = data.get("checkpointId", "unknown")
+        direction = data.get("direction") if data.get("direction") in {"entry", "exit"} else "entry"
+        if not existing_movement:
+            event_id = f"MAN-{uuid.uuid4().hex[:10].upper()}"
+            event = {
+                "id": event_id,
+                "date": now_dt.date().isoformat(),
+                "time": now_dt.strftime("%H:%M:%S"),
+                "checkpointId": checkpoint_id,
+                "checkpoint": data.get("checkpoint", checkpoint_id),
+                "direction": direction,
+                "subjectId": subject_id or "unregistered",
+                "subjectName": data.get("subjectName") or subject_barcode,
+                "subjectType": subject_kind,
+                "barcode": subject_barcode,
+                "result": "denied",
+                "reason": reason or "Denied by administrator during manual review.",
+                "denialCode": "manual_review",
+                "scanType": "manual",
+                "syncState": "queued",
+                "hardwareIds": [],
+                "createdAt": now,
+                "overrideRequestId": request_id,
+            }
+            db.add(Movement(
+                id=event_id,
+                subject_id=subject_id,
+                checkpoint_id=checkpoint_id,
+                occurred_at=now_dt,
+                result="denied",
+                direction=direction,
+                denial_code="manual_review",
+                scan_type="manual",
+                subject_type=subject_kind,
+                sync_state="queued",
+                data=event,
+            ))
         notif_id = f"NOT-{uuid.uuid4().hex[:8].upper()}"
         notification = Notification(
             id=notif_id,
+            created_at=now_dt,
             data={
                 "id": notif_id,
                 "title": "Override Request Denied",
@@ -153,7 +252,44 @@ async def deny_override(request_id: str, reason: str) -> dict:
             }
         )
         db.add(notification)
+        audit_id = f"AUD-{uuid.uuid4().hex[:8].upper()}"
+        db.add(AuditEvent(
+            id=audit_id,
+            created_at=now_dt,
+            data={
+                "id": audit_id,
+                "category": "permission",
+                "action": "Manual override denied",
+                "subjectId": subject_id or "",
+                "actor": "Administrator",
+                "role": "Administrator",
+                "decision": "denied",
+                "reason": reason,
+                "relatedId": request_id,
+                "createdAt": now,
+            },
+        ))
+        if subject_id:
+            perm_result = await db.execute(
+                select(AccessPermission).where(AccessPermission.subject_id == subject_id).order_by(AccessPermission.id).limit(1)
+            )
+            perm = perm_result.scalars().first()
+            if perm:
+                perm.data = {**(perm.data or {}), "state": "restricted", "reason": reason}
+            person_result = await db.execute(select(Person).where(Person.subject_id == subject_id))
+            person = person_result.scalar_one_or_none()
+            if person:
+                person.data = {**(person.data or {}), "status": "restricted"}
         await db.commit()
+        await publish_presence_update(json.dumps({
+            "type": "manual_review_decision",
+            "requestId": request_id,
+            "subject_id": subject_id,
+            "kind": "manual_decision",
+            "barcode": subject_barcode,
+            "state": "unchanged",
+            "timestamp": now,
+        }))
         return data
 
 
@@ -175,13 +311,26 @@ async def approve_visitor(request_id: str, reason: str) -> None:
         data["status"] = "approved"
         req.data = data
         subject_id = data["subjectId"]
-        perm_stmt = select(AccessPermission).where(AccessPermission.subject_id == subject_id)
-        perm = (await db.execute(perm_stmt)).scalar_one_or_none()
+        perm_stmt = select(AccessPermission).where(AccessPermission.subject_id == subject_id).order_by(AccessPermission.id).limit(1)
+        perm = (await db.execute(perm_stmt)).scalars().first()
         if perm:
             perm_data = dict(perm.data)
             perm_data["state"] = "active"
             perm_data["reason"] = reason
+            perm_data["validFrom"] = data.get("validFrom", perm_data.get("validFrom", ""))
+            perm_data["validTo"] = data.get("validTo", perm_data.get("validTo", ""))
+            perm_data["zones"] = data.get("requestedZones", perm_data.get("zones", []))
             perm.data = perm_data
+        person_result = await db.execute(select(Person).where(Person.subject_id == subject_id))
+        person = person_result.scalar_one_or_none()
+        if person:
+            person.data = {
+                **(person.data or {}),
+                "status": "pre_approved",
+                "validFrom": data.get("validFrom", person.data.get("validFrom", "")),
+                "validTo": data.get("validTo", person.data.get("validTo", "")),
+                "allowedZones": data.get("requestedZones", person.data.get("allowedZones", [])),
+            }
         await db.commit()
 
 
@@ -196,6 +345,16 @@ async def deny_visitor(request_id: str, reason: str) -> None:
         data = dict(req.data)
         data["status"] = "denied"
         req.data = data
+        subject_id = data.get("subjectId")
+        if subject_id:
+            perm_result = await db.execute(select(AccessPermission).where(AccessPermission.subject_id == subject_id).order_by(AccessPermission.id).limit(1))
+            perm = perm_result.scalars().first()
+            if perm:
+                perm.data = {**(perm.data or {}), "state": "restricted", "reason": reason}
+            person_result = await db.execute(select(Person).where(Person.subject_id == subject_id))
+            person = person_result.scalar_one_or_none()
+            if person:
+                person.data = {**(person.data or {}), "status": "restricted"}
         await db.commit()
 
 
@@ -208,16 +367,19 @@ async def auto_deny_visitor(request_id: str) -> None:
 @activity.defn
 async def run_alert_rule_evaluation() -> int:
     """Evaluate scheduled alert rules and persist any newly triggered alerts."""
-    from rule_engine import evaluate_scheduled_rules, build_workday_statuses
+    from rule_engine import evaluate_scheduled_rules, build_workday_statuses, default_alert_rules, with_default_alert_rules
     from models import AlertRule, Alert as AlertModel, Movement as MovementModel, Person
     from datetime import timedelta
     import uuid
     async with async_session() as db:
-        since = (datetime.now(timezone.utc) - timedelta(hours=48)).isoformat()
+        # Compare PostgreSQL timestamptz columns with a datetime value, not an
+        # ISO string. Passing the string makes asyncpg bind VARCHAR and causes
+        # ``timestamptz >= varchar`` failures in the cron activity.
+        since = datetime.now(timezone.utc) - timedelta(hours=48)
         rules_result = await db.execute(
             select(AlertRule).where(AlertRule.data["enabled"].as_boolean() == True)
         )
-        rules = [r.data for r in rules_result.scalars().all()]
+        rules = with_default_alert_rules([r.data for r in rules_result.scalars().all()] or default_alert_rules())
         if not rules:
             return 0
         movements_result = await db.execute(

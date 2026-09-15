@@ -12,7 +12,7 @@ import { Doughnut } from "react-chartjs-2";
 import { DrillDownDoughnut } from "./DrillDownDoughnut";
 import { KPICards } from "./KPICards";
 import { TimeRangeSelector } from "./TimeRangeSelector";
-import { ActiveAlertsWidget } from "./ActiveAlertsWidget";
+import { PendingDecisionsWidget } from "./PendingDecisionsWidget";
 import { UsersRound, Package } from "lucide-react";
 import type { Alert, MovementEvent } from "../../../lib/types";
 import { getDrillDownData, getDashboardKPIs } from "../../../lib/analyticsUtils";
@@ -30,6 +30,7 @@ ChartJS.register(ArcElement, Tooltip, Legend);
 type DashboardChartsProps = {
   alerts: Alert[];
   movements: MovementEvent[];
+  pendingRequests: import("../../../lib/types").PermissionRequest[];
 };
 
 const chartFont = {
@@ -41,6 +42,7 @@ const TIME_RANGES = ["Today", "This Week", "This Month", "This Year", "All Time"
 export function DashboardCharts({
   alerts,
   movements,
+  pendingRequests,
 }: DashboardChartsProps) {
   const router = useRouter();
   const { queryMovements } = useDataActions();
@@ -79,13 +81,16 @@ export function DashboardCharts({
       startDate,
       endDate
     );
+    const rangeQuery = {
+      ...(Number.isFinite(start) ? { startAt: new Date(start).toISOString() } : {}),
+      ...(Number.isFinite(end) ? { endAt: new Date(end).toISOString() } : {}),
+    };
     let cancelled = false;
     void queryMovements({
       page: 1,
-      pageSize: 100,
+      pageSize: 200,
       subjectGroup: subjectTypeFilter,
-      startAt: new Date(start).toISOString(),
-      endAt: new Date(end).toISOString(),
+      ...rangeQuery,
       sortKey: "createdAt",
       sortDirection: "desc",
     })
@@ -115,7 +120,7 @@ export function DashboardCharts({
           : movement.subjectType === "hardware";
       if (!typeMatches) return false;
       const timestamp = eventTimestamp(movement);
-      return Number.isFinite(timestamp) && timestamp >= start && timestamp <= end;
+      return Number.isFinite(timestamp) && timestamp > 0 && timestamp >= start && timestamp <= end;
     });
   }, [
     availableMovements,
@@ -128,10 +133,11 @@ export function DashboardCharts({
   const filteredAlerts = useMemo(() => {
     const { start, end } = dashboardRangeBounds(timeRange, startDate, endDate);
     return alerts.filter((alert) => {
-      const timestamp = alert.createdAt
-        ? new Date(alert.createdAt).getTime()
+      const createdAt = alert.createdAt ? new Date(alert.createdAt).getTime() : NaN;
+      const timestamp = Number.isFinite(createdAt)
+        ? createdAt
         : new Date(`${alert.date} ${alert.time}`).getTime();
-      return Number.isFinite(timestamp) && timestamp >= start && timestamp <= end;
+      return Number.isFinite(timestamp) && timestamp > 0 && timestamp >= start && timestamp <= end;
     });
   }, [alerts, endDate, startDate, timeRange]);
 
@@ -191,7 +197,7 @@ export function DashboardCharts({
       labels: ["Entries", "Exits"],
       datasets: [{
         data: [activeScanAnalytics.totalEntries, activeScanAnalytics.totalExits],
-        backgroundColor: ["#12b76a", "#027a48"],
+        backgroundColor: ["#12b76a", "#0b63e5"],
         borderColor: themeColors.border,
         borderWidth: 4
       }]
@@ -212,7 +218,7 @@ export function DashboardCharts({
           activeScanAnalytics.totalRestricted,
           activeScanAnalytics.totalOtherDenied,
         ],
-        backgroundColor: ["#f04438", "#912018", "#667085"],
+        backgroundColor: ["#f04438", "#667085"],
         borderColor: themeColors.border,
         borderWidth: 4
       }]
@@ -331,8 +337,8 @@ export function DashboardCharts({
             <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalEntries.toLocaleString()}</div>
           </div>
           <div style={{ textAlign: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#027a48", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#027a48" }} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#0b63e5", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
+              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#0b63e5" }} />
               Exits
             </div>
             <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalExits.toLocaleString()}</div>
@@ -371,8 +377,8 @@ export function DashboardCharts({
         </div>
       </div>
 
-      {/* Top Right — Auto vs Manual */}
-      <ActiveAlertsWidget alerts={alerts} limit={3} />
+      {/* Center Right — Pending permission decisions */}
+      <PendingDecisionsWidget requests={pendingRequests} limit={3} />
 
       <div className="analytics-donut dashboard-donut dashboard-donut-auto animate-slide-up delay-200" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginRight: "-22px" }}>
         <div className="dashboard-donut-title" style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Auto vs Manual</div>

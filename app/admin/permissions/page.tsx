@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   BellRing,
+  Barcode,
   CalendarClock,
   Check,
   ChevronRight,
@@ -41,6 +42,10 @@ function requestLabel(request: PermissionRequest) {
   if (request.type === "manual_override") return "Manual override request";
   return "Hardware custody request";
 
+}
+
+function requestBarcode(request: PermissionRequest) {
+  return request.barcode || (request.subjectId ? "Registered subject" : "Unknown barcode");
 }
 
 function formatLocalInput(date: Date) {
@@ -136,7 +141,7 @@ export default function PermissionManagerPage() {
       (notification) => notification.relatedId === request.id && !notification.read
     );
     if (relatedNotification) await markNotificationRead(relatedNotification.id);
-    setFeedback(`${request.subjectName}: request ${decision}.`);
+    setFeedback(`${request.subjectName}: request ${decision === "approved" ? "allowed" : "denied"}.`);
   }
 
   function openAssignDialog() {
@@ -295,6 +300,7 @@ export default function PermissionManagerPage() {
               <article id={request.id} key={request.id}>
                 <div className="request-type">{requestLabel(request)}</div>
                 <h3>{request.subjectName}</h3>
+                <p className="permission-request-barcode"><Barcode size={15} /> {requestBarcode(request)}</p>
                 <p>Requested by {request.requester}</p>
                 <dl>
                   <div><dt>Purpose</dt><dd>{request.purpose}</dd></div>
@@ -302,7 +308,7 @@ export default function PermissionManagerPage() {
                   <div><dt>Valid</dt><dd>{request.validFrom} - {request.validTo}</dd></div>
                 </dl>
                 <div className="request-actions">
-                  <button type="button" onClick={() => void decide(request, "approved")}>Approve</button>
+                  <button type="button" onClick={() => void decide(request, "approved")}>Allow</button>
                   <button type="button" onClick={() => void decide(request, "denied")}>Deny</button>
                 </div>
               </article>

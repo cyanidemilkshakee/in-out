@@ -7,6 +7,7 @@ import { useDataState } from "../../../frontend/context/DataContext";
 import type {
   Alert,
   MovementEvent,
+  PermissionRequest,
   SortDirection,
   VisibleColumn,
 } from "../../../lib/types";
@@ -41,9 +42,11 @@ const dashboardVisibleColumns: Record<VisibleColumn, boolean> = {
 function DashboardOverview({
   alerts,
   events,
+  pendingRequests,
 }: {
   alerts: Alert[];
   events: MovementEvent[];
+  pendingRequests: PermissionRequest[];
 }) {
   const latestEvents = useMemo(() => events.slice(0, 10), [events]);
   const [sortKey, setSortKey] = useState<VisibleColumn>("time");
@@ -56,6 +59,7 @@ function DashboardOverview({
         <DashboardCharts
           alerts={alerts}
           movements={events}
+          pendingRequests={pendingRequests}
         />
       </div>
 
@@ -90,12 +94,13 @@ function DashboardOverview({
 }
 
 export default function AdminDashboardPage() {
-  const { alerts, movements } = useDataState();
+  const { alerts, movements, permissionRequests } = useDataState();
 
   return (
     <DashboardOverview
       alerts={alerts}
       events={movements}
+      pendingRequests={permissionRequests.filter((request) => request.status === "pending")}
     />
   );
 }

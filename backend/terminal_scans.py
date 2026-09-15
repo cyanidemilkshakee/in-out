@@ -7,8 +7,8 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert
 
-from models import Subject, PresenceState, ScanRequest, Movement, Checkpoint, Alert, AlertRule
-from movement_logic import evaluate_scan, apply_movement_state, denial_code_for_reason
+from models import Subject, PresenceState, ScanRequest, Movement, Checkpoint, Alert, AlertRule, AccessPermission
+from movement_logic import evaluate_scan, apply_movement_state
 
 
 async def record_scan(db, key, payload, terminal_id):
@@ -42,13 +42,24 @@ async def record_scan(db, key, payload, terminal_id):
             "hardwareIds": [], "createdAt": now.isoformat(),
         }
         decision = {"event": event, "carriedHardware": []}
+        # ``alerts.source_event_id`` is a foreign key to ``movements.id``.
+        # Flush the movement before adding the alert so SQLAlchemy/Postgres
+        # cannot attempt the child insert first during a flush.
         db.add(Movement(id=event["id"], subject_id=None, checkpoint_id=checkpoint.id,
             occurred_at=now, result="denied", direction=direction,
             denial_code="barcode_not_registered", scan_type=payload.scan_type,
             subject_type="visitor", sync_state=event["syncState"], data=event))
+        await db.flush()
+        from rule_engine import create_scan_alert, default_alert_rules, with_default_alert_rules
+        rule_rows = (await db.execute(select(AlertRule.data))).scalars().all()
+        rules = with_default_alert_rules(rule_rows or default_alert_rules())
+        existing = (await db.execute(select(Alert.data))).scalars().all()
+        alert = create_scan_alert(event, None, [], rules, existing, str(uuid.uuid4()))
+        if alert:
+            db.add(Alert(id=alert["id"], source_event_id=event["id"], created_at=now, data=alert))
         result = {"allowed": False, "reason": event["reason"], "subject_id": None,
             "decision": decision, "updatedPeople": [], "updatedHardwareAssets": [],
-            "generatedAlerts": []}
+            "generatedAlerts": [alert] if alert else []}
         db.add(ScanRequest(idempotency_key=key, subject_id=None, terminal_id=terminal_id,
             status_code=200, response_body=result))
         await db.flush()
@@ -64,11 +75,37 @@ async def record_scan(db, key, payload, terminal_id):
     if not set(payload.selected_hardware_ids).issubset(assets):
         raise HTTPException(422, "Selected hardware is not registered")
     people, hardware, states = [], [], {}
+    permission_result = await db.execute(
+        select(AccessPermission).where(AccessPermission.subject_id.in_(ids)).order_by(AccessPermission.id)
+    )
+    permissions = {}
+    for permission in permission_result.scalars().all():
+        permissions.setdefault(permission.subject_id, permission.data or {})
     for sub in subjects:
         metadata = sub.hardware if sub.kind == "hardware" else sub.person
         if metadata is None:
             raise HTTPException(422, "Subject metadata is missing")
         data = {**metadata.data, "id": sub.id, "barcode": sub.barcode}
+        permission = permissions.get(sub.id, {})
+        permission_state = permission.get("state")
+        if permission_state:
+            if sub.kind == "visitor" and permission_state == "active":
+                data["status"] = "pre_approved"
+            else:
+                status_map = {
+                    "active": "active",
+                    "restricted": "restricted",
+                    "pending_approval": "pending_approval",
+                    "expired": "expired",
+                    "revoked": "inactive",
+                }
+                data["status"] = status_map.get(permission_state, data.get("status", "inactive"))
+        if isinstance(permission.get("zones"), list):
+            data["allowedZones"] = permission["zones"]
+        if permission.get("validFrom"):
+            data["validFrom"] = permission["validFrom"]
+        if permission.get("validTo"):
+            data["validTo"] = permission["validTo"]
         if sub.kind != "hardware":
             data["type"] = sub.kind
         else:
@@ -106,9 +143,9 @@ async def record_scan(db, key, payload, terminal_id):
         denial_code=event.get("denialCode"), scan_type=payload.scan_type,
         subject_type=subject.kind, sync_state=event["syncState"], data=event))
     await db.flush()
-    from rule_engine import create_scan_alert
-    rules = (await db.execute(select(AlertRule.data))).scalars().all()
-    existing = (await db.execute(select(Alert.data).where(Alert.data["status"].astext == "open"))).scalars().all()
+    from rule_engine import create_scan_alert, default_alert_rules, with_default_alert_rules
+    rules = with_default_alert_rules((await db.execute(select(AlertRule.data))).scalars().all() or default_alert_rules())
+    existing = (await db.execute(select(Alert.data))).scalars().all()
     alert = create_scan_alert(event, decision["subject"], decision["carriedHardware"], rules, existing, str(uuid.uuid4()))
     if alert:
         db.add(Alert(id=alert["id"], source_event_id=event["id"], created_at=now, data=alert))

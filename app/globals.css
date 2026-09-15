@@ -19,7 +19,7 @@
   --admin-sidebar-radius: 20px;
   --bg: rgba(206, 215, 231, 0.897);
   --surface: #ffffff;
-  --surface-muted: #000000;
+  --surface-muted: #f3f5f7;
   --surface-soft: #fafafa;
   --text: #111827;
   --muted: #667085;
@@ -31,8 +31,8 @@
   --green-soft: #edf8ef;
   --red: #d92d20;
   --red-soft: #fff0ed;
-  --amber: #66716c;
-  --amber-soft: #edf1ef;
+  --amber: #dc6803;
+  --amber-soft: #fff6ed;
   --shadow: 0 8px 22px rgba(17, 24, 39, 0.08);
   --radius: 6px;
 }
@@ -493,50 +493,6 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
-.toast-region {
-  position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 50;
-  width: min(420px, calc(100vw - 32px));
-}
-
-.toast {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: #ffffff;
-  box-shadow: var(--shadow);
-  padding: 12px;
-  color: var(--text);
-}
-
-.toast span {
-  flex: 1;
-  font-size: 14px;
-  line-height: 1.35;
-}
-
-.toast-action,
-.toast-dismiss {
-  min-height: 32px;
-  border: 0;
-  border-radius: 10px;
-  background: var(--blue-soft);
-  color: var(--blue);
-  padding: 0 10px;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.toast-dismiss {
-  background: var(--surface-soft);
-  color: var(--muted);
-}
-
 .segmented {
   min-height: 36px;
   border: 1px solid var(--border);
@@ -582,8 +538,6 @@ tbody tr:hover {
 }
 
 .sort-button:focus-visible,
-.toast-action:focus-visible,
-.toast-dismiss:focus-visible,
 .segmented:focus-visible {
   outline: 3px solid rgba(11, 99, 229, 0.34);
   outline-offset: 2px;
@@ -644,6 +598,8 @@ tbody tr:hover {
   --admin-surface-strong: rgba(223, 232, 230, 0.94);
   --admin-panel: rgba(231, 238, 236, 0.78);
   --admin-line: rgba(176, 190, 186, 0.5);
+  --admin-border: rgba(176, 190, 186, 0.5);
+  --admin-line-strong: rgba(24, 32, 31, 0.28);
   --admin-text: #18201f;
   --admin-muted: #6d7a77;
   --admin-lime: #e7ece9;
@@ -671,6 +627,8 @@ html[data-admin-theme="dark"] .role-security {
   --admin-surface-strong: #17201e;
   --admin-panel: #141b1a;
   --admin-line: rgba(196, 211, 204, 0.24);
+  --admin-border: #2f3d39;
+  --admin-line-strong: #52615d;
   --admin-text: #eef7f2;
   --admin-muted: #aab8b3;
   --admin-lime: #e7ece9;

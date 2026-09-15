@@ -111,7 +111,11 @@ export default function AlertsPage() {
           />
           <AutomatedRules
             rules={alertRules}
-            onToggle={(ruleId, enabled) => void updateAlertRule(ruleId, enabled)}
+            onSave={async (changes) => {
+              for (const change of changes) {
+                await updateAlertRule(change.ruleId, change.enabled);
+              }
+            }}
           />
         </div>
       </section>

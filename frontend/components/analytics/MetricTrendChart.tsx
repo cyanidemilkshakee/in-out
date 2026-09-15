@@ -207,10 +207,10 @@ export function MetricTrendChart({
           {(["1Y", "1M", "1W", "1D"] as TimeRange[]).map((range) => (
             <button
               key={range}
+              type="button"
               onClick={() => onTimeRangeChange(range)}
               className={`chart-range-button${timeRange === range ? " is-active" : ""}`}
               style={{ "--chart-accent": color } as CSSProperties}
-              type="button"
             >
               {range}
             </button>

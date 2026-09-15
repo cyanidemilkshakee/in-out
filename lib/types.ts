@@ -126,7 +126,7 @@ export type MovementEvent = {
 export type Alert = {
   id: string;
   severity: "critical" | "high" | "medium";
-  status: "open" | "acknowledged" | "resolved";
+  status: "open" | "acknowledged" | "warned" | "resolved";
   title: string;
   reason: string;
   subjectName: string;
@@ -180,9 +180,13 @@ export type PermissionRequest = {
   validTo: string;
   status: "pending" | "approved" | "denied";
   createdAt: string;
+  barcode?: string;
   hardwareId?: string;
   carrierId?: string;
   carrierName?: string;
+  checkpointId?: string;
+  direction?: Direction;
+  eventId?: string;
 };
 
 export type PermissionNotification = {
@@ -311,6 +315,8 @@ export type RecordScanInput = {
 export type BarcodeManualReviewInput = {
   barcode: string;
   checkpointId: string;
+  direction?: Direction;
+  eventId?: string;
 };
 
 export type RecordScanResult = {
@@ -339,6 +345,7 @@ export type AccessPermissionMutationResult = {
 
 export type PermissionDecisionMutationResult = {
   request: PermissionRequest;
+  movement?: MovementEvent;
   permission?: AccessPermission;
   person?: Person;
   hardwareAsset?: HardwareAsset;
@@ -395,7 +402,7 @@ export interface DataService {
   updateAlertRule(ruleId: string, enabled: boolean): Promise<AlertRule>;
   markNotificationRead(notificationId: string): Promise<PermissionNotification>;
   recordScan(input: RecordScanInput): Promise<RecordScanResult>;
-  requestBarcodeManualReview(input: BarcodeManualReviewInput): Promise<Alert>;
+  requestBarcodeManualReview(input: BarcodeManualReviewInput): Promise<PermissionRequest>;
   saveMovement(event: MovementEvent): Promise<MovementEvent>;
   syncMovements(eventIds?: string[]): Promise<MovementEvent[]>;
   resolveMovementConflicts(eventIds: string[]): Promise<MovementEvent[]>;

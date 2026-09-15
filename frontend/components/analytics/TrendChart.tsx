@@ -245,6 +245,7 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
           {(["1Y", "1M", "1W", "1D"] as TimeRange[]).map((range) => (
             <button
               key={range}
+              type="button"
               onClick={() => onTimeRangeChange?.(range)}
               className={`chart-range-button${timeRange === range ? " is-active" : ""}`}
             >

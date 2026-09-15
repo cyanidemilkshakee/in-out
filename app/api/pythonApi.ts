@@ -21,19 +21,43 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
     headers["Authorization"] = `Bearer ${accessToken}`
   }
 
-  const res = await fetch(url, {
-    method,
-    headers,
-    cache: "no-store",
-    signal,
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
-    const errorBody = await res.json().catch(() => ({}));
-    throw new PythonApiError(typeof errorBody.detail === "string" ? errorBody.detail : 'Backend request failed.', res.status);
+  try {
+    const res = await fetch(url, {
+      method,
+      headers,
+      cache: "no-store",
+      signal,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    if (!res.ok) {
+      const errorBody = await res.json().catch(() => ({}));
+      const detail = typeof errorBody.detail === "string" ? errorBody.detail : 'Backend request failed.';
+      console.error("[python-api] upstream request failed", {
+        method,
+        path,
+        status: res.status,
+        detail,
+      });
+      throw new PythonApiError(detail, res.status);
+    }
+    return res;
+  } catch (error) {
+    if (!(error instanceof PythonApiError)) {
+      console.error("[python-api] upstream request could not be completed", {
+        method,
+        path,
+        error,
+      });
+    }
+    throw error;
   }
-  return res;
 }
 export async function callPythonApi(path: string, method: string, body?: unknown, idempotencyKey?: string) {
-  return (await fetchPythonApi(path, method, body, idempotencyKey)).json();
+  const response = await fetchPythonApi(path, method, body, idempotencyKey);
+  try {
+    return await response.json();
+  } catch (error) {
+    console.error("[python-api] upstream returned invalid JSON", { method, path, error });
+    throw error;
+  }
 }

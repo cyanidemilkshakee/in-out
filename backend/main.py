@@ -20,7 +20,6 @@ from routers import presence, movements, registry, permissions
 from routers import dashboard, alerts, notifications, audit, checkpoints, terminal, admin_profile
 from temporal_worker import run_worker, get_temporal_client, TASK_QUEUE
 from workflows.alert_rule_cron import AlertRuleCronWorkflow
-from temporalio.client import WorkflowFailureError
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +97,7 @@ app.include_router(presence.router, dependencies=[Depends(verify_authenticated_r
 app.include_router(movements.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(registry.router)
 app.include_router(registry.bundle_router, dependencies=[Depends(verify_admin_request)])
-app.include_router(permissions.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(permissions.router)
 
 # Phase 2 — new routers
 app.include_router(dashboard.router, dependencies=[Depends(verify_admin_request)])

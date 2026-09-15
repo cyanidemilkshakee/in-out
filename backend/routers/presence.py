@@ -5,14 +5,13 @@ GET /v1/presence        → current snapshot of all subjects' inside/outside sta
 GET /v1/presence/stream → SSE stream; emits an event whenever a scan changes presence
 """
 
-import json
 import logging
 import asyncio
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, func
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db

@@ -13,8 +13,8 @@ create_scan_alert(event, subject, carried_hardware, rules, existing_alerts, aler
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone, timedelta
-from typing import Any, Literal, Optional, TypedDict
+from datetime import datetime, timezone
+from typing import Any, Literal, TypedDict
 
 # ---------------------------------------------------------------------------
 # TypedDicts (mirror of types.ts — minimal subset needed here)
@@ -26,7 +26,7 @@ SyncState = Literal["synced", "queued", "conflict"]
 SubjectType = Literal["employee", "visitor", "hardware"]
 
 AlertSeverity = Literal["critical", "high", "medium"]
-AlertStatus = Literal["open", "acknowledged", "resolved"]
+AlertStatus = Literal["open", "acknowledged", "warned", "resolved"]
 AlertCategory = Literal["access_violation", "presence_anomaly", "hardware_custody", "operational"]
 ConditionKey = Literal[
     "exit_balance",
@@ -34,6 +34,77 @@ ConditionKey = Literal[
     "unauthorized_hardware_carrier",
     "restricted_employee_entry",
 ]
+
+DEFAULT_ALERT_RULES: list[dict[str, object]] = [
+    {
+        "id": "rule-restricted-entry",
+        "name": "Restricted employee entry",
+        "description": "Alert when a restricted employee attempts access.",
+        "category": "access_violation",
+        "severity": "high",
+        "enabled": True,
+        "scope": "All checkpoints",
+        "conditionKey": "restricted_employee_entry",
+        "recentTriggers": 0,
+    },
+    {
+        "id": "rule-unauthorized-hardware",
+        "name": "Unauthorized hardware carrier",
+        "description": "Alert when an item is carried by the wrong person.",
+        "category": "hardware_custody",
+        "severity": "high",
+        "enabled": True,
+        "scope": "All checkpoints",
+        "conditionKey": "unauthorized_hardware_carrier",
+        "recentTriggers": 0,
+    },
+    {
+        "id": "rule-exit-balance",
+        "name": "Exit balance anomaly",
+        "description": "Alert when approved exits exceed approved entries.",
+        "category": "presence_anomaly",
+        "severity": "medium",
+        "enabled": True,
+        "scope": "Daily facility totals",
+        "conditionKey": "exit_balance",
+        "recentTriggers": 0,
+    },
+    {
+        "id": "rule-no-break",
+        "name": "No break recorded",
+        "description": "Alert when an employee works six hours without a break.",
+        "category": "operational",
+        "severity": "medium",
+        "enabled": True,
+        "scope": "Employee workdays",
+        "conditionKey": "no_break",
+        "recentTriggers": 0,
+    },
+]
+
+
+def default_alert_rules() -> list[dict[str, object]]:
+    return [dict(rule) for rule in DEFAULT_ALERT_RULES]
+
+
+def with_default_alert_rules(rules: list[AlertRule]) -> list[AlertRule]:
+    """Keep older databases usable when they predate one of the built-in rules."""
+    # Manual reviews and unknown barcodes are not alert rules. Strip legacy
+    # rows if they exist in an older database before returning rules to either
+    # the UI or the scheduled evaluator.
+    result = [
+        dict(rule)
+        for rule in rules
+        if rule.get("conditionKey") not in {"manual_review", "unknown_barcode"}
+        and rule.get("id") not in {"rule-manual-review", "rule-unknown-barcode"}
+    ]
+    existing_conditions = {rule.get("conditionKey") for rule in result}
+    result.extend(
+        dict(rule)
+        for rule in DEFAULT_ALERT_RULES
+        if rule.get("conditionKey") not in existing_conditions
+    )
+    return result
 
 
 class MovementEvent(TypedDict, total=False):
@@ -448,7 +519,7 @@ def create_scan_alert(
     rule_id = rule.get("id") if rule else None
     duplicate = any(
         a.get("sourceEventId") == event_id
-        or (rule_id is not None and a.get("ruleId") == rule_id and a.get("status") == "open")
+        or (rule_id is not None and a.get("ruleId") == rule_id and a.get("status") != "resolved")
         for a in existing_alerts
     )
     if duplicate:

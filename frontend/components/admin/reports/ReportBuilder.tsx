@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, FileBarChart, X } from "lucide-react";
 import type { Alert, AuditEvent, MovementEvent } from "../../../../lib/types";
 import { CalendarDatePicker } from "../../analytics/CalendarDatePicker";
+import { parseDateInput } from "../../../../lib/dateRanges";
 
 type ReportSource = "movements" | "alerts" | "permissions";
 
@@ -28,7 +29,10 @@ function escapeCsv(value: string) {
 }
 
 function parseReportDate(date: string, time: string, createdAt?: string) {
-  const parsed = createdAt ? new Date(createdAt).getTime() : new Date(`${date} ${time}`).getTime();
+  const createdTimestamp = createdAt ? new Date(createdAt).getTime() : NaN;
+  const parsed = Number.isFinite(createdTimestamp)
+    ? createdTimestamp
+    : new Date(`${date} ${time}`).getTime();
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -51,9 +55,18 @@ export function ReportBuilder({
   const [endDate, setEndDate] = useState("");
   const [generated, setGenerated] = useState(false);
 
+  useEffect(() => {
+    if (!open) return;
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [open]);
+
   const rows = useMemo(() => {
-    const start = startDate ? new Date(startDate).getTime() : Number.NEGATIVE_INFINITY;
-    const end = endDate ? new Date(endDate).getTime() : Number.POSITIVE_INFINITY;
+    const start = startDate ? parseDateInput(startDate) ?? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+    const end = endDate ? parseDateInput(endDate, true) ?? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY;
     const reportRows: Array<ReportRow & { timestamp: number }> = [];
 
     if (sources.includes("movements")) {
@@ -103,7 +116,7 @@ export function ReportBuilder({
     }
 
     return reportRows
-      .filter((row) => row.timestamp >= start && row.timestamp <= end)
+      .filter((row) => Number.isFinite(row.timestamp) && row.timestamp > 0 && row.timestamp >= start && row.timestamp <= end)
       .sort((a, b) => b.timestamp - a.timestamp)
       .map(({ timestamp: _timestamp, ...row }) => row);
   }, [alerts, auditEvents, endDate, movements, sources, startDate]);
@@ -144,11 +157,11 @@ export function ReportBuilder({
       </button>
       {open ? (
         <div className="report-dialog-backdrop" role="presentation">
-          <section className="report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title">
+          <section className="report-dialog" role="dialog" aria-modal="true" aria-labelledby="report-title" aria-describedby="report-description">
             <header>
               <div>
                 <h2 id="report-title">Generate audit report</h2>
-                <p>Combine movement, alert, and manual permission evidence into one export.</p>
+                <p id="report-description">Choose the evidence sources and facility dates to create a CSV audit trail.</p>
               </div>
               <button type="button" aria-label="Close report builder" onClick={() => setOpen(false)}>
                 <X size={18} />
@@ -189,10 +202,10 @@ export function ReportBuilder({
 
             {generated ? (
               <div className="report-preview" aria-live="polite">
-                <span>Report ready</span>
+                <span>Report preview</span>
                 <strong>{rows.length.toLocaleString()} records</strong>
                 <small>
-                  {sources.length} source{sources.length === 1 ? "" : "s"} selected
+                  {sources.length} source{sources.length === 1 ? "" : "s"} selected · Facility time UTC+05:30
                 </small>
               </div>
             ) : null}

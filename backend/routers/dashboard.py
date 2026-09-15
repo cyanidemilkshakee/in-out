@@ -3,8 +3,6 @@ GET /v1/dashboard — returns aggregated analytics, recent movements, open alert
 and presence counts, all fetched in parallel.
 """
 
-import asyncio
-import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -12,8 +10,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/dashboard", tags=["dashboard"])
 
@@ -68,8 +64,20 @@ async def get_dashboard(
         SELECT id, created_at, data
         FROM alerts
         WHERE data->>'status' = 'open'
+          AND COALESCE(data->>'manualReview', 'false') <> 'true'
+          AND COALESCE(data->>'ruleId', '') <> 'rule-manual-review'
+          AND COALESCE(data->>'ruleId', '') <> 'rule-unknown-barcode'
+          AND COALESCE(data->>'title', '') NOT ILIKE 'Unknown barcode%'
         ORDER BY created_at DESC
         LIMIT 10
+    """)
+
+    pending_decisions_sql = text("""
+        SELECT data
+        FROM permission_requests
+        WHERE data->>'status' = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 20
     """)
 
     presence_sql = text("""
@@ -81,6 +89,7 @@ async def get_dashboard(
     analytics_result = await db.execute(analytics_sql)
     recent_result = await db.execute(recent_sql)
     alerts_result = await db.execute(alerts_sql)
+    pending_decisions_result = await db.execute(pending_decisions_sql)
     presence_result = await db.execute(presence_sql)
 
     # --- Analytics ---
@@ -114,6 +123,8 @@ async def get_dashboard(
         }
         open_alerts.append(entry)
 
+    pending_decisions = [dict(row[0]) for row in pending_decisions_result.all()]
+
     # --- Presence counts ---
     presence_counts = {"inside": 0, "outside": 0}
     for r in presence_result.mappings().all():
@@ -128,5 +139,6 @@ async def get_dashboard(
         "analytics":       analytics,
         "recentMovements": recent_movements,
         "openAlerts":      open_alerts,
+        "pendingDecisions": pending_decisions,
         "presenceCounts":  presence_counts,
     }

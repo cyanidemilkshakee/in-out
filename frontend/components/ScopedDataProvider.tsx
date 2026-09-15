@@ -49,14 +49,19 @@ export async function ScopedDataProvider({
   scope: DataScope;
 }) {
   let initialData: AppDataSnapshot | undefined;
+  const endpoint = SCOPE_ENDPOINT[scope];
   try {
-    const endpoint = SCOPE_ENDPOINT[scope];
     if (endpoint) {
       const raw = await callPythonApi(endpoint, "GET");
       initialData = normalizeForScope(scope, raw);
     }
     // profile scope has no bundle endpoint — let client fetch on mount
-  } catch {
+  } catch (error) {
+    console.error("[scoped-data] initial load failed", {
+      scope,
+      endpoint: endpoint ?? null,
+      error,
+    });
     // If the backend is unreachable, let the client-side DataProvider fetch on mount
     initialData = undefined;
   }

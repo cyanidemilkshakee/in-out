@@ -7,18 +7,15 @@ POST /v1/alerts/evaluate     — placeholder rule evaluation
 PATCH /v1/alert-rules/{id}   — toggle enabled on alert rule (auth-protected)
 """
 
-import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_admin_request
 from database import get_db, get_read_db
 from models import Alert, AlertRule
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["alerts"])
 
@@ -29,7 +26,7 @@ router = APIRouter(tags=["alerts"])
 
 @router.get("/v1/alerts")
 async def list_alerts(
-    status: Optional[str] = Query(None, pattern="^(open|acknowledged|resolved)$"),
+    status: Optional[str] = Query(None, pattern="^(open|acknowledged|warned|resolved)$"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
     db: AsyncSession = Depends(get_read_db),
@@ -39,8 +36,14 @@ async def list_alerts(
     Optional ?status= filters alerts by data->>'status'.
     """
     # -- Alerts query --
-    alerts_q = select(Alert).order_by(Alert.created_at.desc())
-    count_q = select(func.count()).select_from(Alert)
+    excluded_alert = or_(
+        (Alert.data["manualReview"].astext == "true")
+        | (Alert.data["ruleId"].astext == "rule-manual-review")
+        | (Alert.data["ruleId"].astext == "rule-unknown-barcode")
+        | Alert.data["title"].astext.ilike("Unknown barcode%")
+    )
+    alerts_q = select(Alert).where(~excluded_alert).order_by(Alert.created_at.desc())
+    count_q = select(func.count()).select_from(Alert).where(~excluded_alert)
 
     if status:
         alerts_q = alerts_q.where(Alert.data["status"].astext == status)
@@ -55,10 +58,16 @@ async def list_alerts(
     # -- Rules query (all) --
     rules_res = await db.execute(select(AlertRule).order_by(AlertRule.id))
     rules = rules_res.scalars().all()
+    if not rules:
+        from rule_engine import default_alert_rules
+        rule_data = default_alert_rules()
+    else:
+        from rule_engine import with_default_alert_rules
+        rule_data = with_default_alert_rules([r.data for r in rules])
 
     return {
         "items":  [a.data for a in alerts],
-        "rules":  [r.data for r in rules],
+        "rules":  rule_data,
         "total":  total,
     }
 
@@ -80,6 +89,8 @@ async def update_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
 
+    if "status" in payload and payload["status"] not in {"open", "acknowledged", "warned", "resolved"}:
+        raise HTTPException(status_code=422, detail="Unsupported alert status")
     merged = {**(alert.data or {}), **payload}
     alert.data = merged
     await db.commit()
@@ -92,9 +103,13 @@ async def update_alert(
 # ---------------------------------------------------------------------------
 
 @router.post("/v1/alerts/evaluate")
-async def evaluate_alerts() -> dict[str, Any]:
-    """Placeholder — rule engine will be wired in Phase 5."""
-    return {"triggered": 0, "message": "Rule engine not yet wired"}
+async def evaluate_alerts(
+    _admin: dict = Depends(verify_admin_request),
+) -> dict[str, Any]:
+    """Run the same rule evaluation used by the scheduled worker."""
+    from workflows.activities import run_alert_rule_evaluation
+    triggered = await run_alert_rule_evaluation()
+    return {"triggered": triggered, "message": "Alert rules evaluated"}
 
 
 # ---------------------------------------------------------------------------
@@ -112,8 +127,16 @@ async def update_alert_rule(
     result = await db.execute(select(AlertRule).where(AlertRule.id == rule_id))
     rule = result.scalar_one_or_none()
     if not rule:
-        raise HTTPException(status_code=404, detail="Alert rule not found")
+        from rule_engine import default_alert_rules
+        default = next((item for item in default_alert_rules() if item["id"] == rule_id), None)
+        if not default:
+            raise HTTPException(status_code=404, detail="Alert rule not found")
+        rule = AlertRule(id=rule_id, data=default)
+        db.add(rule)
 
+    unknown = set(payload) - {"enabled", "severity", "scope", "description", "name"}
+    if unknown or ("enabled" in payload and not isinstance(payload["enabled"], bool)):
+        raise HTTPException(status_code=422, detail="Unsupported alert rule update")
     merged = {**(rule.data or {}), **payload}
     rule.data = merged
     await db.commit()

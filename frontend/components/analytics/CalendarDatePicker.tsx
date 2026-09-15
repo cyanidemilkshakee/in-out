@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Calendar as CalendarIcon, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Calendar as CalendarIcon, Check, X } from "lucide-react";
 
 export interface CalendarDatePickerProps {
   startDate: string;
@@ -10,27 +10,27 @@ export interface CalendarDatePickerProps {
   active?: boolean;
 }
 
-const MIN_DATE_TIME = "2016-01-01T00:00";
+const MIN_DATE = "2016-01-01";
 
-function getFacilityNowValue() {
+function getFacilityToday() {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
   }).formatToParts(new Date());
   const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`;
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
-function clampDateTime(value: string, maximum: string) {
-  if (!value) return value;
-  if (value < MIN_DATE_TIME) return MIN_DATE_TIME;
-  if (value > maximum) return maximum;
-  return value;
+function validDate(value: string) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
+}
+
+function displayRange(start: string, end: string) {
+  if (!start && !end) return "Custom dates";
+  if (start && end) return `${start} → ${end}`;
+  return start ? `From ${start}` : `Until ${end}`;
 }
 
 export function CalendarDatePicker({
@@ -42,146 +42,130 @@ export function CalendarDatePicker({
   active = false,
 }: CalendarDatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [draftStart, setDraftStart] = useState(startDate);
+  const [draftEnd, setDraftEnd] = useState(endDate);
+  const [error, setError] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
-  const maximumDateTime = getFacilityNowValue();
+  const maximumDate = getFacilityToday();
   const isSegment = variant === "segment";
 
-  // Close when clicking outside
   useEffect(() => {
+    if (!isOpen) {
+      setDraftStart(startDate);
+      setDraftEnd(endDate);
+      setError("");
+    }
+  }, [endDate, isOpen, startDate]);
+
+  useEffect(() => {
+    if (!isOpen) return;
     function handleClickOutside(event: MouseEvent) {
       if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
         setIsOpen(false);
       }
     }
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsOpen(false);
     }
+    document.addEventListener("mousedown", handleClickOutside);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOpen]);
 
-  const handleStartChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const nextStart = clampDateTime(e.target.value, maximumDateTime);
-    onRangeChange(nextStart, endDate && nextStart > endDate ? nextStart : endDate);
-  };
+  function openPicker() {
+    setDraftStart(startDate);
+    setDraftEnd(endDate);
+    setError("");
+    setIsOpen(true);
+  }
 
-  const handleEndChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const nextEnd = clampDateTime(e.target.value, maximumDateTime);
-    onRangeChange(startDate, startDate && nextEnd < startDate ? startDate : nextEnd);
-  };
+  function applyRange() {
+    const nextStart = validDate(draftStart);
+    const nextEnd = validDate(draftEnd);
+    if (nextStart && nextEnd && nextStart > nextEnd) {
+      setError("Start date must not be after end date.");
+      return;
+    }
+    onRangeChange(nextStart, nextEnd);
+    setIsOpen(false);
+  }
 
-  const rangeInvalid = Boolean(startDate && endDate && startDate > endDate);
+  function clearRange() {
+    onRangeChange("", "");
+    setDraftStart("");
+    setDraftEnd("");
+    setError("");
+    setIsOpen(false);
+  }
 
   return (
-    <div className={`calendar-picker-container ${className}`} ref={containerRef} style={{ position: "relative", display: "inline-block" }}>
-      <button 
-        type="button" 
+    <div className={`calendar-picker-container ${className}`} ref={containerRef}>
+      <button
+        type="button"
         className={`${isSegment ? "dashboard-time-range-button dashboard-calendar-segment" : "icon-filter-button"}${isOpen ? " active" : ""}${isSegment && active ? " is-active" : ""}`}
-        onClick={() => setIsOpen(!isOpen)}
-        title="Custom Date Range"
-        aria-label="Custom date range"
+        onClick={() => (isOpen ? setIsOpen(false) : openPicker())}
+        title="Choose custom date range"
+        aria-label="Choose custom date range"
         aria-expanded={isOpen}
         aria-pressed={isSegment ? active : undefined}
-        style={isSegment ? undefined : {
-          background: "transparent",
-          border: isOpen ? "1.5px solid var(--admin-text)" : "1px solid transparent",
-          borderRadius: "12px",
-          padding: "10px",
-          color: "var(--admin-text)",
-          cursor: "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          transition: "border-color 0.2s"
-        }}
       >
-        {!isSegment ? <CalendarIcon size={18} strokeWidth={isOpen ? 1.6 : 1.2} /> : null}
+        {!isSegment ? <CalendarIcon size={18} strokeWidth={1.6} /> : null}
         {isSegment ? <span>Custom</span> : null}
       </button>
 
-      {isOpen && (
-        <div 
-          className="calendar-popover"
-          style={{
-            position: "absolute",
-            top: "100%",
-            left: "50%",
-            transform: "translateX(-50%)",
-            marginTop: "12px",
-            zIndex: 9999,
-            backgroundColor: "var(--admin-bg, #f7faf9)",
-            border: "1px solid var(--admin-border)",
-            borderRadius: "16px",
-            padding: "20px",
-            boxShadow: "0 10px 25px -5px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.2)",
-            width: "320px",
-            display: "flex",
-            flexDirection: "column",
-            gap: "16px",
-            opacity: 1
-          }}
-        >
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <h4 style={{ margin: 0, fontSize: "16px", fontWeight: 700, color: "var(--admin-text)" }}>Select Range</h4>
-            <button 
-              type="button" 
-              onClick={() => setIsOpen(false)}
-              style={{ background: "none", border: "none", cursor: "pointer", color: "var(--admin-muted)" }}
-            >
+      {isOpen ? (
+        <div className="calendar-popover" role="dialog" aria-label="Custom date range">
+          <div className="calendar-popover-heading">
+            <div>
+              <strong>Custom date range</strong>
+              <small>{displayRange(draftStart, draftEnd)}</small>
+            </div>
+            <button type="button" aria-label="Close date picker" onClick={() => setIsOpen(false)}>
               <X size={16} />
             </button>
           </div>
-          
-          <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-            <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: 600, color: "var(--admin-muted)" }}>
-              Start Date & Time
-              <input 
-                type="datetime-local" 
-                value={startDate} 
-                onChange={handleStartChange}
-                min={MIN_DATE_TIME}
-                max={endDate || maximumDateTime}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--admin-border)",
-                  backgroundColor: "var(--admin-bg, #f7faf9)",
-                  color: "var(--admin-text)",
-                  fontFamily: "inherit",
-                  fontSize: "14px",
-                  opacity: 1
-                }}
+
+          <div className="calendar-date-fields">
+            <label>
+              <span>Start date</span>
+              <input
+                type="date"
+                value={draftStart}
+                min={MIN_DATE}
+                max={draftEnd || maximumDate}
+                onChange={(event) => setDraftStart(event.target.value)}
               />
             </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "13px", fontWeight: 600, color: "var(--admin-muted)" }}>
-              End Date & Time
-              <input 
-                type="datetime-local" 
-                value={endDate} 
-                onChange={handleEndChange}
-                min={startDate || MIN_DATE_TIME}
-                max={maximumDateTime}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: "10px",
-                  border: "1px solid var(--admin-border)",
-                  backgroundColor: "var(--admin-bg, #f7faf9)",
-                  color: "var(--admin-text)",
-                  fontFamily: "inherit",
-                  fontSize: "14px",
-                  opacity: 1
-                }}
+            <label>
+              <span>End date</span>
+              <input
+                type="date"
+                value={draftEnd}
+                min={draftStart || MIN_DATE}
+                max={maximumDate}
+                onChange={(event) => setDraftEnd(event.target.value)}
               />
             </label>
           </div>
-          <small className={rangeInvalid ? "calendar-range-error" : "calendar-timezone-note"}>
-            {rangeInvalid
-              ? "Start date must not be after end date."
-              : "Facility time: UTC+05:30. Dates before Jan 1, 2016 and future times are unavailable."}
+
+          <small className={error ? "calendar-range-error" : "calendar-timezone-note"}>
+            {error || "Facility time · UTC+05:30 · Future dates are unavailable."}
           </small>
+
+          <div className="calendar-popover-actions">
+            <button type="button" className="calendar-clear-button" onClick={clearRange}>
+              Clear
+            </button>
+            <button type="button" className="calendar-apply-button" onClick={applyRange}>
+              <Check size={15} />
+              Apply range
+            </button>
+          </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

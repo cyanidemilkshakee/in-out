@@ -29,6 +29,28 @@ async def seed_reference_data(engine) -> None:
                  "id2": "server-room", "data2": '{"name": "Server Room",   "zone": "secure"}'},
             ],
         )
+        await conn.execute(
+            text(
+                """
+                INSERT INTO alert_rules (id, data) VALUES
+                  (:id1, CAST(:data1 AS jsonb)),
+                  (:id2, CAST(:data2 AS jsonb)),
+                  (:id3, CAST(:data3 AS jsonb)),
+                  (:id4, CAST(:data4 AS jsonb))
+                ON CONFLICT (id) DO NOTHING
+                """
+            ),
+            {
+                "id1": "rule-restricted-entry",
+                "data1": '{"id":"rule-restricted-entry","name":"Restricted employee entry","description":"Alert when a restricted employee attempts access.","category":"access_violation","severity":"high","enabled":true,"scope":"All checkpoints","conditionKey":"restricted_employee_entry","recentTriggers":0}',
+                "id2": "rule-unauthorized-hardware",
+                "data2": '{"id":"rule-unauthorized-hardware","name":"Unauthorized hardware carrier","description":"Alert when an item is carried by the wrong person.","category":"hardware_custody","severity":"high","enabled":true,"scope":"All checkpoints","conditionKey":"unauthorized_hardware_carrier","recentTriggers":0}',
+                "id3": "rule-exit-balance",
+                "data3": '{"id":"rule-exit-balance","name":"Exit balance anomaly","description":"Alert when approved exits exceed approved entries.","category":"presence_anomaly","severity":"medium","enabled":true,"scope":"Daily facility totals","conditionKey":"exit_balance","recentTriggers":0}',
+                "id4": "rule-no-break",
+                "data4": '{"id":"rule-no-break","name":"No break recorded","description":"Alert when an employee works six hours without a break.","category":"operational","severity":"medium","enabled":true,"scope":"Employee workdays","conditionKey":"no_break","recentTriggers":0}',
+            },
+        )
 
 
 async def seed_demo_data(engine) -> None:

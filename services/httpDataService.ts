@@ -167,7 +167,7 @@ export class HttpDataService implements DataService {
   }
 
   requestBarcodeManualReview(input: BarcodeManualReviewInput) {
-    return this.command<Alert>({ action: "requestBarcodeManualReview", input });
+    return this.command<PermissionRequest>({ action: "requestBarcodeManualReview", input });
   }
 
   saveMovement(event: MovementEvent) {

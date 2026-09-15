@@ -9,7 +9,6 @@ GET  /v1/movements/{id}/notes          — list notes for a movement
 POST /v1/movements/{id}/notes          — add a note to a movement (auth-protected)
 """
 
-import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -18,15 +17,10 @@ from pydantic import BaseModel
 from sqlalchemy import select, func, text, and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-import asyncio
 
 from auth import verify_admin_request
 from database import get_db, get_read_db
 from models import Movement, MovementNote
-from schemas import MovementEntry, MovementListResponse
-
-logger = logging.getLogger(__name__)
-
 router = APIRouter(prefix="/v1/movements", tags=["movements"])
 
 _MAX_LIMIT = 200
@@ -307,7 +301,7 @@ async def sync_movements(
         sa_update(Movement)
         .where(Movement.sync_state == "queued")
     )
-    if payload.eventIds:
+    if payload.eventIds is not None:
         stmt = stmt.where(Movement.id.in_(payload.eventIds))
 
     stmt = stmt.values(sync_state="synced").returning(Movement)

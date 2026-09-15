@@ -16,7 +16,7 @@ from fastapi import FastAPI, Depends
 from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.engine import make_url
-from database import Base, get_db, get_read_db
+from database import get_db, get_read_db
 from models import Subject, Person, HardwareAsset, Checkpoint, Movement, PresenceState
 from schemas import BrowserScanPayload
 from terminal_scans import record_scan
