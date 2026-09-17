@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import { withApiSession } from "../authSession";
 import { PythonApiError } from "../pythonApi";
 import { executeCommand } from "./commands";
 import { errorResponse, handleGet, requireObject, requireString, ServerTiming } from "./bff";
@@ -6,7 +7,7 @@ import { errorResponse, handleGet, requireObject, requireString, ServerTiming } 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET(request: NextRequest) {
+async function getData(request: NextRequest) {
   const timing = new ServerTiming();
   try {
     return await handleGet(request, timing);
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function postData(request: NextRequest) {
   const timing = new ServerTiming();
   let action = "unknown";
   try {
@@ -48,3 +49,6 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const GET = withApiSession(getData);
+export const POST = withApiSession(postData);

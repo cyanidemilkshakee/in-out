@@ -1,4 +1,37 @@
 services:
+  db-test:
+    image: postgres:17-alpine
+    profiles: [test]
+    environment:
+      POSTGRES_DB: inout_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [test]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d inout_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  backend-tests:
+    profiles: [test]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app:ro
+    environment:
+      TEST_DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
+      DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
+      READ_DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
+    networks: [test]
+    command: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+    depends_on:
+      db-test:
+        condition: service_healthy
+
   postgres-primary:
     image: postgres:17-alpine
     environment:
@@ -6,7 +39,7 @@ services:
       - POSTGRES_USER=inout
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-inout}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-1003}:5432"
     volumes:
       - pg-primary-data:/var/lib/postgresql/data
     healthcheck:
@@ -18,7 +51,7 @@ services:
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-1004}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -26,7 +59,7 @@ services:
       retries: 5
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.2
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.2.5}
     command: start-dev --import-realm
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:-admin}
@@ -37,11 +70,14 @@ services:
       - KC_DB_USERNAME=inout
       - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-inout}
       - KC_HEALTH_ENABLED=true
-      - KC_HOSTNAME=http://localhost:8081
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      - INOUT_APP_URL=${AUTH_URL:-http://localhost:${APP_PORT:-1008}}
+      - KC_HOSTNAME=http://localhost:${KEYCLOAK_PORT:-1005}
+      - KC_HOSTNAME_ADMIN=http://localhost:${KEYCLOAK_PORT:-1005}
     ports:
-      - "8081:8080"
+      - "127.0.0.1:${KEYCLOAK_PORT:-1005}:8080"
     volumes:
-      - ./keycloak:/opt/keycloak/data/import
+      - ./keycloak/realm-inout.json:/opt/keycloak/data/import/inout-realm.json:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"]
       interval: 10s
@@ -59,12 +95,15 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:-inout}@postgres-primary:5432/inout
       - REDIS_URL=redis://redis:6379/0
+      - TEMPORAL_HOST=temporal:7233
       - ENV=production
       - MTLS_PROXY_SECRET=${MTLS_PROXY_SECRET:-}
-      - KEYCLOAK_ISSUER=http://localhost:8081/realms/inout
+      - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
+      - KEYCLOAK_JWKS_CACHE_TTL=${KEYCLOAK_JWKS_CACHE_TTL:-300}
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${PYTHON_API_PORT:-1002}:8000"
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')\""]
       interval: 5s
@@ -86,20 +125,20 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
+        - NEXT_PUBLIC_API_URL=http://localhost:${PYTHON_API_PORT:-1002}
     environment:
       - DATABASE_URL=postgresql://inout:${POSTGRES_PASSWORD:-inout}@postgres-primary:5432/inout
       - PYTHON_API_URL=http://python-api:8000
       - AUTH_TRUST_HOST=true
-      - AUTH_URL=${AUTH_URL:-http://localhost:1001}
+      - AUTH_URL=${AUTH_URL:-http://localhost:${APP_PORT:-1008}}
       - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
       - KEYCLOAK_CLIENT_ID=inout-frontend
-      - KEYCLOAK_CLIENT_SECRET=inout-frontend-secret
-      - KEYCLOAK_ISSUER=http://localhost:8081/realms/inout
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
-      - KEYCLOAK_ISSUER_PUBLIC=http://localhost:8081/realms/inout
+      - KEYCLOAK_ISSUER_PUBLIC=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
     ports:
-      - "1001:1001"
+      - "127.0.0.1:${APP_PORT:-1008}:1001"
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -107,23 +146,6 @@ services:
         condition: service_healthy
       python-api:
         condition: service_healthy
-
-  db-test:
-    image: postgres:17-alpine
-    profiles: ["test"]
-    environment:
-      POSTGRES_DB: inout_test
-      POSTGRES_USER: inout
-      POSTGRES_PASSWORD: inout
-    ports:
-      - "5433:5432"
-    tmpfs:
-      - /var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U inout -d inout_test"]
-      interval: 2s
-      timeout: 3s
-      retries: 20
 
   temporal:
     image: temporalio/auto-setup:1.26.2
@@ -135,7 +157,7 @@ services:
       - POSTGRES_SEEDS=postgres-primary
       - TEMPORAL_ADDRESS=temporal:7233
     ports:
-      - "7233:7233"
+      - "127.0.0.1:${TEMPORAL_PORT:-1006}:7233"
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -150,11 +172,15 @@ services:
     image: temporalio/ui:2.31.2
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+      - TEMPORAL_CORS_ORIGINS=http://localhost:${APP_PORT:-1008}
     ports:
-      - "8233:8080"
+      - "127.0.0.1:${TEMPORAL_UI_PORT:-1007}:8080"
     depends_on:
       - temporal
 
 volumes:
   pg-primary-data:
+
+networks:
+  test:
+    internal: true

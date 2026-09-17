@@ -18,6 +18,7 @@ import {
 import { useDataActions, useDataState } from "../../context/DataContext";
 import type { Checkpoint, MovementEvent, PermissionRequest, ScanDecision } from "../../../lib/types";
 import styles from "./SecurityTerminal.module.css";
+import { AccountActions } from "../AccountActions";
 
 const fallbackCheckpoint: Checkpoint = {
   id: "unassigned",
@@ -56,9 +57,12 @@ function TerminalHeader() {
           <span>Primary scan service</span>
         </div>
       </div>
-      <div className={styles.operator}>
-        <span className={styles.operatorAvatar}>SS</span>
-        <span><small>Operator</small><strong>Security Staff</strong></span>
+      <div className={styles.headerActions}>
+        <AccountActions />
+        <div className={styles.operator}>
+          <span className={styles.operatorAvatar}>SS</span>
+          <span><small>Operator</small><strong>Security Staff</strong></span>
+        </div>
       </div>
     </header>
   );

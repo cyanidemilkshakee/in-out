@@ -9,9 +9,7 @@ import {
   UserCog,
   UserRound
 } from "lucide-react";
-import { AdminCreator, type CreateAdminInput } from "../../../frontend/components/admin/AdminCreator";
 import {
-  createAdminAccount,
   getAdminProfile,
   updateAdminProfile,
   type ProfileSettings,
@@ -166,25 +164,9 @@ export default function ProfilePage() {
     }
   }
 
-  async function createAdmin(input: CreateAdminInput) {
-    const result = await createAdminAccount(input);
-    setProfile({
-      name: result.name,
-      nickname: result.nickname,
-      email: result.email,
-      avatarDataUrl: result.avatarDataUrl,
-    });
-    setAutoLock(result.autoLock);
-    setSettings(result.settings);
-    setSaved(false);
-    setFormError("");
-  }
 
   return (
     <main className="profile-workspace" aria-label="Profile settings">
-      <div className="profile-top-actions">
-        <AdminCreator onCreate={createAdmin} />
-      </div>
       <header className="profile-identity-band">
         <label className="profile-avatar-picker" aria-label="Change profile picture">
           <div className="profile-avatar-large">

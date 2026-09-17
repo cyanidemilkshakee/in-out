@@ -17,7 +17,7 @@ if config.config_file_name is not None:
 # --- Inject DATABASE_URL from environment so we never store credentials in alembic.ini ---
 # Alembic requires a sync-compatible URL for offline mode, but we convert it
 # to the asyncpg dialect for the online async runner below.
-_db_url = os.getenv("DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:6432/inout")
+_db_url = os.getenv("DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:1003/inout")
 # Ensure the URL uses the async driver for the engine, but sync for offline mode
 _sync_url = _db_url.replace("postgresql+asyncpg://", "postgresql://")
 config.set_main_option("sqlalchemy.url", _db_url)

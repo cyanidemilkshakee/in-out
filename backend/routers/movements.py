@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, func, text, and_, or_
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,7 +56,8 @@ class ConflictResolveRequest(BaseModel):
 
 
 class NoteRequest(BaseModel):
-    note: str
+    model_config = ConfigDict(str_strip_whitespace=True)
+    note: str = Field(min_length=1, max_length=2000)
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +381,7 @@ async def add_movement_note(
     if not exists.scalar_one_or_none():
         raise HTTPException(status_code=404, detail="Movement not found")
 
-    note = MovementNote(event_id=movement_id, note=payload.note)
+    note = MovementNote(event_id=movement_id, note=payload.note, created_at=datetime.now(timezone.utc))
     db.add(note)
     await db.commit()
 

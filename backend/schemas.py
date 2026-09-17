@@ -5,18 +5,22 @@ from datetime import datetime
 BARCODE_PATTERN = r"^[A-Za-z0-9._:/-]+$"
 
 
-class ScanPayload(BaseModel):
+class APIModel(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True)
+
+
+class ScanPayload(APIModel):
     barcode: str = Field(..., min_length=1, max_length=64, pattern=BARCODE_PATTERN, strip_whitespace=True)
     terminal_id: str = Field(..., min_length=1, max_length=128, strip_whitespace=True)
     checkpoint_id: str = Field(..., min_length=1, max_length=128, strip_whitespace=True)
     direction: str = Field(..., pattern="^(entry|exit)$")
-    selected_hardware_ids: list[str] = Field(default_factory=list)
+    selected_hardware_ids: list[str] = Field(default_factory=list, max_length=8)
     online: bool = True
     scan_type: str = Field("auto", pattern="^(auto|manual)$")
 
 
-class BrowserScanPayload(BaseModel):
-    model_config = ConfigDict(populate_by_name=True)
+class BrowserScanPayload(APIModel):
+    model_config = ConfigDict(populate_by_name=True, str_strip_whitespace=True)
     barcode: str = Field(min_length=1, max_length=64, pattern=BARCODE_PATTERN, strip_whitespace=True)
     checkpoint_id: str = Field(alias="checkpointId", min_length=1, max_length=128, strip_whitespace=True)
     selected_hardware_ids: list[str] = Field(default_factory=list, alias="selectedHardwareIds", max_length=8)
@@ -25,7 +29,7 @@ class BrowserScanPayload(BaseModel):
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
 
 
-class ManualReviewPayload(BaseModel):
+class ManualReviewPayload(APIModel):
     barcode: str = Field(min_length=1, max_length=64, pattern=BARCODE_PATTERN, strip_whitespace=True)
     checkpoint_id: str = Field(alias="checkpointId", min_length=1, max_length=128)
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
@@ -51,13 +55,13 @@ class PresenceEntry(BaseModel):
 
 # ── Phase 3 schemas ────────────────────────────────────────────────────────────
 
-class SubjectCreate(BaseModel):
+class SubjectCreate(APIModel):
     barcode: str = Field(..., min_length=1, max_length=64, pattern=BARCODE_PATTERN, strip_whitespace=True)
     kind: str = Field(..., pattern="^(employee|visitor|hardware)$")
     data: dict = Field(..., description="JSON metadata for the person or hardware")
 
 
-class SubjectUpdate(BaseModel):
+class SubjectUpdate(APIModel):
     barcode: Optional[str] = Field(None, min_length=1, max_length=64, pattern=BARCODE_PATTERN, strip_whitespace=True)
     data: Optional[dict] = Field(None, description="Partial or full update of JSON metadata")
 
@@ -75,7 +79,7 @@ class SubjectListResponse(BaseModel):
     limit: int
     offset: int
 
-class PermissionRequestCreate(BaseModel):
+class PermissionRequestCreate(APIModel):
     subject_id: str
     checkpoint_id: str
     request_type: str = Field(..., pattern="^(visitor|hardware_custody|manual_override|zone_access)$")
@@ -92,7 +96,7 @@ class PermissionRequestCreate(BaseModel):
     event_id: Optional[str] = None
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
 
-class PermissionDecision(BaseModel):
+class PermissionDecision(APIModel):
     decision: str = Field(..., pattern="^(approved|denied)$", description="'approved' or 'denied'")
     reason: Optional[str] = None
-    admin_id: str
+    admin_id: Optional[str] = None  # Legacy clients; the authenticated token owns attribution.

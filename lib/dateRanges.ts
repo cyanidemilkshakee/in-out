@@ -27,7 +27,7 @@ function facilityDateParts(date: Date) {
   };
 }
 
-export function startOfFacilityDay(date = new Date()) {
+function startOfFacilityDay(date = new Date()) {
   const parts = facilityDateParts(date);
   return Date.UTC(parts.year, parts.month - 1, parts.day) - FACILITY_OFFSET_MS;
 }
@@ -110,18 +110,4 @@ export function eventTimestamp(event: MovementEvent) {
     ? createdAt
     : new Date(`${event.date} ${event.time}`).getTime();
   return Number.isFinite(timestamp) ? timestamp : 0;
-}
-
-export function formatRelativeTime(value?: string, now = Date.now()) {
-  if (!value) return "Time unavailable";
-  const timestamp = new Date(value).getTime();
-  if (!Number.isFinite(timestamp)) return "Time unavailable";
-  const seconds = Math.max(0, Math.round((now - timestamp) / 1000));
-  if (seconds < 60) return "Just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes} min${minutes === 1 ? "" : "s"} ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours} hr${hours === 1 ? "" : "s"} ago`;
-  const days = Math.floor(hours / 24);
-  return `${days} day${days === 1 ? "" : "s"} ago`;
 }

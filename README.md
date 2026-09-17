@@ -22,6 +22,15 @@ $secret = node -e "console.log(require('crypto').randomBytes(32).toString('base6
 (Get-Content .env) -replace '^AUTH_SECRET=.*$', "AUTH_SECRET=$secret" | Set-Content .env
 ```
 
+For a **new installation**, generate a separate Keycloak client secret:
+
+```powershell
+$clientSecret = node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+(Get-Content .env) -replace '^KEYCLOAK_CLIENT_SECRET=.*$', "KEYCLOAK_CLIENT_SECRET=$clientSecret" | Set-Content .env
+```
+
+For an existing `inout` realm, set `KEYCLOAK_CLIENT_SECRET` to the current value in **Clients > inout-frontend > Credentials**. Changing `.env` does not rotate an existing realm's secret. Follow the [Keycloak rollout guide](docs/keycloak-review.md#applying-the-changes-to-an-existing-installation) before changing it.
+
 Open `.env` and choose local values for these settings before the first start:
 
 ```env
@@ -29,7 +38,8 @@ POSTGRES_PASSWORD=choose-a-local-database-password
 KEYCLOAK_ADMIN_USERNAME=admin
 KEYCLOAK_ADMIN_PASSWORD=choose-a-keycloak-master-password
 AUTH_SECRET=the-generated-secret
-AUTH_URL=http://localhost:1001
+APP_PORT=1008
+AUTH_URL=http://localhost:1008
 ```
 
 These settings have different purposes:
@@ -38,7 +48,8 @@ These settings have different purposes:
 | --- | --- | --- |
 | `POSTGRES_PASSWORD` | Password for the local PostgreSQL service | Docker services connecting to PostgreSQL |
 | `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` | Keycloak **master administrator** login | The first time Keycloak initializes its database |
-| `AUTH_SECRET` | Signs the application's Auth.js session cookies | Every application start |
+| `AUTH_SECRET` | Encrypts and authenticates the application's Auth.js session cookies | Every application start |
+| `KEYCLOAK_CLIENT_SECRET` | Authenticates the frontend to Keycloak | Initial realm import and every frontend start; must match the saved client |
 | `AUTH_URL` | The browser-facing application URL used for Keycloak callbacks | Every application start |
 
 Application-user passwords are not entered in `.env`. Create those users and passwords in Keycloak after the services start.
@@ -57,13 +68,15 @@ docker compose ps
 
 Open:
 
-- Application: http://localhost:1001
-- Keycloak administration console: http://localhost:8081/admin
-- Temporal UI: http://localhost:8233
+- Application: http://localhost:1008
+- Python API: http://localhost:1002
+- Keycloak administration console: http://localhost:1005/admin
+- Temporal: localhost:1006
+- Temporal UI: http://localhost:1007
 
 ## First login and application user
 
-Sign in to Keycloak at http://localhost:8081/admin with the `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` values from `.env`.
+Sign in to Keycloak at http://localhost:1005/admin with the `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` values from `.env`.
 
 Then create an application administrator:
 
@@ -71,7 +84,7 @@ Then create an application administrator:
 2. Go to **Users** and create a user.
 3. In **Credentials**, set a password and turn **Temporary** off.
 4. In **Role mapping**, assign the `admin` realm role.
-5. Sign in to the application at http://localhost:1001 with that user.
+5. Sign in to the application at http://localhost:1008 with that user.
 
 Role access is intentionally separated:
 
@@ -82,9 +95,26 @@ Role access is intentionally separated:
 
 Create an operator with the same steps, assigning the `operator` role instead. Assign each application user one of these roles. After changing a user's role, have that user sign out and sign in again so their session receives the new role.
 
+Both application areas provide **Sign out** and **Account security**. Sign out clears the app session and opens Keycloak's standard SSO logout; Keycloak may ask you to confirm. Account security opens Keycloak's Account Console for credentials and active sessions.
+
+The `admin` and `operator` roles include the built-in `account:manage-account` and `account:view-profile` permissions for managing the signed-in user's own account. These are separate from Keycloak administration privileges. Keep the default realm roles when assigning application roles.
+
+If Account security fails with HTTP 401 on `account/supportedLocales` or `account/?userProfileMetadata=true`, check and repair an existing local realm:
+
+```powershell
+npm run keycloak:account:check
+npm run keycloak:account:repair
+```
+
+The repair uses the local administrator credentials from `.env`, adds missing self-service role composites, and restores the frontend's API audience mapper from the realm template if absent. Reload the Account Console afterward to obtain a fresh token; sign out and back into the application if its session still has an old token. The iframe sandbox warnings emitted by Keycloak's cookie/session checks are separate from this missing-permission failure.
+
+See the [Keycloak review and feature roadmap](docs/keycloak-review.md) for verified fixes, advanced features, version requirements, and the existing-realm rollout procedure. Startup import skips an existing realm, so editing the JSON alone does not update users or client settings already in PostgreSQL.
+
 ## Users and data
 
-Users created in Keycloak are shared only by people using the same Keycloak server and database. For example, users you create at your own `http://localhost:8081` are available to the application on your computer, but they are not copied to a guide's fresh clone and local Docker installation.
+Manual approval records one admitted visit in PostgreSQL, including its identity, movement, audit trail, and presence. Its matching exit remains allowed even if the entry policy is still restricted; later re-entry requires normal permission or another approval. See the [project review and historical-data repair](docs/project-review.md) for the fixes, migration procedure, and regression tests.
+
+Users created in Keycloak are shared only by people using the same Keycloak server and database. For example, users you create at your own `http://localhost:1005` are available to the application on your computer, but they are not copied to a guide's fresh clone and local Docker installation.
 
 To let multiple people use the same accounts, they must all use one shared deployment with the same Keycloak and PostgreSQL database. For a project review, each reviewer should normally create their own local Keycloak master account and their own `inout` application administrator.
 

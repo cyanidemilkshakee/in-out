@@ -14,6 +14,7 @@ import type {
   MovementEvent,
   PermissionRequest,
 } from "./types";
+import type { DataScope } from "./types";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -21,7 +22,7 @@ import type {
 
 export function normalizeDashboardMovement(raw: Record<string, unknown>): MovementEvent {
   const data = (raw.data ?? raw) as Record<string, unknown>;
-  const occurredAt = (raw.occurred_at ?? raw.occurredAt ?? "") as string;
+  const occurredAt = (raw.occurred_at ?? raw.occurredAt ?? data.createdAt ?? "") as string;
   const date = occurredAt ? occurredAt.split("T")[0] : "";
   const time = occurredAt ? occurredAt.split("T")[1]?.slice(0, 5) ?? "" : "";
   return {
@@ -321,4 +322,25 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
     permissionRequests: ((r.permissionRequests ?? []) as unknown[]).map(normalizePermissionRequest),
   };
 
+}
+
+/** Normalize any backend bundle using the same mapping for SSR and BFF loads. */
+export function normalizeDataScope(scope: DataScope, raw: unknown): AppDataSnapshot {
+  switch (scope) {
+    case "alerts":
+      return normalizeAlertsSnapshot(raw);
+    case "permissions":
+      return normalizePermissionsSnapshot(raw);
+    case "logs":
+      return normalizeLogsSnapshot(raw);
+    case "registry":
+      return normalizeRegistrySnapshot(raw);
+    case "terminal":
+      return normalizeTerminalSnapshot(raw);
+    case "dashboard":
+    case "all":
+    case "profile":
+    default:
+      return normalizeDashboardSnapshot(raw);
+  }
 }

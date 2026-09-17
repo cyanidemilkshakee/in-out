@@ -278,7 +278,7 @@ export function DashboardCharts({
       />
 
       {/* Top Left — Scan Status */}
-      <div className="analytics-donut dashboard-donut dashboard-donut-quality animate-slide-up delay-100" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-42px" }}>
+      <div className="analytics-donut dashboard-donut dashboard-donut-quality" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-40px" }}>
         <div className="dashboard-donut-title" style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Status</div>
         <Doughnut
           data={chartData.quality}
@@ -311,7 +311,7 @@ export function DashboardCharts({
       </div>
 
       {/* Bottom Left — Approved Scans (Entry/Exit) */}
-      <div className="analytics-donut dashboard-donut dashboard-donut-approved animate-slide-up delay-150" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-42px", marginBottom: "16px" }}>
+      <div className="analytics-donut dashboard-donut dashboard-donut-approved" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "0", marginBottom: "16px" }}>
         <div className="dashboard-donut-title" style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Approved Scans</div>
         <Doughnut
           data={chartData.scanMix}
@@ -353,7 +353,7 @@ export function DashboardCharts({
           <div className="dashboard-breakdown-title" style={{ position: "absolute", top: "calc(100% + 40px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "25px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Total Scan Breakdown</div>
         </div>
 
-        <div className="vertical-pill-segmented-group animate-slide-up delay-100">
+        <div className="vertical-pill-segmented-group">
           <button
             type="button"
             className={`icon-filter-button ${subjectTypeFilter === "people" ? "active" : ""}`}
@@ -380,7 +380,7 @@ export function DashboardCharts({
       {/* Center Right — Pending permission decisions */}
       <PendingDecisionsWidget requests={pendingRequests} limit={3} />
 
-      <div className="analytics-donut dashboard-donut dashboard-donut-auto animate-slide-up delay-200" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginRight: "-22px" }}>
+      <div className="analytics-donut dashboard-donut dashboard-donut-auto" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginRight: "-22px" }}>
         <div className="dashboard-donut-title" style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Auto vs Manual</div>
         <Doughnut
           data={chartData.autoVsManual}
@@ -413,7 +413,7 @@ export function DashboardCharts({
       </div>
 
       {/* Bottom Right — Denied Mix */}
-      <div className="analytics-donut dashboard-donut dashboard-donut-denied animate-slide-up delay-250" style={{ gridColumn: 3, gridRow: 2, alignSelf: "end", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginRight: "-22px", marginBottom: "16px" }}>
+      <div className="analytics-donut dashboard-donut dashboard-donut-denied" style={{ gridColumn: 3, gridRow: 2, alignSelf: "end", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginRight: "-22px", marginBottom: "16px" }}>
         <div className="dashboard-donut-title" style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Denied Reasons</div>
         <Doughnut
           data={chartData.deniedMix}

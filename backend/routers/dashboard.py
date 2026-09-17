@@ -46,9 +46,13 @@ async def get_dashboard(
                 WHERE result = 'denied'
                 AND (denial_code IS NULL OR denial_code NOT IN (
                     'asset_restricted','access_restricted',
-                    'hardware_restricted','zone_not_permitted'
+                    'hardware_restricted','zone_not_permitted',
+                    'expired_pass'
                 ))
-            )                                                                  AS other_denied
+            )                                                                  AS other_denied,
+            count(*) FILTER (
+                WHERE result = 'denied' AND denial_code = 'expired_pass'
+            )                                                                  AS expired
         FROM movements
     """)
 
@@ -103,7 +107,7 @@ async def get_dashboard(
         "totalAutomatic":   int(row["automatic"]   or 0),
         "totalManual":      int(row["manual"]      or 0),
         "totalRestricted":  int(row["restricted"]  or 0),
-        "totalExpired":     0,
+        "totalExpired":     int(row["expired"]     or 0),
         "totalOtherDenied": int(row["other_denied"] or 0),
     }
 

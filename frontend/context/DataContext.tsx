@@ -26,13 +26,17 @@ export function DataProvider({
     error: null,
   }));
   const hydratedScope = useRef(initialData ? initialScope ?? scope : undefined);
+  const refreshVersion = useRef(0);
 
   const refresh = useCallback(async () => {
+    const version = ++refreshVersion.current;
     setState((current) => ({ ...current, isLoading: true, error: null }));
     try {
       const snapshot = await service.getSnapshot(scope);
+      if (version !== refreshVersion.current) return;
       setState({ ...emptyData, ...snapshot, isLoading: false, error: null });
     } catch (error) {
+      if (version !== refreshVersion.current) return;
       setState((current) => ({
         ...current,
         isLoading: false,
@@ -44,19 +48,27 @@ export function DataProvider({
   useEffect(() => {
     if (hydratedScope.current === scope) {
       hydratedScope.current = undefined;
-      return;
+      return () => { refreshVersion.current++; };
     }
     setState({ ...emptyData, isLoading: true, error: null });
     void refresh();
+    return () => { refreshVersion.current++; };
   }, [refresh, scope]);
 
   useEffect(() => {
-    if (!["dashboard", "logs", "all", "terminal"].includes(scope)) return;
+    if (scope === "profile") return;
     const eventSource = new EventSource("/api/presence");
     eventSource.onmessage = (event) => {
       if (event.data?.trim()) void refresh();
     };
     return () => eventSource.close();
+  }, [refresh, scope]);
+
+  // Keep the approval queue usable while the notification channel reconnects.
+  useEffect(() => {
+    if (scope !== "permissions") return;
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => window.clearInterval(timer);
   }, [refresh, scope]);
 
   const actions = useDataActionSet({ service, setState, refresh });

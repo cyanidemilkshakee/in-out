@@ -178,6 +178,15 @@ def _status_for(
     if subject is None:
         return {"result": "denied", "reason": "Barcode not registered"}
 
+    # The administrator admitted this visit despite the entry policy. Honour
+    # its matching exit even if that policy still denies entry or has expired.
+    # Extra assets do not inherit another visit's manual approval.
+    override = subject.get("entryOverride")
+    if direction == "exit" and subject.get("inside") and isinstance(override, dict) and override.get("requestId"):
+        admitted_assets = set(override.get("hardwareIds") or [])
+        if all(asset.get("inside") and asset.get("id") in admitted_assets for asset in carried_hardware):
+            return {"result": "approved", "reason": "Exit for manually approved entry"}
+
     for field, label, predicate in (
         ("validFrom", "Access pass is not active yet", lambda value: now < value),
         ("validTo", "Access pass has expired", lambda value: now > value),
@@ -195,15 +204,15 @@ def _status_for(
             return {"result": "denied", "reason": "Access pass has an invalid validity window"}
 
     # Hardware-specific restrictions
-    if _is_hardware(subject) and subject.get("status") == "restricted":
-        return {"result": "denied", "reason": "Asset restricted"}
+    if _is_hardware(subject) and subject.get("status") != "active":
+        return {"result": "denied", "reason": f"Asset {subject.get('status') or 'inactive'}"}
 
     # Employee-specific restrictions
     if not _is_hardware(subject) and subject.get("type") == "employee":
         if subject.get("status") == "restricted":
             return {"result": "denied", "reason": "Employee access restricted"}
-        if subject.get("status") == "inactive":
-            return {"result": "denied", "reason": "Employee access inactive"}
+        if subject.get("status") != "active":
+            return {"result": "denied", "reason": f"Employee access {subject.get('status') or 'inactive'}"}
 
     # Visitor-specific checks
     if not _is_hardware(subject) and subject.get("type") == "visitor":
@@ -246,6 +255,13 @@ def _status_for(
                     f"Hardware assigned to {assignee}; custody approval required"
                 ),
             }
+
+    # Carried assets obey the same validity, zone and presence rules as a
+    # direct asset scan; selecting a carrier must not bypass asset controls.
+    for asset in carried_hardware:
+        asset_decision = _status_for(asset, checkpoint, direction, [], now)
+        if asset_decision["result"] == "denied":
+            return asset_decision
 
     # Zone check
     if not _zone_allowed(subject, checkpoint):
@@ -332,6 +348,7 @@ def evaluate_scan(
     online: bool,
     event_count: int,
     scan_type: ScanType,
+    event_id: str | None = None,
 ) -> ScanDecision:
     """
     Core scan evaluation — port of evaluateScan() in movementLogic.ts.
@@ -346,6 +363,7 @@ def evaluate_scan(
     online               : whether the terminal is connected to the server
     event_count          : used to generate a deterministic event ID
     scan_type            : "auto" | "manual"
+    event_id             : optional caller-provided event ID for persisted scans
 
     Returns
     -------
@@ -358,13 +376,15 @@ def evaluate_scan(
     carried_hardware: list[HardwareAsset] = [
         a for a in hardware if a.get("id") in selected_hardware_ids
     ]
-    decision = _status_for(subject, checkpoint, direction, carried_hardware, datetime.now(tz=timezone.utc))
+    decision = _status_for(subject, checkpoint, direction, carried_hardware, now)
 
     sync_state: SyncState = "synced" if online else "queued"
 
-    # Event ID: EVT-<1000 + count zero-padded to 6 digits>
-    raw_num = 1000 + event_count
-    event_id = f"EVT-{str(raw_num).zfill(6)}"
+    # Offline callers retain deterministic EVT IDs; persisted server scans can
+    # provide their UUID directly so it is not generated and then discarded.
+    if event_id is None:
+        raw_num = 1000 + event_count
+        event_id = f"EVT-{str(raw_num).zfill(6)}"
 
     event: MovementEvent = {
         "id": event_id,

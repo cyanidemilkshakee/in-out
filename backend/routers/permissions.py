@@ -17,6 +17,8 @@ from schemas import PermissionRequestCreate, PermissionDecision
 from temporal_worker import get_temporal_client, TASK_QUEUE
 from workflows.permission_override import PermissionOverrideWorkflow
 from workflows.visitor_approval import VisitorApprovalWorkflow
+from permission_decisions import review_source, pending_manual_review, publish_decision
+from access_validation import validate_window, validate_zones
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,10 @@ async def create_permission_request(
     subject = (await db.execute(stmt)).scalar_one_or_none()
     if not subject:
         raise HTTPException(status_code=404, detail="Subject not found")
+    if payload.request_type == "visitor" and subject.kind != "visitor":
+        raise HTTPException(422, "Visitor approval requires a visitor")
+    if payload.request_type == "hardware_custody" and (subject.kind != "hardware" or payload.hardware_id not in (None, subject.id)):
+        raise HTTPException(422, "Custody review subject must be the requested hardware")
 
     now = datetime.now(timezone.utc)
     req_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
@@ -59,18 +65,27 @@ async def create_permission_request(
     valid_from = payload.valid_from or now.isoformat()
     valid_to = payload.valid_to or (now + timedelta(hours=1)).isoformat()
     requested_zones = payload.requested_zones or [checkpoint_zone]
+    requested_zones = validate_zones(requested_zones)
+    validate_window(valid_from, valid_to)
+    direction = payload.direction
+    if payload.request_type == "manual_override":
+        source = await review_source(db, payload.event_id, subject.barcode, checkpoint.id, direction)
+        direction = direction or (source.direction if source else None) or ("exit" if checkpoint.data.get("mode") == "exit" else "entry")
+        existing = await pending_manual_review(db, subject.barcode, checkpoint.id, direction)
+        if existing:
+            return existing.data
 
     data = {
         "id": req_id,
         "subjectId": subject.id,
-        "subjectName": payload.subject_name or subject_data.get("name") or subject.barcode,
+        "subjectName": subject_data.get("name") or subject.barcode,
         "subjectType": subject.kind,
         "barcode": subject.barcode,
         "type": payload.request_type,
         "purpose": payload.reason,
         "checkpointId": payload.checkpoint_id,
         "checkpoint": checkpoint_name,
-        "requester": payload.requester or actor.get("sub") or "Terminal Operator",
+        "requester": actor.get("sub") or "Terminal Operator",
         "requestedZones": requested_zones,
         "validFrom": valid_from,
         "validTo": valid_to,
@@ -85,8 +100,8 @@ async def create_permission_request(
         data["carrierName"] = payload.carrier_name
     if payload.event_id:
         data["eventId"] = payload.event_id
-    if payload.direction:
-        data["direction"] = payload.direction
+    if direction:
+        data["direction"] = direction
 
     req_model = PermissionRequestModel(
         id=req_id,
@@ -96,6 +111,7 @@ async def create_permission_request(
     )
     db.add(req_model)
     await db.commit()
+    await publish_decision({"request": data})
 
     if payload.request_type == "manual_override":
         try:
@@ -129,129 +145,28 @@ async def decide_permission_request(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(verify_admin_request)
 ):
-    # Fetch existing to check type
-    stmt = select(PermissionRequestModel).where(PermissionRequestModel.id == req_id)
-    req = (await db.execute(stmt)).scalar_one_or_none()
-    if not req:
-        raise HTTPException(status_code=404, detail="Request not found")
+    from permission_decisions import apply_permission_decision, publish_decision
 
-    req_type = req.data.get("type")
-
-    if req.data.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Permission request has already been decided")
-
-    if req_type == "manual_override":
-        workflow_id = f"override-{req_id}"
-    elif req_type == "visitor":
-        workflow_id = f"visitor-{req_id}"
-    else:
-        raise HTTPException(status_code=400, detail="Cannot decide this request type via Temporal yet")
-
-    # Persist immediately so Permission Manager and the terminal queue reflect
-    # Allow/Deny without waiting for the workflow activity to finish.
-    admin_id = admin.get("sub", "unknown")
-    updated_request = {**req.data, "status": payload.decision}
-    updated_request["decidedAt"] = datetime.now(timezone.utc).isoformat()
-    updated_request["decidedBy"] = admin_id
-    req.data = updated_request
+    # The row lock, decision, identity, movement and presence share one transaction.
+    result = await apply_permission_decision(
+        db, req_id, payload.decision, admin.get("sub", "unknown"),
+        payload.reason or f"{payload.decision.title()} by Permission Manager after policy review",
+    )
     await db.commit()
-
-    # A terminal review is applied synchronously before signaling Temporal.
-    # This guarantees the movement, audit log, and dashboard are updated even
-    # when the workflow has already timed out or is temporarily unavailable.
-    if req_type == "manual_override":
-        try:
-            from workflows.activities import approve_override, deny_override
-
-            if payload.decision == "approved":
-                await approve_override(
-                    req_id, admin_id,
-                    payload.reason or "Approved by Permission Manager after policy review",
-                )
-            else:
-                await deny_override(
-                    req_id,
-                    payload.reason or "Denied by Permission Manager after policy review",
-                )
-        except Exception:
-            logger.exception("Failed to apply manual override decision")
-            # Activity commits are atomic, but presence publication happens
-            # after the commit. If an exception occurred after persistence,
-            # keep the completed decision; otherwise return the request to
-            # pending so the operator can retry instead of hiding a partial
-            # approval/denial behind a successful response.
-            movement_check = await db.execute(
-                select(Movement)
-                .where(Movement.data["overrideRequestId"].astext == req_id)
-                .limit(1)
-            )
-            if movement_check.scalars().first() is None:
-                reverted_request = dict(req.data)
-                reverted_request["status"] = "pending"
-                reverted_request.pop("decidedAt", None)
-                reverted_request.pop("decidedBy", None)
-                req.data = reverted_request
-                await db.commit()
-                raise HTTPException(
-                    status_code=503,
-                    detail="Manual decision could not be applied. Please retry.",
-                )
-
+    await publish_decision(result)
+    req_type = result["request"].get("type")
     workflow_signaled = False
-    try:
-        client = await get_temporal_client()
-        handle = client.get_workflow_handle(workflow_id)
-        signal_args = (
-            [payload.decision, admin_id, payload.reason or ""]
-            if req_type == "manual_override"
-            else [payload.decision, payload.reason or ""]
-        )
-        await handle.signal("admin_decision", args=signal_args)
-        workflow_signaled = True
-    except Exception:
-        # The decision and (for terminal reviews) its movement are already
-        # committed. Temporal can reconcile later if it becomes available.
-        logger.exception("Failed to signal workflow after decision was applied")
-
-    movement_data = None
-    audit_data = None
-    if req_type == "manual_override":
-        movement_result = await db.execute(
-            select(Movement)
-            .where(Movement.data["overrideRequestId"].astext == req_id)
-            .order_by(Movement.occurred_at.desc())
-            .limit(1)
-        )
-        movement = movement_result.scalars().first()
-        if movement:
-            movement_data = {
-                **(movement.data or {}),
-                "id": movement.id,
-                "subjectId": movement.subject_id or (movement.data or {}).get("subjectId", ""),
-                "checkpointId": movement.checkpoint_id,
-                "result": movement.result,
-                "direction": movement.direction,
-                "scanType": movement.scan_type,
-                "subjectType": movement.subject_type,
-                "syncState": movement.sync_state,
-                "denialCode": movement.denial_code,
-                "createdAt": movement.occurred_at.isoformat() if movement.occurred_at else None,
-            }
-        audit_result = await db.execute(
-            select(AuditEvent)
-            .where(AuditEvent.data["relatedId"].astext == req_id)
-            .order_by(AuditEvent.created_at.desc())
-            .limit(1)
-        )
-        audit = audit_result.scalars().first()
-        audit_data = audit.data if audit else None
-
-    return {
-        "request": updated_request,
-        "workflowSignaled": workflow_signaled,
-        "movement": movement_data,
-        "auditEvent": audit_data,
-    }
+    if req_type in {"manual_override", "visitor"}:
+        try:
+            client = await get_temporal_client()
+            prefix = "override" if req_type == "manual_override" else "visitor"
+            args = ([payload.decision, admin.get("sub", "unknown"), payload.reason or ""]
+                    if req_type == "manual_override" else [payload.decision, payload.reason or ""])
+            await client.get_workflow_handle(f"{prefix}-{req_id}").signal("admin_decision", args=args)
+            workflow_signaled = True
+        except Exception:
+            logger.exception("Decision committed; workflow signal unavailable")
+    return {**result, "workflowSignaled": workflow_signaled}
 
 
 # ===========================================================================
@@ -287,7 +202,7 @@ async def list_permissions(
             select(Notification)
             .where(
                 (Notification.data["read"].astext != "true")
-                | Notification.data["read"].is_(None)
+                | Notification.data["read"].astext.is_(None)
             )
             .order_by(Notification.created_at.desc())
             .limit(100)
@@ -335,6 +250,17 @@ async def update_permission(
     """
     now = datetime.now(timezone.utc)
 
+    unknown = set(payload) - {"subjectId", "state", "zones", "validFrom", "validTo", "reason"}
+    if unknown or payload.get("subjectId", subject_id) != subject_id:
+        raise HTTPException(422, "Unsupported permission update")
+    if "state" in payload and payload["state"] not in {"active", "restricted", "pending_approval", "expired", "revoked"}:
+        raise HTTPException(422, "Unsupported permission state")
+    if "zones" in payload:
+        payload["zones"] = validate_zones(payload["zones"])
+    subject = await db.scalar(select(Subject).where(Subject.id == subject_id).with_for_update())
+    if not subject:
+        raise HTTPException(404, "Subject not found")
+
     # 1. Fetch permission
     perm_res = await db.execute(
         select(AccessPermission).where(AccessPermission.subject_id == subject_id).order_by(AccessPermission.id).limit(1)
@@ -351,8 +277,9 @@ async def update_permission(
         **(perm.data or {}),
         **payload,
         "updatedAt": now.isoformat(),
-        "updatedBy":  "Admin User",
+        "updatedBy":  _admin.get("sub", "unknown"),
     }
+    validate_window(merged_data.get("validFrom"), merged_data.get("validTo"))
     perm.data = merged_data
 
     new_state: str = merged_data.get("state", "")
@@ -366,23 +293,25 @@ async def update_permission(
     # 4. Cascade to Person
     if person:
         person_status = _STATE_TO_PERSON_STATUS.get(new_state, "inactive")
-        if person.data.get("type") == "visitor" and new_state == "active":
+        if subject.kind == "visitor" and new_state == "active":
             person_status = "pre_approved"
         person.data = {
             **(person.data or {}),
             "status": person_status,
             **({"allowedZones": merged_data["zones"]} if isinstance(merged_data.get("zones"), list) else {}),
-            **({"validFrom": merged_data["validFrom"]} if merged_data.get("validFrom") else {}),
-            **({"validTo": merged_data["validTo"]} if merged_data.get("validTo") else {}),
+            "validFrom": merged_data.get("validFrom") or "",
+            "validTo": merged_data.get("validTo") or "",
         }
 
     # 5. Cascade to HardwareAsset
     if hw:
-        hw_status = "restricted" if new_state in ("restricted", "revoked") else "active"
+        hw_status = "active" if new_state == "active" else "restricted"
         hw.data = {
             **(hw.data or {}),
             "status": hw_status,
             **({"allowedZones": merged_data["zones"]} if isinstance(merged_data.get("zones"), list) else {}),
+            "validFrom": merged_data.get("validFrom") or "",
+            "validTo": merged_data.get("validTo") or "",
         }
 
     # 6. Insert AuditEvent
@@ -394,7 +323,7 @@ async def update_permission(
         "subjectId":  subject_id,
         "state":      new_state,
         "timestamp":  now.isoformat(),
-        "performedBy": "Admin User",
+        "performedBy": _admin.get("sub", "unknown"),
     }
     audit_event = AuditEvent(
         id=audit_id,

@@ -1,5 +1,7 @@
 """Transactional scan processing shared by browser and certificate terminals."""
 import uuid
+import hashlib
+import json
 from datetime import datetime, timezone
 
 from fastapi import HTTPException
@@ -8,16 +10,22 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert
 
 from models import Subject, PresenceState, ScanRequest, Movement, Checkpoint, Alert, AlertRule, AccessPermission
-from movement_logic import evaluate_scan, apply_movement_state
+from movement_logic import evaluate_scan, apply_movement_state, _current_date, _current_time
 
 
 async def record_scan(db, key, payload, terminal_id):
+    normalized = payload.model_dump()
+    normalized["barcode"] = payload.barcode.strip().lower()
+    normalized["selected_hardware_ids"] = sorted(set(payload.selected_hardware_ids))
+    fingerprint = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
     # Serialize retries even when a caller reuses a key for a different subject.
     await db.execute(select(func.pg_advisory_xact_lock(key.int % (2**63 - 1))))
     cached = await db.get(ScanRequest, key)
     if cached:
         if cached.terminal_id != terminal_id:
             raise HTTPException(409, "Idempotency key belongs to another terminal")
+        if cached.request_fingerprint and cached.request_fingerprint != fingerprint:
+            raise HTTPException(409, "Idempotency key was already used for a different scan")
         return cached.response_body
 
     subject = (await db.execute(select(Subject).where(
@@ -32,8 +40,8 @@ async def record_scan(db, key, payload, terminal_id):
         if direction not in {"entry", "exit"}:
             direction = "entry"
         event = {
-            "id": str(uuid.uuid4()), "date": now.date().isoformat(),
-            "time": now.strftime("%H:%M:%S"), "checkpointId": checkpoint.id,
+            "id": str(uuid.uuid4()), "date": _current_date(now),
+            "time": _current_time(now), "checkpointId": checkpoint.id,
             "checkpoint": checkpoint.data.get("name", checkpoint.id), "direction": direction,
             "subjectId": "unregistered", "subjectName": "Unregistered barcode",
             "subjectType": "visitor", "barcode": payload.barcode.strip(), "result": "denied",
@@ -61,9 +69,11 @@ async def record_scan(db, key, payload, terminal_id):
             "decision": decision, "updatedPeople": [], "updatedHardwareAssets": [],
             "generatedAlerts": [alert] if alert else []}
         db.add(ScanRequest(idempotency_key=key, subject_id=None, terminal_id=terminal_id,
-            status_code=200, response_body=result))
+            status_code=200, response_body=result, request_fingerprint=fingerprint))
         await db.flush()
         return result
+    if subject.kind == "hardware" and payload.selected_hardware_ids:
+        raise HTTPException(422, "A hardware scan cannot carry other hardware")
     checkpoint = await db.get(Checkpoint, payload.checkpoint_id)
     if not checkpoint:
         raise HTTPException(422, "Checkpoint not registered")
@@ -117,6 +127,8 @@ async def record_scan(db, key, payload, terminal_id):
             PresenceState.subject_id == sub.id).with_for_update())).scalar_one()
         states[sub.id] = presence
         data["inside"] = presence.state == "inside"
+        # This entitlement comes only from locked database state, not editable metadata.
+        data["entryOverride"] = presence.entry_override
         (hardware if sub.kind == "hardware" else people).append(data)
 
     cp = {**checkpoint.data, "id": checkpoint.id}
@@ -124,20 +136,24 @@ async def record_scan(db, key, payload, terminal_id):
         cp["mode"] = payload.direction
     decision = evaluate_scan(barcode=payload.barcode, checkpoint=cp, people=people,
         hardware=hardware, selected_hardware_ids=payload.selected_hardware_ids,
-        online=payload.online, event_count=0, scan_type=payload.scan_type)
+        online=payload.online, event_count=0, scan_type=payload.scan_type,
+        event_id=str(uuid.uuid4()))
     event = decision["event"]
-    event["id"] = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     last_scan = states[subject.id].last_scan_timestamp
-    if last_scan and (now - last_scan).total_seconds() < 10:
+    matching_manual_exit = (event["direction"] == "exit" and states[subject.id].state == "inside"
+                            and states[subject.id].entry_override)
+    if last_scan and (now - last_scan).total_seconds() < 10 and not matching_manual_exit:
         event.update(result="denied", reason="Cooldown active", denialCode="manual_review")
     updated = apply_movement_state(event, people, hardware)
     if event["result"] == "approved":
         for sub in subjects:
             states[sub.id].state = "inside" if event["direction"] == "entry" else "outside"
             states[sub.id].last_scan_timestamp = now
+            states[sub.id].entry_override = None
             metadata = sub.hardware if sub.kind == "hardware" else sub.person
-            metadata.data = next(d for d in [*updated["people"], *updated["hardware"]] if d["id"] == sub.id)
+            metadata.data = {k: v for k, v in next(d for d in [*updated["people"], *updated["hardware"]] if d["id"] == sub.id).items()
+                             if k != "entryOverride"}
     db.add(Movement(id=event["id"], subject_id=subject.id, checkpoint_id=checkpoint.id,
         occurred_at=now, result=event["result"], direction=event["direction"],
         denial_code=event.get("denialCode"), scan_type=payload.scan_type,
@@ -153,6 +169,6 @@ async def record_scan(db, key, payload, terminal_id):
         "subject_id": subject.id, "decision": decision, "updatedPeople": updated["people"],
         "updatedHardwareAssets": updated["hardware"], "generatedAlerts": [alert] if alert else []}
     db.add(ScanRequest(idempotency_key=key, subject_id=subject.id, terminal_id=terminal_id,
-        status_code=200, response_body=result))
+        status_code=200, response_body=result, request_fingerprint=fingerprint))
     await db.flush()
     return result

@@ -17,14 +17,18 @@
     "db:test:up": "docker compose --profile test up -d --wait db-test",
     "typecheck": "node scripts/run-with-timeout.mjs 120 node node_modules/typescript/bin/tsc --noEmit",
     "test:compile": "node scripts/run-with-timeout.mjs 120 node node_modules/typescript/bin/tsc -p tsconfig.test.json",
-    "test": "npm run test:compile && node .test-dist/tests/contracts.test.js",
-    "test:postgres": "docker compose --profile test up -d --wait db-test && npm test",
+    "test": "npm run test:compile && node .test-dist/tests/contracts.test.js && node .test-dist/tests/keycloak.test.js && node tests/keycloak-account.test.mjs",
+    "keycloak:account:check": "node scripts/keycloak-account-access.mjs --check",
+    "keycloak:account:repair": "node scripts/keycloak-account-access.mjs --apply",
+    "test:auth:http": "node scripts/run-with-timeout.mjs 180 node scripts/test-keycloak-http.mjs",
+    "test:auth:account": "node scripts/test-keycloak-account.mjs",
+    "test:postgres": "docker compose --profile test run --build --rm backend-tests",
     "test:python": "uv run --project backend python -m unittest discover -s backend/tests"
   },
   "dependencies": {
     "chart.js": "^4.5.1",
     "lucide-react": "^0.468.0",
-    "next": "^15.3.3",
+    "next": "^15.5.25",
     "next-auth": "^5.0.0-beta.32",
     "pg": "^8.22.0",
     "react": "^19.0.0",
@@ -38,5 +42,10 @@
     "@types/react-dom": "^19.0.2",
     "critters": "^0.0.25",
     "typescript": "^5.7.2"
+  },
+  "overrides": {
+    "next": {
+      "postcss": "8.5.28"
+    }
   }
 }

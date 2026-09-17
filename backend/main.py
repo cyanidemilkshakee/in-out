@@ -109,6 +109,12 @@ app.include_router(terminal.router, dependencies=[Depends(verify_terminal_operat
 app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
 
 
+@app.get("/", include_in_schema=False)
+async def api_root() -> dict:
+    """Return a lightweight response for direct API root requests."""
+    return {"service": "InOut Backend", "status": "ok", "health": "/health/live"}
+
+
 @app.post("/v1/scans", response_model=ScanResponse)
 async def process_scan(
     payload: ScanPayload,

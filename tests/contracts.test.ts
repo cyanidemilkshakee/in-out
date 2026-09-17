@@ -13,8 +13,9 @@ test("movement rows use authoritative database state and preserve display metada
 });
 
 test("flat chart movements retain their names and barcodes", () => {
-  const event = normalizeDashboardMovement({ id: "m1", subjectName: "Alice", barcode: "a1", scanType: "auto" });
+  const event = normalizeDashboardMovement({ id: "m1", subjectName: "Alice", barcode: "a1", scanType: "auto", createdAt: "2026-09-17T10:00:00Z" });
   assert.equal(event.subjectName, "Alice"); assert.equal(event.barcode, "a1");
+  assert.equal(event.createdAt, "2026-09-17T10:00:00Z");
 });
 
 test("terminal bundle separates assets and applies authoritative presence", () => {

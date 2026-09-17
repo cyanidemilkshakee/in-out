@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withApiSession } from "../authSession";
 import type {
   CreateAdminAccountInput,
   UpdateAdminProfileInput,
@@ -35,7 +36,7 @@ function errorResponse(error: unknown) {
   );
 }
 
-export async function GET() {
+async function getProfile() {
   try {
     const raw = await callPythonApi('/v1/admin/profile', 'GET') as Record<string, unknown>;
     return response(normalizeProfile(raw));
@@ -44,7 +45,7 @@ export async function GET() {
   }
 }
 
-export async function PATCH(request: NextRequest) {
+async function patchProfile(request: NextRequest) {
   try {
     const raw = await callPythonApi('/v1/admin/profile', 'PATCH', await request.json()) as Record<string, unknown>;
     return response(normalizeProfile(raw));
@@ -53,7 +54,7 @@ export async function PATCH(request: NextRequest) {
   }
 }
 
-export async function POST(request: NextRequest) {
+async function postProfile(request: NextRequest) {
   try {
     const raw = await callPythonApi('/v1/admin/profile/accounts', 'POST', await request.json()) as Record<string, unknown>;
     return response(normalizeProfile(raw));
@@ -61,3 +62,7 @@ export async function POST(request: NextRequest) {
     return errorResponse(error);
   }
 }
+
+export const GET = withApiSession(getProfile);
+export const PATCH = withApiSession(patchProfile);
+export const POST = withApiSession(postProfile);

@@ -11,7 +11,7 @@ from movement_logic import evaluate_scan, apply_movement_state
 from auth import verify_admin_request, verify_terminal_operator_request
 from fastapi.security import HTTPAuthorizationCredentials
 from auth import verify_keycloak_token
-from jose import jwt
+from jose import jwt, jwk
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from datetime import datetime, timezone, timedelta
@@ -21,14 +21,15 @@ class ContractTests(unittest.TestCase):
     def test_signed_tokens_require_the_configured_audience(self):
         private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         key = private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-        public = private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-        claims = {"sub": "admin", "iss": "https://identity.test/realms/inout", "aud": "another-client", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}
-        with patch("auth._load_jwks", return_value=public), patch("auth.settings.KEYCLOAK_ISSUER", claims["iss"]):
+        public = jwk.construct(private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo), "RS256").to_dict()
+        public["kid"] = "contract-key"
+        claims = {"sub": "admin", "typ": "Bearer", "iss": "https://identity.test/realms/inout", "aud": "another-client", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}
+        with patch("auth._load_jwks", return_value=[public]), patch("auth.settings.KEYCLOAK_ISSUER", claims["iss"]):
             with self.assertRaises(HTTPException) as error:
-                verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256"))
+                verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256", headers={"kid": "contract-key"}))
             self.assertEqual(error.exception.status_code, 401)
             claims["aud"] = "inout-frontend"
-            self.assertEqual(verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256"))["sub"], "admin")
+            self.assertEqual(verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256", headers={"kid": "contract-key"}))["sub"], "admin")
 
     def test_browser_scan_payload(self):
         payload = BrowserScanPayload.model_validate({"barcode": "a1", "checkpointId": "cp1",

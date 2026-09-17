@@ -57,6 +57,8 @@ class PresenceState(Base):
     )
     state: str = Column(String, nullable=False)  # 'inside' | 'outside'
     last_scan_timestamp = Column(DateTime(timezone=True), nullable=True)
+    # One admitted visit, consumed by the matching exit. Never grants re-entry.
+    entry_override = Column(JSONB, nullable=True)
     updated_at = Column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
@@ -72,6 +74,7 @@ class ScanRequest(Base):
     terminal_id: str = Column(String, nullable=False)
     status_code: int = Column(Integer, nullable=False)
     response_body = Column(JSONB, nullable=False)
+    request_fingerprint: str | None = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
@@ -152,17 +155,12 @@ class MovementNote(Base):
 class AdminAccount(Base):
     __tablename__ = "admin_accounts"
     id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    keycloak_subject: str | None = Column(String, nullable=True, unique=True)
     name: str = Column(String, nullable=False)
     nickname: str = Column(String, nullable=False)
-    email: str = Column(String, nullable=False, unique=True)
+    email: str = Column(String, nullable=False)
     avatar_data_url: str = Column(String, nullable=False, default="")
     auto_lock: str = Column(String, nullable=False, default="15")
     settings = Column(JSONB, nullable=False, default=dict)
     is_current: bool = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-
-
-class AppMetadata(Base):
-    __tablename__ = "app_metadata"
-    key: str = Column(String, primary_key=True)
-    value: str = Column(String, nullable=False)

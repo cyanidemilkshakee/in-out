@@ -1,14 +1,15 @@
+import { apiSession } from "./authSession"
+
 export class PythonApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
 export async function fetchPythonApi(path: string, method: string, body?: unknown, idempotencyKey?: string, signal?: AbortSignal) {
-  const base = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:8000';
+  const base = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:1002';
   const url = base + path;
 
-  // Obtain the Keycloak access_token from the current NextAuth session.
-  // The token is stored in the session by the jwt/session callbacks in auth.ts.
-  const session = await import("../../auth").then((m) => m.auth())
-  const accessToken = (session as any)?.access_token as string | undefined
+  // Server auth() includes the bearer token; /api/auth/session never exposes it.
+  const session = await apiSession()
+  const accessToken = session?.access_token
   if (!session || !accessToken) throw new PythonApiError("Please sign in again.", 401);
 
   const headers: Record<string, string> = {

@@ -17,12 +17,14 @@
       "name": "InOut Frontend",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
-      "secret": "inout-frontend-secret",
+      "secret": "${KEYCLOAK_CLIENT_SECRET}",
       "redirectUris": [
-        "http://localhost:1001/*",
-        "http://localhost:3000/*"
+        "${INOUT_APP_URL}/api/auth/callback/keycloak",
+        "http://localhost:1001/api/auth/callback/keycloak",
+        "http://localhost:3000/api/auth/callback/keycloak"
       ],
       "webOrigins": [
+        "${INOUT_APP_URL}",
         "http://localhost:1001",
         "http://localhost:3000"
       ],
@@ -33,7 +35,8 @@
       "publicClient": false,
       "protocol": "openid-connect",
       "attributes": {
-        "post.logout.redirect.uris": "http://localhost:1001/*##http://localhost:3000/*"
+        "post.logout.redirect.uris": "${INOUT_APP_URL}/login##http://localhost:1001/login##http://localhost:3000/login",
+        "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
         {
@@ -67,11 +70,23 @@
     "realm": [
       {
         "name": "admin",
-        "description": "Full access to the InOut admin panel"
+        "description": "Full access to the InOut admin panel",
+        "composite": true,
+        "composites": {
+          "client": {
+            "account": ["manage-account", "view-profile"]
+          }
+        }
       },
       {
         "name": "operator",
-        "description": "Read-only access to the InOut admin panel"
+        "description": "Security terminal scans and temporary visitor registration; no admin panel access",
+        "composite": true,
+        "composites": {
+          "client": {
+            "account": ["manage-account", "view-profile"]
+          }
+        }
       }
     ]
   },

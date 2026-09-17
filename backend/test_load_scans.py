@@ -16,7 +16,7 @@ async def hit_api_diff_key(client, barcode, session_id):
         'direction': 'entry'
     }
     start = time.perf_counter()
-    response = await client.post('http://localhost:8000/v1/scans', json=payload, headers=headers)
+    response = await client.post('http://localhost:1002/v1/scans', json=payload, headers=headers)
     latency = time.perf_counter() - start
     return response.status_code, response.json(), latency
 
@@ -27,9 +27,9 @@ async def main():
     async with httpx.AsyncClient(timeout=30.0) as client:
         # Check if server is up
         try:
-            await client.get("http://localhost:8000/health/live")
+            await client.get("http://localhost:1002/health/live")
         except httpx.ConnectError:
-            print("Server is not running on port 8000!")
+            print("Server is not running on port 1002!")
             sys.exit(1)
             
         tasks = [hit_api_diff_key(client, barcode, session_id) for _ in range(100)]
@@ -64,7 +64,7 @@ async def main():
                 'direction': 'exit' # using exit to avoid logical conflict since we just entered
             }
             start = time.perf_counter()
-            response = await client.post('http://localhost:8000/v1/scans', json=payload, headers=headers)
+            response = await client.post('http://localhost:1002/v1/scans', json=payload, headers=headers)
             latency = time.perf_counter() - start
             return response.status_code, response.json(), latency
 

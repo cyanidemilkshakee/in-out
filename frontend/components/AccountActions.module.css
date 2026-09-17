@@ -1,0 +1,31 @@
+.actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px;
+}
+
+.actions a, .actions button {
+  display: inline-block;
+  padding: 8px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 13px;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.actions button:disabled { opacity: .6; cursor: wait; }
+.actions a:hover, .actions button:hover { background: #f1f5f9; }
+.actions a:focus-visible, .actions button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+
+:global([data-admin-theme="dark"]) .actions a,
+:global([data-admin-theme="dark"]) .actions button {
+  background: #1e293b;
+  color: #e2e8f0;
+  border-color: #475569;
+}

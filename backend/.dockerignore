@@ -1,6 +1,12 @@
 .venv
 __pycache__
 *.pyc
+*.pyo
+*.egg-info
 .env
 .env.*
 tests
+test_*.py
+README.md
+Makefile
+.python-version
