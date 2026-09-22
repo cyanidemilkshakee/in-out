@@ -1,6 +1,4 @@
 export type ProfileSettings = {
-  syncAlerts: boolean;
-  weeklyDigest: boolean;
   requireReviewNote: boolean;
 };
 
@@ -21,12 +19,6 @@ export type UpdateAdminProfileInput = {
   avatarDataUrl: string;
   autoLock: string;
   settings: ProfileSettings;
-};
-
-export type CreateAdminAccountInput = {
-  name: string;
-  nickname: string;
-  email: string;
 };
 
 async function readResponse<T>(response: Response): Promise<T> {
@@ -52,16 +44,6 @@ export async function updateAdminProfile(input: UpdateAdminProfileInput) {
   return readResponse<AdminProfile>(
     await fetch("/api/profile", {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(input),
-    })
-  );
-}
-
-export async function createAdminAccount(input: CreateAdminAccountInput) {
-  return readResponse<AdminProfile>(
-    await fetch("/api/profile", {
-      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),
     })

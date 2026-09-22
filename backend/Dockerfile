@@ -41,4 +41,4 @@ COPY --from=builder --chown=app:app /build ./
 USER app
 
 EXPOSE 8000
-CMD ["sh", "-c", "alembic upgrade head && python seed.py reference && exec uvicorn main:app --host 0.0.0.0 --port 8000"]
+CMD ["sh", "-c", "echo \"Starting API on http://localhost:${PUBLIC_PORT:-8000}\" && uvicorn main:app --host 0.0.0.0 --port 8000"]

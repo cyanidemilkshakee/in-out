@@ -64,6 +64,53 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "inout-postman",
+      "name": "InOut Postman (local development)",
+      "description": "Local API testing client. Uses Authorization Code with PKCE; it does not accept password or client-credential grants.",
+      "enabled": true,
+      "redirectUris": [
+        "https://oauth.pstmn.io/v1/callback"
+      ],
+      "webOrigins": [
+        "https://oauth.pstmn.io"
+      ],
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "inout-frontend",
+            "access.token.claim": "true",
+            "id.token.claim": "false"
+          }
+        }
+      ]
     }
   ],
   "roles": {

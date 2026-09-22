@@ -1,6 +1,6 @@
 """
 GET /v1/dashboard — returns aggregated analytics, recent movements, open alerts,
-and presence counts, all fetched in parallel.
+and presence counts.
 """
 
 from typing import Any
@@ -10,6 +10,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db
+from dashboard_cache import get_dashboard_cache, set_dashboard_cache
 
 router = APIRouter(prefix="/v1/dashboard", tags=["dashboard"])
 
@@ -19,12 +20,16 @@ async def get_dashboard(
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
     """
-    Returns four data groups fetched in parallel:
+    Returns the dashboard data groups from one consistent read session:
     - analytics: aggregate scan counters
     - recentMovements: up to 100 newest movements
     - openAlerts: up to 10 open alerts
     - presenceCounts: inside/outside counts
     """
+
+    cached = await get_dashboard_cache()
+    if cached is not None:
+        return cached
 
     analytics_sql = text("""
         SELECT
@@ -139,10 +144,12 @@ async def get_dashboard(
     # Embed activeInside into analytics so the frontend ScanAnalytics shape is complete
     analytics["activeInside"] = presence_counts["inside"]
 
-    return {
+    payload = {
         "analytics":       analytics,
         "recentMovements": recent_movements,
         "openAlerts":      open_alerts,
         "pendingDecisions": pending_decisions,
         "presenceCounts":  presence_counts,
     }
+    await set_dashboard_cache(payload)
+    return payload

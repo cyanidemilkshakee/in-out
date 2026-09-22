@@ -41,8 +41,9 @@ test("HTTP service forwards movement filters and creates scan idempotency keys",
     const params = new URL(calls[0].url, "http://localhost").searchParams;
     assert.equal(params.get("search"), "Alice"); assert.equal(params.get("page"), "2");
     assert.equal(params.get("scanType"), "auto");
-    await service.recordScan({ barcode: "a1", checkpointId: "cp1", selectedHardwareIds: ["h1"], online: true, scanType: "auto" });
+    await service.recordScan({ barcode: "a1", checkpointId: "cp1", direction: "exit", selectedHardwareIds: ["h1"], online: true, scanType: "auto" });
     assert.match(new Headers(calls[1].init?.headers).get("Idempotency-Key")!, /^[0-9a-f-]{36}$/);
     assert.deepEqual(JSON.parse(String(calls[1].init?.body)).input.selectedHardwareIds, ["h1"]);
+    assert.equal(JSON.parse(String(calls[1].init?.body)).input.direction, "exit");
   } finally { globalThis.fetch = original; }
 });

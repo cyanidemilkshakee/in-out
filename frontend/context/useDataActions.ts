@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import { getDashboardKPIs } from "../../lib/analyticsUtils";
 import type {
   Alert,
+  AlertEvaluationResult,
   BarcodeManualReviewInput,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
@@ -157,6 +158,12 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     [service, setState]
   );
 
+  const evaluateAlertRules = useCallback(async (): Promise<AlertEvaluationResult> => {
+    const result = await service.evaluateAlertRules();
+    await refresh();
+    return result;
+  }, [refresh, service]);
+
   const markNotificationRead = useCallback(
     async (notificationId: string) => {
       const updated = await service.markNotificationRead(notificationId);
@@ -170,8 +177,8 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   );
 
   const recordScan = useCallback(
-    async (input: RecordScanInput) => {
-      const result = await service.recordScan(input);
+    async (input: RecordScanInput, idempotencyKey?: string) => {
+      const result = await service.recordScan(input, idempotencyKey);
       setState((current) => {
         const movements = [result.decision.event, ...current.movements];
         return {
@@ -257,6 +264,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       submitPermissionRequest,
       decidePermissionRequest,
       updateAlertRule,
+      evaluateAlertRules,
       markNotificationRead,
       recordScan,
       requestBarcodeManualReview,
@@ -271,6 +279,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       createHardwareAsset,
       createTemporaryVisitor,
       decidePermissionRequest,
+      evaluateAlertRules,
       markNotificationRead,
       queryMovements,
       recordScan,

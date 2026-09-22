@@ -69,12 +69,18 @@ export async function handleGet(request: NextRequest, timing: ServerTiming) {
   if (request.nextUrl.searchParams.get("resource") === "movements") {
     const queryParams = new URLSearchParams(request.nextUrl.searchParams.toString());
     queryParams.delete("resource");
-    const page = await callPythonApi(`/v1/movements?${queryParams.toString()}`, "GET");
+    const [page, analytics] = await Promise.all([
+      callPythonApi(`/v1/movements?${queryParams.toString()}`, "GET"),
+      callPythonApi(`/v1/movements/analytics?${queryParams.toString()}`, "GET"),
+    ]);
     return response(
       {
         ...page,
         items: page.items.map(normalizeDashboardMovement),
-        chartItems: page.chartItems.map(normalizeDashboardMovement),
+        chartItems: analytics.items.map(normalizeDashboardMovement),
+        checkpoints: analytics.checkpoints,
+        analytics: analytics.summary,
+        chartBuckets: analytics.buckets,
       },
       timing
     );

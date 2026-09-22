@@ -102,6 +102,8 @@ async def create_permission_request(
         data["eventId"] = payload.event_id
     if direction:
         data["direction"] = direction
+    if payload.operator_note:
+        data["operatorNote"] = payload.operator_note
 
     req_model = PermissionRequestModel(
         id=req_id,
@@ -150,7 +152,7 @@ async def decide_permission_request(
     # The row lock, decision, identity, movement and presence share one transaction.
     result = await apply_permission_decision(
         db, req_id, payload.decision, admin.get("sub", "unknown"),
-        payload.reason or f"{payload.decision.title()} by Permission Manager after policy review",
+        payload.reason,
     )
     await db.commit()
     await publish_decision(result)
@@ -160,8 +162,8 @@ async def decide_permission_request(
         try:
             client = await get_temporal_client()
             prefix = "override" if req_type == "manual_override" else "visitor"
-            args = ([payload.decision, admin.get("sub", "unknown"), payload.reason or ""]
-                    if req_type == "manual_override" else [payload.decision, payload.reason or ""])
+            args = ([payload.decision, admin.get("sub", "unknown"), payload.reason]
+                    if req_type == "manual_override" else [payload.decision, payload.reason])
             await client.get_workflow_handle(f"{prefix}-{req_id}").signal("admin_decision", args=args)
             workflow_signaled = True
         except Exception:
@@ -184,10 +186,10 @@ async def list_permissions(
 ) -> dict[str, Any]:
     """
     Return a consolidated snapshot:
-    - permissions: all AccessPermission.data[]
-    - requests:    all PermissionRequestModel.data[]
+    - permissions: AccessPermission.data[]
+    - requests:    PermissionRequestModel.data[]
     - notifications: unread Notification.data[]
-    All fetched in parallel.
+    Reads run on one scoped session so they observe a coherent snapshot.
     """
     async def fetch_permissions():
         res = await db.execute(select(AccessPermission).order_by(AccessPermission.id))

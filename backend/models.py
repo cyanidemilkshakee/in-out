@@ -162,5 +162,4 @@ class AdminAccount(Base):
     avatar_data_url: str = Column(String, nullable=False, default="")
     auto_lock: str = Column(String, nullable=False, default="15")
     settings = Column(JSONB, nullable=False, default=dict)
-    is_current: bool = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

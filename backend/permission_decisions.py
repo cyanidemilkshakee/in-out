@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from models import (Subject, Person, HardwareAsset, AccessPermission, PresenceState,
                     PermissionRequestModel, Movement, Checkpoint, AuditEvent)
 from redis_client import publish_presence_update
+from dashboard_cache import invalidate_dashboard_cache
 from movement_logic import _current_date, _current_time
 from access_validation import validate_window, validate_zones
 
@@ -222,8 +223,16 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
 
 async def publish_decision(result):
     """Redis is a notification channel; its failure must not undo a committed decision."""
+    await invalidate_dashboard_cache()
     try:
-        await publish_presence_update(json.dumps({"type": "manual_review_decision",
-            "requestId": result["request"]["id"], "subject_id": result["request"].get("subjectId")}))
+        await publish_presence_update(json.dumps({
+            "type": "manual_review_decision",
+            "requestId": result["request"]["id"],
+            "subject_id": result["request"].get("subjectId"),
+            "movement": result.get("movement"),
+            "request": result["request"],
+            "people": [result["person"]] if result.get("person") else [],
+            "hardwareAssets": [result["hardwareAsset"]] if result.get("hardwareAsset") else [],
+        }))
     except Exception:
         logger.exception("Permission decision committed; presence notification failed")

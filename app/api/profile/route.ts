@@ -1,9 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withApiSession } from "../authSession";
-import type {
-  CreateAdminAccountInput,
-  UpdateAdminProfileInput,
-} from "../../../services/profileService";
 import { callPythonApi, PythonApiError } from "../pythonApi";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +15,6 @@ function normalizeProfile(raw: Record<string, unknown>): Record<string, unknown>
     avatarDataUrl: raw.avatar_data_url ?? raw.avatarDataUrl ?? "",
     autoLock:      raw.auto_lock      ?? raw.autoLock      ?? "15",
     settings:      raw.settings       ?? {},
-    isCurrent:     raw.is_current     ?? raw.isCurrent     ?? false,
     createdAt:     raw.created_at     ?? raw.createdAt,
   };
 }
@@ -54,15 +49,5 @@ async function patchProfile(request: NextRequest) {
   }
 }
 
-async function postProfile(request: NextRequest) {
-  try {
-    const raw = await callPythonApi('/v1/admin/profile/accounts', 'POST', await request.json()) as Record<string, unknown>;
-    return response(normalizeProfile(raw));
-  } catch (error) {
-    return errorResponse(error);
-  }
-}
-
 export const GET = withApiSession(getProfile);
 export const PATCH = withApiSession(patchProfile);
-export const POST = withApiSession(postProfile);

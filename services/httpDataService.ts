@@ -1,6 +1,7 @@
 import type {
   AccessPermissionMutationResult,
   Alert,
+  AlertEvaluationResult,
   AlertRule,
   BarcodeManualReviewInput,
   AppDataSnapshot,
@@ -39,6 +40,7 @@ type Command =
       reason: string;
     }
   | { action: "updateAlertRule"; ruleId: string; enabled: boolean }
+  | { action: "evaluateAlertRules" }
   | { action: "markNotificationRead"; notificationId: string }
   | { action: "recordScan"; input: RecordScanInput }
   | { action: "requestBarcodeManualReview"; input: BarcodeManualReviewInput }
@@ -47,12 +49,19 @@ type Command =
   | { action: "resolveMovementConflicts"; eventIds: string[] }
   | { action: "addMovementNote"; eventId: string; note: string };
 
+export class DataServiceError extends Error {
+  constructor(message: string, public readonly status: number) {
+    super(message);
+    this.name = "DataServiceError";
+  }
+}
+
 async function readResponse<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => null)) as
     | { data?: T; error?: string }
     | null;
   if (!response.ok) {
-    throw new Error(body?.error ?? `Backend request failed with status ${response.status}.`);
+    throw new DataServiceError(body?.error ?? `Backend request failed with status ${response.status}.`, response.status);
   }
   if (!body || !("data" in body)) {
     throw new Error("Backend returned an invalid response.");
@@ -90,10 +99,10 @@ export class HttpDataService implements DataService {
     return readResponse<MovementPage>(response);
   }
 
-  private async command<T>(command: Command) {
+  private async command<T>(command: Command, idempotencyKey = crypto.randomUUID()) {
     const response = await fetch("/api/data", {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Idempotency-Key": crypto.randomUUID() },
+      headers: { "Content-Type": "application/json", "Idempotency-Key": idempotencyKey },
       body: JSON.stringify(command),
     });
     return readResponse<T>(response);
@@ -155,6 +164,10 @@ export class HttpDataService implements DataService {
     return this.command<AlertRule>({ action: "updateAlertRule", ruleId, enabled });
   }
 
+  evaluateAlertRules() {
+    return this.command<AlertEvaluationResult>({ action: "evaluateAlertRules" });
+  }
+
   markNotificationRead(notificationId: string) {
     return this.command<PermissionNotification>({
       action: "markNotificationRead",
@@ -162,8 +175,8 @@ export class HttpDataService implements DataService {
     });
   }
 
-  recordScan(input: RecordScanInput) {
-    return this.command<RecordScanResult>({ action: "recordScan", input });
+  recordScan(input: RecordScanInput, idempotencyKey?: string) {
+    return this.command<RecordScanResult>({ action: "recordScan", input }, idempotencyKey);
   }
 
   requestBarcodeManualReview(input: BarcodeManualReviewInput) {

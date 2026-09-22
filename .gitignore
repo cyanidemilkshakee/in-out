@@ -43,3 +43,6 @@ build/
 
 
 .venv-review/
+
+# Postman collections
+postman/collections/

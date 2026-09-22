@@ -3634,6 +3634,58 @@ button.terminal-create-btn:hover {
   gap: 8px;
 }
 
+.role-admin .permission-request-note,
+.role-admin .permission-decision-note {
+  display: grid;
+  gap: 5px;
+  margin: 0 0 12px;
+}
+
+.role-admin .permission-request-note {
+  padding: 8px 10px;
+  border-left: 2px solid var(--admin-line-strong);
+  color: var(--admin-text);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.role-admin .permission-request-note strong {
+  color: var(--admin-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.role-admin .permission-decision-note > span {
+  color: var(--admin-muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+.role-admin .permission-decision-note em {
+  color: #d92d20;
+  font-style: normal;
+}
+
+.role-admin .permission-decision-note textarea {
+  min-height: 72px;
+  resize: vertical;
+  border: 1px solid var(--admin-border);
+  border-radius: 7px;
+  padding: 8px 9px;
+  background: var(--admin-surface-strong);
+  color: var(--admin-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.role-admin .permission-decision-note textarea:focus {
+  outline: 2px solid var(--admin-text);
+  outline-offset: 2px;
+}
+
 .role-admin .request-actions button {
   min-height: 31px;
   border: 1px solid #12b76a;
@@ -3738,6 +3790,18 @@ button.terminal-create-btn:hover {
   margin-bottom: 18px;
   border-bottom: 1px solid var(--admin-border);
   padding: 4px 0 18px;
+}
+
+.role-admin .alert-run-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.role-admin .alert-run-control > span {
+  color: var(--admin-muted);
+  font-size: 13px;
+  font-weight: 650;
 }
 
 .role-admin .alerts-command-grid {

@@ -49,6 +49,8 @@ async def record_scan(db, key, payload, terminal_id):
             "scanType": payload.scan_type, "syncState": "synced" if payload.online else "queued",
             "hardwareIds": [], "createdAt": now.isoformat(),
         }
+        if payload.captured_offline_at:
+            event["capturedOfflineAt"] = payload.captured_offline_at.isoformat()
         decision = {"event": event, "carriedHardware": []}
         # ``alerts.source_event_id`` is a foreign key to ``movements.id``.
         # Flush the movement before adding the alert so SQLAlchemy/Postgres
@@ -139,6 +141,8 @@ async def record_scan(db, key, payload, terminal_id):
         online=payload.online, event_count=0, scan_type=payload.scan_type,
         event_id=str(uuid.uuid4()))
     event = decision["event"]
+    if payload.captured_offline_at:
+        event["capturedOfflineAt"] = payload.captured_offline_at.isoformat()
     now = datetime.now(timezone.utc)
     last_scan = states[subject.id].last_scan_timestamp
     matching_manual_exit = (event["direction"] == "exit" and states[subject.id].state == "inside"

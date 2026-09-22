@@ -76,6 +76,7 @@ export default function PermissionManagerPage() {
   const [feedback, setFeedback] = useState("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
 
   async function runAction(action: () => Promise<void>) {
     if (busy) return;
@@ -148,10 +149,17 @@ export default function PermissionManagerPage() {
   }
 
   async function decide(request: PermissionRequest, decision: "approved" | "denied") {
-    const reason = decision === "approved"
-      ? "Approved by Permission Manager after policy review"
-      : "Denied by Permission Manager after policy review";
+    const reason = decisionNotes[request.id]?.trim();
+    if (!reason) {
+      setActionError("Add a decision note before allowing or denying this request.");
+      return;
+    }
     await decidePermissionRequest(request.id, decision, reason);
+    setDecisionNotes((current) => {
+      const next = { ...current };
+      delete next[request.id];
+      return next;
+    });
     const relatedNotification = notifications.find(
       (notification) => notification.relatedId === request.id && !notification.read
     );
@@ -326,9 +334,20 @@ export default function PermissionManagerPage() {
                   <div><dt>Access</dt><dd>{request.requestedZones.join(" / ")}</dd></div>
                   <div><dt>Valid</dt><dd>{request.validFrom} - {request.validTo}</dd></div>
                 </dl>
+                {request.operatorNote ? <p className="permission-request-note"><strong>Operator note</strong>{request.operatorNote}</p> : null}
+                <label className="permission-decision-note">
+                  <span>Decision note <em>Required</em></span>
+                  <textarea
+                    value={decisionNotes[request.id] ?? ""}
+                    disabled={busy}
+                    maxLength={1000}
+                    placeholder="Explain why you are allowing or denying this request."
+                    onChange={(event) => setDecisionNotes((current) => ({ ...current, [request.id]: event.target.value }))}
+                  />
+                </label>
                 <div className="request-actions">
-                  <button type="button" disabled={busy} onClick={() => void runAction(() => decide(request, "approved"))}>Allow</button>
-                  <button type="button" disabled={busy} onClick={() => void runAction(() => decide(request, "denied"))}>Deny</button>
+                  <button type="button" disabled={busy || !decisionNotes[request.id]?.trim()} onClick={() => void runAction(() => decide(request, "approved"))}>Allow</button>
+                  <button type="button" disabled={busy || !decisionNotes[request.id]?.trim()} onClick={() => void runAction(() => decide(request, "denied"))}>Deny</button>
                 </div>
               </article>
             )) : (

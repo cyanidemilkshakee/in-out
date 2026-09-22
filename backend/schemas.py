@@ -27,6 +27,7 @@ class BrowserScanPayload(APIModel):
     online: bool = True
     scan_type: str = Field("auto", alias="scanType", pattern="^(auto|manual)$")
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
+    captured_offline_at: Optional[datetime] = Field(None, alias="capturedOfflineAt")
 
 
 class ManualReviewPayload(APIModel):
@@ -34,6 +35,7 @@ class ManualReviewPayload(APIModel):
     checkpoint_id: str = Field(alias="checkpointId", min_length=1, max_length=128)
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
     event_id: Optional[str] = Field(None, alias="eventId", min_length=1, max_length=128, strip_whitespace=True)
+    operator_note: Optional[str] = Field(None, alias="operatorNote", max_length=1000, strip_whitespace=True)
 
 
 class ScanResponse(BaseModel):
@@ -95,8 +97,9 @@ class PermissionRequestCreate(APIModel):
     carrier_name: Optional[str] = None
     event_id: Optional[str] = None
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
+    operator_note: Optional[str] = Field(None, max_length=1000, strip_whitespace=True)
 
 class PermissionDecision(APIModel):
     decision: str = Field(..., pattern="^(approved|denied)$", description="'approved' or 'denied'")
-    reason: Optional[str] = None
+    reason: str = Field(..., min_length=1, max_length=1000, strip_whitespace=True)
     admin_id: Optional[str] = None  # Legacy clients; the authenticated token owns attribution.

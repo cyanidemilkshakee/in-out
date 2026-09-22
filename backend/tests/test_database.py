@@ -106,6 +106,15 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page.status_code, 200, page.text)
         self.assertEqual(page.json()["total"], 2)
         self.assertEqual(len(page.json()["items"]), 1)
+        self.assertNotIn("chartItems", page.json())
+        analytics = await self.client.get("/v1/movements/analytics", params={"search": "Alice"})
+        self.assertEqual(analytics.status_code, 200, analytics.text)
+        self.assertEqual(analytics.json()["summary"]["total"], 2)
+        self.assertEqual(len(analytics.json()["items"]), 2)
+        bundle = await self.client.get("/v1/terminal/bundle")
+        self.assertEqual(bundle.status_code, 200, bundle.text)
+        self.assertNotIn("subjects", bundle.json())
+        self.assertEqual([asset["id"] for asset in bundle.json()["hardwareAssets"]], ["h1"])
         for params in ({"search": "Missing"}, {"scanType": "manual"}, {"subjectGroup": "hardware"}, {"startAt": "2099-01-01T00:00:00Z"}, {"endAt": "2000-01-01T00:00:00Z"}):
             self.assertEqual((await self.client.get("/v1/movements", params=params)).json()["total"], 0)
 
@@ -148,9 +157,17 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             denied = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
             self.assertEqual(denied.status_code, 200, denied.text)
             self.assertFalse(denied.json()["allowed"])
-            review = await self.client.post("/v1/terminal/manual-reviews", json={**scan_body, "direction": "entry", "eventId": denied.json()["decision"]["event"]["id"]})
+            review = await self.client.post("/v1/terminal/manual-reviews", json={
+                **scan_body,
+                "direction": "entry",
+                "eventId": denied.json()["decision"]["event"]["id"],
+                "operatorNote": "Verified photo ID at the gate.",
+            })
             self.assertEqual(review.status_code, 200, review.text)
+            self.assertEqual(review.json()["operatorNote"], "Verified photo ID at the gate.")
             url = f"/v1/permission-requests/{review.json()['id']}/decide"
+            no_note = await self.client.post(url, json={"decision": "approved"})
+            self.assertEqual(no_note.status_code, 422, no_note.text)
             approval = {"decision": "approved", "admin_id": "spoofed", "reason": "Checked ID"}
             response = await self.client.post(url, json=approval)
             self.assertEqual(response.status_code, 200, response.text)
@@ -259,7 +276,11 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             req_id = await self._create_review(db, "visitor", "v1", kind="visitor")
         with patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
              patch("permission_decisions.publish_presence_update", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            response = await self.client.post(f"/v1/permission-requests/{req_id}/decide", json={"decision": "approved", "admin_id": "admin"})
+            response = await self.client.post(f"/v1/permission-requests/{req_id}/decide", json={
+                "decision": "approved",
+                "admin_id": "admin",
+                "reason": "Visitor identity and host were verified.",
+            })
             self.assertEqual(response.status_code, 200, response.text)
         async with self.sessions() as db:
             self.assertEqual((await db.get(Person, "v1")).data["status"], "pre_approved")
@@ -370,6 +391,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(second.json()["name"], "Admin B")
         self.assertEqual(second.json()["avatar_data_url"], "")
         self.assertEqual(second.json()["auto_lock"], "15")
+        self.assertEqual(second.json()["settings"], {"requireReviewNote": True})
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a"}
         again = await self.client.get("/v1/admin/profile")
         self.assertEqual(again.json()["auto_lock"], "30")

@@ -7,6 +7,8 @@ import { errorResponse, handleGet, requireObject, requireString, ServerTiming } 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+const MAX_COMMAND_BODY_BYTES = 64 * 1024;
+
 async function getData(request: NextRequest) {
   const timing = new ServerTiming();
   try {
@@ -29,6 +31,10 @@ async function postData(request: NextRequest) {
   const timing = new ServerTiming();
   let action = "unknown";
   try {
+    const contentLength = Number(request.headers.get("content-length") ?? 0);
+    if (Number.isFinite(contentLength) && contentLength > MAX_COMMAND_BODY_BYTES) {
+      return errorResponse("Command payload is too large.", timing, 413);
+    }
     const parseStartedAt = performance.now();
     const body = requireObject(await request.json(), "Command");
     timing.add("request_parse", performance.now() - parseStartedAt);
