@@ -19,6 +19,7 @@ import { MovementTable } from "../../../frontend/components/admin/tables/Movemen
 import type { TimeRange } from "../../../frontend/components/analytics/TrendChart";
 import { CalendarDatePicker } from "../../../frontend/components/analytics/CalendarDatePicker";
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
+import { isMovementEventId } from "../../../lib/movementReferences";
 import {
   compactRangeBounds,
   parseDateInput,
@@ -62,6 +63,13 @@ const defaultVisibleColumns: Record<VisibleColumn, boolean> = {
   eventId: true
 };
 
+function updateEventUrl(eventId?: string) {
+  const url = new URL(window.location.href);
+  if (eventId) url.searchParams.set("eventId", eventId);
+  else url.searchParams.delete("eventId");
+  window.history.replaceState(window.history.state, "", url);
+}
+
 export default function LogsPage() {
   const {
     movements: initialEvents,
@@ -72,6 +80,7 @@ export default function LogsPage() {
   } = useDataState();
   const { addMovementNote, queryMovements, updateAlert } = useDataActions();
   const [search, setSearch] = useState("");
+  const [linkedEventId, setLinkedEventId] = useState("");
   const [checkpointFilter, setCheckpointFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [scanTypeFilter, setScanTypeFilter] = useState<"all" | "auto" | "manual">("all");
@@ -89,6 +98,9 @@ export default function LogsPage() {
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const deferredSearch = useDeferredValue(search);
+  const searchTerm = deferredSearch.trim();
+  const eventIdLookup = (linkedEventId && searchTerm === linkedEventId) || isMovementEventId(searchTerm)
+    ? searchTerm : undefined;
   const [filtersReady, setFiltersReady] = useState(false);
   const [isQuerying, setIsQuerying] = useState(false);
   const [movementPage, setMovementPage] = useState<MovementPage>(() => ({
@@ -114,7 +126,8 @@ export default function LogsPage() {
     const scanType = params.get("scanType");
     const direction = params.get("direction");
     const reason = params.get("reason");
-    if ([subject, result, scanType, direction, reason].some(Boolean)) {
+    const eventId = params.get("eventId")?.trim();
+    if ([subject, result, scanType, direction, reason, eventId].some(Boolean)) {
       initialQueryPending.current = false;
     }
     if (subject === "people" || subject === "hardware") setSubjectTypeFilter(subject);
@@ -122,8 +135,17 @@ export default function LogsPage() {
     if (scanType === "auto" || scanType === "manual") setScanTypeFilter(scanType);
     if (direction === "entry" || direction === "exit") setDirectionFilter(direction);
     if (reason) setSearch(reason);
+    if (eventId) {
+      setLinkedEventId(eventId);
+      setSearch(eventId);
+      setSelectedEventId("");
+    }
     setFiltersReady(true);
   }, []);
+
+  useEffect(() => {
+    if (filtersReady) updateEventUrl(eventIdLookup || selectedEventId || undefined);
+  }, [eventIdLookup, filtersReady, selectedEventId]);
 
   const rangeBounds = useMemo(() => {
     const preset = compactRangeBounds(timeRange);
@@ -164,8 +186,9 @@ export default function LogsPage() {
         : {}),
     };
     void queryMovements({
-      page,
+      page: eventIdLookup ? 1 : page,
       pageSize: rowsPerPage,
+      eventId: eventIdLookup,
       search: deferredSearch.trim() || undefined,
       checkpoint:
         checkpointFilter === "all" ? undefined : checkpointFilter,
@@ -181,7 +204,8 @@ export default function LogsPage() {
         if (cancelled) return;
         setMovementPage(result);
         setSelectedEventId((current) =>
-          result.items.some((event) => event.id === current) ? current : ""
+          eventIdLookup ? result.items[0]?.id ?? "" :
+            result.items.some((event) => event.id === current) ? current : ""
         );
       })
       .catch((error) => {
@@ -203,6 +227,7 @@ export default function LogsPage() {
     checkpointFilter,
     deferredSearch,
     directionFilter,
+    eventIdLookup,
     filtersReady,
     page,
     queryMovements,
@@ -240,7 +265,7 @@ export default function LogsPage() {
     [movementPage.items, selectedEventId]
   );
   const selectedAlert = useMemo(
-    () => alerts.find((alert) => alert.id === selectedEventId || alert.sourceEventId === selectedEventId),
+    () => alerts.find((alert) => alert.sourceEventId === selectedEventId),
     [alerts, selectedEventId]
   );
   const totalPages = Math.max(
@@ -341,13 +366,19 @@ export default function LogsPage() {
             <span className="sr-only">Search events</span>
             <input
               type="search"
-              placeholder="Search subjects, barcodes, reasons..."
+              placeholder="Search event IDs, subjects, barcodes, reasons..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </label>
         </div>
 
+        {eventIdLookup ? (
+          <p className="inline-note" role="status">
+            Looking up this event ID across all dates, checkpoints, and subject types. Clear the search to use the filters again.
+          </p>
+        ) : null}
+        {queryError ? <p className="inline-note" role="alert">{queryError}</p> : null}
         <MovementTable
           events={movementPage.items}
           selectedId={selectedEventId}

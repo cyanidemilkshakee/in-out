@@ -17,8 +17,12 @@ class Settings(BaseSettings):
     KEYCLOAK_ISSUER: str = "http://localhost:1005/realms/inout"
 
     KEYCLOAK_JWKS_BASE: str = ""
+    # Internal Keycloak origin for the Admin REST API. This is only used with
+    # the current administrator's validated bearer token.
+    KEYCLOAK_ADMIN_BASE: str = ""
     KEYCLOAK_AUDIENCE: str = "inout-frontend"
     KEYCLOAK_JWKS_CACHE_TTL: int = Field(default=300, ge=30)
+    KEYCLOAK_STEP_UP_MAX_AGE_SECONDS: int = Field(default=300, ge=60, le=900)
     MTLS_PROXY_SECRET: str = ""
     MAX_REQUEST_BODY_BYTES: int = Field(default=262_144, ge=1_024, le=10_485_760)
     WRITE_RATE_LIMIT_PER_MINUTE: int = Field(default=300, ge=10, le=10_000)

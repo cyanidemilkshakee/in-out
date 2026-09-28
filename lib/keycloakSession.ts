@@ -7,6 +7,8 @@ export type RoleToken = JWT & {
   expires_at?: number
   provider?: string
   roles?: string[]
+  auth_time?: number
+  step_up_expires_at?: number
   error?: "RefreshTokenError"
 }
 
@@ -14,25 +16,37 @@ export type AppSession = Session & {
   access_token?: string
   provider?: string
   roles: string[]
+  authTime?: number
+  stepUpExpiresAt?: number
   error?: "RefreshTokenError"
 }
 
-export function rolesFromAccessToken(value: unknown): string[] {
-  if (typeof value !== "string") return []
+function accessTokenClaims(value: unknown): Record<string, unknown> {
+  if (typeof value !== "string") return {}
   try {
     const encoded = value.split(".")[1]
-    if (!encoded) return []
+    if (!encoded) return {}
     const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(encoded.length / 4) * 4, "=")
-    const payload = JSON.parse(atob(base64)) as { realm_access?: { roles?: unknown } }
-    const roles = payload.realm_access?.roles
-    return Array.isArray(roles) ? roles.filter((role): role is string => typeof role === "string") : []
+    const payload = JSON.parse(atob(base64))
+    return payload && typeof payload === "object" ? payload as Record<string, unknown> : {}
   } catch {
-    return []
+    return {}
   }
 }
 
-function invalidSession(token: RoleToken): RoleToken {
-  return { ...token, access_token: undefined, refresh_token: undefined, expires_at: undefined, roles: [], error: "RefreshTokenError" }
+export function rolesFromAccessToken(value: unknown): string[] {
+  const payload = accessTokenClaims(value) as { realm_access?: { roles?: unknown } }
+  const roles = payload.realm_access?.roles
+  return Array.isArray(roles) ? roles.filter((role): role is string => typeof role === "string") : []
+}
+
+export function authTimeFromAccessToken(value: unknown): number | undefined {
+  const authTime = accessTokenClaims(value).auth_time
+  return typeof authTime === "number" && Number.isFinite(authTime) ? authTime : undefined
+}
+
+export function invalidSession(token: RoleToken, error: RoleToken["error"] = "RefreshTokenError"): RoleToken {
+  return { ...token, access_token: undefined, refresh_token: undefined, expires_at: undefined, roles: [], error }
 }
 
 export async function refreshKeycloakToken(
@@ -72,6 +86,7 @@ export async function refreshKeycloakToken(
       refresh_token: (refreshed.refresh_token as string | undefined) ?? token.refresh_token,
       expires_at: Math.floor(now / 1000) + refreshed.expires_in,
       roles: rolesFromAccessToken(refreshed.access_token),
+      auth_time: authTimeFromAccessToken(refreshed.access_token),
       error: undefined,
     }
   } catch {
@@ -86,13 +101,15 @@ export function keycloakSession(session: Session, token: RoleToken, serverOnly: 
     expires: session.expires,
     provider: token.provider,
     roles: token.error ? [] : token.roles ?? [],
+    authTime: token.auth_time,
+    stepUpExpiresAt: token.step_up_expires_at,
     error: token.error,
     ...(serverOnly && !token.error ? { access_token: token.access_token } : {}),
   }
 }
 
-export function keycloakLogoutUrl(issuer: string, clientId: string, appUrl: string): string {
+export function keycloakLogoutUrl(issuer: string, clientId: string, appUrl: string, returnPath = "/login"): string {
   const url = new URL(`${issuer.replace(/\/$/, "")}/protocol/openid-connect/logout`)
-  url.search = new URLSearchParams({ client_id: clientId, post_logout_redirect_uri: new URL("/login", appUrl).href }).toString()
+  url.search = new URLSearchParams({ client_id: clientId, post_logout_redirect_uri: new URL(returnPath, appUrl).href }).toString()
   return url.href
 }

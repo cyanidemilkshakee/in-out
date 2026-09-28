@@ -99,7 +99,7 @@ function Activity({ movements, requests }: { movements: MovementEvent[]; request
 }
 
 export function SecurityTerminal() {
-  const { hardwareAssets, checkpoints, movements, permissionRequests, error, isLoading } = useDataState();
+  const { hardwareAssets, checkpoints, movements, permissionRequests, adminAvailability, error, isLoading } = useDataState();
   const { recordScan, requestBarcodeManualReview, submitPermissionRequest, refresh } = useDataActions();
   const theme = useAdminTheme();
   const [checkpointId, setCheckpointId] = useState("cp-main");
@@ -131,8 +131,11 @@ export function SecurityTerminal() {
   const result = isScanning ? "scanning" : latestQueuedScan ? "queued" : review?.status === "pending" ? "pending" : review?.status ?? decision?.event.result ?? "idle";
   const direction = decision?.event.direction === "exit" ? "Exit" : "Entry";
   const busy = isScanning || isReviewing;
+  const estimatedAdminReturn = adminAvailability?.status === "offline" && adminAvailability.availableAt
+    ? formatTime(adminAvailability.availableAt)
+    : null;
   const title = result === "scanning" ? "Checking access" : result === "queued" ? "Scan queued for verification" : result === "pending" ? "Awaiting approval" : result === "approved" ? `${direction} allowed` : result === "denied" ? "Access denied" : "Ready to scan";
-  const description = result === "scanning" ? "Verifying this barcode…" : result === "queued" ? "This scan is stored on this terminal and will be sent when the connection returns. Do not grant access until the server confirms it." : result === "pending" ? "An administrator is reviewing this scan." : review?.status === "approved" ? "Manual approval received. You may proceed." : review?.status === "denied" ? "The administrator declined this request." : decision ? decision.event.reason && decision.event.reason !== "-" ? decision.event.reason : "Access verified. You may proceed." : "The access decision will appear here.";
+  const description = result === "scanning" ? "Verifying this barcode…" : result === "queued" ? "This scan is stored on this terminal and will be sent when the connection returns. Do not grant access until the server confirms it." : result === "pending" ? estimatedAdminReturn ? `An administrator is offline. Manual review may be picked up around ${estimatedAdminReturn} IST.` : "An administrator is reviewing this scan." : review?.status === "approved" ? "Manual approval received. You may proceed." : review?.status === "denied" ? "The administrator declined this request." : decision ? decision.event.reason && decision.event.reason !== "-" ? decision.event.reason : "Access verified. You may proceed." : "The access decision will appear here.";
 
   const refreshQueuedScans = useCallback(async () => {
     const pending = await listQueuedTerminalScans();

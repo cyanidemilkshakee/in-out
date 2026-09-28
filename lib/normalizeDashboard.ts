@@ -313,6 +313,7 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
     checkpoints?: AppDataSnapshot["checkpoints"];
     movements?: unknown[];
     permissionRequests?: unknown[];
+    adminAvailability?: AppDataSnapshot["adminAvailability"];
   };
   const presence = new Map((r.presence ?? []).map(p => [p.subjectId, p.state === "inside"]));
   const subjects: Record<string, unknown>[] = (r.subjects ?? []).map(s => ({ ...s, type: s.type ?? s.kind, inside: presence.get(String(s.id)) ?? Boolean(s.inside) }));
@@ -323,6 +324,9 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
     hardwareAssets: r.hardwareAssets ?? (subjects.filter(s => s.type === "hardware") as AppDataSnapshot["hardwareAssets"]),
     movements: ((r.movements ?? []) as Record<string, unknown>[]).map(normalizeDashboardMovement),
     permissionRequests: ((r.permissionRequests ?? []) as unknown[]).map(normalizePermissionRequest),
+    adminAvailability: r.adminAvailability && typeof r.adminAvailability === "object"
+      ? r.adminAvailability as AppDataSnapshot["adminAvailability"]
+      : undefined,
   };
 
 }

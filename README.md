@@ -65,10 +65,10 @@ The browser uses the Next.js API layer; the server forwards access tokens to Fas
 | `postgres-primary` | PostgreSQL 17; persistent storage | `localhost:1003` |
 | `redis` | Redis 7; event publication and caches | `localhost:1004` |
 | `keycloak` | OIDC identity provider; default image pin `26.2.5` | [localhost:1005/admin](http://localhost:1005/admin) |
-| `temporal` / `temporal-ui` | Durable workflows and their inspection UI | gRPC `localhost:1006`; [UI localhost:1007](http://localhost:1007) |
-| `backend-init` | Alembic migrations and reference seeding; exits on completion | Internal job |
+| `temporal` | Durable workflows | gRPC `localhost:1006` |
+| `temporal-ui` | Optional workflow inspection UI (`observability` profile) | [localhost:1007](http://localhost:1007) |
+| `backend-init` | Alembic migrations, reference seeding, and alert-schedule bootstrap; exits on completion | Internal job |
 | `temporal-worker` | Executes approval and alert activities | Internal service |
-| `temporal-scheduler` | Registers the alert schedule; exits on completion | Internal job |
 
 Application tables hold subjects, people/assets, permissions, requests, presence, movements, scan retry records, alerts, notifications, and audit events. Keycloak uses the `keycloak` schema in the `inout` database; Temporal uses separate databases on the same PostgreSQL service. Administrator profiles are associated with the Keycloak identity and do not store login passwords. The PostgreSQL volume persists across normal restarts. Independent local installations do not share accounts or records.
 
@@ -118,7 +118,13 @@ docker compose up --build -d
 docker compose ps -a
 ```
 
-`-d` runs services in the background. `backend-init` and `temporal-scheduler` should exit successfully; the API and worker remain running. Startup seeds reference checkpoints and alert rules, not application login users.
+`-d` runs services in the background. `backend-init` should exit successfully; the API and worker remain running. Startup seeds reference checkpoints and alert rules, registers the durable alert schedule, and does not create application login users.
+
+The Temporal inspection interface is intentionally off by default. Start it only when diagnosing workflows:
+
+```powershell
+docker compose --profile observability up -d temporal-ui
+```
 
 **3. Create application users.**
 

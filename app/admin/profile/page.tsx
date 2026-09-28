@@ -38,7 +38,6 @@ const defaultSettings: ProfileSettings = {
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<ProfileIdentity>(defaultProfile);
-  const [autoLock, setAutoLock] = useState("15");
   const [saved, setSaved] = useState(false);
   const [formError, setFormError] = useState("");
   const [pictureError, setPictureError] = useState("");
@@ -56,7 +55,6 @@ export default function ProfilePage() {
           email: result.email,
           avatarDataUrl: result.avatarDataUrl,
         });
-        setAutoLock(result.autoLock);
         setSettings(result.settings);
       })
       .catch((error) => {
@@ -133,7 +131,6 @@ export default function ProfilePage() {
     try {
       const result = await updateAdminProfile({
         ...cleanProfile,
-        autoLock,
         settings,
       });
       setProfile({
@@ -142,7 +139,6 @@ export default function ProfilePage() {
         email: result.email,
         avatarDataUrl: result.avatarDataUrl,
       });
-      setAutoLock(result.autoLock);
       setSettings(result.settings);
       setFormError("");
       setSaved(true);
@@ -219,24 +215,9 @@ export default function ProfilePage() {
             <KeyRound aria-hidden="true" />
             <div>
               <h2>Security</h2>
-              <p>Operator safeguards for admin workflows.</p>
+              <p>Manual-review decision notes are part of the security audit trail.</p>
             </div>
           </div>
-          <label className="profile-field">
-            <span>Auto-lock after</span>
-            <select
-              value={autoLock}
-              onChange={(event) => {
-                setAutoLock(event.target.value);
-                markChanged();
-              }}
-            >
-              <option value="5">5 minutes</option>
-              <option value="15">15 minutes</option>
-              <option value="30">30 minutes</option>
-              <option value="60">60 minutes</option>
-            </select>
-          </label>
           <SettingsToggle
             checked={settings.requireReviewNote}
             label="Manual-review decision notes"

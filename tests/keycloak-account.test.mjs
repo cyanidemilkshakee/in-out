@@ -23,13 +23,17 @@ test("same-named realm or other-client roles cannot be used for the repair", () 
   assert.throws(() => missingAccountRoles([], roles.map((role) => ({ ...role, clientRole: false })), clientId));
 });
 
-test("fresh realm users inherit account access through either application role", () => {
+test("application roles grant self-service access while only admins receive user-management access", () => {
   const realm = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
-  for (const name of ["admin", "operator"]) {
-    const role = realm.roles.realm.find((candidate) => candidate.name === name);
-    assert.equal(role.composite, true);
-    assert.deepEqual(role.composites, { client: { account: ["manage-account", "view-profile"] } });
-  }
+  const admin = realm.roles.realm.find((candidate) => candidate.name === "admin");
+  const operator = realm.roles.realm.find((candidate) => candidate.name === "operator");
+  assert.equal(admin.composite, true);
+  assert.deepEqual(admin.composites, { client: {
+    account: ["manage-account", "view-profile"],
+    "realm-management": ["manage-users", "query-users", "view-users", "view-realm"],
+  } });
+  assert.equal(operator.composite, true);
+  assert.deepEqual(operator.composites, { client: { account: ["manage-account", "view-profile"] } });
 });
 
 test("API audience repair restores the template mapper and is idempotent", () => {

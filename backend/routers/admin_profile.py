@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,8 +21,12 @@ class ProfileUpdateRequest(BaseModel):
     nickname: Optional[str] = Field(None, min_length=1, max_length=100)
     email: Optional[str] = Field(None, min_length=3, max_length=320, pattern=r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
     avatar_data_url: Optional[str] = Field(None, alias="avatarDataUrl", max_length=3_000_000)
-    auto_lock: Optional[str] = Field(None, alias="autoLock", pattern="^(5|10|15|30|60|never)$")
     settings: Optional[dict[str, bool]] = None
+
+
+class AvailabilityUpdateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    offline_until: Optional[datetime] = Field(None, alias="offlineUntil")
 
 
 def _review_note_policy(_settings: Optional[dict[str, bool]]) -> dict[str, bool]:
@@ -33,7 +37,8 @@ def _review_note_policy(_settings: Optional[dict[str, bool]]) -> dict[str, bool]
 def _serialize_account(account):
     return {"id": account.id, "name": account.name, "nickname": account.nickname,
         "email": account.email, "avatar_data_url": account.avatar_data_url,
-        "auto_lock": account.auto_lock, "settings": _review_note_policy(account.settings),
+        "offline_until": account.offline_until.isoformat() if account.offline_until else None,
+        "settings": _review_note_policy(account.settings),
         "created_at": account.created_at.isoformat()}
 
 
@@ -55,7 +60,7 @@ async def _identity_profile(db, admin):
         account = AdminAccount(id=str(uuid.uuid4()), keycloak_subject=subject,
             name=admin.get("name") or admin.get("preferred_username") or "Administrator",
             nickname=admin.get("preferred_username") or "admin", email=email or "",
-            avatar_data_url="", auto_lock="15", settings=_review_note_policy(None),
+            avatar_data_url="", settings=_review_note_policy(None),
             created_at=datetime.now(timezone.utc))
         db.add(account)
     await db.flush()
@@ -80,3 +85,20 @@ async def update_admin_profile(payload: ProfileUpdateRequest, db: AsyncSession =
         setattr(account, key, value)
     await db.commit()
     return _serialize_account(account)
+
+
+@router.patch("/profile/availability")
+async def update_admin_availability(payload: AvailabilityUpdateRequest, db: AsyncSession = Depends(get_db),
+                                    admin: dict = Depends(verify_admin_request)) -> dict[str, Any]:
+    """Record an explicit, short-lived expected admin return time after SSO logout."""
+    offline_until = payload.offline_until
+    if offline_until:
+        if offline_until.tzinfo is None:
+            raise HTTPException(status_code=422, detail="offlineUntil must include a timezone")
+        seconds = (offline_until - datetime.now(timezone.utc)).total_seconds()
+        if seconds < 60 or seconds > 24 * 60 * 60:
+            raise HTTPException(status_code=422, detail="offlineUntil must be between one minute and 24 hours from now")
+    account = await _identity_profile(db, admin)
+    account.offline_until = offline_until
+    await db.commit()
+    return {"offline_until": account.offline_until.isoformat() if account.offline_until else None}

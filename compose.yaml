@@ -100,9 +100,15 @@ services:
       dockerfile: Dockerfile
     environment:
       - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres-primary:5432/inout
-    command: ["sh", "-c", "alembic upgrade head && python seed.py reference"]
+      - TEMPORAL_HOST=temporal:7233
+    # One idempotent bootstrap job: schema, reference data, then the durable
+    # Temporal alert schedule. Keeping these together avoids a second exited
+    # scheduler container after every deployment.
+    command: ["sh", "-c", "alembic upgrade head && python seed.py reference && python -m scheduler"]
     depends_on:
       postgres-primary:
+        condition: service_healthy
+      temporal:
         condition: service_healthy
 
   python-api:
@@ -117,6 +123,7 @@ services:
       - MTLS_PROXY_SECRET=${MTLS_PROXY_SECRET:-}
       - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
+      - KEYCLOAK_ADMIN_BASE=http://keycloak:8080
       - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
       - KEYCLOAK_JWKS_CACHE_TTL=${KEYCLOAK_JWKS_CACHE_TTL:-300}
       - PUBLIC_PORT=${PYTHON_API_PORT:-1002}
@@ -162,20 +169,6 @@ services:
       temporal:
         condition: service_healthy
     restart: unless-stopped
-
-  temporal-scheduler:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    environment:
-      - TEMPORAL_HOST=temporal:7233
-    command: ["python", "-m", "scheduler"]
-    depends_on:
-      temporal:
-        condition: service_healthy
-      temporal-worker:
-        condition: service_started
-    restart: on-failure:5
 
   app:
     build:
@@ -233,6 +226,7 @@ services:
 
   temporal-ui:
     image: temporalio/ui:2.31.2
+    profiles: [observability]
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
       - TEMPORAL_CORS_ORIGINS=http://localhost:${APP_PORT:-1008}

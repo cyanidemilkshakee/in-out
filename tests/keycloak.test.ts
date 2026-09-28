@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { keycloakLogoutUrl, keycloakSession, refreshKeycloakToken, rolesFromAccessToken, type RoleToken } from "../lib/keycloakSession"
+import { authTimeFromAccessToken, keycloakLogoutUrl, keycloakSession, refreshKeycloakToken, rolesFromAccessToken, type RoleToken } from "../lib/keycloakSession"
+import { signStepUpIntent, verifyStepUpIntent } from "../lib/userManagementStepUp"
 
 const now = 2_000_000
 const config = { issuer: "http://keycloak:8080/realms/inout", clientId: "inout-frontend", clientSecret: "test-secret" }
@@ -74,6 +75,20 @@ test("public sessions omit provider credentials while the server can forward acc
 test("malformed role claims never grant access", () => {
   for (const value of [null, "malformed", accessToken("admin"), accessToken(null)]) assert.deepEqual(rolesFromAccessToken(value), [])
   assert.deepEqual(rolesFromAccessToken(accessToken(["operator", 1])), ["operator"])
+})
+
+test("auth time is extracted only from valid numeric claims", () => {
+  const token = `header.${Buffer.from(JSON.stringify({ auth_time: 1234 })).toString("base64url")}.signature`
+  assert.equal(authTimeFromAccessToken(token), 1234)
+  assert.equal(authTimeFromAccessToken(accessToken(["admin"])), undefined)
+})
+
+test("step-up intent is signed, short-lived, and cannot be tampered with", async () => {
+  const now = 2_000_000
+  const intent = await signStepUpIntent(now, "test-secret")
+  assert.equal(await verifyStepUpIntent(intent, "test-secret", now + 60_000), now)
+  assert.equal(await verifyStepUpIntent(`${now}.tampered`, "test-secret", now), null)
+  assert.equal(await verifyStepUpIntent(intent, "test-secret", now + 11 * 60_000), null)
 })
 
 test("SSO logout uses the public realm and a fixed local return path", () => {

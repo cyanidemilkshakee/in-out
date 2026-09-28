@@ -8,7 +8,6 @@ export type AdminProfile = {
   nickname: string;
   email: string;
   avatarDataUrl: string;
-  autoLock: string;
   settings: ProfileSettings;
 };
 
@@ -17,7 +16,6 @@ export type UpdateAdminProfileInput = {
   nickname: string;
   email: string;
   avatarDataUrl: string;
-  autoLock: string;
   settings: ProfileSettings;
 };
 

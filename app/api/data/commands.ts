@@ -153,7 +153,7 @@ export async function executeCommand(
     case "resolveMovementConflicts":
       return send(await callPythonApi("/v1/movements/conflicts/resolve", "POST", { eventIds: body.eventIds || [] }));
     case "addMovementNote":
-      return send(await callPythonApi(`/v1/movements/${requireString(body.eventId, "Event id")}/notes`, "POST", { note: body.note }));
+      return send(await callPythonApi(`/v1/movements/${encodeURIComponent(requireString(body.eventId, "Event id"))}/notes`, "POST", { note: body.note }));
     default:
       throw new Error(`Unsupported command: ${action}.`);
   }

@@ -65,12 +65,18 @@ def _movement_filters(
     subject_group: Optional[str], start_at: Optional[str], end_at: Optional[str],
     subject_id: Optional[str], result: Optional[str], direction: Optional[str],
     scan_type: Optional[str], subject_type: Optional[str], since: Optional[str],
+    event_id: Optional[str] = None,
 ) -> list[Any]:
+    # Direct references must resolve even when an event is older than the
+    # ledger's default date range or belongs to the other subject tab.
+    if event_id:
+        return [func.lower(Movement.id) == event_id.strip().lower()]
     filters: list[Any] = []
     if search:
         escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = "%" + escaped.lower() + "%"
         searchable = func.lower(
+            Movement.id + literal(" ") +
             func.coalesce(Movement.data["subjectName"].astext, "") + literal(" ") +
             func.coalesce(Movement.data["barcode"].astext, "") + literal(" ") +
             func.coalesce(Movement.data["checkpoint"].astext, "") + literal(" ") +
@@ -120,6 +126,7 @@ def _movement_filters(
 
 @router.get("")
 async def list_movements(
+    eventId: Optional[str] = Query(None, min_length=1, max_length=128),
     search: Optional[str] = Query(None),
     checkpoint: Optional[str] = Query(None),
     scanType: Optional[str] = Query(None, pattern="^(auto|manual)$"),
@@ -153,7 +160,7 @@ async def list_movements(
     filters = _movement_filters(
         search=search, checkpoint=checkpoint, scan_type_ui=scanType, subject_group=subjectGroup,
         start_at=startAt, end_at=endAt, subject_id=subject_id, result=result,
-        direction=direction, scan_type=scan_type, subject_type=subject_type, since=since,
+        direction=direction, scan_type=scan_type, subject_type=subject_type, since=since, event_id=eventId,
     )
     sort_columns = {"date": Movement.occurred_at, "time": Movement.occurred_at,
         "createdAt": Movement.occurred_at, "eventId": Movement.id, "type": Movement.subject_type,
@@ -223,6 +230,7 @@ async def list_movements(
 
 @router.get("/analytics")
 async def movement_analytics(
+    eventId: Optional[str] = Query(None, min_length=1, max_length=128),
     search: Optional[str] = Query(None),
     checkpoint: Optional[str] = Query(None),
     scanType: Optional[str] = Query(None, pattern="^(auto|manual)$"),
@@ -246,7 +254,7 @@ async def movement_analytics(
     filters = _movement_filters(
         search=search, checkpoint=checkpoint, scan_type_ui=scanType, subject_group=subjectGroup,
         start_at=startAt, end_at=endAt, subject_id=None, result=result,
-        direction=direction, scan_type=scan_type, subject_type=subject_type, since=since,
+        direction=direction, scan_type=scan_type, subject_type=subject_type, since=since, event_id=eventId,
     )
     where = filters if filters else []
     bucket_column = func.date_trunc(bucket, Movement.occurred_at).label("bucket")

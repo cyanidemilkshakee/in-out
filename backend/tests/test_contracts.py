@@ -44,11 +44,14 @@ class ContractTests(unittest.TestCase):
                 asyncio.run(verify_admin_request(None))
         self.assertEqual(error.exception.status_code, 401)
 
-    def test_terminal_role_is_exclusive_from_admin(self):
+    def test_terminal_access_allows_admin_or_operator(self):
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-token")
         with patch("auth.verify_keycloak_token", return_value={"sub": "operator", "realm_access": {"roles": ["operator"]}}):
             self.assertEqual(asyncio.run(verify_terminal_operator_request(credentials))["sub"], "operator")
-        for roles in (["admin"], ["admin", "operator"], []):
+        for roles in (["admin"], ["admin", "operator"]):
+            with patch("auth.verify_keycloak_token", return_value={"sub": "admin", "realm_access": {"roles": roles}}):
+                self.assertEqual(asyncio.run(verify_terminal_operator_request(credentials))["sub"], "admin")
+        for roles in ([],):
             with patch("auth.verify_keycloak_token", return_value={"realm_access": {"roles": roles}}):
                 with self.assertRaises(HTTPException) as error:
                     asyncio.run(verify_terminal_operator_request(credentials))

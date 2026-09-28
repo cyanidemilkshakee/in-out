@@ -108,7 +108,19 @@ export function MovementTable({
               ) : null}
               {visibleColumns.barcode ? <td className="column-barcode" data-label="Barcode" style={{ fontFamily: "monospace", fontSize: "0.9em" }}>{event.barcode}</td> : null}
               {visibleColumns.scanType ? <td className="column-scanType" data-label="Scan type" style={{ textTransform: "capitalize" }}>{event.scanType}</td> : null}
-              {visibleColumns.eventId ? <td className="column-eventId" data-label="Event ID">{event.id}</td> : null}
+              {visibleColumns.eventId ? (
+                <td className="column-eventId" data-label="Event ID">
+                  <button
+                    type="button"
+                    className="event-id-button"
+                    title={event.id}
+                    aria-label={`Open event ${event.id}`}
+                    onClick={(click) => { click.stopPropagation(); onSelect(event.id); }}
+                  >
+                    {event.id}
+                  </button>
+                </td>
+              ) : null}
             </tr>
           ))}
         </tbody>

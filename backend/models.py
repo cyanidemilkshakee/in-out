@@ -160,6 +160,6 @@ class AdminAccount(Base):
     nickname: str = Column(String, nullable=False)
     email: str = Column(String, nullable=False)
     avatar_data_url: str = Column(String, nullable=False, default="")
-    auto_lock: str = Column(String, nullable=False, default="15")
+    offline_until = Column(DateTime(timezone=True), nullable=True)
     settings = Column(JSONB, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

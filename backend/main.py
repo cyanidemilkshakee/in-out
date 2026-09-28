@@ -20,7 +20,7 @@ from terminal_scans import record_scan
 from redis_client import get_redis_pool, close_redis_pool, publish_presence_update
 from dashboard_cache import invalidate_dashboard_cache
 from routers import presence, movements, registry, permissions
-from routers import dashboard, alerts, notifications, audit, checkpoints, terminal, admin_profile
+from routers import dashboard, alerts, notifications, audit, checkpoints, terminal, admin_profile, keycloak_admin
 from temporal_worker import get_temporal_client
 
 logger = logging.getLogger(__name__)
@@ -118,6 +118,7 @@ app.include_router(alerts.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(notifications.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(audit.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(checkpoints.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(keycloak_admin.router)
 app.include_router(terminal.router, dependencies=[Depends(verify_terminal_operator_request)])
 app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
 

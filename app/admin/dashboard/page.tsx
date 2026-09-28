@@ -2,6 +2,8 @@
 
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { movementLogHref } from "../../../lib/movementReferences";
 import { MovementTable } from "../../../frontend/components/admin/tables/MovementTable";
 import { useDataState } from "../../../frontend/context/DataContext";
 import type {
@@ -51,7 +53,7 @@ function DashboardOverview({
   const latestEvents = useMemo(() => events.slice(0, 10), [events]);
   const [sortKey, setSortKey] = useState<VisibleColumn>("time");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [selectedEventId, setSelectedEventId] = useState<string>();
+  const router = useRouter();
 
   return (
     <section className="dashboard-overview" aria-label="Operational overview">
@@ -67,7 +69,6 @@ function DashboardOverview({
         <h2 id="recent-movement-heading">Recent Movement Logs</h2>
         <MovementTable
           events={latestEvents}
-          selectedId={selectedEventId}
           visibleColumns={dashboardVisibleColumns}
           sortKey={sortKey}
           sortDirection={sortDirection}
@@ -82,11 +83,7 @@ function DashboardOverview({
               setSortDirection("desc");
             }
           }}
-          onSelect={(id) =>
-            setSelectedEventId((current) =>
-              id === current ? undefined : id
-            )
-          }
+          onSelect={(id) => router.push(movementLogHref(id))}
         />
       </div>
     </section>

@@ -60,10 +60,16 @@ export function DetailDrawer({
             <dt>Result</dt>
             <dd style={{ textTransform: "capitalize" }}>{event.result}</dd>
           </div>
-          <div>
-            <dt>{alert ? "Alert ID" : "Event ID"}</dt>
-            <dd>{alert?.id ?? event.id}</dd>
+          <div className="detail-identifier">
+            <dt>Event ID</dt>
+            <dd><code tabIndex={0} title={event.id}>{event.id}</code></dd>
           </div>
+          {alert ? (
+            <div className="detail-identifier">
+              <dt>Alert ID</dt>
+              <dd><code tabIndex={0} title={alert.id}>{alert.id}</code></dd>
+            </div>
+          ) : null}
           <div>
             <dt>Scan Type</dt>
             <dd style={{ textTransform: "capitalize" }}>{event.scanType ?? "N/A"}</dd>

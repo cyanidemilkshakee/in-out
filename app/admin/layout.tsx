@@ -10,7 +10,6 @@ import {
 import { Moon, Sun } from "lucide-react";
 import { AppChrome } from "../../frontend/components/AppChrome";
 import { AdminNavRail } from "../../frontend/components/admin/AdminNavRail";
-import { AccountActions } from "../../frontend/components/AccountActions";
 import "./admin.css";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
@@ -115,7 +114,6 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           tabIndex={0}
           aria-label="Admin content"
         >
-          <AccountActions />
           {children}
         </div>
         <button

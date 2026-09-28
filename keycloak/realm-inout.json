@@ -35,7 +35,7 @@
       "publicClient": false,
       "protocol": "openid-connect",
       "attributes": {
-        "post.logout.redirect.uris": "${INOUT_APP_URL}/login##http://localhost:1001/login##http://localhost:3000/login",
+        "post.logout.redirect.uris": "${INOUT_APP_URL}/login##${INOUT_APP_URL}/logout/complete##http://localhost:1001/login##http://localhost:1001/logout/complete##http://localhost:3000/login##http://localhost:3000/logout/complete",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
@@ -121,7 +121,8 @@
         "composite": true,
         "composites": {
           "client": {
-            "account": ["manage-account", "view-profile"]
+            "account": ["manage-account", "view-profile"],
+            "realm-management": ["manage-users", "query-users", "view-users", "view-realm"]
           }
         }
       },

@@ -282,6 +282,7 @@ export type AppDataSnapshot = {
   notifications: PermissionNotification[];
   alertRules: AlertRule[];
   auditEvents: AuditEvent[];
+  adminAvailability?: { status: "available" | "offline"; availableAt: string | null };
 };
 
 export type CreateTemporaryVisitorInput = {
@@ -367,6 +368,7 @@ export type PermissionDecisionMutationResult = {
 export type MovementQuery = {
   page: number;
   pageSize: number;
+  eventId?: string;
   search?: string;
   checkpoint?: string;
   result?: ResultStatus;

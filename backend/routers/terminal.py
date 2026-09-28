@@ -21,7 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db
-from models import Checkpoint, HardwareAsset, Subject, PermissionRequestModel, Movement
+from models import AdminAccount, Checkpoint, HardwareAsset, Subject, PermissionRequestModel, Movement
 from temporal_worker import get_temporal_client, TASK_QUEUE
 from workflows.permission_override import PermissionOverrideWorkflow
 from permission_decisions import review_source, pending_manual_review
@@ -180,10 +180,20 @@ async def get_terminal_bundle(
         }
         for movement in movement_result.scalars().all()
     ]
+    offline_until = await db.scalar(
+        select(AdminAccount.offline_until)
+        .where(AdminAccount.offline_until.is_not(None), AdminAccount.offline_until > datetime.now(timezone.utc))
+        .order_by(AdminAccount.offline_until.asc())
+        .limit(1)
+    )
 
     return {
         "hardwareAssets": hardware_assets,
         "checkpoints": checkpoints,
         "movements":   movements,
         "permissionRequests": permission_requests,
+        "adminAvailability": {
+            "status": "offline" if offline_until else "available",
+            "availableAt": offline_until.isoformat() if offline_until else None,
+        },
     }

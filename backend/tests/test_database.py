@@ -118,6 +118,38 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         for params in ({"search": "Missing"}, {"scanType": "manual"}, {"subjectGroup": "hardware"}, {"startAt": "2099-01-01T00:00:00Z"}, {"endAt": "2000-01-01T00:00:00Z"}):
             self.assertEqual((await self.client.get("/v1/movements", params=params)).json()["total"], 0)
 
+    async def test_movement_references_search_and_resolve_across_default_filters(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        event_ids = [str(uuid.uuid4()), "MAN-" + uuid.uuid4().hex, "EVT-000123"]
+        async with self.sessions() as db:
+            for event_id in event_ids:
+                db.add(Movement(id=event_id, subject_id="h1", checkpoint_id="cp1",
+                    occurred_at=datetime(2020, 1, 1, tzinfo=timezone.utc), result="approved",
+                    direction="entry", scan_type="manual", subject_type="hardware", sync_state="synced",
+                    data={"id": "stale-display-id", "subjectName": "Laptop", "barcode": "h1"}))
+            await db.commit()
+        for event_id in event_ids:
+            # Text search must find both complete IDs and fragments.
+            for search in [event_id.lower(), event_id[-10:]]:
+                page = await self.client.get("/v1/movements", params={"search": search})
+                self.assertEqual(page.status_code, 200, page.text)
+                self.assertEqual([item["id"] for item in page.json()["items"]], [event_id])
+            # A direct reference overrides stale filters, and chart/table use
+            # the same identity even if historical display metadata differs.
+            params = {"eventId": event_id.lower(), "subjectGroup": "people",
+                "startAt": "2099-01-01T00:00:00Z", "checkpoint": "elsewhere", "result": "denied"}
+            for endpoint in ["/v1/movements", "/v1/movements/analytics"]:
+                response = await self.client.get(endpoint, params=params)
+                self.assertEqual(response.status_code, 200, response.text)
+                self.assertEqual([item["id"] for item in response.json()["items"]], [event_id])
+            notes_url = f"/v1/movements/{event_id}/notes"
+            note = await self.client.post(notes_url, json={"note": "Verified event reference"})
+            self.assertEqual(note.status_code, 200, note.text)
+            page = (await self.client.get("/v1/movements", params=params)).json()
+            self.assertEqual(page["movementNotes"][event_id], ["Verified event reference"])
+        missing = await self.client.get("/v1/movements", params={"eventId": "missing"})
+        self.assertEqual(missing.json()["total"], 0)
+
     async def test_direct_hardware_scan_and_custody_denial(self):
         async with self.sessions() as db:
             asset = await db.get(HardwareAsset, "h1")
@@ -377,24 +409,31 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="h1", checkpointId="cp1", selectedHardwareIds=["h1"]), "test")
             self.assertEqual(error.exception.status_code, 422)
 
-    async def test_profile_isolation_and_camel_case_preferences(self):
+    async def test_profile_isolation_and_explicit_availability(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a", "name": "Admin A", "email": "a@example.test"}
         first = await self.client.get("/v1/admin/profile")
         self.assertEqual(first.status_code, 200, first.text)
-        updated = await self.client.patch("/v1/admin/profile", json={"avatarDataUrl": "data:image/png;base64,dGVzdA==", "autoLock": "30"})
+        updated = await self.client.patch("/v1/admin/profile", json={"avatarDataUrl": "data:image/png;base64,dGVzdA=="})
         self.assertEqual(updated.status_code, 200, updated.text)
-        self.assertEqual(updated.json()["auto_lock"], "30")
         self.assertEqual(updated.json()["avatar_data_url"], "data:image/png;base64,dGVzdA==")
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-b", "name": "Admin B", "email": "b@example.test"}
         second = await self.client.get("/v1/admin/profile")
         self.assertNotEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(second.json()["name"], "Admin B")
         self.assertEqual(second.json()["avatar_data_url"], "")
-        self.assertEqual(second.json()["auto_lock"], "15")
         self.assertEqual(second.json()["settings"], {"requireReviewNote": True})
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a"}
         again = await self.client.get("/v1/admin/profile")
-        self.assertEqual(again.json()["auto_lock"], "30")
+        self.assertEqual(again.json()["offline_until"], None)
+        expected_return = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
+        offline = await self.client.patch("/v1/admin/profile/availability", json={"offlineUntil": expected_return})
+        self.assertEqual(offline.status_code, 200, offline.text)
+        self.assertIsNotNone(offline.json()["offline_until"])
+        cleared = await self.client.patch("/v1/admin/profile/availability", json={"offlineUntil": None})
+        self.assertEqual(cleared.status_code, 200, cleared.text)
+        self.assertIsNone(cleared.json()["offline_until"])
+        invalid = await self.client.patch("/v1/admin/profile/availability", json={"offlineUntil": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()})
+        self.assertEqual(invalid.status_code, 422, invalid.text)
 
     async def test_registry_updates_cascade_to_permissions_and_keep_identity_consistent(self):
         from auth import verify_admin_or_operator_request

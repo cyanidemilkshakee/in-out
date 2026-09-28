@@ -13,7 +13,6 @@ function normalizeProfile(raw: Record<string, unknown>): Record<string, unknown>
     nickname:      raw.nickname,
     email:         raw.email,
     avatarDataUrl: raw.avatar_data_url ?? raw.avatarDataUrl ?? "",
-    autoLock:      raw.auto_lock      ?? raw.autoLock      ?? "15",
     settings:      raw.settings       ?? {},
     createdAt:     raw.created_at     ?? raw.createdAt,
   };
