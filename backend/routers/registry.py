@@ -6,7 +6,7 @@ Manage subjects (employees, visitors, hardware) and their associated metadata.
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -20,6 +20,7 @@ from models import AccessPermission, Alert, Subject, Person, HardwareAsset, Perm
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
 from temporal_worker import get_temporal_client, TASK_QUEUE
 from workflows.visitor_approval import VisitorApprovalWorkflow
+from access_validation import validate_window, validate_zones
 
 logger = logging.getLogger(__name__)
 
@@ -155,13 +156,22 @@ async def create_subject(
     incoming = _validated_metadata(payload)
     requested_zones = incoming.get("allowedZones")
     if not isinstance(requested_zones, list):
-        requested_zones = []
+        requested_zones = [incoming["allowedZone"]] if isinstance(incoming.get("allowedZone"), str) else []
+    if payload.kind == "hardware" and incoming.get("status", "active") not in {"active", "restricted", "maintenance"}:
+        raise HTTPException(422, "Unsupported hardware status")
+    now = datetime.now(timezone.utc)
+    valid_from = incoming.get("validFrom") or now.isoformat()
+    valid_to = incoming.get("validTo") or incoming.get("validUntil") or ""
+    if payload.kind == "visitor" and not valid_to:
+        valid_to = (now + timedelta(hours=incoming["hours"])).isoformat()
+    validate_window(valid_from, valid_to)
+    requested_zones = validate_zones(requested_zones)
     data = {
         **incoming,
         # Server-owned fields must be applied last. Operators cannot create an
         # already-approved visitor or smuggle a different identity into the
         # registry payload.
-        "status": "pending_approval" if payload.kind == "visitor" else "active",
+        "status": "pending_approval" if payload.kind == "visitor" else incoming.get("status", "active") if payload.kind == "hardware" else "active",
         "inside": False,
         "phone": str(incoming.get("phone") or ""),
         "accessLevel": str(incoming.get("accessLevel") or "Standard"),
@@ -170,6 +180,9 @@ async def create_subject(
         "id": subject_id,
         "barcode": payload.barcode,
         "type": payload.kind,
+        "validFrom": valid_from,
+        "validTo": valid_to,
+        "createdAt": now.isoformat(),
     }
     new_sub = Subject(id=subject_id, kind=payload.kind, barcode=payload.barcode)
     
@@ -179,7 +192,7 @@ async def create_subject(
         new_sub.hardware = HardwareAsset(data=data)
 
     db.add(new_sub)
-    if payload.kind == "visitor":
+    if payload.kind in {"employee", "visitor", "hardware"}:
         permission_id = str(uuid.uuid4())
         db.add(AccessPermission(
             id=permission_id,
@@ -188,9 +201,9 @@ async def create_subject(
                 "id": permission_id,
                 "subjectId": subject_id,
                 "subjectName": data.get("name") or payload.barcode,
-                "subjectType": "visitor",
-                "assignment": "Temporary visitor",
-                "state": "pending_approval",
+                "subjectType": payload.kind,
+                "assignment": "Temporary visitor" if payload.kind == "visitor" else payload.kind.title(),
+                "state": "pending_approval" if payload.kind == "visitor" else "active" if data["status"] == "active" else "restricted",
                 "zones": data.get("allowedZones") or [],
                 "validFrom": data.get("validFrom") or "",
                 "validTo": data.get("validTo") or data.get("validUntil") or "",
@@ -263,6 +276,7 @@ async def update_subject(
         select(Subject)
         .options(selectinload(Subject.person), selectinload(Subject.hardware))
         .where(Subject.id == subject_id)
+        .with_for_update()
     )
     result = await db.execute(stmt)
     sub = result.scalar_one_or_none()
@@ -273,6 +287,18 @@ async def update_subject(
     if payload.barcode is not None:
         sub.barcode = payload.barcode
 
+    patch = {key: value for key, value in (payload.data or {}).items()
+             if key not in {"id", "type", "kind", "barcode", "inside", "entryOverride", "createdAt"}}
+    if "allowedZones" in patch:
+        patch["allowedZones"] = validate_zones(patch["allowedZones"])
+    if "status" in patch:
+        statuses = {"active", "restricted", "maintenance"} if sub.kind == "hardware" else {"active", "inactive", "pre_approved", "pending_approval", "restricted", "expired"}
+        if patch["status"] not in statuses:
+            raise HTTPException(422, "Unsupported registry status")
+    for field, limit in _METADATA_LIMITS.items():
+        if field in patch and (not isinstance(patch[field], str) or not patch[field].strip() or len(patch[field]) > limit):
+            raise HTTPException(422, f"{field} must be non-empty text of at most {limit} characters")
+
     current_data = {}
     if payload.data is not None:
         if sub.kind in ("employee", "visitor"):
@@ -280,12 +306,12 @@ async def update_subject(
                 sub.person = Person(data={})
             # Merge updates or overwrite entirely? We overwrite entirely.
             # If partial merge is desired, it's `sub.person.data = {**sub.person.data, **payload.data}`
-            sub.person.data = {**sub.person.data, **payload.data}
+            sub.person.data = {**sub.person.data, **patch}
             current_data = sub.person.data
         elif sub.kind == "hardware":
             if not sub.hardware:
                 sub.hardware = HardwareAsset(data={})
-            sub.hardware.data = {**sub.hardware.data, **payload.data}
+            sub.hardware.data = {**sub.hardware.data, **patch}
             current_data = sub.hardware.data
     else:
         if sub.person:
@@ -293,6 +319,21 @@ async def update_subject(
         elif sub.hardware:
             current_data = sub.hardware.data
 
+    current_data = {**current_data, "id": sub.id, "barcode": sub.barcode, "type": sub.kind}
+    validate_window(current_data.get("validFrom"), current_data.get("validTo"))
+    metadata = sub.hardware if sub.kind == "hardware" else sub.person
+    if metadata:
+        metadata.data = current_data
+    permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == sub.id))
+    if permission:
+        permission_data = {**permission.data, "subjectName": current_data.get("name", sub.barcode),
+            "updatedAt": datetime.now(timezone.utc).isoformat(), "updatedBy": _admin.get("sub", "unknown")}
+        for source, target in (("allowedZones", "zones"), ("validFrom", "validFrom"), ("validTo", "validTo")):
+            if source in patch:
+                permission_data[target] = patch[source]
+        if "status" in patch:
+            permission_data["state"] = {"pre_approved": "active", "inactive": "revoked", "maintenance": "restricted"}.get(patch["status"], patch["status"])
+        permission.data = permission_data
     try:
         await db.commit()
     except exc.IntegrityError:
@@ -335,8 +376,8 @@ async def registry_bundle(db: AsyncSession = Depends(get_read_db)) -> dict[str, 
     subjects = (await db.execute(
         select(Subject).options(selectinload(Subject.person), selectinload(Subject.hardware)).order_by(Subject.id)
     )).scalars().all()
-    people = [{**(subject.person.data or {}), "id": subject.id} for subject in subjects if subject.person]
-    hardware = [{**(subject.hardware.data or {}), "id": subject.id} for subject in subjects if subject.hardware]
+    people = [{**(subject.person.data or {}), "id": subject.id, "barcode": subject.barcode, "type": subject.kind} for subject in subjects if subject.person]
+    hardware = [{**(subject.hardware.data or {}), "id": subject.id, "barcode": subject.barcode} for subject in subjects if subject.hardware]
     manual_review_alert = (
         (Alert.data["manualReview"].astext == "true")
         | (Alert.data["ruleId"].astext == "rule-manual-review")
@@ -344,7 +385,7 @@ async def registry_bundle(db: AsyncSession = Depends(get_read_db)) -> dict[str, 
         | Alert.data["title"].astext.ilike("Unknown barcode%")
     )
     alerts = [alert.data for alert in (await db.execute(
-        select(Alert).where(~manual_review_alert).order_by(Alert.created_at.desc()).limit(200)
+        select(Alert).where(~func.coalesce(manual_review_alert, False)).order_by(Alert.created_at.desc()).limit(200)
     )).scalars().all()]
     permissions = [permission.data for permission in (await db.execute(
         select(AccessPermission).order_by(AccessPermission.id)

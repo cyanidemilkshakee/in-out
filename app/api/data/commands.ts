@@ -98,6 +98,7 @@ export async function executeCommand(
         carrier_name: input.carrierName,
         event_id: input.eventId,
         direction: input.direction,
+        operator_note: input.operatorNote,
       }));
     }
     case "decidePermissionRequest": {
@@ -117,6 +118,8 @@ export async function executeCommand(
       if (typeof body.enabled !== "boolean") throw new Error("Alert rule enabled state is required.");
       return send(await callPythonApi(`/v1/alert-rules/${ruleId}`, "PATCH", { enabled: body.enabled }));
     }
+    case "evaluateAlertRules":
+      return send(await callPythonApi("/v1/alerts/evaluate", "POST"));
     case "markNotificationRead":
       return send(await callPythonApi(`/v1/notifications/${requireString(body.notificationId, "Notification id")}/read`, "PATCH", {}));
     case "recordScan":

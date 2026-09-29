@@ -1,10 +1,12 @@
 """
 Temporal Worker — connects to the Temporal server and processes workflow/activity tasks.
-Started as a background asyncio task in main.py lifespan.
+Run as its own service so worker failures are supervised separately from the
+HTTP API process.
 """
 from __future__ import annotations
 
 import logging
+import asyncio
 
 from temporalio.client import Client
 from temporalio.worker import Worker
@@ -57,3 +59,12 @@ async def run_worker() -> None:
     )
     logger.info("Temporal worker started on task queue: %s", TASK_QUEUE)
     await worker.run()
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(run_worker())
+
+
+if __name__ == "__main__":
+    main()

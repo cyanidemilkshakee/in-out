@@ -1,0 +1,35 @@
+name: Verify
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+  backend:
+    runs-on: ubuntu-latest
+    env:
+      POSTGRES_PASSWORD: ci-postgres-password
+      KEYCLOAK_ADMIN_USERNAME: ci-admin
+      KEYCLOAK_ADMIN_PASSWORD: ci-keycloak-password
+      KEYCLOAK_CLIENT_SECRET: ci-client-secret
+      AUTH_SECRET: ci-auth-secret
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose --profile test run --build --rm backend-tests

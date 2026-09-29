@@ -121,6 +121,7 @@ export type MovementEvent = {
   syncState: SyncState;
   hardwareIds: string[];
   createdAt?: string;
+  capturedOfflineAt?: string;
 };
 
 export type Alert = {
@@ -143,6 +144,11 @@ export type Alert = {
   explanation?: string;
   sourceEventId?: string;
   createdAt?: string;
+};
+
+export type AlertEvaluationResult = {
+  triggered: number;
+  message: string;
 };
 
 export type AccessState =
@@ -187,6 +193,8 @@ export type PermissionRequest = {
   checkpointId?: string;
   direction?: Direction;
   eventId?: string;
+  operatorNote?: string;
+  decisionReason?: string;
 };
 
 export type PermissionNotification = {
@@ -307,9 +315,11 @@ export type CreateHardwareAssetInput = {
 export type RecordScanInput = {
   barcode: string;
   checkpointId: string;
+  direction?: Direction;
   selectedHardwareIds: string[];
   online: boolean;
   scanType: "auto" | "manual";
+  capturedOfflineAt?: string;
 };
 
 export type BarcodeManualReviewInput = {
@@ -317,6 +327,7 @@ export type BarcodeManualReviewInput = {
   checkpointId: string;
   direction?: Direction;
   eventId?: string;
+  operatorNote?: string;
 };
 
 export type RecordScanResult = {
@@ -401,7 +412,8 @@ export interface DataService {
   ): Promise<PermissionDecisionMutationResult>;
   updateAlertRule(ruleId: string, enabled: boolean): Promise<AlertRule>;
   markNotificationRead(notificationId: string): Promise<PermissionNotification>;
-  recordScan(input: RecordScanInput): Promise<RecordScanResult>;
+  recordScan(input: RecordScanInput, idempotencyKey?: string): Promise<RecordScanResult>;
+  evaluateAlertRules(): Promise<AlertEvaluationResult>;
   requestBarcodeManualReview(input: BarcodeManualReviewInput): Promise<PermissionRequest>;
   saveMovement(event: MovementEvent): Promise<MovementEvent>;
   syncMovements(eventIds?: string[]): Promise<MovementEvent[]>;

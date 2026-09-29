@@ -2,6 +2,7 @@ import type { Dispatch, ReactNode, SetStateAction } from "react";
 import type {
   AccessPermission,
   Alert,
+  AlertEvaluationResult,
   AlertRule,
   AppDataSnapshot,
   BarcodeManualReviewInput,
@@ -57,7 +58,8 @@ export type DataActions = {
   ) => Promise<PermissionRequest>;
   updateAlertRule: (ruleId: string, enabled: boolean) => Promise<AlertRule>;
   markNotificationRead: (notificationId: string) => Promise<PermissionNotification>;
-  recordScan: (input: RecordScanInput) => ReturnType<DataService["recordScan"]>;
+  recordScan: (input: RecordScanInput, idempotencyKey?: string) => ReturnType<DataService["recordScan"]>;
+  evaluateAlertRules: () => Promise<AlertEvaluationResult>;
   requestBarcodeManualReview: (
     input: BarcodeManualReviewInput
   ) => ReturnType<DataService["requestBarcodeManualReview"]>;

@@ -1,0 +1,466 @@
+{
+  "info": {
+    "name": "IN / OUT — Backend API (updated)",
+    "description": "All FastAPI routes. Base URL: http://localhost:1002\n\nAuthentication: use the collection-level OAuth 2.0 Authorization Code + PKCE configuration. Select Get New Access Token, sign in to Keycloak, then select Use Token. Do not paste a JWT into a collection variable: access tokens intentionally expire after five minutes.\n\nAuth:\n- Admin routes → Keycloak JWT for an admin user\n- Terminal routes → Keycloak JWT for an operator user\n- mTLS scan → cert headers via API gateway\n- Presence → any authenticated user JWT",
+    "_postman_id": "inout-backend-v2",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "base", "value": "http://localhost:1002", "type": "string" },
+    { "key": "keycloak_issuer", "value": "http://localhost:1005/realms/inout", "type": "string" },
+    { "key": "postman_client_id", "value": "inout-postman", "type": "string" },
+    { "key": "proxy_secret", "value": "YOUR_MTLS_PROXY_SECRET", "type": "string" }
+  ],
+  "auth": {
+    "type": "oauth2",
+    "oauth2": [
+      { "key": "grant_type", "value": "authorization_code_with_pkce", "type": "string" },
+      { "key": "authUrl", "value": "{{keycloak_issuer}}/protocol/openid-connect/auth", "type": "string" },
+      { "key": "accessTokenUrl", "value": "{{keycloak_issuer}}/protocol/openid-connect/token", "type": "string" },
+      { "key": "clientId", "value": "{{postman_client_id}}", "type": "string" },
+      { "key": "scope", "value": "openid profile email", "type": "string" },
+      { "key": "redirect_uri", "value": "https://oauth.pstmn.io/v1/callback", "type": "string" },
+      { "key": "addTokenTo", "value": "header", "type": "string" },
+      { "key": "tokenType", "value": "Bearer", "type": "string" },
+      { "key": "headerPrefix", "value": "Bearer", "type": "string" },
+      { "key": "challengeAlgorithm", "value": "S256", "type": "string" },
+      { "key": "tokenName", "value": "InOut Keycloak", "type": "string" },
+      { "key": "useBrowser", "value": true, "type": "boolean" }
+    ]
+  },
+  "item": [
+
+    {
+      "name": "Health",
+      "item": [
+        { "name": "GET / — API root", "request": { "method": "GET", "url": "{{base}}/" } },
+        { "name": "GET /health/live — Liveness probe", "request": { "method": "GET", "url": "{{base}}/health/live" } },
+        { "name": "GET /health/ready — Readiness probe (DB + Redis + Temporal)", "request": { "method": "GET", "url": "{{base}}/health/ready" } }
+      ]
+    },
+
+    {
+      "name": "Scans — mTLS Hardware Terminal",
+      "description": "Requires X-Client-Verify, X-Client-DN, X-Proxy-Secret forwarded by API gateway. Idempotency-Key header mandatory.",
+      "item": [
+        {
+          "name": "POST /v1/scans — Process scan (mTLS)",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/scans",
+            "header": [
+              { "key": "Idempotency-Key", "value": "{{$guid}}" },
+              { "key": "X-Client-Verify", "value": "SUCCESS" },
+              { "key": "X-Client-DN", "value": "CN=terminal-main,O=acme" },
+              { "key": "X-Proxy-Secret", "value": "{{proxy_secret}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"barcode\": \"EMP-001\",\n  \"checkpoint_id\": \"cp-main\",\n  \"direction\": \"entry\",\n  \"terminal_id\": \"terminal-main\",\n  \"scan_type\": \"auto\",\n  \"online\": true,\n  \"selected_hardware_ids\": []\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Terminal — Browser Operator",
+      "description": "Auth: terminal operator JWT.",
+      "item": [
+        {
+          "name": "POST /v1/terminal/scans — Process scan (browser)",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/terminal/scans",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"barcode\": \"EMP-001\",\n  \"checkpoint_id\": \"cp-main\",\n  \"direction\": \"entry\",\n  \"scan_type\": \"auto\",\n  \"online\": true,\n  \"selected_hardware_ids\": []\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/terminal/manual-reviews — Request manual override",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/terminal/manual-reviews",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"barcode\": \"EMP-001\",\n  \"checkpoint_id\": \"cp-main\",\n  \"direction\": \"entry\",\n  \"event_id\": \"evt-uuid-here\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/terminal/bundle — Bootstrap bundle",
+          "request": { "method": "GET", "url": "{{base}}/v1/terminal/bundle" }
+        }
+      ]
+    },
+
+    {
+      "name": "Registry — Subjects",
+      "description": "Auth: admin JWT.",
+      "item": [
+        {
+          "name": "GET /v1/registry/subjects — List subjects",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/v1/registry/subjects?q=&kind=person&page=1&limit=50",
+              "host": ["{{base}}"],
+              "path": ["v1","registry","subjects"],
+              "query": [
+                { "key": "q", "value": "" },
+                { "key": "kind", "value": "person" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/registry/subjects/:id — Get subject",
+          "request": {
+            "method": "GET",
+            "url": "{{base}}/v1/registry/subjects/:subject_id",
+            "variable": [{ "key": "subject_id", "value": "" }]
+          }
+        },
+        {
+          "name": "POST /v1/registry/subjects — Create subject",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/registry/subjects",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Smith\",\n  \"type\": \"person\",\n  \"barcode\": \"EMP-001\",\n  \"metadata\": {}\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "PUT /v1/registry/subjects/:id — Update subject",
+          "request": {
+            "method": "PUT",
+            "url": "{{base}}/v1/registry/subjects/:subject_id",
+            "variable": [{ "key": "subject_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"Alice Smith\",\n  \"barcode\": \"EMP-001\",\n  \"metadata\": {}\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "DELETE /v1/registry/subjects/:id — Delete subject",
+          "request": {
+            "method": "DELETE",
+            "url": "{{base}}/v1/registry/subjects/:subject_id",
+            "variable": [{ "key": "subject_id", "value": "" }]
+          }
+        },
+        {
+          "name": "GET /v1/registry/bundle — Full admin bundle",
+          "request": { "method": "GET", "url": "{{base}}/v1/registry/bundle" }
+        }
+      ]
+    },
+
+    {
+      "name": "Movements",
+      "description": "Auth: admin JWT.",
+      "item": [
+        {
+          "name": "GET /v1/movements — List movements (paginated + filtered)",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/v1/movements?checkpoint_id=&direction=&page=1&limit=50",
+              "host": ["{{base}}"],
+              "path": ["v1","movements"],
+              "query": [
+                { "key": "checkpoint_id", "value": "" },
+                { "key": "direction", "value": "" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "GET /v1/movements/analytics — Movement analytics",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/v1/movements/analytics?checkpoint_id=&from=&to=",
+              "host": ["{{base}}"],
+              "path": ["v1","movements","analytics"],
+              "query": [
+                { "key": "checkpoint_id", "value": "" },
+                { "key": "from", "value": "" },
+                { "key": "to", "value": "" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "POST /v1/movements/save — Upsert movement (offline)",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/movements/save",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"movements\": [\n    {\n      \"barcode\": \"EMP-001\",\n      \"checkpoint_id\": \"cp-main\",\n      \"direction\": \"entry\",\n      \"time\": \"2024-01-01T09:00:00Z\"\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/movements/sync — Mark movements synced",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/movements/sync",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/movements/conflicts/resolve — Resolve conflict",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/movements/conflicts/resolve",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"event_ids\": [\"evt-uuid-here\"]\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/movements/:id/notes — Get notes",
+          "request": {
+            "method": "GET",
+            "url": "{{base}}/v1/movements/:movement_id/notes",
+            "variable": [{ "key": "movement_id", "value": "" }]
+          }
+        },
+        {
+          "name": "POST /v1/movements/:id/notes — Add note",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/movements/:movement_id/notes",
+            "variable": [{ "key": "movement_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"note\": \"Visitor escorted by staff\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Permissions",
+      "item": [
+        {
+          "name": "POST /v1/permission-requests — Submit request",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/permission-requests",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"barcode\": \"EMP-001\",\n  \"checkpoint_id\": \"cp-main\",\n  \"direction\": \"entry\",\n  \"event_id\": \"evt-uuid-here\",\n  \"type\": \"manual_override\",\n  \"subject_id\": \"sub-uuid-here\",\n  \"subject_name\": \"Alice Smith\",\n  \"requester\": \"Terminal Operator\",\n  \"purpose\": \"Emergency access\",\n  \"requested_zones\": [\"zone-a\"],\n  \"valid_from\": \"2024-01-01T09:00:00Z\",\n  \"valid_to\": \"2024-01-01T10:00:00Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/permission-requests/:id/decide — Approve or deny",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/permission-requests/:req_id/decide",
+            "variable": [{ "key": "req_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"approved\",\n  \"reason\": \"Verified by admin\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "GET /v1/permissions — All permissions snapshot",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/v1/permissions?subject_id=",
+              "host": ["{{base}}"],
+              "path": ["v1","permissions"],
+              "query": [{ "key": "subject_id", "value": "" }]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/permissions/:subject_id — Update access",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base}}/v1/permissions/:subject_id",
+            "variable": [{ "key": "subject_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"allowed_checkpoints\": [\"cp-main\"],\n  \"valid_from\": \"2024-01-01T00:00:00Z\",\n  \"valid_to\": \"2024-12-31T23:59:59Z\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Presence",
+      "description": "Auth: any authenticated user JWT.",
+      "item": [
+        { "name": "GET /v1/presence — Presence snapshot", "request": { "method": "GET", "url": "{{base}}/v1/presence" } },
+        {
+          "name": "GET /v1/presence/stream — SSE live stream",
+          "request": {
+            "method": "GET",
+            "url": "{{base}}/v1/presence/stream",
+            "header": [{ "key": "Accept", "value": "text/event-stream" }]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Dashboard",
+      "item": [
+        { "name": "GET /v1/dashboard — Aggregate stats", "request": { "method": "GET", "url": "{{base}}/v1/dashboard" } }
+      ]
+    },
+
+    {
+      "name": "Alerts",
+      "item": [
+        {
+          "name": "GET /v1/alerts — List alerts",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/v1/alerts?status=active&page=1&limit=50",
+              "host": ["{{base}}"],
+              "path": ["v1","alerts"],
+              "query": [
+                { "key": "status", "value": "active" },
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" }
+              ]
+            }
+          }
+        },
+        {
+          "name": "PATCH /v1/alerts/:id — Acknowledge / resolve",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base}}/v1/alerts/:alert_id",
+            "variable": [{ "key": "alert_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"acknowledged\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/alerts/evaluate — Trigger rule evaluation",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/alerts/evaluate",
+            "body": { "mode": "raw", "raw": "{}", "options": { "raw": { "language": "json" } } }
+          }
+        },
+        {
+          "name": "PATCH /v1/alert-rules/:id — Enable / disable rule",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base}}/v1/alert-rules/:rule_id",
+            "variable": [{ "key": "rule_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"enabled\": true\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Notifications",
+      "item": [
+        { "name": "GET /v1/notifications — List notifications", "request": { "method": "GET", "url": "{{base}}/v1/notifications" } },
+        {
+          "name": "PATCH /v1/notifications/:id/read — Mark as read",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base}}/v1/notifications/:notification_id/read",
+            "variable": [{ "key": "notification_id", "value": "" }]
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Audit",
+      "item": [
+        {
+          "name": "GET /v1/audit-events — List audit events",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{base}}/v1/audit-events?page=1&limit=50",
+              "host": ["{{base}}"],
+              "path": ["v1","audit-events"],
+              "query": [
+                { "key": "page", "value": "1" },
+                { "key": "limit", "value": "50" }
+              ]
+            }
+          }
+        }
+      ]
+    },
+
+    {
+      "name": "Checkpoints",
+      "item": [
+        { "name": "GET /v1/checkpoints — List checkpoints", "request": { "method": "GET", "url": "{{base}}/v1/checkpoints" } }
+      ]
+    },
+
+    {
+      "name": "Admin Profile",
+      "item": [
+        { "name": "GET /v1/admin/profile — Get profile", "request": { "method": "GET", "url": "{{base}}/v1/admin/profile" } },
+        {
+          "name": "PATCH /v1/admin/profile — Update profile",
+          "request": {
+            "method": "PATCH",
+            "url": "{{base}}/v1/admin/profile",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"display_name\": \"Admin User\",\n  \"preferences\": {}\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        }
+      ]
+    }
+
+  ]
+}

@@ -20,13 +20,32 @@ const MetricTrendChart = dynamic(
 
 export default function AlertsPage() {
   const { alerts, alertRules } = useDataState();
-  const { updateAlert, updateAlertRule } = useDataActions();
+  const { updateAlert, updateAlertRule, evaluateAlertRules } = useDataActions();
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
+  const [isEvaluating, setIsEvaluating] = useState(false);
+  const [evaluationMessage, setEvaluationMessage] = useState("");
   const deferredSearch = useDeferredValue(search);
 
   function handleUpdateAlert(alertId: string, status: Alert["status"]) {
     void updateAlert(alertId, { status });
+  }
+
+  async function handleEvaluateRules() {
+    setIsEvaluating(true);
+    setEvaluationMessage("");
+    try {
+      const result = await evaluateAlertRules();
+      setEvaluationMessage(
+        result.triggered
+          ? `Created ${result.triggered} new alert${result.triggered === 1 ? "" : "s"}.`
+          : "Rules evaluated. No new alerts."
+      );
+    } catch (error) {
+      setEvaluationMessage(error instanceof Error ? error.message : "Unable to evaluate alert rules.");
+    } finally {
+      setIsEvaluating(false);
+    }
   }
 
   const activeAlerts = useMemo(
@@ -94,6 +113,17 @@ export default function AlertsPage() {
               <option value="1D">Last 24 Hours</option>
             </select>
           </label>
+          <div className="alert-run-control">
+            <button
+              type="button"
+              className="secondary-button compact-button"
+              onClick={() => void handleEvaluateRules()}
+              disabled={isEvaluating}
+            >
+              {isEvaluating ? "Evaluating…" : "Run rules now"}
+            </button>
+            {evaluationMessage && <span role="status">{evaluationMessage}</span>}
+          </div>
           <label className="search-control" style={{ marginLeft: "auto" }}>
             <span className="sr-only">Search alerts</span>
             <input
