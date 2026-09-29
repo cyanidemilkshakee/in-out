@@ -6,7 +6,7 @@ workspace:
 
 cloudResources:
   collections:
-    ../postman/collections/IN - OUT — Backend API (updated): fa748cc8-2f0e-4cab-89be-bada5ee8c90d
+    ../inout_api_collection.postman_collection.json: fa748cc8-2f0e-4cab-89be-bada5ee8c90d
 
 # All resources in the `postman/` folder are automatically registered in Local View.
 # Point to additional files outside the `postman/` folder to register them individually. Example:

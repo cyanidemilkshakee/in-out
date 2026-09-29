@@ -14,7 +14,9 @@ from movement_logic import evaluate_scan, apply_movement_state, _current_date, _
 
 
 async def record_scan(db, key, payload, terminal_id):
-    normalized = payload.model_dump()
+    # Use Pydantic's JSON mode so queued scans with a captured datetime remain
+    # deterministic and serializable when building the idempotency fingerprint.
+    normalized = payload.model_dump(mode="json")
     normalized["barcode"] = payload.barcode.strip().lower()
     normalized["selected_hardware_ids"] = sorted(set(payload.selected_hardware_ids))
     fingerprint = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()

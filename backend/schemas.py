@@ -17,6 +17,7 @@ class ScanPayload(APIModel):
     selected_hardware_ids: list[str] = Field(default_factory=list, max_length=8)
     online: bool = True
     scan_type: str = Field("auto", pattern="^(auto|manual)$")
+    captured_offline_at: Optional[datetime] = None
 
 
 class BrowserScanPayload(APIModel):

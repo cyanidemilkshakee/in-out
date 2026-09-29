@@ -35,7 +35,9 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         if not make_url(TEST_URL).database.endswith("_test"):
             raise RuntimeError("Integration tests require a database ending in _test")
         self.schema = "test_" + uuid.uuid4().hex
-        self.engine = create_async_engine(TEST_URL, connect_args={"server_settings": {"search_path": self.schema}})
+        # Keep PostgreSQL extension objects (including pg_trgm) visible while
+        # isolating tables in a per-test schema.
+        self.engine = create_async_engine(TEST_URL, connect_args={"server_settings": {"search_path": self.schema + ",public"}})
         async with self.engine.begin() as conn:
             await conn.execute(text(f'CREATE SCHEMA "{self.schema}"'))
             def migrate(connection):

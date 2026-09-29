@@ -63,6 +63,18 @@ services:
       retries: 5
     restart: unless-stopped
 
+  keycloak-realm-renderer:
+    image: alpine:3.20
+    environment:
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      - INOUT_APP_URL=${AUTH_URL:-http://localhost:${APP_PORT:-1008}}
+    volumes:
+      - ./keycloak/realm-inout.json:/templates/realm-inout.json:ro
+      - ./keycloak/render-realm.sh:/scripts/render-realm.sh:ro
+      - keycloak-import:/import
+    command: ["/bin/sh", "/scripts/render-realm.sh"]
+    restart: "no"
+
   keycloak:
     image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.2.5}
     command: start-dev --import-realm
@@ -82,7 +94,7 @@ services:
     ports:
       - "127.0.0.1:${KEYCLOAK_PORT:-1005}:8080"
     volumes:
-      - ./keycloak/realm-inout.json:/opt/keycloak/data/import/inout-realm.json:ro
+      - keycloak-import:/opt/keycloak/data/import:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"]
       interval: 10s
@@ -92,6 +104,8 @@ services:
     depends_on:
       postgres-primary:
         condition: service_healthy
+      keycloak-realm-renderer:
+        condition: service_completed_successfully
     restart: unless-stopped
 
   backend-init:
@@ -244,6 +258,7 @@ services:
 
 volumes:
   pg-primary-data:
+  keycloak-import:
 
 networks:
   test:

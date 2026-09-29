@@ -77,16 +77,22 @@ app = FastAPI(title="InOut Backend", lifespan=lifespan)
 
 @app.middleware("http")
 async def protect_write_requests(request: Request, call_next):
-    """Bound command payloads and bursts before parsing JSON bodies.
+    """Reject unbounded commands and limit write bursts before body parsing.
 
     This is a process-local backstop. A public deployment should apply the
     equivalent limit at its trusted reverse proxy as well.
     """
-    content_length = request.headers.get("content-length")
-    if content_length and content_length.isdigit() and int(content_length) > settings.MAX_REQUEST_BODY_BYTES:
-        return JSONResponse(status_code=413, content={"detail": "Request payload is too large"})
-
     is_write = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    content_length = request.headers.get("content-length")
+    if is_write:
+        # Do not let chunked or otherwise unbounded requests reach FastAPI's
+        # JSON parser. The gateway is responsible for buffering such requests
+        # and supplying a verified Content-Length when it forwards them.
+        if content_length is None or not content_length.isdecimal():
+            return JSONResponse(status_code=411, content={"detail": "A bounded Content-Length is required"})
+        if int(content_length) > settings.MAX_REQUEST_BODY_BYTES:
+            return JSONResponse(status_code=413, content={"detail": "Request payload is too large"})
+
     if is_write:
         client = request.client.host if request.client else "unknown"
         now = monotonic()
