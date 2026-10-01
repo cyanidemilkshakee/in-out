@@ -6,9 +6,10 @@
     "node": ">=22.5.0"
   },
   "scripts": {
-    "dev": "next dev -H ::1 -p 1001 --turbopack",
-    "dev:bounded": "node scripts/run-with-timeout.mjs 900 node node_modules/next/dist/bin/next dev -H ::1 -p 1001 --turbopack",
-    "dev:webpack": "next dev -H ::1 -p 1001",
+    "test:gateway": "docker compose -p inout-kong-test -f gateway/compose.test.yaml run --build --rm tests",
+    "dev": "next dev -H ::1 -p 3001 --turbopack",
+    "dev:bounded": "node scripts/run-with-timeout.mjs 900 node node_modules/next/dist/bin/next dev -H ::1 -p 3001 --turbopack",
+    "dev:webpack": "next dev -H ::1 -p 3001",
     "build": "node scripts/run-with-timeout.mjs 600 node node_modules/next/dist/bin/next build",
     "start": "next start",
     "start:bounded": "node scripts/run-with-timeout.mjs 900 node node_modules/next/dist/bin/next start",

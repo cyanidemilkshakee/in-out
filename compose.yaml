@@ -1,7 +1,54 @@
-# This file is for a loopback-bound local deployment. Do not publish Keycloak
-# or the API directly to the Internet: use a TLS-terminating gateway that
-# strips client-certificate headers and applies its own rate limits.
+# Kong owns the local HTTP listeners. App, API, and Keycloak have no host ports.
+# For physical-terminal TLS, add compose.mtls.yaml with your own certificates.
 services:
+  kong:
+    image: kong:${KONG_VERSION:-3.9.3}
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8002, 0.0.0.0:8005"
+      KONG_ADMIN_LISTEN: "off"
+      KONG_STATUS_LISTEN: "127.0.0.1:8100"
+      KONG_PLUGINS: bundled,inout-terminal-identity
+      KONG_NGINX_MAIN_ENV: INOUT_TERMINAL_SECRET
+      INOUT_TERMINAL_SECRET: ${KONG_TERMINAL_SECRET:-}
+      KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: 1m
+      # Auth.js may chunk the session cookie across several request cookies.
+      # Allow the gateway to accept the complete Cookie header on protected routes.
+      KONG_NGINX_HTTP_CLIENT_HEADER_BUFFER_SIZE: 16k
+      KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
+      # Auth.js/Keycloak can return several large Set-Cookie and redirect
+      # headers during login. Keep these responses inside Kong's buffers.
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 16k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: "8 16k"
+      # Resolve upstream containers only after their health checks pass. This
+      # avoids a first-request DNS failure when Docker has not registered the
+      # app endpoint yet.
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+    volumes:
+      - ./gateway/kong.yml:/etc/kong/kong.yml:ro
+      - ./gateway/plugins/inout-terminal-identity:/usr/local/share/lua/5.1/kong/plugins/inout-terminal-identity:ro
+    ports:
+      - "127.0.0.1:${APP_PORT:-1008}:8000"
+      - "127.0.0.1:${PYTHON_API_PORT:-1002}:8002"
+      - "127.0.0.1:${KEYCLOAK_PORT:-1005}:8005"
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    depends_on:
+      app:
+        condition: service_healthy
+      python-api:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    restart: unless-stopped
+
   db-test:
     image: postgres:17-alpine
     profiles: [test]
@@ -74,13 +121,13 @@ services:
       - KC_DB_URL=jdbc:postgresql://postgres-primary:5432/inout
       - KC_DB_USERNAME=inout
       - KC_DB_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      - KC_HTTP_PORT=1105
       - KC_HEALTH_ENABLED=true
       - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
       - INOUT_APP_URL=${AUTH_URL:-http://localhost:${APP_PORT:-1008}}
       - KC_HOSTNAME=http://localhost:${KEYCLOAK_PORT:-1005}
       - KC_HOSTNAME_ADMIN=http://localhost:${KEYCLOAK_PORT:-1005}
-    ports:
-      - "127.0.0.1:${KEYCLOAK_PORT:-1005}:8080"
+      - KC_PROXY_HEADERS=xforwarded
     volumes:
       - ./keycloak/realm-inout.json:/opt/keycloak/data/import/inout-realm.json:ro
     healthcheck:
@@ -100,7 +147,11 @@ services:
       dockerfile: Dockerfile
     environment:
       - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres-primary:5432/inout
-      - TEMPORAL_HOST=temporal:7233
+      # Docker Desktop's host gateway reaches Temporal's published frontend
+      # without the container-to-self gRPC routing timeout.
+      - TEMPORAL_HOST=host.docker.internal:${TEMPORAL_PORT:-1006}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     # One idempotent bootstrap job: schema, reference data, then the durable
     # Temporal alert schedule. Keeping these together avoids a second exited
     # scheduler container after every deployment.
@@ -118,19 +169,19 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres-primary:5432/inout
       - REDIS_URL=redis://redis:6379/0
-      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_HOST=host.docker.internal:${TEMPORAL_PORT:-1006}
       - ENV=production
-      - MTLS_PROXY_SECRET=${MTLS_PROXY_SECRET:-}
+      - KONG_TERMINAL_SECRET=${KONG_TERMINAL_SECRET:-}
       - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
-      - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
-      - KEYCLOAK_ADMIN_BASE=http://keycloak:8080
+      - KEYCLOAK_JWKS_BASE=http://keycloak:1105/realms/inout
+      - KEYCLOAK_ADMIN_BASE=http://keycloak:1105
       - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
       - KEYCLOAK_JWKS_CACHE_TTL=${KEYCLOAK_JWKS_CACHE_TTL:-300}
       - PUBLIC_PORT=${PYTHON_API_PORT:-1002}
-    ports:
-      - "127.0.0.1:${PYTHON_API_PORT:-1002}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:1102/health/ready')\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -155,11 +206,13 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres-primary:5432/inout
       - REDIS_URL=redis://redis:6379/0
-      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_HOST=host.docker.internal:${TEMPORAL_PORT:-1006}
       - ENV=production
       - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
-      - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
+      - KEYCLOAK_JWKS_BASE=http://keycloak:1105/realms/inout
       - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["python", "-m", "temporal_worker"]
     depends_on:
       backend-init:
@@ -175,18 +228,17 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - PYTHON_API_URL=http://python-api:8000
+      - PYTHON_API_URL=http://kong:8002
       - AUTH_TRUST_HOST=true
       - AUTH_URL=${AUTH_URL:-http://localhost:${APP_PORT:-1008}}
       - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
       - KEYCLOAK_CLIENT_ID=inout-frontend
       - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
       - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
-      - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
+      - KEYCLOAK_JWKS_BASE=http://keycloak:1105/realms/inout
       - KEYCLOAK_ISSUER_PUBLIC=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
+      - PORT=${APP_INTERNAL_PORT:-3000}
       - PUBLIC_PORT=${APP_PORT:-1008}
-    ports:
-      - "127.0.0.1:${APP_PORT:-1008}:1001"
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -195,7 +247,7 @@ services:
       python-api:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:1001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -210,6 +262,9 @@ services:
       - POSTGRES_USER=inout
       - POSTGRES_PWD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - POSTGRES_SEEDS=postgres-primary
+      # Existing Temporal metadata advertises the active frontend at loopback.
+      # Bind all interfaces so that route and Docker's published port both work.
+      - BIND_ON_IP=0.0.0.0
       - TEMPORAL_ADDRESS=temporal:7233
     ports:
       - "127.0.0.1:${TEMPORAL_PORT:-1006}:7233"
@@ -217,7 +272,7 @@ services:
       postgres-primary:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "temporal operator cluster health --address temporal:7233 | grep -q SERVING || exit 1"]
+      test: ["CMD-SHELL", "temporal operator cluster health --address 127.0.0.1:7233 | grep -q SERVING || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 10

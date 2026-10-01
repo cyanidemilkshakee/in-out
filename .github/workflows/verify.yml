@@ -9,6 +9,14 @@ permissions:
   contents: read
 
 jobs:
+  gateway:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -p inout-kong-test -f gateway/compose.test.yaml run --build --rm tests
+      - if: always()
+        run: docker compose -p inout-kong-test -f gateway/compose.test.yaml down --volumes
+
   frontend:
     runs-on: ubuntu-latest
     steps:
@@ -21,6 +29,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - run: npm run test:auth:http
 
   backend:
     runs-on: ubuntu-latest

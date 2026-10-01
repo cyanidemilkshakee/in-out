@@ -14,7 +14,8 @@ class AccessPolicyTests(unittest.TestCase):
         self.person = {"id": "p", "name": "Visitor", "type": "visitor", "barcode": "v", "inside": True,
             "status": "pending_approval", "allowedZones": [],
             "validTo": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
-            "entryOverride": {"requestId": "manual-entry", "hardwareIds": []}}
+            "entryOverride": {"requestId": "manual-entry", "hardwareIds": [],
+                "validTo": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()}}
 
     def scan(self, subject, hardware=None):
         return evaluate_scan(barcode=subject["barcode"], checkpoint={"id": "cp", "zone": "Office", "mode": "auto"},

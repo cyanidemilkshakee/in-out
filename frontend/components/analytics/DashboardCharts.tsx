@@ -235,19 +235,7 @@ export function DashboardCharts({
   }), [activeScanAnalytics, themeColors.border]);
 
   return (
-    <section className="dashboard-analytics" aria-label="Dashboard analytics" style={{
-      position: "absolute",
-      top: 0,
-      left: 0,
-      width: "100%",
-      height: "100%",
-      display: "grid",
-      gridTemplateColumns: "1fr 0.8fr 1fr",
-      gridTemplateRows: "1fr 1fr",
-      padding: "50px 24px 24px 18px",
-      boxSizing: "border-box",
-      zIndex: 0
-    }}>
+    <section className="dashboard-analytics" aria-label="Dashboard analytics">
       <TimeRangeSelector
         timeRange={timeRange}
         timeRanges={TIME_RANGES}
@@ -278,8 +266,8 @@ export function DashboardCharts({
       />
 
       {/* Top Left — Scan Status */}
-      <div className="analytics-donut dashboard-donut dashboard-donut-quality" style={{ gridColumn: 1, gridRow: 1, alignSelf: "start", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "-40px" }}>
-        <div className="dashboard-donut-title" style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Scan Status</div>
+      <div className="analytics-donut dashboard-donut dashboard-donut-quality">
+        <div className="dashboard-donut-title">Scan Status</div>
         <Doughnut
           data={chartData.quality}
           options={{
@@ -292,27 +280,27 @@ export function DashboardCharts({
             plugins: { ...sharedPlugins, legend: { display: false } }
           }}
         />
-        <div className="dashboard-donut-center" style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
-          <div style={{ textAlign: "center", marginBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#12b76a", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#12b76a" }} />
+        <div className="dashboard-donut-center">
+          <div className="dashboard-donut-stat-group">
+            <div className="dashboard-donut-stat-label is-approved">
+              <span className="dashboard-donut-stat-dot is-approved" />
               Approved
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalApproved.toLocaleString()}</div>
+            <div className="dashboard-donut-stat-value">{activeScanAnalytics.totalApproved.toLocaleString()}</div>
           </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#f04438", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#f04438" }} />
+          <div className="dashboard-donut-stat-group">
+            <div className="dashboard-donut-stat-label is-denied">
+              <span className="dashboard-donut-stat-dot is-denied" />
               Denied
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalDenied.toLocaleString()}</div>
+            <div className="dashboard-donut-stat-value">{activeScanAnalytics.totalDenied.toLocaleString()}</div>
           </div>
         </div>
       </div>
 
       {/* Bottom Left — Approved Scans (Entry/Exit) */}
-      <div className="analytics-donut dashboard-donut dashboard-donut-approved" style={{ gridColumn: 1, gridRow: 2, alignSelf: "end", justifySelf: "start", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginLeft: "0", marginBottom: "16px" }}>
-        <div className="dashboard-donut-title" style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Approved Scans</div>
+      <div className="analytics-donut dashboard-donut dashboard-donut-approved">
+        <div className="dashboard-donut-title">Approved Scans</div>
         <Doughnut
           data={chartData.scanMix}
           options={{
@@ -328,29 +316,29 @@ export function DashboardCharts({
             plugins: { ...sharedPlugins, legend: { display: false } }
           }}
         />
-        <div className="dashboard-donut-center" style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
-          <div style={{ textAlign: "center", marginBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#12b76a", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#12b76a" }} />
+        <div className="dashboard-donut-center">
+          <div className="dashboard-donut-stat-group">
+            <div className="dashboard-donut-stat-label is-approved">
+              <span className="dashboard-donut-stat-dot is-approved" />
               Entries
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalEntries.toLocaleString()}</div>
+            <div className="dashboard-donut-stat-value">{activeScanAnalytics.totalEntries.toLocaleString()}</div>
           </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#0b63e5", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#0b63e5" }} />
+          <div className="dashboard-donut-stat-group">
+            <div className="dashboard-donut-stat-label is-blue">
+              <span className="dashboard-donut-stat-dot is-blue" />
               Exits
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalExits.toLocaleString()}</div>
+            <div className="dashboard-donut-stat-value">{activeScanAnalytics.totalExits.toLocaleString()}</div>
           </div>
         </div>
       </div>
 
       {/* Center — Drill-down Chart */}
       <div className="dashboard-breakdown-cluster">
-        <div className="analytics-donut dashboard-breakdown" style={{ gridColumn: 2, gridRow: "1 / -1", alignSelf: "center", justifySelf: "center", width: "100%", height: "auto", aspectRatio: "1/1", maxWidth: "1200px", marginTop: "35px" }}>
+        <div className="analytics-donut dashboard-breakdown">
           <DrillDownDoughnut data={drillDownData} onNodeClick={openDrillDown} />
-          <div className="dashboard-breakdown-title" style={{ position: "absolute", top: "calc(100% + 40px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "25px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Total Scan Breakdown</div>
+          <div className="dashboard-breakdown-title">Total Scan Breakdown</div>
         </div>
 
         <div className="vertical-pill-segmented-group">
@@ -380,8 +368,8 @@ export function DashboardCharts({
       {/* Center Right — Pending permission decisions */}
       <PendingDecisionsWidget requests={pendingRequests} limit={3} />
 
-      <div className="analytics-donut dashboard-donut dashboard-donut-auto" style={{ gridColumn: 3, gridRow: 1, alignSelf: "start", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginRight: "-22px" }}>
-        <div className="dashboard-donut-title" style={{ position: "absolute", top: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Auto vs Manual</div>
+      <div className="analytics-donut dashboard-donut dashboard-donut-auto">
+        <div className="dashboard-donut-title">Auto vs Manual</div>
         <Doughnut
           data={chartData.autoVsManual}
           options={{
@@ -394,27 +382,27 @@ export function DashboardCharts({
             plugins: { ...sharedPlugins, legend: { display: false } }
           }}
         />
-        <div className="dashboard-donut-center" style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
-          <div style={{ textAlign: "center", marginBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#0b63e5", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#0b63e5" }} />
+        <div className="dashboard-donut-center">
+          <div className="dashboard-donut-stat-group">
+            <div className="dashboard-donut-stat-label is-blue">
+              <span className="dashboard-donut-stat-dot is-blue" />
               Auto
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalAutomatic.toLocaleString()}</div>
+            <div className="dashboard-donut-stat-value">{activeScanAnalytics.totalAutomatic.toLocaleString()}</div>
           </div>
-          <div style={{ textAlign: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#667085", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#667085" }} />
+          <div className="dashboard-donut-stat-group">
+            <div className="dashboard-donut-stat-label is-muted">
+              <span className="dashboard-donut-stat-dot is-muted" />
               Manual
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalManual.toLocaleString()}</div>
+            <div className="dashboard-donut-stat-value">{activeScanAnalytics.totalManual.toLocaleString()}</div>
           </div>
         </div>
       </div>
 
       {/* Bottom Right — Denied Mix */}
-      <div className="analytics-donut dashboard-donut dashboard-donut-denied" style={{ gridColumn: 3, gridRow: 2, alignSelf: "end", justifySelf: "end", width: "100%", maxWidth: "260px", aspectRatio: "1/1", marginRight: "-22px", marginBottom: "16px" }}>
-        <div className="dashboard-donut-title" style={{ position: "absolute", bottom: "calc(100% + 14px)", left: "50%", transform: "translateX(-50%)", whiteSpace: "nowrap", fontSize: "16px", fontWeight: 700, textTransform: "uppercase", letterSpacing: "1px", color: "var(--admin-text)" }}>Denied Reasons</div>
+      <div className="analytics-donut dashboard-donut dashboard-donut-denied">
+        <div className="dashboard-donut-title">Denied Reasons</div>
         <Doughnut
           data={chartData.deniedMix}
           options={{
@@ -430,20 +418,20 @@ export function DashboardCharts({
             plugins: { ...sharedPlugins, legend: { display: false } }
           }}
         />
-        <div className="dashboard-donut-center" style={{ position: "absolute", top: "0", left: "0", width: "100%", height: "100%", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", pointerEvents: "none", paddingTop: "8px" }}>
-          <div style={{ textAlign: "center", marginBottom: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#f04438", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#f04438" }} />
+        <div className="dashboard-donut-center">
+          <div className="dashboard-donut-stat-group">
+            <div className="dashboard-donut-stat-label is-denied">
+              <span className="dashboard-donut-stat-dot is-denied" />
               Restricted
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalRestricted.toLocaleString()}</div>
+            <div className="dashboard-donut-stat-value">{activeScanAnalytics.totalRestricted.toLocaleString()}</div>
           </div>
-          <div style={{ textAlign: "center", marginTop: "12px" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", color: "#667085", fontSize: "14px", fontWeight: 750, textTransform: "uppercase" }}>
-              <span style={{ display: "block", width: "8px", height: "8px", borderRadius: "50%", backgroundColor: "#667085" }} />
+          <div className="dashboard-donut-stat-group is-spaced">
+            <div className="dashboard-donut-stat-label is-muted">
+              <span className="dashboard-donut-stat-dot is-muted" />
               Other
             </div>
-            <div style={{ fontSize: "16px", fontWeight: 800, lineHeight: 1 }}>{activeScanAnalytics.totalOtherDenied.toLocaleString()}</div>
+            <div className="dashboard-donut-stat-value">{activeScanAnalytics.totalOtherDenied.toLocaleString()}</div>
           </div>
         </div>
       </div>
@@ -453,22 +441,6 @@ export function DashboardCharts({
         type="button"
         className="dashboard-scroll-indicator"
         aria-label="Scroll to recent movement logs"
-        style={{
-          position: "absolute",
-          bottom: "16px",
-          left: "50%",
-          transform: "translateX(-50%)",
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: "13px",
-          cursor: "pointer",
-          zIndex: 10,
-          border: 0,
-          padding: 0,
-          background: "transparent",
-          color: "inherit",
-        }}
         onClick={() => {
           const tableHeader = Array.from(document.querySelectorAll('h2')).find(h => h.textContent === 'Recent Movement Logs');
           if (tableHeader) {
@@ -481,36 +453,11 @@ export function DashboardCharts({
           }
         }}
       >
-        <span style={{
-          fontSize: "10px",
-          fontWeight: 800,
-          letterSpacing: "3px",
-          color: "var(--admin-muted)",
-          textTransform: "uppercase",
-          marginRight: "-3px",
-          textAlign: "center"
-        }}>
+        <span className="dashboard-scroll-label">
           Scroll
         </span>
-        <div style={{
-          width: "18px",
-          height: "30px",
-          border: "2px solid rgba(253, 176, 34, 0.4)",
-          borderRadius: "9px",
-          display: "flex",
-          justifyContent: "center",
-          paddingTop: "4px",
-          boxSizing: "border-box",
-          boxShadow: "0 0 8px rgba(253, 176, 34, 0.2)"
-        }}>
-          <div className="dashboard-scroll-wheel" style={{
-            width: "3px",
-            height: "5px",
-            backgroundColor: "#d7ddda",
-            borderRadius: "1.5px",
-            boxShadow: "0 0 4px 1px rgba(253, 176, 34, 0.8)",
-            animation: "scrollWheel 1.5s cubic-bezier(0.15, 0.41, 0.69, 0.94) infinite"
-          }} />
+        <div className="dashboard-scroll-frame">
+          <div className="dashboard-scroll-wheel" />
         </div>
       </button>
     </section>

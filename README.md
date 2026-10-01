@@ -13,7 +13,7 @@ A checkpoint management application for employee, visitor, and hardware entry/ex
 | Permissions | Validity windows, visitor approvals, hardware custody, and manual access decisions |
 | Security terminal | Barcode scanning, up to four optional carried-hardware barcodes, checkpoint selection, entry/exit controls, and persistent results |
 | Movement logs | Search and filters, pagination, analytics, movement notes, and synchronization tools |
-| Alerts and audit | Configurable rules, notifications, alert management, and audit history; scheduled evaluation every five minutes |
+| Alerts and audit | Scheduled attendance rules, alert acknowledgement, notifications, and audit history; evaluation every five minutes |
 | Offline queue | Device-local scan storage and retry after reconnection; queued scans require a server decision before access is allowed |
 | Account and appearance | Keycloak account security, SSO logout, administrator profile preferences, responsive layouts, and shared light/dark themes |
 
@@ -21,17 +21,17 @@ A checkpoint management application for employee, visitor, and hardware entry/ex
 
 | Identity | Access |
 | --- | --- |
-| `admin` realm role | `/admin/dashboard`, `/admin/registry`, `/admin/permissions`, `/admin/logs`, `/admin/alerts`, `/admin/profile` |
-| `operator` realm role | `/terminal` and its scan/manual-review workflow |
+| `admin` realm role | All admin pages and `/terminal`, including scan/manual-review operations |
+| `operator` realm role | `/terminal` and its scan/manual-review workflow; no admin pages |
 | Keycloak master administrator | Keycloak configuration and identity management; this does not automatically grant an application role |
 
-Assign each application user one role. Administrators are deliberately excluded from terminal operations, including users assigned both roles. Keycloak login accounts and registry people are separate: creating a login does not register a person for checkpoint access.
+The `admin` role grants access to every application page and operation, including the security terminal. The `operator` role grants terminal access without admin pages. Keycloak login accounts and registry people are separate: creating a login does not register a person for checkpoint access.
 
 ### Scan and approval workflow
 
-1. The operator selects a checkpoint, scans a person or asset barcode, and optionally adds carried hardware. Press **Enter** or **Check access**.
+1. An admin or operator selects a checkpoint, scans a person or asset barcode, and optionally adds carried hardware. Press **Enter** or **Check access**.
 2. The backend checks registration, access status, validity, zone, presence, and applicable hardware custody. Automatic checkpoints derive direction from presence; manual checkpoints expose **Entry** and **Exit** controls.
-3. The decision and movement are recorded in PostgreSQL. Approved movements update presence; enabled rules can generate alerts. Idempotency keys protect scan retries.
+3. The decision and movement are recorded in PostgreSQL. Approved movements update presence; scheduled attendance rules generate alerts separately. Idempotency keys protect scan retries.
 4. A denied scan can be sent for **manual approval**, with an optional operator note. An administrator decides it in Permissions; the terminal displays the updated status.
 5. Manual entry approval atomically stores the identity, decision, movement, audit event, and presence. Its matching exit remains allowed even if normal entry access is restricted or expires. Exit consumes that visit's permission; future entry requires normal permission or another approval. Additional hardware is not covered by the original approval.
 
@@ -43,10 +43,13 @@ The offline queue uses IndexedDB in the same browser and device. Connect once to
 
 ```mermaid
 flowchart LR
-    Browser[Admin / security browser] --> Web[Next.js + Auth.js]
+    Browser[Admin / security browser] --> Gateway[Kong Gateway]
+    Gateway --> Web[Next.js + Auth.js]
     Web <-->|OIDC login and refresh| KC[Keycloak]
-    Web -->|Authenticated API calls| API[FastAPI]
-    Gateway[Trusted certificate gateway] -->|Physical terminal scans| API
+    Web -->|Authenticated API calls| Gateway
+    Gateway --> API[FastAPI]
+    Gateway --> KC
+    Terminal[Physical terminal] -->|Client certificate| Gateway
     API --> DB[(PostgreSQL)]
     KC --> DB
     API <-->|Live events / cache| Redis[(Redis)]
@@ -56,15 +59,16 @@ flowchart LR
     Worker --> Redis
 ```
 
-The browser uses the Next.js API layer; the server forwards access tokens to FastAPI. Keycloak credentials and refresh tokens are not exposed in public session responses. FastAPI verifies access-token signatures, issuer, audience, expiry, and roles, with signing-key refresh support. Physical terminals use a separate certificate-gateway path.
+Kong Gateway owns the app, API, and Keycloak HTTP listeners. The browser uses the Next.js session/API layer, whose server-side requests reach FastAPI through Kong. Keycloak credentials and refresh tokens are not exposed in public session responses. FastAPI verifies access-token signatures, issuer, audience, expiry, and roles, with signing-key refresh support. Physical terminals can use Kong's optional certificate-authenticated TLS listener, configured in `compose.mtls.yaml` and `gateway/kong.yml`.
 
 | Compose service | Technology / responsibility | Default local address |
 | --- | --- | --- |
-| `app` | Next.js 15, React 19, TypeScript, Auth.js; UI and API proxy | [localhost:1008](http://localhost:1008) |
-| `python-api` | Python 3.10+, FastAPI, SQLAlchemy, asyncpg | [localhost:1002/docs](http://localhost:1002/docs) |
+| `kong` | Kong OSS 3.9.3; DB-less routing, limits, streaming, and terminal identity | Owns ports `1008`, `1002`, and `1005` |
+| `app` | Next.js 15, React 19, TypeScript, Auth.js; UI and session/API layer | [localhost:1008](http://localhost:1008), through Kong |
+| `python-api` | Python 3.10+, FastAPI, SQLAlchemy, asyncpg | [localhost:1002/docs](http://localhost:1002/docs), through Kong |
 | `postgres-primary` | PostgreSQL 17; persistent storage | `localhost:1003` |
 | `redis` | Redis 7; event publication and caches | `localhost:1004` |
-| `keycloak` | OIDC identity provider; default image pin `26.2.5` | [localhost:1005/admin](http://localhost:1005/admin) |
+| `keycloak` | OIDC identity provider; default image pin `26.2.5` | [localhost:1005/admin](http://localhost:1005/admin), through Kong |
 | `temporal` | Durable workflows | gRPC `localhost:1006` |
 | `temporal-ui` | Optional workflow inspection UI (`observability` profile) | [localhost:1007](http://localhost:1007) |
 | `backend-init` | Alembic migrations, reference seeding, and alert-schedule bootstrap; exits on completion | Internal job |
@@ -86,9 +90,10 @@ backend/workflows/    Temporal workflows and activities
 backend/alembic/      Database migrations
 backend/tests/        Policy, authentication, contract, and PostgreSQL tests
 keycloak/             Realm import template
+gateway/              Kong routes, terminal-identity plugin, and isolated tests
 scripts/              Authentication checks and local realm repair
 tests/                Frontend contract and authentication tests
-docs/                 Operations, review findings, and Keycloak roadmap
+BACKEND_FUNCTION_MAP.md Backend endpoints, core functions, and workflows
 compose.yaml          Local services and isolated test services
 ```
 
@@ -109,7 +114,7 @@ $clientSecret = node -e "console.log(require('crypto').randomBytes(32).toString(
 
 Set `POSTGRES_PASSWORD`, `KEYCLOAK_ADMIN_USERNAME`, and `KEYCLOAK_ADMIN_PASSWORD` in `.env`. The default application URL is `http://localhost:1008`. Never commit `.env`.
 
-For an **existing realm**, keep its current client secret from **Clients → inout-frontend → Credentials**. Changing `.env` does not rotate the saved secret, and startup import does not overwrite an existing realm. Follow the [existing-realm rollout guide](docs/keycloak-review.md#applying-the-changes-to-an-existing-installation) when changing identity configuration.
+For an **existing realm**, keep its current client secret from **Clients → inout-frontend → Credentials**. Changing `.env` does not rotate the saved secret, and startup import does not overwrite an existing realm. Back up the realm before applying identity changes; make and verify those changes in Keycloak before relying on the updated application configuration.
 
 **2. Build and start.**
 
@@ -130,10 +135,10 @@ docker compose --profile observability up -d temporal-ui
 
 1. Open [Keycloak administration](http://localhost:1005/admin) using the master credentials from `.env`.
 2. Select the `inout` realm, create a user under **Users**, and set a password under **Credentials**. For immediate local sign-in, turn **Temporary** off.
-3. Assign the `admin` realm role under **Role mapping**, preserving default realm roles. Create a separate user with `operator` for terminal access.
+3. Assign the `admin` realm role under **Role mapping**, preserving default realm roles. Admins can also use the terminal. Create a separate user with `operator` when you want terminal-only access.
 4. Sign in at [localhost:1008](http://localhost:1008). After role changes, sign out and back in to obtain updated claims.
 
-**4. Register subjects and operate the terminal.** Use the admin Registry and Permissions pages to create people/assets and configure access. Sign in as the operator to scan them at `/terminal`.
+**4. Register subjects and operate the terminal.** Use the admin Registry and Permissions pages to create people/assets and configure access. Admins or operators can scan them at `/terminal`.
 
 ## Configuration
 
@@ -153,7 +158,9 @@ docker compose --profile observability up -d temporal-ui
 | `PYTHON_API_URL`, `DATABASE_URL`, `READ_DATABASE_URL` | API and database connections; an empty read URL uses the primary database |
 | `REDIS_URL`, `TEMPORAL_HOST` | Cache/event and workflow connections |
 | `PYTHON_API_PORT`, `POSTGRES_PORT`, `REDIS_PORT`, `TEMPORAL_PORT`, `TEMPORAL_UI_PORT` | Host port overrides for the addresses above |
-| `MTLS_PROXY_SECRET` | Shared secret for a trusted physical-terminal certificate gateway |
+| `KONG_VERSION` | Pinned Kong OSS image version; default `3.9.3` |
+| `KONG_TERMINAL_SECRET` | Optional Kong-to-API terminal identity secret, at least 32 random characters |
+| `KONG_TLS_DIR`, `TERMINAL_TLS_PORT` | Certificate directory and listener port for `compose.mtls.yaml` |
 | `MAX_REQUEST_BODY_BYTES`, `WRITE_RATE_LIMIT_PER_MINUTE` | API limits; defaults are 262,144 bytes and 300 writes/minute per client address per process |
 | `*_RETENTION_DAYS` | Maintenance windows: retry records 30 days, notifications 90; audit events, alerts, and movements default to indefinite retention (`0`) |
 
@@ -164,11 +171,11 @@ Compose supplies internal service addresses; host-side development uses localhos
 Install host-side dependencies with `npm ci`. Keep Docker backend services running, then start the frontend with its development callback origin:
 
 ```powershell
-$env:AUTH_URL = "http://localhost:1001"
+$env:AUTH_URL = "http://localhost:3001"
 npm run dev
 ```
 
-Open [localhost:1001](http://localhost:1001). The realm template includes this callback; an existing realm must have it registered. Use `npm run dev:webpack` for the Webpack development server. Remove the temporary override with `Remove-Item Env:AUTH_URL` before returning to the Docker application URL. Backend code changes require rebuilding its services through `docker compose up --build -d`.
+Open [localhost:3001](http://localhost:3001). The realm template includes this callback; an existing realm must have it registered. Use `npm run dev:webpack` for the Webpack development server. Remove the temporary override with `Remove-Item Env:AUTH_URL` before returning to the Docker application URL. Backend code changes require rebuilding its services through `docker compose up --build -d`.
 
 | Command | Verification |
 | --- | --- |
@@ -181,7 +188,7 @@ Open [localhost:1001](http://localhost:1001). The realm template includes this c
 
 PostgreSQL tests use the `test` Compose profile, a separate temporary database, and a schema per database test. They require Docker and the Compose configuration values. Stop the test service afterward with `docker compose --profile test stop db-test`. The live account check additionally requires the running local stack and matching credentials in `.env`.
 
-[GitHub Actions](.github/workflows/verify.yml) runs frontend type checks, tests, and build, plus the isolated backend suite on pull requests and pushes to `main`.
+[GitHub Actions](.github/workflows/verify.yml) runs frontend type checks, tests, the production build and HTTP authentication checks, plus isolated backend and Kong gateway suites on pull requests and pushes to `main`. Run `npm run test:gateway` locally to verify routing, streaming, traffic limits, and terminal certificate authentication.
 
 ## API
 
@@ -189,7 +196,7 @@ The browser calls `/api/data`, `/api/profile`, and `/api/presence` through Next.
 
 | Endpoint group | Purpose / access |
 | --- | --- |
-| `/v1/terminal/bundle`, `/v1/terminal/scans`, `/v1/terminal/manual-reviews` | Operator bootstrap, scans, and manual-review submission |
+| `/v1/terminal/bundle`, `/v1/terminal/scans`, `/v1/terminal/manual-reviews` | Admin or operator bootstrap, scans, and manual-review submission |
 | `/v1/scans` | Physical terminal scans through the trusted certificate gateway |
 | `/v1/registry/subjects` | Registry reads and writes; authorization depends on the operation |
 | `/v1/permissions`, `/v1/permission-requests` | Permission management and request/decision workflows |
@@ -198,7 +205,7 @@ The browser calls `/api/data`, `/api/profile`, and `/api/presence` through Next.
 | `/v1/checkpoints`, `/v1/admin/profile` | Administrator checkpoint listing and profile preferences |
 | `/v1/presence`, `/v1/presence/stream` | Authenticated presence snapshots and server-sent events |
 
-Scan requests require a UUID `Idempotency-Key` header. Reuse it only when retrying the same scan; a changed payload returns `409`. Use [Swagger UI](http://localhost:1002/docs) for exact methods, payloads, and responses, or import the [Postman collection](inout_api_collection.postman_collection.json). Postman uses the `inout-postman` Authorization Code with PKCE client; see [token setup](docs/operations.md#postman). Existing realms need that client configured.
+Scan requests require a UUID `Idempotency-Key` header. Reuse it only when retrying the same scan; a changed payload returns `409`. Use [Swagger UI](http://localhost:1002/docs) for exact methods, payloads, and responses, or import the [Postman collection](inout_api_collection.postman_collection.json). Postman uses the `inout-postman` Authorization Code with PKCE client; existing realms need that client configured.
 
 ## Operations
 
@@ -238,7 +245,7 @@ Verify the restored records before planning a deployment cutover.
 
 ### Deployment boundaries
 
-This Compose stack is for local development: services bind to loopback and Keycloak runs with `start-dev`. A shared deployment needs HTTPS, production Keycloak settings, managed secrets, backups, and gateway rate limits. A certificate gateway must strip incoming `X-Client-*` and `X-Proxy-Secret` headers and supply verified values itself. Browser offline storage is not a database backup. MFA, directory federation, back-channel logout, and other advanced identity features remain proposals in the [Keycloak roadmap](docs/keycloak-review.md), not features enabled by this setup.
+This Compose stack is for local development: Kong publishes loopback listeners and Keycloak runs with `start-dev`. A shared deployment needs HTTPS for browser/identity traffic, production Keycloak settings, managed secrets, and backups. Kong already enforces API traffic/body limits and strips forged terminal headers; optional terminal mTLS requires trusted certificates and the `compose.mtls.yaml` configuration. Browser offline storage is not a database backup.
 
 ## Troubleshooting
 
@@ -255,9 +262,6 @@ This Compose stack is for local development: services bind to loopback and Keycl
 
 Health checks: [frontend](http://localhost:1008/api/health), [API liveness](http://localhost:1002/health/live), and [API readiness](http://localhost:1002/health/ready). Readiness checks PostgreSQL, Redis, and Temporal. Keycloak repair adds missing self-service role composites and restores the API audience mapper if absent; it does not replace a complete realm migration.
 
-## Detailed documentation
+## Backend reference
 
-- [Backend function map](BACKEND_FUNCTION_MAP.md): endpoints, core functions, data models, and workflows.
-- [Operations](docs/operations.md): deployment guidance, Postman, and retention maintenance.
-- [Keycloak review and roadmap](docs/keycloak-review.md): authentication design, existing-realm rollout, and proposed advanced features.
-- [Project review](docs/project-review.md): September 2026 defect fixes, historical repair, and recorded validation results.
+See [BACKEND_FUNCTION_MAP.md](BACKEND_FUNCTION_MAP.md) for the backend endpoints, core functions, data models, and workflows.

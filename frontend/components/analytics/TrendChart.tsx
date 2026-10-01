@@ -204,44 +204,26 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
   }, [darkTheme]);
 
   return (
-    <div
-      style={{
-        backgroundColor: "transparent",
-        width: "100%", 
-        margin: "0",
-        padding: "0",
-        display: "flex",
-        flexDirection: "column",
-        gap: "24px",
-        fontFamily: chartFont.family,
-      }}
-    >
+    <div className="trend-chart-container">
       {/* Header Section */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "flex-start",
-          padding: "0 8px",
-        }}
-      >
-        <div style={{ display: "flex", gap: "48px" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <div style={{ fontSize: "32px", fontWeight: 800, color: "var(--admin-text)", lineHeight: 1 }}>
+      <div className="trend-chart-header">
+        <div className="trend-chart-summary-list">
+          <div className="trend-chart-summary">
+            <div className="trend-chart-value-row">
+              <div className="trend-chart-value">
                 {avgMovements.toLocaleString()}
               </div>
-              <div style={{ fontSize: "12px", fontWeight: 700, color: "#0b63e5" }}>
+              <div className="trend-chart-change">
                 {isUp ? "↑" : "↓"} {percentage}%
               </div>
             </div>
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--admin-muted)", letterSpacing: "1px" }}>
+            <div className="trend-chart-unit">
               {labelUnit}
             </div>
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: "8px" }}>
+        <div className="trend-chart-range-controls">
           {(["1Y", "1M", "1W", "1D"] as TimeRange[]).map((range) => (
             <button
               key={range}
@@ -256,7 +238,7 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
       </div>
 
       {/* Graph Section */}
-      <div style={{ height: "170px", width: "100%", position: "relative", padding: "0" }}>
+      <div className="trend-chart-graph">
         <Line data={data} options={options} />
       </div>
     </div>

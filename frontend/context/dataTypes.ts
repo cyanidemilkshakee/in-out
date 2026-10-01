@@ -8,11 +8,9 @@ import type {
   BarcodeManualReviewInput,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
-  CreateTemporaryVisitorInput,
   DataScope,
   DataService,
   HardwareAsset,
-  MovementEvent,
   MovementPage,
   MovementQuery,
   Person,
@@ -30,7 +28,6 @@ export type DataState = AppDataSnapshot & {
 export type DataActions = {
   refresh: () => Promise<void>;
   queryMovements: (query: MovementQuery) => Promise<MovementPage>;
-  createTemporaryVisitor: (input: CreateTemporaryVisitorInput) => Promise<Person>;
   createEmployee: (input: CreateEmployeeInput) => Promise<Person>;
   createHardwareAsset: (input: CreateHardwareAssetInput) => Promise<HardwareAsset>;
   updatePerson: (
@@ -41,10 +38,7 @@ export type DataActions = {
     assetId: string,
     patch: Partial<Omit<HardwareAsset, "id">>
   ) => Promise<HardwareAsset>;
-  updateAlert: (
-    alertId: string,
-    patch: Partial<Omit<Alert, "id">>
-  ) => Promise<Alert>;
+  acknowledgeAlert: (alertId: string) => Promise<Alert>;
   updateAccessPermission: (
     input: UpdateAccessPermissionInput
   ) => Promise<AccessPermission>;
@@ -54,8 +48,10 @@ export type DataActions = {
   decidePermissionRequest: (
     requestId: string,
     decision: "approved" | "denied",
-    reason: string
+    reason: string,
+    validForMinutes?: number
   ) => Promise<PermissionRequest>;
+  acknowledgePermissionRequest: (requestId: string) => Promise<PermissionRequest>;
   updateAlertRule: (ruleId: string, enabled: boolean) => Promise<AlertRule>;
   markNotificationRead: (notificationId: string) => Promise<PermissionNotification>;
   recordScan: (input: RecordScanInput, idempotencyKey?: string) => ReturnType<DataService["recordScan"]>;
@@ -63,9 +59,6 @@ export type DataActions = {
   requestBarcodeManualReview: (
     input: BarcodeManualReviewInput
   ) => ReturnType<DataService["requestBarcodeManualReview"]>;
-  saveMovement: (event: MovementEvent) => Promise<MovementEvent>;
-  syncMovements: (eventIds?: string[]) => Promise<MovementEvent[]>;
-  resolveMovementConflicts: (eventIds: string[]) => Promise<MovementEvent[]>;
   addMovementNote: (eventId: string, note: string) => Promise<string[]>;
 };
 

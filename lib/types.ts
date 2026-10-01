@@ -195,6 +195,9 @@ export type PermissionRequest = {
   eventId?: string;
   operatorNote?: string;
   decisionReason?: string;
+  terminalAcknowledgementRequired?: boolean;
+  acknowledgedAt?: string;
+  acknowledgedBy?: string;
 };
 
 export type PermissionNotification = {
@@ -218,10 +221,8 @@ export type AlertRule = {
   enabled: boolean;
   scope: string;
   conditionKey:
-    | "exit_balance"
     | "no_break"
-    | "unauthorized_hardware_carrier"
-    | "restricted_employee_entry";
+    | "irregularity";
   recentTriggers: number;
 };
 
@@ -231,6 +232,7 @@ export type AuditEvent = {
   action: string;
   subjectId: string;
   subjectName: string;
+  barcode?: string;
   actor: string;
   role: string;
   decision?: "granted" | "denied";
@@ -285,17 +287,6 @@ export type AppDataSnapshot = {
   adminAvailability?: { status: "available" | "offline"; availableAt: string | null };
 };
 
-export type CreateTemporaryVisitorInput = {
-  name: string;
-  barcode: string;
-  company: string;
-  host: string;
-  hours: number;
-  validFrom: string;
-  validUntil: string;
-  reason: string;
-};
-
 export type CreateEmployeeInput = {
   name: string;
   barcode: string;
@@ -328,14 +319,13 @@ export type BarcodeManualReviewInput = {
   checkpointId: string;
   direction?: Direction;
   eventId?: string;
-  operatorNote?: string;
+  operatorNote: string;
 };
 
 export type RecordScanResult = {
   decision: ScanDecision;
   updatedPeople: Person[];
   updatedHardwareAssets: HardwareAsset[];
-  generatedAlerts: Alert[];
 };
 
 export type UpdateAccessPermissionInput = {
@@ -361,6 +351,7 @@ export type PermissionDecisionMutationResult = {
   permission?: AccessPermission;
   person?: Person;
   hardwareAsset?: HardwareAsset;
+  hardwareAssets?: HardwareAsset[];
   auditEvent?: AuditEvent;
   notification?: PermissionNotification;
 };
@@ -394,7 +385,6 @@ export type MovementPage = {
 export interface DataService {
   getSnapshot(scope?: DataScope): Promise<AppDataSnapshot>;
   queryMovements(query: MovementQuery): Promise<MovementPage>;
-  createTemporaryVisitor(input: CreateTemporaryVisitorInput): Promise<Person>;
   createEmployee(input: CreateEmployeeInput): Promise<Person>;
   createHardwareAsset(input: CreateHardwareAssetInput): Promise<HardwareAsset>;
   updatePerson(personId: string, patch: Partial<Omit<Person, "id">>): Promise<Person>;
@@ -402,7 +392,7 @@ export interface DataService {
     assetId: string,
     patch: Partial<Omit<HardwareAsset, "id">>
   ): Promise<HardwareAsset>;
-  updateAlert(alertId: string, patch: Partial<Omit<Alert, "id">>): Promise<Alert>;
+  acknowledgeAlert(alertId: string): Promise<Alert>;
   updateAccessPermission(
     input: UpdateAccessPermissionInput
   ): Promise<AccessPermissionMutationResult>;
@@ -410,15 +400,14 @@ export interface DataService {
   decidePermissionRequest(
     requestId: string,
     decision: "approved" | "denied",
-    reason: string
+    reason: string,
+    validForMinutes?: number
   ): Promise<PermissionDecisionMutationResult>;
+  acknowledgePermissionRequest(requestId: string): Promise<PermissionRequest>;
   updateAlertRule(ruleId: string, enabled: boolean): Promise<AlertRule>;
   markNotificationRead(notificationId: string): Promise<PermissionNotification>;
   recordScan(input: RecordScanInput, idempotencyKey?: string): Promise<RecordScanResult>;
   evaluateAlertRules(): Promise<AlertEvaluationResult>;
   requestBarcodeManualReview(input: BarcodeManualReviewInput): Promise<PermissionRequest>;
-  saveMovement(event: MovementEvent): Promise<MovementEvent>;
-  syncMovements(eventIds?: string[]): Promise<MovementEvent[]>;
-  resolveMovementConflicts(eventIds: string[]): Promise<MovementEvent[]>;
   addMovementNote(eventId: string, note: string): Promise<string[]>;
 }

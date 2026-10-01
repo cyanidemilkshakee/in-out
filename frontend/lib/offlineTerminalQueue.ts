@@ -6,7 +6,7 @@ const SCAN_STORE = "queued-scans";
 const CONFIG_STORE = "terminal-config";
 const CONFIG_KEY = "latest";
 
-type QueuedScanInput = Omit<RecordScanInput, "online" | "capturedOfflineAt">;
+type QueuedScanInput = Omit<RecordScanInput, "online"> & { online?: boolean };
 
 export type QueuedTerminalScan = {
   idempotencyKey: string;
@@ -21,6 +21,14 @@ export type CachedTerminalConfig = {
   hardwareAssets: HardwareAsset[];
   savedAt: string;
 };
+
+export function queuedScanInput(queued: QueuedTerminalScan): RecordScanInput {
+  // Older queue entries omitted transport fields. New entries preserve the
+  // exact attempted payload so a lost response never changes its fingerprint.
+  return queued.input.online === undefined
+    ? { ...queued.input, online: true, capturedOfflineAt: queued.capturedOfflineAt }
+    : { ...queued.input, online: queued.input.online };
+}
 
 function requestResult<T>(request: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -78,11 +86,8 @@ export async function enqueueTerminalScan(
   const item: QueuedTerminalScan = {
     idempotencyKey,
     input: {
-      barcode: input.barcode,
-      checkpointId: input.checkpointId,
-      direction: input.direction,
+      ...input,
       selectedHardwareIds: [...input.selectedHardwareIds],
-      scanType: input.scanType,
     },
     capturedOfflineAt,
     attempts: 0,

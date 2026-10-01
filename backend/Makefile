@@ -1,2 +1,2 @@
-test-load-scans:
-	uv run python test_load_scans.py
+test:
+	uv run python -m unittest discover -s tests -v

@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1
+
 FROM node:22-alpine AS base
 
 # Install dependencies only when needed
@@ -8,7 +10,15 @@ WORKDIR /app
 
 # Install dependencies based on the preferred package manager
 COPY package.json package-lock.json* ./
-RUN npm ci
+# npm ci can fail after a transient registry reset while unpacking a large
+# package such as Next.js. Persist the npm cache between builds and retry
+# fetches so an interrupted download does not leave a partial install.
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund --prefer-offline \
+      --fetch-retries=5 \
+      --fetch-retry-factor=2 \
+      --fetch-retry-mintimeout=1000 \
+      --fetch-retry-maxtimeout=60000
 
 # Rebuild the source code only when needed
 FROM base AS builder
@@ -31,8 +41,8 @@ ENV NODE_ENV=production
 # Uncomment the following line in case you want to disable telemetry during runtime.
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+RUN addgroup --system --gid 10001 nodejs
+RUN adduser --system --uid 10001 nextjs
 
 # Set the correct permission for prerender cache
 RUN mkdir -p .next
@@ -47,12 +57,12 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 
-EXPOSE 1001
+EXPOSE 3000
 
-ENV PORT=1001
+ENV PORT=3000
 # set hostname to localhost
 ENV HOSTNAME="0.0.0.0"
 
 # server.js is created by next build from the standalone output
 # https://nextjs.org/docs/pages/api-reference/next-config-js/output
-CMD ["sh", "-c", "echo \"Starting app on http://localhost:${PUBLIC_PORT:-1001}\" && node server.js"]
+CMD ["sh", "-c", "echo \"Starting app on http://localhost:${PUBLIC_PORT:-3000}\" && node server.js"]

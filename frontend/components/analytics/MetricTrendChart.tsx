@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, type CSSProperties } from "react";
+import { useMemo } from "react";
 import {
   CategoryScale,
   Chart as ChartJS,
@@ -33,6 +33,20 @@ type MetricTrendChartProps = {
 const chartFont = {
   family: "var(--font-urbanist, Urbanist), Arial, sans-serif",
 };
+
+const accentClassByColor: Record<string, string> = {
+  "#0b63e5": "accent-blue",
+  "#ff3b30": "accent-alert-red",
+  "#ea580c": "accent-orange",
+  "#db2777": "accent-pink",
+  "#8b5cf6": "accent-violet",
+  "#ef4444": "accent-red",
+  "#10b981": "accent-green",
+};
+
+function accentClass(color: string) {
+  return accentClassByColor[color.toLowerCase()] ?? "accent-blue";
+}
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Filler);
 
@@ -189,8 +203,10 @@ export function MetricTrendChart({
     []
   );
 
+  const accent = accentClass(color);
+
   return (
-    <div className="metric-trend-chart" style={{ fontFamily: chartFont.family }}>
+    <div className="metric-trend-chart">
       <div className="metric-trend-header">
         <div>
           <div className="metric-trend-title">{title}</div>
@@ -199,7 +215,7 @@ export function MetricTrendChart({
               {average.toLocaleString()}
               {unit}
             </strong>
-            <span style={{ color }}>{isUp ? "↑" : "↓"} {percentage}%</span>
+            <span className={`metric-trend-change ${accent}`}>{isUp ? "↑" : "↓"} {percentage}%</span>
           </div>
           <div className="metric-trend-label">{valueLabel}</div>
         </div>
@@ -209,8 +225,7 @@ export function MetricTrendChart({
               key={range}
               type="button"
               onClick={() => onTimeRangeChange(range)}
-              className={`chart-range-button${timeRange === range ? " is-active" : ""}`}
-              style={{ "--chart-accent": color } as CSSProperties}
+              className={`chart-range-button ${accent}${timeRange === range ? " is-active" : ""}`}
             >
               {range}
             </button>

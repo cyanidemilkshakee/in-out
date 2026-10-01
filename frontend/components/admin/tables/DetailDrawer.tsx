@@ -8,7 +8,6 @@ export function DetailDrawer({
   noteDraft,
   onNoteDraftChange,
   onAcknowledge,
-  onResolve,
   onAddNote,
   onClose
 }: {
@@ -18,15 +17,14 @@ export function DetailDrawer({
   noteDraft: string;
   onNoteDraftChange: (value: string) => void;
   onAcknowledge: () => void;
-  onResolve: () => void;
   onAddNote: () => void;
   onClose: () => void;
 }) {
   return (
-    <aside className="detail-drawer" aria-label="Movement details">
+    <aside className="admin-panel detail-drawer" aria-label="Movement details">
       <div className="drawer-header">
         <h2>{event.subjectName}</h2>
-        <button className="icon-button" type="button" onClick={onClose} aria-label="Close movement details">
+        <button className="admin-button admin-button--icon icon-button" type="button" onClick={onClose} aria-label="Close movement details">
           <X />
         </button>
       </div>
@@ -84,23 +82,15 @@ export function DetailDrawer({
       </dl>
       {alert ? (
         <section className="drawer-section">
-          <h3>Alert workflow</h3>
+          <h3>Alert</h3>
           <div className="drawer-actions">
             <button
-              className="secondary-button"
+              className="admin-button admin-button--secondary secondary-button"
               type="button"
               onClick={onAcknowledge}
               disabled={alert.status !== "open"}
             >
               Acknowledge
-            </button>
-            <button
-              className="primary-button"
-              type="button"
-              onClick={onResolve}
-              disabled={alert.status === "resolved"}
-            >
-              Resolve
             </button>
           </div>
         </section>
@@ -125,7 +115,7 @@ export function DetailDrawer({
             rows={3}
           />
           <button
-            className="secondary-button"
+            className="admin-button admin-button--secondary secondary-button"
             type="button"
             onClick={onAddNote}
             disabled={!noteDraft.trim()}

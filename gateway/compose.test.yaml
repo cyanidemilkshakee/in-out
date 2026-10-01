@@ -1,0 +1,70 @@
+# Standalone, disposable gateway test stack. No host ports or application data.
+services:
+  certificates:
+    build:
+      context: ../backend
+    user: "0:0"
+    command: [python, /tests/certificates.py]
+    volumes:
+      - ./tests:/tests:ro
+      - test-certificates:/certificates
+
+  fixture:
+    build:
+      context: ../backend
+    command: [python, /tests/upstream.py]
+    volumes:
+      - ./tests:/tests:ro
+    networks:
+      default:
+        aliases: [app, python-api, keycloak]
+
+  kong:
+    image: kong:${KONG_VERSION:-3.9.3}
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8002, 0.0.0.0:8005, 0.0.0.0:8443 ssl"
+      KONG_ADMIN_LISTEN: "off"
+      KONG_STATUS_LISTEN: "127.0.0.1:8100"
+      KONG_PLUGINS: bundled,inout-terminal-identity
+      KONG_NGINX_MAIN_ENV: INOUT_TERMINAL_SECRET
+      INOUT_TERMINAL_SECRET: gateway-test-secret-not-for-production-12345
+      KONG_SSL_CERT: /certificates/server.crt
+      KONG_SSL_CERT_KEY: /certificates/server.key
+      KONG_NGINX_PROXY_SSL_CLIENT_CERTIFICATE: /certificates/ca.crt
+      KONG_NGINX_PROXY_SSL_VERIFY_CLIENT: "on"
+      KONG_NGINX_PROXY_SSL_VERIFY_DEPTH: "3"
+      KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: 1m
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 16k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: "8 16k"
+      KONG_PROXY_ACCESS_LOG: "off"
+    volumes:
+      - ./kong.yml:/etc/kong/kong.yml:ro
+      - ./plugins/inout-terminal-identity:/usr/local/share/lua/5.1/kong/plugins/inout-terminal-identity:ro
+      - test-certificates:/certificates:ro
+    depends_on:
+      certificates:
+        condition: service_completed_successfully
+      fixture:
+        condition: service_started
+    healthcheck:
+      test: [CMD, kong, health]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  tests:
+    build:
+      context: ../backend
+    command: [python, /tests/check_gateway.py]
+    volumes:
+      - ./tests:/tests:ro
+      - test-certificates:/certificates:ro
+    depends_on:
+      kong:
+        condition: service_healthy
+
+volumes:
+  test-certificates:

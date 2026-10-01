@@ -2,12 +2,10 @@ import type { NextRequest } from "next/server";
 import type {
   CreateEmployeeInput,
   CreateHardwareAssetInput,
-  CreateTemporaryVisitorInput,
   HardwareAsset,
   Person,
   UpdateAccessPermissionInput,
 } from "../../../lib/types";
-import { normalizeDashboardMovement } from "../../../lib/normalizeDashboard";
 import { callPythonApi } from "../pythonApi";
 import {
   requireObject,
@@ -25,15 +23,6 @@ export async function executeCommand(
   const send = <T,>(data: T) => response(data, timing);
 
   switch (action) {
-    case "createTemporaryVisitor": {
-      const input = requireObject(body.input, "Visitor input") as CreateTemporaryVisitorInput;
-      const result = await callPythonApi("/v1/registry/subjects", "POST", {
-        barcode: input.barcode,
-        kind: "visitor",
-        data: input,
-      });
-      return send({ id: result.id, barcode: result.barcode, type: "visitor", ...result.data });
-    }
     case "createEmployee": {
       const input = requireObject(body.input, "Employee input") as CreateEmployeeInput;
       const result = await callPythonApi("/v1/registry/subjects", "POST", {
@@ -74,18 +63,22 @@ export async function executeCommand(
       const result = await callPythonApi(`/v1/registry/subjects/${assetId}`, "PUT", payload);
       return send({ id: result.id, barcode: result.barcode, type: "hardware", ...result.data });
     }
-    case "updateAlert":
-      return send(await callPythonApi(`/v1/alerts/${requireString(body.alertId, "Alert id")}`, "PATCH", requireObject(body.patch, "Alert patch")));
+    case "acknowledgeAlert":
+      return send(await callPythonApi(`/v1/alerts/${requireString(body.alertId, "Alert id")}`, "PATCH", { status: "acknowledged" }));
     case "updateAccessPermission": {
       const input = requireObject(body.input, "Permission input") as UpdateAccessPermissionInput;
       return send(await callPythonApi(`/v1/permissions/${input.subjectId}`, "PATCH", input));
     }
     case "submitPermissionRequest": {
       const input = requireObject(body.request, "Request input");
+      const requestType = requireString(input.type, "Type");
+      const operatorNote = requestType === "manual_override"
+        ? requireString(input.operatorNote, "Request note")
+        : input.operatorNote;
       return send(await callPythonApi("/v1/permission-requests", "POST", {
         subject_id: requireString(input.subjectId, "Subject id"),
         checkpoint_id: input.checkpointId || "main-gate",
-        request_type: requireString(input.type, "Type"),
+        request_type: requestType,
         reason: requireString(input.purpose, "Purpose"),
         subject_name: input.subjectName,
         barcode: input.barcode,
@@ -98,7 +91,7 @@ export async function executeCommand(
         carrier_name: input.carrierName,
         event_id: input.eventId,
         direction: input.direction,
-        operator_note: input.operatorNote,
+        operator_note: operatorNote,
       }));
     }
     case "decidePermissionRequest": {
@@ -107,12 +100,27 @@ export async function executeCommand(
         throw new Error("Decision must be approved or denied.");
       }
       const requestId = requireString(body.requestId, "Request id");
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      if (decision === "denied" && !reason) {
+        throw new Error("A decision note is required when denying a permission request.");
+      }
+      const validForMinutes = body.validForMinutes;
+      if (validForMinutes !== undefined && (typeof validForMinutes !== "number" || !Number.isInteger(validForMinutes) || validForMinutes < 15 || validForMinutes > 240)) {
+        throw new Error("Valid for must be between 15 minutes and 4 hours.");
+      }
       return send(await callPythonApi(`/v1/permission-requests/${requestId}/decide`, "POST", {
         decision,
-        reason: requireString(body.reason, "Decision reason"),
+        reason,
+        valid_for_minutes: decision === "approved" ? validForMinutes : undefined,
         admin_id: "admin-1",
       }));
     }
+    case "acknowledgePermissionRequest":
+      return send(await callPythonApi(
+        `/v1/permission-requests/${requireString(body.requestId, "Request id")}/acknowledge`,
+        "POST",
+        {}
+      ));
     case "updateAlertRule": {
       const ruleId = requireString(body.ruleId, "Rule id");
       if (typeof body.enabled !== "boolean") throw new Error("Alert rule enabled state is required.");
@@ -129,29 +137,11 @@ export async function executeCommand(
         requireObject(body.input, "Scan input"),
         request.headers.get("Idempotency-Key") ?? crypto.randomUUID()
       ));
-    case "requestBarcodeManualReview":
-      return send(await callPythonApi("/v1/terminal/manual-reviews", "POST", requireObject(body.input, "Manual review input")));
-    case "saveMovement": {
-      const event = requireObject(body.event, "Movement event");
-      const saved = await callPythonApi("/v1/movements/save", "POST", {
-        id: event.id,
-        subject_id: event.subjectId,
-        checkpoint_id: event.checkpointId,
-        occurred_at: event.createdAt,
-        result: event.result,
-        direction: event.direction,
-        scan_type: event.scanType,
-        subject_type: event.subjectType,
-        sync_state: event.syncState,
-        denial_code: event.denialCode,
-        data: event,
-      });
-      return send(normalizeDashboardMovement(saved));
+    case "requestBarcodeManualReview": {
+      const input = requireObject(body.input, "Manual review input");
+      requireString(input.operatorNote, "Request note");
+      return send(await callPythonApi("/v1/terminal/manual-reviews", "POST", input));
     }
-    case "syncMovements":
-      return send(await callPythonApi("/v1/movements/sync", "POST", { eventIds: body.eventIds || [] }));
-    case "resolveMovementConflicts":
-      return send(await callPythonApi("/v1/movements/conflicts/resolve", "POST", { eventIds: body.eventIds || [] }));
     case "addMovementNote":
       return send(await callPythonApi(`/v1/movements/${encodeURIComponent(requireString(body.eventId, "Event id"))}/notes`, "POST", { note: body.note }));
     default:

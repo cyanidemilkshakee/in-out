@@ -5,13 +5,16 @@ All activities interact with the database or Redis and are independently retryab
 from __future__ import annotations
 
 import uuid
+import json
 from datetime import datetime, timezone
 
 from temporalio import activity
 from sqlalchemy import select, func
 
 from database import async_session  # use the session factory directly in activities
+from dashboard_cache import invalidate_dashboard_cache
 from models import PermissionRequestModel, Notification
+from redis_client import publish_presence_update
 
 @activity.defn
 async def notify_admins_of_override(request_id: str) -> None:
@@ -88,7 +91,7 @@ async def auto_deny_visitor(request_id: str) -> None:
 async def run_alert_rule_evaluation() -> int:
     """Evaluate scheduled alert rules and persist any newly triggered alerts."""
     from rule_engine import evaluate_scheduled_rules, build_workday_statuses, default_alert_rules, with_default_alert_rules
-    from models import AlertRule, Alert as AlertModel, Movement as MovementModel, Person
+    from models import AlertRule, Alert as AlertModel, Movement as MovementModel, Person, Subject
     from datetime import timedelta
     import uuid
     async with async_session() as db:
@@ -109,14 +112,32 @@ async def run_alert_rule_evaluation() -> int:
         movements = [{**m.data, "subjectId": m.subject_id, "result": m.result, "direction": m.direction,
             "subjectType": m.subject_type, "createdAt": m.occurred_at.isoformat(),
             "date": _current_date(m.occurred_at), "time": _current_time(m.occurred_at)} for m in movements_result.scalars().all()]
-        people_result = await db.execute(select(Person))
-        people = [{**p.data, "id": p.subject_id} for p in people_result.scalars().all()]
+        people_result = await db.execute(
+            select(Person, Subject).join(Subject, Subject.id == Person.subject_id)
+        )
+        people = [
+            {
+                **(person.data or {}),
+                "id": subject.id,
+                "barcode": subject.barcode,
+                "type": subject.kind,
+            }
+            for person, subject in people_result.all()
+        ]
         existing_result = await db.execute(
             select(AlertModel).where(AlertModel.created_at >= since)
         )
         existing_alerts = [a.data for a in existing_result.scalars().all()]
-        workdays = build_workday_statuses(movements, people)
-        triggered = evaluate_scheduled_rules(rules, movements, workdays, existing_alerts)
+        evaluation_now = datetime.now(timezone.utc)
+        workdays = build_workday_statuses(movements, people, now=evaluation_now)
+        triggered = evaluate_scheduled_rules(
+            rules,
+            movements,
+            workdays,
+            existing_alerts,
+            employees=people,
+            now=evaluation_now,
+        )
         for alert_data in triggered:
             alert_id = f"AL-{uuid.uuid4().hex[:8].upper()}"
             alert_data["id"] = alert_id
@@ -124,4 +145,15 @@ async def run_alert_rule_evaluation() -> int:
             alert_data["createdAt"] = created_at.isoformat()
             db.add(AlertModel(id=alert_id, data=alert_data, created_at=created_at))
         await db.commit()
+        if triggered:
+            await invalidate_dashboard_cache()
+            try:
+                await publish_presence_update(json.dumps({
+                    "type": "alerts",
+                    "alerts": triggered,
+                }))
+            except Exception:
+                # Alert persistence must not fail because an SSE subscriber is
+                # temporarily unavailable.
+                pass
         return len(triggered)

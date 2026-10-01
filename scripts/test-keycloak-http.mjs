@@ -14,6 +14,15 @@ let refreshCalls = 0;
 const upstreamTokens = [];
 
 const upstream = createServer(async (req, res) => {
+  if (req.url === "/v1/presence/stream") {
+    res.writeHead(200, { "Content-Type": "text/event-stream" });
+    res.write(': heartbeat\n\n');
+    return;
+  }
+  if (req.url === "/v1/terminal/scans") {
+    req.socket.destroy(); // Simulate an unavailable API, not a validation error.
+    return;
+  }
   res.setHeader("Content-Type", "application/json");
   if (req.url === "/realms/inout/protocol/openid-connect/token") {
     refreshCalls++;
@@ -91,6 +100,7 @@ try {
   }
   assert.ok(ready, "Isolated app readiness timed out");
   assert.equal((await request("/api/profile")).status, 401);
+  assert.equal(new URL((await request("/account")).headers.get("location"), appUrl).pathname, "/login");
 
   const response = await request("/api/profile", await sessionCookie());
   assert.equal(response.status, 200);
@@ -122,8 +132,20 @@ try {
   assert.equal(refreshCalls, attempts, "Invalid refresh grants must not be retried after invalidation is persisted");
 
   const operator = await sessionCookie({ roles: ["operator"], access_token: accessToken("operator"), expires_at: Math.floor(Date.now() / 1000) + 300 });
+  assert.equal((await request("/account", operator)).headers.get("location"), `${upstreamUrl}/realms/inout/account/`);
   const redirected = await request("/admin/profile", operator);
   assert.equal(new URL(redirected.headers.get("location")).pathname, "/terminal");
+  const stream = await request("/api/presence", await sessionCookie());
+  assert.equal(stream.status, 200);
+  updatedCookie(stream);
+  const reader = stream.body.getReader();
+  assert.ok(new TextDecoder().decode((await reader.read()).value).includes(": heartbeat"));
+  await reader.cancel();
+  const failedScan = await fetch(`${appUrl}/api/data`, { method: "POST",
+    headers: { cookie, "Content-Type": "application/json", Origin: appUrl },
+    body: JSON.stringify({ action: "recordScan", input: { barcode: "test", checkpointId: "cp1" } }),
+  });
+  assert.equal(failedScan.status, 502, "An upstream connection failure must remain retryable by the offline queue");
   console.log("Keycloak HTTP checks passed: public-session isolation, single refresh, cookie persistence, upstream forwarding, invalidation, account redirect, role routing, account controls.");
 } catch (error) {
   // The server uses only synthetic credentials, but redact them even in errors.

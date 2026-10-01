@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withApiSession } from "../authSession";
 import { callPythonApi, PythonApiError } from "../pythonApi";
+import { readJsonBody, RequestBodyError } from "../../../lib/requestJson";
+import { requireObject } from "../data/bff";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Identity request failed.";
-  return NextResponse.json({ error: message }, { status: error instanceof PythonApiError ? error.status : 400 });
+  return NextResponse.json({ error: message }, { status: error instanceof PythonApiError || error instanceof RequestBodyError ? error.status : 400 });
 }
 
 async function identityRequest(request: NextRequest) {
@@ -19,7 +21,7 @@ async function identityRequest(request: NextRequest) {
       return NextResponse.json({ data: await callPythonApi(`/v1/keycloak/users?search=${encodeURIComponent(search)}&first=${encodeURIComponent(first)}&max=${encodeURIComponent(max)}`, "GET") });
     }
 
-    const body = await request.json() as Record<string, unknown>;
+    const body = requireObject(await readJsonBody(request), "Identity command");
     const action = body.action;
     if (typeof action !== "string") return NextResponse.json({ error: "Identity action is required." }, { status: 400 });
     const userId = typeof body.userId === "string" ? body.userId : "";

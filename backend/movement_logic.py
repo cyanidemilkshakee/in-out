@@ -178,13 +178,15 @@ def _status_for(
     if subject is None:
         return {"result": "denied", "reason": "Barcode not registered"}
 
-    # The administrator admitted this visit despite the entry policy. Honour
-    # its matching exit even if that policy still denies entry or has expired.
-    # Extra assets do not inherit another visit's manual approval.
+    # The administrator admitted this visit despite the entry policy. Once the
+    # subject is inside, preserve the matching exit even after the approval's
+    # validity window has elapsed. Extra assets do not inherit that approval.
     override = subject.get("entryOverride")
     if direction == "exit" and subject.get("inside") and isinstance(override, dict) and override.get("requestId"):
         admitted_assets = set(override.get("hardwareIds") or [])
-        if all(asset.get("inside") and asset.get("id") in admitted_assets for asset in carried_hardware):
+        if all(
+            asset.get("inside") and asset.get("id") in admitted_assets for asset in carried_hardware
+        ):
             return {"result": "approved", "reason": "Exit for manually approved entry"}
 
     for field, label, predicate in (

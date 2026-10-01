@@ -2,18 +2,15 @@ import logging
 import uuid
 import secrets
 import json
-from collections import defaultdict, deque
 from contextlib import asynccontextmanager
-from time import monotonic
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Depends, Header, HTTPException, Request
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import verify_admin_request, verify_authenticated_request, verify_terminal_operator_request
+from auth import verify_admin_request, verify_authenticated_request, verify_terminal_access_request
 from config import settings
+from request_limits import RequestLimitsMiddleware
 from database import get_db, get_read_db, engine, read_engine
 from schemas import ScanPayload, ScanResponse
 from terminal_scans import record_scan
@@ -24,7 +21,7 @@ from routers import dashboard, alerts, notifications, audit, checkpoints, termin
 from temporal_worker import get_temporal_client
 
 logger = logging.getLogger(__name__)
-_write_windows: dict[str, deque[float]] = defaultdict(deque)
+
 
 
 @asynccontextmanager
@@ -47,27 +44,19 @@ async def verify_mtls_terminal(request: Request) -> str:
     """
     Validate the mTLS terminal identity forwarded by the API Gateway.
 
-    In production, the API Gateway (Nginx/Envoy) terminates TLS and forwards:
-      X-Client-Verify: SUCCESS | FAILED | NONE
-      X-Client-DN:     CN=terminal-abc,O=acme-corp
-
-    SECURITY: The API Gateway MUST strip these headers from inbound external
-    requests before forwarding. They must only be set by the Gateway itself.
-    The gateway must also inject the configured shared proxy secret.
+    Kong verifies the client certificate on its dedicated TLS listener, strips
+    caller-supplied identity headers, and injects the certificate subject and
+    a shared secret. The API is not published directly by Docker Compose.
     """
-    verify = request.headers.get("X-Client-Verify", "NONE")
-    client_dn = request.headers.get("X-Client-DN", "")
+    client_dn = request.headers.get("X-Inout-Terminal-DN", "")
 
-    if not settings.MTLS_PROXY_SECRET or not secrets.compare_digest(
-        request.headers.get("X-Proxy-Secret", ""), settings.MTLS_PROXY_SECRET
+    if len(settings.KONG_TERMINAL_SECRET) < 32 or not secrets.compare_digest(
+        request.headers.get("X-Inout-Gateway-Secret", ""), settings.KONG_TERMINAL_SECRET
     ):
-        raise HTTPException(status_code=401, detail="Trusted certificate gateway required")
-
-    if verify != "SUCCESS":
-        raise HTTPException(status_code=401, detail="mTLS client certificate required or invalid")
+        raise HTTPException(status_code=401, detail="Trusted Kong terminal identity required")
 
     if not client_dn:
-        raise HTTPException(status_code=401, detail="Client DN header missing")
+        raise HTTPException(status_code=401, detail="Verified terminal identity missing")
 
     return client_dn
 
@@ -75,36 +64,7 @@ async def verify_mtls_terminal(request: Request) -> str:
 app = FastAPI(title="InOut Backend", lifespan=lifespan)
 
 
-@app.middleware("http")
-async def protect_write_requests(request: Request, call_next):
-    """Bound command payloads and bursts before parsing JSON bodies.
-
-    This is a process-local backstop. A public deployment should apply the
-    equivalent limit at its trusted reverse proxy as well.
-    """
-    content_length = request.headers.get("content-length")
-    if content_length and content_length.isdigit() and int(content_length) > settings.MAX_REQUEST_BODY_BYTES:
-        return JSONResponse(status_code=413, content={"detail": "Request payload is too large"})
-
-    is_write = request.method in {"POST", "PUT", "PATCH", "DELETE"}
-    if is_write:
-        client = request.client.host if request.client else "unknown"
-        now = monotonic()
-        window = _write_windows[client]
-        while window and now - window[0] >= 60:
-            window.popleft()
-        if len(window) >= settings.WRITE_RATE_LIMIT_PER_MINUTE:
-            return JSONResponse(status_code=429, content={"detail": "Too many write requests; try again shortly"})
-        window.append(now)
-    return await call_next(request)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(RequestLimitsMiddleware)
 
 app.include_router(presence.router, dependencies=[Depends(verify_authenticated_request)])
 app.include_router(movements.router, dependencies=[Depends(verify_admin_request)])
@@ -119,7 +79,7 @@ app.include_router(notifications.router, dependencies=[Depends(verify_admin_requ
 app.include_router(audit.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(checkpoints.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(keycloak_admin.router)
-app.include_router(terminal.router, dependencies=[Depends(verify_terminal_operator_request)])
+app.include_router(terminal.router, dependencies=[Depends(verify_terminal_access_request)])
 app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
 
 
@@ -161,12 +121,14 @@ async def process_scan(
         raw_response = await record_scan(db, idempotency_key, payload, payload.terminal_id)
         response = ScanResponse(**raw_response)
         await db.commit()
+        if db.info.get("scan_replayed"):
+            return response
         await invalidate_dashboard_cache()
         try:
             await publish_presence_update(json.dumps({
                 "type": "scan",
                 "subject_id": response.subject_id,
-                "state": ("inside" if payload.direction == "entry" else "outside") if response.allowed else None,
+                "state": ("inside" if raw_response["decision"]["event"]["direction"] == "entry" else "outside") if response.allowed else None,
                 "movement": raw_response["decision"]["event"],
                 "people": raw_response.get("updatedPeople", []),
                 "hardwareAssets": raw_response.get("updatedHardwareAssets", []),

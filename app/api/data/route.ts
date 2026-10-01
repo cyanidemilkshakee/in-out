@@ -1,13 +1,12 @@
 import { NextRequest } from "next/server";
 import { withApiSession } from "../authSession";
 import { PythonApiError } from "../pythonApi";
+import { readJsonBody, RequestBodyError } from "../../../lib/requestJson";
 import { executeCommand } from "./commands";
 import { errorResponse, handleGet, requireObject, requireString, ServerTiming } from "./bff";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-const MAX_COMMAND_BODY_BYTES = 64 * 1024;
 
 async function getData(request: NextRequest) {
   const timing = new ServerTiming();
@@ -31,12 +30,8 @@ async function postData(request: NextRequest) {
   const timing = new ServerTiming();
   let action = "unknown";
   try {
-    const contentLength = Number(request.headers.get("content-length") ?? 0);
-    if (Number.isFinite(contentLength) && contentLength > MAX_COMMAND_BODY_BYTES) {
-      return errorResponse("Command payload is too large.", timing, 413);
-    }
     const parseStartedAt = performance.now();
-    const body = requireObject(await request.json(), "Command");
+    const body = requireObject(await readJsonBody(request), "Command");
     timing.add("request_parse", performance.now() - parseStartedAt);
     action = requireString(body.action, "Command action");
     return await executeCommand(action, body, request, timing);
@@ -51,7 +46,7 @@ async function postData(request: NextRequest) {
     return errorResponse(
       message,
       timing,
-      error instanceof PythonApiError ? error.status : conflict ? 409 : 400
+      error instanceof PythonApiError || error instanceof RequestBodyError ? error.status : conflict ? 409 : 400
     );
   }
 }

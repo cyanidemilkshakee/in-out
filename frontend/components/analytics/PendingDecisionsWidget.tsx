@@ -1,10 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { Barcode, Check, ChevronRight, Clock3, X } from "lucide-react";
+import { Check, ChevronRight, Clock3, X } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useDataActions } from "../../context/DataContext";
 import type { PermissionRequest } from "../../../lib/types";
+
+const VALID_FOR_OPTIONS = [
+  { minutes: 15, label: "15 minutes" },
+  { minutes: 30, label: "30 minutes" },
+  { minutes: 60, label: "1 hour" },
+  { minutes: 120, label: "2 hours" },
+  { minutes: 240, label: "4 hours" },
+];
 
 export function PendingDecisionsWidget({
   requests,
@@ -15,6 +23,9 @@ export function PendingDecisionsWidget({
 }) {
   const { decidePermissionRequest } = useDataActions();
   const [workingId, setWorkingId] = useState<string | null>(null);
+  const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
+  const [validForMinutes, setValidForMinutes] = useState<Record<string, number>>({});
+  const [error, setError] = useState("");
   const pendingRequests = useMemo(
     () => requests
       .filter((request) => request.status === "pending")
@@ -24,14 +35,19 @@ export function PendingDecisionsWidget({
   );
 
   async function decide(request: PermissionRequest, decision: "approved" | "denied") {
+    const reason = decisionNotes[request.id]?.trim() ?? "";
+    if (decision === "denied" && !reason) {
+      setError("Add a decision note before denying this permission.");
+      return;
+    }
     setWorkingId(request.id);
+    setError("");
     try {
       await decidePermissionRequest(
         request.id,
         decision,
-        decision === "approved"
-          ? "Approved from Dashboard pending decisions"
-          : "Denied from Dashboard pending decisions"
+        reason,
+        decision === "approved" ? (validForMinutes[request.id] ?? 60) : undefined
       );
     } finally {
       setWorkingId(null);
@@ -47,9 +63,9 @@ export function PendingDecisionsWidget({
         <Link
           className="alert-widget-title-link"
           href="/admin/permissions"
-          aria-label="Open pending permission decisions"
+          aria-label="Open pending permissions"
         >
-          <h2 id="pending-decisions-heading">Pending Decisions</h2>
+          <h2 id="pending-decisions-heading">Pending Permissions</h2>
           <ChevronRight
             className="alert-widget-title-chevron"
             aria-hidden="true"
@@ -57,6 +73,8 @@ export function PendingDecisionsWidget({
           />
         </Link>
       </header>
+
+      {error ? <p className="pending-decision-error" role="alert">{error}</p> : null}
 
       {pendingRequests.length ? (
         <ul className="alert-list-container pending-decision-list">
@@ -68,35 +86,56 @@ export function PendingDecisionsWidget({
                   <span className="pending-decision-icon" aria-hidden="true">
                     <Clock3 size={17} strokeWidth={1.8} />
                   </span>
-                  <span className="alert-item-main">
+                  <div className="alert-item-main">
                     <span className="alert-item-title">{request.subjectName}</span>
-                    <span className="alert-item-meta">
-                      <span>{request.type === "manual_override" ? "Manual review" : "Permission request"}</span>
-                      <span className="pending-decision-barcode"><Barcode size={11} />{request.barcode || "Registered subject"}</span>
-                    </span>
-                  </span>
-                  <span className="pending-decision-actions">
-                    <button
-                      type="button"
-                      className="pending-decision-approve"
-                      aria-label={`Approve ${request.subjectName}`}
-                      title="Approve"
-                      disabled={busy}
-                      onClick={() => void decide(request, "approved")}
-                    >
-                      <Check size={16} strokeWidth={2.2} />
-                    </button>
-                    <button
-                      type="button"
-                      className="pending-decision-deny"
-                      aria-label={`Deny ${request.subjectName}`}
-                      title="Deny"
-                      disabled={busy}
-                      onClick={() => void decide(request, "denied")}
-                    >
-                      <X size={16} strokeWidth={2.2} />
-                    </button>
-                  </span>
+                    {request.operatorNote ? <span className="pending-decision-request-note">{request.operatorNote}</span> : null}
+                    <label className="pending-decision-note">
+                      <span>Decision note <em>Required to deny</em></span>
+                      <textarea
+                        value={decisionNotes[request.id] ?? ""}
+                        disabled={busy}
+                        maxLength={1000}
+                        placeholder="Add a note if you deny this permission."
+                        onChange={(event) => setDecisionNotes((current) => ({ ...current, [request.id]: event.target.value }))}
+                      />
+                    </label>
+                    <div className="pending-decision-controls">
+                      <label>
+                        <span>Valid for</span>
+                        <select
+                          value={validForMinutes[request.id] ?? 60}
+                          disabled={busy}
+                          onChange={(event) => setValidForMinutes((current) => ({ ...current, [request.id]: Number(event.target.value) }))}
+                        >
+                          {VALID_FOR_OPTIONS.map((option) => <option key={option.minutes} value={option.minutes}>{option.label}</option>)}
+                        </select>
+                      </label>
+                      <span className="pending-decision-actions">
+                        <button
+                          type="button"
+                          className="pending-decision-approve"
+                          aria-label={`Allow ${request.subjectName}`}
+                          title="Allow"
+                          disabled={busy}
+                          onClick={() => void decide(request, "approved")}
+                        >
+                          <Check size={16} strokeWidth={2.2} />
+                          <span>Allow</span>
+                        </button>
+                        <button
+                          type="button"
+                          className="pending-decision-deny"
+                          aria-label={`Deny ${request.subjectName}`}
+                          title="Deny"
+                          disabled={busy || !decisionNotes[request.id]?.trim()}
+                          onClick={() => void decide(request, "denied")}
+                        >
+                          <X size={16} strokeWidth={2.2} />
+                          <span>Deny</span>
+                        </button>
+                      </span>
+                    </div>
+                  </div>
                 </article>
               </li>
             );
@@ -104,17 +143,13 @@ export function PendingDecisionsWidget({
         </ul>
       ) : (
         <div className="alert-widget-empty">
-          <span className="alert-widget-empty-icon" aria-hidden="true">✓</span>
           <div>
-            <strong>No pending decisions</strong>
+            <strong>No pending permissions</strong>
             <span>All permission requests are up to date.</span>
           </div>
         </div>
       )}
 
-      <p className="alert-widget-count" aria-live="polite">
-        {requests.filter((request) => request.status === "pending").length} pending {requests.filter((request) => request.status === "pending").length === 1 ? "decision" : "decisions"}
-      </p>
     </section>
   );
 }

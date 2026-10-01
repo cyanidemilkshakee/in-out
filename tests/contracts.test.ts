@@ -3,6 +3,63 @@ import { test } from "node:test";
 import { normalizeDashboardMovement, normalizeTerminalSnapshot } from "../lib/normalizeDashboard";
 import { HttpDataService } from "../services/httpDataService";
 import { isMovementEventId, movementLogHref } from "../lib/movementReferences";
+import { applyPresenceUpdate, parsePresenceUpdate } from "../frontend/context/presenceUpdates";
+import { emptyData } from "../frontend/context/dataDefaults";
+import { queuedScanInput } from "../frontend/lib/offlineTerminalQueue";
+import { readJsonBody } from "../lib/requestJson";
+import type { DataState } from "../frontend/context/dataTypes";
+import type { RecordScanInput } from "../lib/types";
+import { escapeCsv } from "../lib/csv";
+
+test("CSV exports keep untrusted names as text instead of spreadsheet formulas", () => {
+  assert.equal(escapeCsv('Alice "A"'), '"Alice ""A"""');
+  for (const text of ["=1+1", "  @SUM(1)", "+1", "-1", "\tformula"]) {
+    assert.equal(escapeCsv(text), `"'${text}"`);
+  }
+});
+
+test("HTTP and SSE delivery count one event and a retry never restores older presence", () => {
+  const event = normalizeDashboardMovement({ id: "entry", subjectId: "p1", subjectType: "employee", result: "approved", direction: "entry", scanType: "auto" });
+  const initial: DataState = { ...emptyData, isLoading: false, error: null };
+  const entered = applyPresenceUpdate(initial, { movement: event });
+  const duplicate = applyPresenceUpdate(entered, { movement: event });
+  assert.equal(duplicate.movements.length, 1);
+  assert.equal(duplicate.scanAnalytics.totalScans, 1);
+  assert.equal(duplicate.scanAnalytics.activeInside, 1);
+  const exited = applyPresenceUpdate(duplicate, { movement: { ...event, id: "exit", direction: "exit" } });
+  const retry = applyPresenceUpdate(exited, { movement: event });
+  assert.equal(retry.scanAnalytics.totalScans, 2);
+  assert.equal(retry.scanAnalytics.activeInside, 0);
+  const asset = applyPresenceUpdate(retry, { movement: { ...event, id: "asset", subjectType: "hardware" } });
+  assert.equal(asset.scanAnalytics.activeInside, 0);
+  assert.equal(parsePresenceUpdate('{"people":{}}'), null);
+  assert.equal(parsePresenceUpdate('{"movement":{"id":"bad"}}'), null);
+});
+
+test("offline retries preserve the original attempted payload and support legacy queue entries", () => {
+  const input: RecordScanInput = { barcode: "p1", checkpointId: "cp1", online: true, scanType: "auto", selectedHardwareIds: [] };
+  const queued = { input, idempotencyKey: "retry", capturedOfflineAt: "2026-09-28T10:00:00Z", attempts: 0 };
+  assert.deepEqual(queuedScanInput(queued), input);
+  assert.deepEqual(queuedScanInput({ ...queued, input: { ...input, capturedOfflineAt: queued.capturedOfflineAt } }), { ...input, capturedOfflineAt: queued.capturedOfflineAt });
+  const { online: _online, ...legacy } = input;
+  assert.equal(queuedScanInput({ ...queued, input: legacy }).capturedOfflineAt, queued.capturedOfflineAt);
+});
+
+test("JSON commands reject cross-origin, non-JSON, malformed and chunked oversized bodies", async () => {
+  const origin = process.env.AUTH_URL || "http://localhost:1008";
+  const request = (body: string, headers: Record<string, string> = {}) => new Request(`${origin}/api/data`, {
+    method: "POST", headers: { "Content-Type": "application/json", ...headers }, body,
+  });
+  assert.deepEqual(await readJsonBody(request('{"ok":true}')), { ok: true });
+  await assert.rejects(readJsonBody(request('{}', { Origin: "https://attacker.invalid" })), { status: 403 });
+  await assert.rejects(readJsonBody(request('{}', { "Content-Type": "text/plain" })), { status: 415 });
+  await assert.rejects(readJsonBody(request('{')), { status: 400 });
+  const streamed = new Request(`${origin}/api/data`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: new ReadableStream({ start(controller) { controller.enqueue(new Uint8Array(40000)); controller.enqueue(new Uint8Array(40000)); controller.close(); } }),
+    duplex: "half",
+  } as RequestInit);
+  await assert.rejects(readJsonBody(streamed), { status: 413 });
+});
 
 test("movement rows use authoritative database state and preserve display metadata", () => {
   const event = normalizeDashboardMovement({ id: "m1", subject_id: "p1", checkpoint_id: "cp1",

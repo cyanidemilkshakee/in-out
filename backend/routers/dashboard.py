@@ -32,6 +32,15 @@ async def get_dashboard(
         return cached
 
     analytics_sql = text("""
+        WITH duplicate_review_sources AS (
+            SELECT DISTINCT pr.data->>'eventId' AS source_event_id
+            FROM permission_requests pr
+            JOIN movements review_event
+              ON review_event.data->>'overrideRequestId' = pr.id
+            WHERE pr.data->>'type' = 'manual_override'
+              AND pr.data->>'eventId' IS NOT NULL
+              AND review_event.id <> pr.data->>'eventId'
+        )
         SELECT
             count(*)                                                           AS total,
             count(*) FILTER (WHERE result = 'approved')                        AS approved,
@@ -59,12 +68,23 @@ async def get_dashboard(
                 WHERE result = 'denied' AND denial_code = 'expired_pass'
             )                                                                  AS expired
         FROM movements
+        WHERE id NOT IN (SELECT source_event_id FROM duplicate_review_sources)
     """)
 
     recent_sql = text("""
+        WITH duplicate_review_sources AS (
+            SELECT DISTINCT pr.data->>'eventId' AS source_event_id
+            FROM permission_requests pr
+            JOIN movements review_event
+              ON review_event.data->>'overrideRequestId' = pr.id
+            WHERE pr.data->>'type' = 'manual_override'
+              AND pr.data->>'eventId' IS NOT NULL
+              AND review_event.id <> pr.data->>'eventId'
+        )
         SELECT id, subject_id, checkpoint_id, occurred_at, result, direction,
                scan_type, subject_type, sync_state, denial_code, data
         FROM movements
+        WHERE id NOT IN (SELECT source_event_id FROM duplicate_review_sources)
         ORDER BY occurred_at DESC
         LIMIT 100
     """)
@@ -73,6 +93,7 @@ async def get_dashboard(
         SELECT id, created_at, data
         FROM alerts
         WHERE data->>'status' = 'open'
+          AND COALESCE(data->>'title', '') NOT ILIKE 'Access decision denied'
           AND COALESCE(data->>'manualReview', 'false') <> 'true'
           AND COALESCE(data->>'ruleId', '') <> 'rule-manual-review'
           AND COALESCE(data->>'ruleId', '') <> 'rule-unknown-barcode'
@@ -90,9 +111,10 @@ async def get_dashboard(
     """)
 
     presence_sql = text("""
-        SELECT state, count(*) AS cnt
-        FROM presence_state
-        GROUP BY state
+        SELECT p.state, count(*) AS cnt
+        FROM presence_state p JOIN subjects s ON s.id = p.subject_id
+        WHERE s.kind IN ('employee', 'visitor')
+        GROUP BY p.state
     """)
 
     analytics_result = await db.execute(analytics_sql)

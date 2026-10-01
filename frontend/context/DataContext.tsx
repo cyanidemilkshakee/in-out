@@ -3,63 +3,15 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { emptyData } from "./dataDefaults";
-import { addMovementToAnalytics, mergeById, scopeForPath } from "./dataHelpers";
+import { scopeForPath } from "./dataHelpers";
 import { useDataActions as useDataActionSet } from "./useDataActions";
 import type { DataActions, DataProviderProps, DataState } from "./dataTypes";
-import type { HardwareAsset, MovementEvent, Person, PermissionRequest } from "../../lib/types";
+import { applyPresenceUpdate, parsePresenceUpdate } from "./presenceUpdates";
 
 export type { DataActions, DataState } from "./dataTypes";
 
 const DataStateContext = createContext<DataState | null>(null);
 const DataActionsContext = createContext<DataActions | null>(null);
-
-type PresenceUpdate = {
-  subject_id?: string;
-  state?: "inside" | "outside";
-  movement?: MovementEvent;
-  people?: Person[];
-  hardwareAssets?: HardwareAsset[];
-  request?: PermissionRequest;
-};
-
-function applyPresenceUpdate(current: DataState, update: PresenceUpdate): DataState {
-  const isInside = update.state === "inside";
-  let presenceChanged = false;
-  const updatePresence = <T extends Person | HardwareAsset>(items: T[]) => items.map((item) => {
-    if (!update.subject_id || !update.state || item.id !== update.subject_id || item.inside === isInside) return item;
-    presenceChanged = true;
-    return { ...item, inside: isInside };
-  });
-
-  const people = mergeById(updatePresence(current.people), update.people ?? []);
-  const hardwareAssets = mergeById(updatePresence(current.hardwareAssets), update.hardwareAssets ?? []);
-  const isNewMovement = Boolean(update.movement && !current.movements.some((movement) => movement.id === update.movement?.id));
-  const movements = update.movement
-    ? mergeById(current.movements, [update.movement]).slice(0, 100)
-    : current.movements;
-  const permissionRequests = update.request
-    ? mergeById(current.permissionRequests, [update.request])
-    : current.permissionRequests;
-
-  const eventAnalytics = update.movement && isNewMovement
-    ? addMovementToAnalytics(current.scanAnalytics, update.movement, update.people ?? [])
-    : current.scanAnalytics;
-  const presenceDelta = presenceChanged ? (isInside ? 1 : -1) : 0;
-  return {
-    ...current,
-    people,
-    hardwareAssets,
-    movements,
-    permissionRequests,
-    scanAnalytics: {
-      ...eventAnalytics,
-      // Presence events are authoritative for occupancy. Keep that count out
-      // of addMovementToAnalytics so an event with an updated person cannot
-      // increment occupancy twice.
-      activeInside: Math.max(0, current.scanAnalytics.activeInside + presenceDelta),
-    },
-  };
-}
 
 export function DataProvider({
   children,
@@ -121,7 +73,14 @@ export function DataProvider({
     eventSource.onmessage = (event) => {
       if (!event.data?.trim()) return;
       try {
-        setState((current) => applyPresenceUpdate(current, JSON.parse(event.data) as PresenceUpdate));
+        const update = parsePresenceUpdate(event.data);
+        if (update) {
+          setState((current) => applyPresenceUpdate(current, update));
+          // Manual requests and decisions can change both the queue and the
+          // aggregate snapshot. The local merge makes the UI immediate; this
+          // refresh makes every scoped view converge to the persisted state.
+          if (update.request?.type === "manual_override") void refresh();
+        }
       } catch {
         // Ignore malformed transient events; the next reconnect fetches a
         // consistent snapshot.
@@ -131,6 +90,7 @@ export function DataProvider({
       eventSource.close();
       window.clearTimeout(reconnectRefresh.current);
       reconnectRefresh.current = undefined;
+      streamOpened.current = false;
     };
   }, [refresh, scope]);
 

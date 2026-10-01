@@ -47,7 +47,7 @@ async def list_audit_events(
         "items":  [
             {
                 **(e.data or {}),
-                "id": (e.data or {}).get("id") or e.id,
+                "id": e.id,
                 "createdAt": (e.data or {}).get("createdAt") or (
                     e.created_at.isoformat() if e.created_at else None
                 ),

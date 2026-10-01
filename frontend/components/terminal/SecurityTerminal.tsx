@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import { ArrowDownLeft, ArrowUpRight, ArrowRight, Barcode, Check, ChevronDown, Clock3, CloudOff, Loader2, Moon, Plus, ScanLine, Sun, UserRound, X } from "lucide-react";
 import { useDataActions, useDataState } from "../../context/DataContext";
 import { useAdminTheme } from "../../hooks/useAdminTheme";
-import type { MovementEvent, PermissionRequest, RecordScanInput, ScanDecision } from "../../../lib/types";
+import type { PermissionRequest, RecordScanInput, ScanDecision } from "../../../lib/types";
 import { DataServiceError } from "../../../services/httpDataService";
 import {
   cacheTerminalConfig,
@@ -13,10 +13,12 @@ import {
   loadCachedTerminalConfig,
   recordQueuedScanFailure,
   removeQueuedTerminalScan,
+  queuedScanInput,
   type CachedTerminalConfig,
   type QueuedTerminalScan,
 } from "../../lib/offlineTerminalQueue";
 import { AccountActions } from "../AccountActions";
+import { formatTerminalTime, PendingPermissions, TerminalActivity } from "./TerminalPanels";
 import styles from "./SecurityTerminal.module.css";
 
 const BARCODE_MAX_LENGTH = 64;
@@ -40,67 +42,9 @@ function isRecoverableConnectionFailure(error: unknown) {
   return error instanceof DataServiceError && [502, 503, 504].includes(error.status);
 }
 
-function formatTime(timestamp?: string, fallback?: string) {
-  const date = timestamp ? new Date(timestamp) : null;
-  if (!date || !Number.isFinite(date.getTime())) return fallback || "—";
-  return new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone: "Asia/Kolkata" }).format(date);
-}
-
-function Status({ status, children }: { status: string; children: React.ReactNode }) {
-  return <span className={styles.status} data-status={status}><span aria-hidden="true" />{children}</span>;
-}
-
-function Activity({ movements, requests }: { movements: MovementEvent[]; requests: PermissionRequest[] }) {
-  const [view, setView] = useState<"scans" | "reviews">("scans");
-  const pending = requests.filter((request) => request.status === "pending").length;
-  const recent = movements.slice(0, 8);
-  const reviews = useMemo(() => [...requests].sort((a, b) =>
-    Number(b.status === "pending") - Number(a.status === "pending") || b.createdAt.localeCompare(a.createdAt)
-  ).slice(0, 8), [requests]);
-
-  return (
-    <section className={styles.activity} aria-label="Checkpoint activity">
-      <div className={styles.activityHeader}>
-        <div className={styles.viewSwitch} role="group" aria-label="Activity view">
-          <button type="button" aria-pressed={view === "scans"} onClick={() => setView("scans")}>Recent scans</button>
-          <button type="button" aria-pressed={view === "reviews"} onClick={() => setView("reviews")}>
-            Manual reviews{pending > 0 && <span className={styles.count} aria-label={`${pending} pending`}>{pending}</span>}
-          </button>
-        </div>
-        <span className={styles.activityHint}>At this checkpoint</span>
-      </div>
-      {(view === "scans" ? recent.length : reviews.length) ? (
-        <div className={styles.tableScroll}>
-          <table className={styles.activityTable}>
-            <caption className={styles.srOnly}>{view === "scans" ? "Recent scans" : "Manual reviews"} at the selected checkpoint</caption>
-            <thead><tr><th scope="col">Person or asset</th><th scope="col">Movement</th><th scope="col">{view === "scans" ? "Result" : "Status"}</th><th scope="col">Time (IST)</th></tr></thead>
-            <tbody>
-              {view === "scans" ? recent.map((movement) => (
-                <tr key={movement.id}>
-                  <td><strong>{movement.subjectName || "Unregistered barcode"}</strong><small>{movement.barcode}</small></td>
-                  <td><span className={styles.direction} data-direction={movement.direction}>{movement.direction === "entry" ? <ArrowDownLeft /> : <ArrowUpRight />}{movement.direction === "entry" ? "Entry" : "Exit"}</span></td>
-                  <td><Status status={movement.result}>{movement.result === "approved" ? "Allowed" : "Denied"}</Status></td>
-                  <td className={styles.time}>{formatTime(movement.createdAt, movement.time)}</td>
-                </tr>
-              )) : reviews.map((request) => (
-                <tr key={request.id}>
-                  <td><strong>{request.subjectName || "Unregistered barcode"}</strong><small>{request.barcode}</small></td>
-                  <td><span className={styles.direction} data-direction={request.direction}>{request.direction === "exit" ? <ArrowUpRight /> : <ArrowDownLeft />}{request.direction === "exit" ? "Exit" : "Entry"}</span></td>
-                  <td><Status status={request.status}>{request.status === "pending" ? "Waiting" : request.status === "approved" ? "Approved" : "Denied"}</Status></td>
-                  <td className={styles.time}>{formatTime(request.createdAt)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : <div className={styles.emptyActivity}>{view === "scans" ? "Scans at this checkpoint will appear here." : "No manual reviews at this checkpoint."}</div>}
-    </section>
-  );
-}
-
 export function SecurityTerminal() {
   const { hardwareAssets, checkpoints, movements, permissionRequests, adminAvailability, error, isLoading } = useDataState();
-  const { recordScan, requestBarcodeManualReview, submitPermissionRequest, refresh } = useDataActions();
+  const { recordScan, requestBarcodeManualReview, submitPermissionRequest, acknowledgePermissionRequest, refresh } = useDataActions();
   const theme = useAdminTheme();
   const [checkpointId, setCheckpointId] = useState("cp-main");
   const [manualDirection, setManualDirection] = useState<"entry" | "exit">("entry");
@@ -118,8 +62,12 @@ export function SecurityTerminal() {
   const [isQueueSyncing, setIsQueueSyncing] = useState(false);
   const [queueStatus, setQueueStatus] = useState("");
   const [networkOnline, setNetworkOnline] = useState(true);
+  const [scanFeedback, setScanFeedback] = useState<{ outcome: "approved" | "denied"; key: number } | null>(null);
+  const [acknowledgingRequestId, setAcknowledgingRequestId] = useState<string | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
+  const queueSyncRef = useRef(false);
+  const feedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const accountRef = useRef<HTMLDetailsElement>(null);
 
   const terminalCheckpoints = checkpoints.length ? checkpoints : cachedTerminalConfig?.checkpoints ?? [];
@@ -127,15 +75,19 @@ export function SecurityTerminal() {
   const checkpoint = terminalCheckpoints.find((item) => item.id === checkpointId) ?? terminalCheckpoints[0];
   const checkpointMovements = useMemo(() => movements.filter((movement) => movement.checkpointId === checkpoint?.id), [movements, checkpoint?.id]);
   const checkpointReviews = useMemo(() => permissionRequests.filter((request) => request.type === "manual_override" && request.checkpointId === checkpoint?.id), [permissionRequests, checkpoint?.id]);
+  const manualApprovalRequests = useMemo(() => {
+    if (!submittedReview || checkpointReviews.some((request) => request.id === submittedReview.id)) return checkpointReviews;
+    return [submittedReview, ...checkpointReviews];
+  }, [checkpointReviews, submittedReview]);
   const review = (decision && checkpointReviews.find((request) => request.id === submittedReview?.id || request.eventId === decision.event.id)) || submittedReview;
   const result = isScanning ? "scanning" : latestQueuedScan ? "queued" : review?.status === "pending" ? "pending" : review?.status ?? decision?.event.result ?? "idle";
   const direction = decision?.event.direction === "exit" ? "Exit" : "Entry";
   const busy = isScanning || isReviewing;
   const estimatedAdminReturn = adminAvailability?.status === "offline" && adminAvailability.availableAt
-    ? formatTime(adminAvailability.availableAt)
+    ? formatTerminalTime(adminAvailability.availableAt)
     : null;
   const title = result === "scanning" ? "Checking access" : result === "queued" ? "Scan queued for verification" : result === "pending" ? "Awaiting approval" : result === "approved" ? `${direction} allowed` : result === "denied" ? "Access denied" : "Ready to scan";
-  const description = result === "scanning" ? "Verifying this barcode…" : result === "queued" ? "This scan is stored on this terminal and will be sent when the connection returns. Do not grant access until the server confirms it." : result === "pending" ? estimatedAdminReturn ? `An administrator is offline. Manual review may be picked up around ${estimatedAdminReturn} IST.` : "An administrator is reviewing this scan." : review?.status === "approved" ? "Manual approval received. You may proceed." : review?.status === "denied" ? "The administrator declined this request." : decision ? decision.event.reason && decision.event.reason !== "-" ? decision.event.reason : "Access verified. You may proceed." : "The access decision will appear here.";
+  const description = result === "scanning" ? "Verifying this barcode…" : result === "queued" ? "This scan is stored on this terminal and will be sent when the connection returns. Do not grant access until the server confirms it." : result === "pending" ? estimatedAdminReturn ? `An administrator is offline. This permission may be picked up around ${estimatedAdminReturn}.` : "An administrator is reviewing this permission." : review?.status === "approved" ? "Permission approved. You may proceed." : review?.status === "denied" ? "The administrator declined this request." : result === "denied" ? "" : decision ? decision.event.reason && decision.event.reason !== "-" ? decision.event.reason : "Access verified. You may proceed." : "The access decision will appear here.";
 
   const refreshQueuedScans = useCallback(async () => {
     const pending = await listQueuedTerminalScans();
@@ -156,22 +108,20 @@ export function SecurityTerminal() {
   }, [refreshQueuedScans]);
 
   const synchronizeQueuedScans = useCallback(async () => {
+    if (queueSyncRef.current) return;
     if (typeof navigator === "undefined" || !navigator.onLine) {
       setQueueStatus("Waiting for a network connection before syncing queued scans.");
       return;
     }
 
+    queueSyncRef.current = true;
     setIsQueueSyncing(true);
     try {
       const pending = await listQueuedTerminalScans();
       let synced = 0;
       for (const queued of pending) {
         try {
-          await recordScan({
-            ...queued.input,
-            online: true,
-            capturedOfflineAt: queued.capturedOfflineAt,
-          }, queued.idempotencyKey);
+          await recordScan(queuedScanInput(queued), queued.idempotencyKey);
           await removeQueuedTerminalScan(queued.idempotencyKey);
           setLatestQueuedScan((current) => current?.idempotencyKey === queued.idempotencyKey ? null : current);
           synced += 1;
@@ -191,6 +141,7 @@ export function SecurityTerminal() {
     } catch (queueError) {
       setQueueStatus(messageFor(queueError, "Unable to access the offline scan queue."));
     } finally {
+      queueSyncRef.current = false;
       setIsQueueSyncing(false);
     }
   }, [recordScan, refresh, refreshQueuedScans]);
@@ -219,16 +170,27 @@ export function SecurityTerminal() {
   useEffect(() => {
     if (networkOnline && queuedScans.length) void synchronizeQueuedScans();
   }, [networkOnline, queuedScans.length, synchronizeQueuedScans]);
+  useEffect(() => () => {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+  }, []);
 
   function focusBarcode() {
     requestAnimationFrame(() => { barcodeInputRef.current?.focus(); barcodeInputRef.current?.select(); });
   }
 
+  function showScanFeedback(outcome: "approved" | "denied") {
+    if (feedbackTimerRef.current) clearTimeout(feedbackTimerRef.current);
+    setScanFeedback({ outcome, key: Date.now() });
+    feedbackTimerRef.current = setTimeout(() => setScanFeedback(null), 2400);
+  }
+
   function resetScan() {
+    setLatestQueuedScan(null);
     setDecision(null);
     setSubmittedReview(null);
     setReviewNote("");
     setScanError("");
+    setScanFeedback(null);
     setBarcode("");
     setHardwareBarcodes([]);
     focusBarcode();
@@ -243,9 +205,11 @@ export function SecurityTerminal() {
   async function runScan(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busyRef.current || !checkpoint) return;
+    setLatestQueuedScan(null);
     setDecision(null);
     setSubmittedReview(null);
     setReviewNote("");
+    setScanFeedback(null);
     const normalizedBarcode = barcode.trim();
     const validationError = validateBarcode(normalizedBarcode, "Barcode");
     if (validationError) { setScanError(validationError); focusBarcode(); return; }
@@ -270,7 +234,7 @@ export function SecurityTerminal() {
       };
       const idempotencyKey = crypto.randomUUID();
       if (!networkOnline) {
-        await queueScanForLater(input, idempotencyKey);
+        await queueScanForLater({ ...input, capturedOfflineAt: new Date().toISOString() }, idempotencyKey);
         return;
       }
       let response;
@@ -282,6 +246,9 @@ export function SecurityTerminal() {
         return;
       }
       setDecision(response.decision);
+      if (response.decision.event.result === "approved" || response.decision.event.result === "denied") {
+        showScanFeedback(response.decision.event.result);
+      }
       setBarcode("");
       setHardwareBarcodes([]);
     } catch (cause) {
@@ -300,31 +267,55 @@ export function SecurityTerminal() {
     setScanError("");
     try {
       const operatorNote = reviewNote.trim();
+      if (!operatorNote) {
+        setScanError("Add a note before requesting permission.");
+        return;
+      }
       const source = {
         barcode: decision.event.barcode,
         checkpointId: decision.event.checkpointId,
         direction: decision.event.direction,
         eventId: decision.event.id,
-        ...(operatorNote ? { operatorNote } : {}),
+        operatorNote,
       };
       const request = decision.subject ? await submitPermissionRequest({
         ...source, type: "manual_override", subjectId: decision.subject.id,
         subjectName: decision.subject.name, requester: "Terminal Operator",
-        purpose: `Requested manual override for denied ${decision.event.direction}`,
+        purpose: `Requested permission for denied ${decision.event.direction}`,
         requestedZones: terminalCheckpoints.filter((item) => item.id === decision.event.checkpointId).map((item) => item.zone),
         validFrom: new Date().toISOString(), validTo: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
       }) : await requestBarcodeManualReview(source);
       setSubmittedReview(request);
     } catch (cause) {
-      setScanError(cause instanceof Error ? cause.message : "Unable to request manual review. Please try again.");
+      setScanError(cause instanceof Error ? cause.message : "Unable to request permission. Please try again.");
     } finally {
       busyRef.current = false;
       setIsReviewing(false);
     }
   }
 
+  async function acknowledgeReview(requestId: string) {
+    setAcknowledgingRequestId(requestId);
+    setScanError("");
+    try {
+      await acknowledgePermissionRequest(requestId);
+    } catch (cause) {
+      setScanError(messageFor(cause, "Unable to acknowledge this decision. Please try again."));
+    } finally {
+      setAcknowledgingRequestId(null);
+    }
+  }
+
   return (
     <main className={styles.page}>
+      {scanFeedback && <div key={scanFeedback.key} className={styles.scanFeedback} data-outcome={scanFeedback.outcome} role="status" aria-live="assertive" aria-atomic="true">
+        <div className={styles.feedbackBurst} aria-hidden="true">{Array.from({ length: 18 }, (_, index) => <span key={index} className={`${styles.particle} ${styles[`particle${index}`]}`} />)}</div>
+        <div className={styles.feedbackMessage}>
+          <span aria-hidden="true">{scanFeedback.outcome === "approved" ? <Check /> : <X />}</span>
+          <strong>{scanFeedback.outcome === "approved" ? "Access granted" : "Access denied"}</strong>
+          <p>{scanFeedback.outcome === "approved" ? "Proceed through the checkpoint." : "Do not allow entry or exit."}</p>
+        </div>
+      </div>}
       <div className={styles.shell}>
         <header className={styles.topbar}>
           <span className={styles.brand}>IN / OUT<span className={styles.brandDivider} aria-hidden="true" /><span>Security</span></span>
@@ -340,7 +331,7 @@ export function SecurityTerminal() {
         </header>
 
         <section className={styles.heading} aria-labelledby="terminal-title">
-          <div><h1 id="terminal-title">Security terminal</h1><p>Check access. Keep things moving.</p></div>
+          <div className={styles.headingCopy}><h1 id="terminal-title">Security terminal</h1><p>Check access. Keep things moving.</p></div>
           <label className={styles.checkpointControl}>
             <span>Checkpoint</span>
             <span className={styles.selectWrap}>
@@ -362,9 +353,7 @@ export function SecurityTerminal() {
 
         <div className={styles.scanWorkspace}>
           <section className={styles.scanSection} aria-labelledby="scan-title">
-            <div className={styles.sectionHeading}>
-              <h2 id="scan-title">Scan barcode</h2>
-            </div>
+            <h2 id="scan-title" className={styles.srOnly}>Scan barcode</h2>
             <form onSubmit={runScan} noValidate className={styles.scanForm}>
               {checkpoint?.mode === "manual" && <div className={styles.directionChoice} role="group" aria-label="Scan direction">
                 <button type="button" disabled={busy} aria-pressed={manualDirection === "entry"} onClick={() => setManualDirection("entry")}><ArrowDownLeft />Entry</button>
@@ -373,7 +362,8 @@ export function SecurityTerminal() {
               <label htmlFor="terminal-barcode" className={styles.fieldLabel}>Person or asset barcode</label>
               <div className={styles.barcodeInput}>
                 <Barcode aria-hidden="true" />
-                <input id="terminal-barcode" ref={barcodeInputRef} autoComplete="off" autoCapitalize="none" spellCheck={false} value={barcode} disabled={busy} aria-invalid={Boolean(scanError)} aria-describedby={scanError ? "terminal-scan-error" : "terminal-scan-hint"} maxLength={BARCODE_MAX_LENGTH} placeholder="Scan or enter a barcode" onChange={(event) => { setBarcode(event.target.value); setScanError(""); }} />
+                <input id="terminal-barcode" ref={barcodeInputRef} autoComplete="off" autoCapitalize="none" spellCheck={false} value={barcode} disabled={busy} aria-invalid={Boolean(scanError)} aria-describedby={scanError ? "terminal-scan-error" : undefined} maxLength={BARCODE_MAX_LENGTH} placeholder="Scan or enter a barcode" onChange={(event) => { setBarcode(event.target.value); setScanError(""); }} />
+                <button className={styles.submitButton} type="submit" disabled={busy || !checkpoint} aria-label={isScanning ? "Checking access" : "Check access"} title="Check access">{isScanning ? <Loader2 className={styles.spin} /> : <ArrowRight />}</button>
               </div>
               {hardwareBarcodes.length > 0 && <div className={styles.hardwareFields}>
                 {hardwareBarcodes.map((value, index) => <div className={styles.hardwareField} key={index}>
@@ -382,12 +372,8 @@ export function SecurityTerminal() {
                   <button className={styles.iconButton} type="button" disabled={busy} aria-label={`Remove hardware barcode ${index + 1}`} onClick={() => { setHardwareBarcodes((current) => current.filter((_, itemIndex) => itemIndex !== index)); setScanError(""); }}><X /></button>
                 </div>)}
               </div>}
-              <button type="button" className={styles.textButton} disabled={busy || hardwareBarcodes.length >= MAX_HARDWARE_BARCODES} onClick={() => setHardwareBarcodes((current) => [...current, ""])}><Plus />Add carried hardware{hardwareBarcodes.length > 0 && <span>({hardwareBarcodes.length}/{MAX_HARDWARE_BARCODES})</span>}</button>
+              <button type="button" className={styles.textButton} disabled={busy || hardwareBarcodes.length >= MAX_HARDWARE_BARCODES} aria-label="Add carried hardware" onClick={() => setHardwareBarcodes((current) => [...current, ""])}><Plus /></button>
               {scanError && <p id="terminal-scan-error" className={styles.scanError} role="alert">{scanError}</p>}
-              <div className={styles.scanActions}>
-                <button className={styles.primaryButton} type="submit" disabled={busy || !checkpoint}>{isScanning ? <><Loader2 className={styles.spin} />Checking…</> : <>Check access<ArrowRight /></>}</button>
-                <span id="terminal-scan-hint" className={styles.keyboardHint}>or press <kbd>Enter</kbd></span>
-              </div>
             </form>
           </section>
 
@@ -396,35 +382,38 @@ export function SecurityTerminal() {
             <div className={styles.resultBody}>
               <span className={styles.resultIcon} aria-hidden="true">{result === "scanning" ? <Loader2 className={styles.spin} /> : result === "queued" ? <CloudOff /> : result === "approved" ? <Check /> : result === "denied" ? <X /> : result === "pending" ? <Clock3 /> : <ScanLine />}</span>
               <div className={styles.resultContent}>
-                <h2>{title}</h2>
-                {decision && !isScanning && <div className={styles.resultSubject}><strong>{decision.event.subjectName}</strong><span>{decision.event.barcode}</span></div>}
-                <p>{description}</p>
-                {decision && !isScanning && <>
-                  <div className={styles.resultMeta}>
+                <div className={styles.resultTitleLine}>
+                  <h2>{title}</h2>
+                  {decision && !isScanning && <div className={styles.resultMeta}>
                     <span className={styles.resultChip} data-direction={decision.event.direction}>{direction}</span>
-                    <span className={styles.resultChip} data-type="time">{formatTime(decision.event.createdAt, decision.event.time)} IST</span>
+                    <span className={styles.resultChip} data-type="time">{formatTerminalTime(decision.event.createdAt, decision.event.time)}</span>
                     {decision.carriedHardware.length > 0 && <span className={styles.resultChip}>{decision.carriedHardware.length} hardware {decision.carriedHardware.length === 1 ? "item" : "items"}</span>}
-                  </div>
+                  </div>}
+                </div>
+                {decision && !isScanning && <div className={styles.resultSubject}><strong>{decision.event.subjectName}</strong><span>{decision.event.barcode}</span></div>}
+                {description && <p>{description}</p>}
+                {decision && !isScanning && <>
                   <div className={styles.resultActions}>
                     {result === "denied" && !review && <label className={styles.reviewNote}>
-                      <span>Note for administrator <small>Optional</small></span>
+                      <span>Request note <em>Required</em></span>
                       <textarea
                         value={reviewNote}
                         disabled={busy}
+                        required
                         maxLength={1000}
-                        placeholder="Add context for the review, such as ID or visitor details."
+                        placeholder="Add context for the request, such as ID or visitor details."
                         onChange={(event) => setReviewNote(event.target.value)}
                       />
                     </label>}
-                    {result === "denied" && !review && <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void requestReview()}>{isReviewing ? <Loader2 className={styles.spin} /> : <UserRound />}{isReviewing ? "Requesting…" : "Request manual approval"}</button>}
-                    <button className={styles.assignButton} type="button" onClick={() => {}}>Assign new</button>
+                    {result === "denied" && !review && <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void requestReview()}>{isReviewing ? <Loader2 className={styles.spin} /> : <UserRound />}{isReviewing ? "Requesting…" : "Request permission"}</button>}
                   </div>
                 </>}
               </div>
             </div>
           </section>
+          <PendingPermissions requests={manualApprovalRequests} onAcknowledge={acknowledgeReview} acknowledgingId={acknowledgingRequestId} />
         </div>
-        <Activity movements={checkpointMovements} requests={checkpointReviews} />
+        <TerminalActivity movements={checkpointMovements} requests={manualApprovalRequests} />
       </div>
     </main>
   );

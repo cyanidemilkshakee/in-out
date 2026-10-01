@@ -4,10 +4,8 @@ import type { HardwareAsset } from '../../../../lib/types';
 
 export function HardwareTable({
   assets,
-  onToggleInside
 }: {
   assets: HardwareAsset[];
-  onToggleInside: (assetId: string) => void;
 }) {
   const [sortKey, setSortKey] = useState<keyof HardwareAsset>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -42,8 +40,8 @@ export function HardwareTable({
   }
 
   return (
-      <div className="table-wrap">
-        <table className="data-table hardware-table">
+      <div className="admin-table-wrap table-wrap registry-table-wrap">
+        <table className="data-table hardware-table registry-table registry-table--hardware">
           <thead>
             <tr>
               {sortHeader("name", "Name")}
@@ -53,7 +51,6 @@ export function HardwareTable({
               {sortHeader("category", "Category")}
               {sortHeader("status", "Status")}
               {sortHeader("inside", "Inside")}
-              <th className="column-actions">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -69,15 +66,10 @@ export function HardwareTable({
                 <td className="column-owner" data-label="Owner">{asset.owner}</td>
                 <td className="column-category" data-label="Category">{asset.category}</td>
                 <td className="column-status" data-label="Status">{asset.status}</td>
-                <td className="column-inside" data-label="Inside">{asset.inside ? "Inside" : "Outside"}</td>
-                <td className="column-actions" data-label="Actions">
-                  <button
-                    className="secondary-button compact-button"
-                    type="button"
-                    onClick={() => onToggleInside(asset.id)}
-                  >
-                    Mark {asset.inside ? "outside" : "inside"}
-                  </button>
+                <td className="column-inside" data-label="Inside">
+                  <span className={`registry-presence ${asset.inside ? "is-inside" : "is-outside"}`}>
+                    {asset.inside ? "Inside" : "Outside"}
+                  </span>
                 </td>
               </tr>
             ))}

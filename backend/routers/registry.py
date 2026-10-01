@@ -10,13 +10,23 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, func, exc
+from sqlalchemy import select, func, exc, delete, or_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db, get_read_db
 from auth import verify_admin_or_operator_request, verify_admin_request, has_admin_role
-from models import AccessPermission, Alert, Subject, Person, HardwareAsset, PermissionRequestModel, Checkpoint
+from models import (
+    AccessPermission,
+    AuditEvent,
+    Alert,
+    Movement,
+    Subject,
+    Person,
+    HardwareAsset,
+    PermissionRequestModel,
+    Checkpoint,
+)
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
 from temporal_worker import get_temporal_client, TASK_QUEUE
 from workflows.visitor_approval import VisitorApprovalWorkflow
@@ -95,7 +105,7 @@ async def list_subjects(
     total_result = await db.execute(count_base)
     total = total_result.scalar_one()
 
-    rows_result = await db.execute(base.limit(limit).offset(offset))
+    rows_result = await db.execute(base.order_by(Subject.id).limit(limit).offset(offset))
     subjects = rows_result.scalars().all()
 
     items = []
@@ -304,8 +314,6 @@ async def update_subject(
         if sub.kind in ("employee", "visitor"):
             if not sub.person:
                 sub.person = Person(data={})
-            # Merge updates or overwrite entirely? We overwrite entirely.
-            # If partial merge is desired, it's `sub.person.data = {**sub.person.data, **payload.data}`
             sub.person.data = {**sub.person.data, **patch}
             current_data = sub.person.data
         elif sub.kind == "hardware":
@@ -361,9 +369,14 @@ async def delete_subject(
     if not sub:
         raise HTTPException(status_code=404, detail="Subject not found")
 
-    await db.delete(sub)
     try:
+        # Let database cascades remove metadata/presence while history FKs
+        # protect subjects that have already participated in a scan/review.
+        await db.execute(delete(Subject).where(Subject.id == subject_id))
         await db.commit()
+    except exc.IntegrityError:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="Subject has recorded history; restrict access instead of deleting it")
     except Exception:
         await db.rollback()
         logger.exception("Error deleting subject")
@@ -372,22 +385,96 @@ async def delete_subject(
 
 @bundle_router.get("/bundle")
 async def registry_bundle(db: AsyncSession = Depends(get_read_db)) -> dict[str, Any]:
-    """Return registry subjects, alerts, and permissions in one admin request."""
+    """Return the complete registry read model in one admin request."""
     subjects = (await db.execute(
-        select(Subject).options(selectinload(Subject.person), selectinload(Subject.hardware)).order_by(Subject.id)
+        select(Subject).options(
+            selectinload(Subject.person),
+            selectinload(Subject.hardware),
+            selectinload(Subject.presence_state),
+        ).order_by(Subject.id)
     )).scalars().all()
-    people = [{**(subject.person.data or {}), "id": subject.id, "barcode": subject.barcode, "type": subject.kind} for subject in subjects if subject.person]
-    hardware = [{**(subject.hardware.data or {}), "id": subject.id, "barcode": subject.barcode} for subject in subjects if subject.hardware]
-    manual_review_alert = (
+    people = []
+    hardware = []
+    for subject in subjects:
+        presence = subject.presence_state.state == "inside" if subject.presence_state else False
+        if subject.person:
+            people.append({
+                **(subject.person.data or {}),
+                "id": subject.id,
+                "barcode": subject.barcode,
+                "type": subject.kind,
+                "inside": presence,
+            })
+        if subject.hardware:
+            hardware.append({
+                **(subject.hardware.data or {}),
+                "id": subject.id,
+                "barcode": subject.barcode,
+                "inside": presence,
+            })
+    permissions = [permission.data for permission in (await db.execute(
+        select(AccessPermission).order_by(AccessPermission.id)
+    )).scalars().all()]
+    excluded_alert = or_(
         (Alert.data["manualReview"].astext == "true")
         | (Alert.data["ruleId"].astext == "rule-manual-review")
         | (Alert.data["ruleId"].astext == "rule-unknown-barcode")
         | Alert.data["title"].astext.ilike("Unknown barcode%")
     )
     alerts = [alert.data for alert in (await db.execute(
-        select(Alert).where(~func.coalesce(manual_review_alert, False)).order_by(Alert.created_at.desc()).limit(200)
+        select(Alert)
+        .where(~func.coalesce(excluded_alert, False))
+        .order_by(Alert.created_at.desc())
+        .limit(200)
     )).scalars().all()]
-    permissions = [permission.data for permission in (await db.execute(
-        select(AccessPermission).order_by(AccessPermission.id)
-    )).scalars().all()]
-    return {"people": people, "hardwareAssets": hardware, "alerts": alerts, "permissions": permissions}
+    movement_rows = (await db.execute(
+        select(Movement).order_by(Movement.occurred_at.desc(), Movement.id).limit(1000)
+    )).scalars().all()
+    movements = []
+    for movement in movement_rows:
+        occurred_at = movement.occurred_at.isoformat() if movement.occurred_at else None
+        movements.append({
+            **(movement.data or {}),
+            "id": movement.id,
+            "subject_id": movement.subject_id,
+            "checkpoint_id": movement.checkpoint_id,
+            "occurred_at": occurred_at,
+            "denial_code": movement.denial_code,
+            "result": movement.result,
+            "direction": movement.direction,
+            "scan_type": movement.scan_type,
+            "subject_type": movement.subject_type,
+            "sync_state": movement.sync_state,
+            "createdAt": (movement.data or {}).get("createdAt") or occurred_at,
+        })
+    audit_rows = (await db.execute(
+        select(AuditEvent).order_by(AuditEvent.created_at.desc(), AuditEvent.id).limit(500)
+    )).scalars().all()
+    request_rows = (await db.execute(
+        select(PermissionRequestModel).where(PermissionRequestModel.id.in_(
+            [str((event.data or {}).get("relatedId") or "") for event in audit_rows]
+        ))
+    )).scalars().all()
+    request_by_id = {request.id: request.data or {} for request in request_rows}
+    subject_by_id = {subject.id: subject for subject in subjects}
+    audit_events = []
+    for event in audit_rows:
+        data = event.data or {}
+        request = request_by_id.get(str(data.get("relatedId") or ""), {})
+        subject = subject_by_id.get(str(data.get("subjectId") or ""))
+        subject_metadata = (subject.person.data if subject and subject.person else subject.hardware.data if subject and subject.hardware else {}) or {}
+        audit_events.append({
+            **data,
+            "id": event.id,
+            "subjectName": data.get("subjectName") or request.get("subjectName") or subject_metadata.get("name") or (subject.barcode if subject else "Unregistered barcode"),
+            "barcode": data.get("barcode") or request.get("barcode") or (subject.barcode if subject else ""),
+            "createdAt": data.get("createdAt") or (event.created_at.isoformat() if event.created_at else None),
+        })
+    return {
+        "people": people,
+        "hardwareAssets": hardware,
+        "alerts": alerts,
+        "permissions": permissions,
+        "movements": movements,
+        "auditEvents": audit_events,
+    }

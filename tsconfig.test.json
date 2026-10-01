@@ -13,8 +13,6 @@
   "include": [
     "tests/**/*.ts",
     "lib/**/*.ts",
-    "backend/**/*.ts",
-    "backend/**/*.cjs",
     "services/profileService.ts"
   ],
   "exclude": ["node_modules", ".next"]

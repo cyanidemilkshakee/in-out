@@ -16,5 +16,5 @@ export function UserManagementLocked() {
       setMessage(error instanceof Error ? error.message : "Unable to start re-authentication.");
     }
   }
-  return <main className="identity-workspace identity-workspace-flat" aria-label="Locked user management"><section className="identity-locked"><LockKeyhole aria-hidden="true" /><div><span className="eyebrow">Protected area</span><h1>Manage users is locked</h1><p>Unlock with a fresh Keycloak sign-in to create, edit, or secure user accounts.</p>{message ? <p className="identity-status" role="status">{message}</p> : null}<button className="primary-button" type="button" onClick={() => void unlock()}><Unlock aria-hidden="true" /> Unlock user management</button></div></section></main>;
+  return <main className="identity-workspace identity-workspace-flat" aria-label="Locked user management"><section className="identity-locked"><LockKeyhole aria-hidden="true" /><div><span className="eyebrow">Protected area</span><h1>Manage users is locked</h1><p>Unlock with a fresh Keycloak sign-in to create, edit, or secure user accounts.</p>{message ? <p className="identity-status" role="status">{message}</p> : null}<button className="admin-button admin-button--primary primary-button" type="button" onClick={() => void unlock()}><Unlock aria-hidden="true" /> Unlock user management</button></div></section></main>;
 }

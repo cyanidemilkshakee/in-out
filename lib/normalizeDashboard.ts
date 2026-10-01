@@ -68,10 +68,12 @@ function normalizeAlert(raw: unknown): Alert {
   };
 }
 
-function isRemovedBarcodeAlert(raw: unknown): boolean {
+function isRemovedAlert(raw: unknown): boolean {
   const alert = (raw ?? {}) as Record<string, unknown>;
+  const title = String(alert.title ?? "").toLowerCase();
   return alert.ruleId === "rule-unknown-barcode" ||
-    String(alert.title ?? "").toLowerCase().startsWith("unknown barcode");
+    title.startsWith("unknown barcode") ||
+    title === "access decision denied";
 }
 
 function normalizeDashboardAlert(a: Record<string, unknown>): Alert {
@@ -129,6 +131,9 @@ function normalizePermissionRequest(raw: unknown): PermissionRequest {
     barcode: typeof request.barcode === "string" ? request.barcode : undefined,
     operatorNote: typeof request.operatorNote === "string" ? request.operatorNote : undefined,
     decisionReason: typeof request.decisionReason === "string" ? request.decisionReason : undefined,
+    terminalAcknowledgementRequired: request.terminalAcknowledgementRequired === true,
+    acknowledgedAt: typeof request.acknowledgedAt === "string" ? request.acknowledgedAt : undefined,
+    acknowledgedBy: typeof request.acknowledgedBy === "string" ? request.acknowledgedBy : undefined,
   };
 }
 
@@ -166,20 +171,24 @@ function normalizeAccessPermission(raw: unknown): AccessPermission {
 
 function normalizeAuditEvent(raw: unknown): AuditEvent {
   const a = (raw ?? {}) as Record<string, unknown>;
+  const createdAt = (a.createdAt ?? a.timestamp ?? "") as string;
+  const date = (a.date ?? (createdAt ? createdAt.slice(0, 10) : "")) as string;
+  const time = (a.time ?? (createdAt ? createdAt.slice(11, 16) : "")) as string;
   return {
     id:          (a.id ?? "") as string,
     category:    (a.category ?? "permission") as AuditEvent["category"],
     action:      (a.action ?? "") as string,
     subjectId:   (a.subjectId ?? "") as string,
     subjectName: (a.subjectName ?? "") as string,
+    barcode:     (a.barcode ?? "") as string,
     actor:       (a.actor ?? a.performedBy ?? "") as string,
     role:        (a.role ?? "admin") as string,
     decision:    a.decision as AuditEvent["decision"] | undefined,
-    reason:      (a.reason ?? "") as string,
+    reason:      (a.reason ?? a.decisionReason ?? "") as string,
     relatedId:   (a.relatedId ?? "") as string,
-    date:        (a.date ?? "") as string,
-    time:        (a.time ?? "") as string,
-    createdAt:   (a.createdAt ?? a.timestamp ?? "") as string,
+    date,
+    time,
+    createdAt,
   };
 }
 
@@ -220,7 +229,7 @@ export function normalizeDashboardSnapshot(raw: unknown): AppDataSnapshot {
     alerts:     rawAlerts
       .filter((item) => {
         const entry = (item ?? {}) as Record<string, unknown>;
-        return !isRemovedBarcodeAlert(entry.data ?? entry);
+        return !isRemovedAlert(entry.data ?? entry);
       })
       .map(normalizeDashboardAlert),
     permissionRequests: ((r.pendingDecisions ?? []) as unknown[]).map(normalizePermissionRequest),
@@ -248,7 +257,7 @@ export function normalizeAlertsSnapshot(raw: unknown): AppDataSnapshot {
 
   return {
     ...EMPTY,
-    alerts:     items.filter((item) => !isRemovedBarcodeAlert(item)).map(normalizeAlert),
+    alerts:     items.filter((item) => !isRemovedAlert(item)).map(normalizeAlert),
     alertRules: rules.map((rule) => ({
       id:             (rule.id ?? "") as string,
       name:           (rule.name ?? "") as string,
@@ -257,14 +266,19 @@ export function normalizeAlertsSnapshot(raw: unknown): AppDataSnapshot {
       severity:       (rule.severity ?? "medium") as Alert["severity"],
       enabled:        (rule.enabled ?? true) as boolean,
       scope:          (rule.scope ?? "") as string,
-      conditionKey:   (rule.conditionKey ?? "restricted_employee_entry") as
-        "exit_balance" | "no_break" | "unauthorized_hardware_carrier" | "restricted_employee_entry",
+      conditionKey:   (rule.conditionKey ?? "irregularity") as "no_break" | "irregularity",
       recentTriggers: (rule.recentTriggers ?? 0) as number,
     })).filter((rule) =>
       String(rule.conditionKey) !== "manual_review" &&
       String(rule.conditionKey) !== "unknown_barcode" &&
+      String(rule.conditionKey) !== "exit_balance" &&
+      String(rule.conditionKey) !== "restricted_employee_entry" &&
+      String(rule.conditionKey) !== "unauthorized_hardware_carrier" &&
       rule.id !== "rule-manual-review" &&
-      rule.id !== "rule-unknown-barcode"
+      rule.id !== "rule-unknown-barcode" &&
+      rule.id !== "rule-exit-balance" &&
+      rule.id !== "rule-restricted-entry" &&
+      rule.id !== "rule-unauthorized-hardware"
     ),
   };
 }
@@ -299,8 +313,9 @@ export function normalizeRegistrySnapshot(raw: unknown): AppDataSnapshot {
     ...EMPTY,
     people:         ((r.people         ?? []) as unknown[]) as AppDataSnapshot["people"],
     hardwareAssets: ((r.hardwareAssets ?? []) as unknown[]) as AppDataSnapshot["hardwareAssets"],
-    alerts:         ((r.alerts         ?? []) as unknown[]).filter((item) => !isRemovedBarcodeAlert(item)).map(normalizeAlert),
+    movements:      ((r.movements      ?? []) as Record<string, unknown>[]).map(normalizeDashboardMovement),
     permissions:    ((r.permissions    ?? []) as unknown[]) as AppDataSnapshot["permissions"],
+    auditEvents:    ((r.auditEvents    ?? []) as unknown[]).map(normalizeAuditEvent),
   };
 }
 

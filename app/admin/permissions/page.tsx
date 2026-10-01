@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import {
   BellRing,
-  Barcode,
   CalendarClock,
   Check,
   ChevronRight,
@@ -25,6 +24,14 @@ const TAB_LABELS: Array<{ id: DirectoryTab; label: string }> = [
   { id: "hardware", label: "Hardware" },
 ];
 
+const VALID_FOR_OPTIONS = [
+  { minutes: 15, label: "15 minutes" },
+  { minutes: 30, label: "30 minutes" },
+  { minutes: 60, label: "1 hour" },
+  { minutes: 120, label: "2 hours" },
+  { minutes: 240, label: "4 hours" },
+];
+
 function permissionAction(permission: AccessPermission) {
   if (permission.state === "pending_approval") return "Review request";
   if (permission.subjectType === "hardware") {
@@ -34,18 +41,6 @@ function permissionAction(permission: AccessPermission) {
     return permission.state === "active" ? "Deny entry" : "Restore access";
   }
   return permission.state === "active" ? "Remove permission" : "Assign permission";
-}
-
-function requestLabel(request: PermissionRequest) {
-  
-  if (request.type === "visitor") return "Visitor request";
-  if (request.type === "manual_override") return "Manual override request";
-  return "Hardware custody request";
-
-}
-
-function requestBarcode(request: PermissionRequest) {
-  return request.barcode || (request.subjectId ? "Registered subject" : "Unknown barcode");
 }
 
 function formatLocalInput(date: Date) {
@@ -77,6 +72,7 @@ export default function PermissionManagerPage() {
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
+  const [validForMinutes, setValidForMinutes] = useState<Record<string, number>>({});
 
   async function runAction(action: () => Promise<void>) {
     if (busy) return;
@@ -150,12 +146,22 @@ export default function PermissionManagerPage() {
 
   async function decide(request: PermissionRequest, decision: "approved" | "denied") {
     const reason = decisionNotes[request.id]?.trim();
-    if (!reason) {
-      setActionError("Add a decision note before allowing or denying this request.");
+    if (decision === "denied" && !reason) {
+      setActionError("Add a decision note before denying this permission.");
       return;
     }
-    await decidePermissionRequest(request.id, decision, reason);
+    await decidePermissionRequest(
+      request.id,
+      decision,
+      reason ?? "",
+      decision === "approved" ? (validForMinutes[request.id] ?? 60) : undefined
+    );
     setDecisionNotes((current) => {
+      const next = { ...current };
+      delete next[request.id];
+      return next;
+    });
+    setValidForMinutes((current) => {
       const next = { ...current };
       delete next[request.id];
       return next;
@@ -280,7 +286,7 @@ export default function PermissionManagerPage() {
               <option value="expired">Expired</option>
             </select>
           </div>
-          <div className="permission-table-wrap">
+          <div className="admin-table-wrap permission-table-wrap">
             <table className="permission-table">
               <thead>
                 <tr>
@@ -319,35 +325,43 @@ export default function PermissionManagerPage() {
 
         <aside className="permission-decisions" aria-labelledby="pending-title">
           <div className="permission-section-heading">
-            <h2 id="pending-title">Pending decisions</h2>
+            <h2 id="pending-title">Pending permissions</h2>
             <span>{pendingRequests.length}</span>
           </div>
           <div className="permission-request-list">
             {pendingRequests.length ? pendingRequests.map((request) => (
               <article id={request.id} key={request.id}>
-                <div className="request-type">{requestLabel(request)}</div>
                 <h3>{request.subjectName}</h3>
-                <p className="permission-request-barcode"><Barcode size={15} /> {requestBarcode(request)}</p>
-                <p>Requested by {request.requester}</p>
                 <dl>
-                  <div><dt>Purpose</dt><dd>{request.purpose}</dd></div>
                   <div><dt>Access</dt><dd>{request.requestedZones.join(" / ")}</dd></div>
-                  <div><dt>Valid</dt><dd>{request.validFrom} - {request.validTo}</dd></div>
+                  {request.direction ? <div><dt>Movement</dt><dd>{request.direction === "entry" ? "Entry" : "Exit"}</dd></div> : null}
                 </dl>
-                {request.operatorNote ? <p className="permission-request-note"><strong>Operator note</strong>{request.operatorNote}</p> : null}
+                {request.operatorNote ? <p className="permission-request-note">{request.operatorNote}</p> : null}
                 <label className="permission-decision-note">
-                  <span>Decision note <em>Required</em></span>
+                  <span>Decision note <em>Required to deny</em></span>
                   <textarea
                     value={decisionNotes[request.id] ?? ""}
                     disabled={busy}
                     maxLength={1000}
-                    placeholder="Explain why you are allowing or denying this request."
+                    placeholder="Add a note if you deny this permission."
                     onChange={(event) => setDecisionNotes((current) => ({ ...current, [request.id]: event.target.value }))}
                   />
                 </label>
-                <div className="request-actions">
-                  <button type="button" disabled={busy || !decisionNotes[request.id]?.trim()} onClick={() => void runAction(() => decide(request, "approved"))}>Allow</button>
-                  <button type="button" disabled={busy || !decisionNotes[request.id]?.trim()} onClick={() => void runAction(() => decide(request, "denied"))}>Deny</button>
+                <div className="request-decision-controls">
+                  <label className="permission-valid-for">
+                    <span>Valid for</span>
+                    <select
+                      value={validForMinutes[request.id] ?? 60}
+                      disabled={busy}
+                      onChange={(event) => setValidForMinutes((current) => ({ ...current, [request.id]: Number(event.target.value) }))}
+                    >
+                      {VALID_FOR_OPTIONS.map((option) => <option key={option.minutes} value={option.minutes}>{option.label}</option>)}
+                    </select>
+                  </label>
+                  <div className="request-actions">
+                    <button type="button" disabled={busy} onClick={() => void runAction(() => decide(request, "approved"))}>Allow</button>
+                    <button type="button" disabled={busy || !decisionNotes[request.id]?.trim()} onClick={() => void runAction(() => decide(request, "denied"))}>Deny</button>
+                  </div>
                 </div>
               </article>
             )) : (

@@ -46,7 +46,7 @@ export function MovementTable({
           {isSorted ? (
             sortDirection === "asc" ? <ArrowUp size={16} /> : <ArrowDown size={16} />
           ) : (
-            <ArrowUpDown size={16} style={{ color: "var(--muted)" }} />
+            <ArrowUpDown className="sort-icon-muted" size={16} />
           )}
         </button>
       </th>
@@ -54,7 +54,7 @@ export function MovementTable({
   };
 
   return (
-    <div className="table-wrap">
+    <div className="admin-table-wrap table-wrap">
       <table className={`data-table movement-table resizable density-${density}`}>
         <thead>
           <tr>
@@ -88,13 +88,12 @@ export function MovementTable({
               className={selectedId === event.id ? "selected" : ""}
               aria-selected={selectedId === event.id}
               onClick={() => onSelect(event.id)}
-              style={{ cursor: "pointer" }}
             >
               {visibleColumns.date ? <td className="column-date" data-label="Date">{event.date}</td> : null}
               {visibleColumns.time ? <td className="column-time" data-label="Time">{event.time}</td> : null}
               {visibleColumns.createdAt ? <td className="column-createdAt" data-label="Created At">{event.createdAt}</td> : null}
               {visibleColumns.name ? <td className="column-name" data-label="Name">{event.subjectName}</td> : null}
-              {visibleColumns.type ? <td className="column-type" data-label="Type" style={{ textTransform: "capitalize" }}>{event.subjectType}</td> : null}
+              {visibleColumns.type ? <td className="column-type cell-capitalize" data-label="Type">{event.subjectType}</td> : null}
               {visibleColumns.direction ? (
                 <td className="column-direction" data-label="Direction">
                   <span className={`direction direction-${event.direction}`}>{event.direction}</span>
@@ -106,8 +105,8 @@ export function MovementTable({
                   <ResultPill value={event.result} />
                 </td>
               ) : null}
-              {visibleColumns.barcode ? <td className="column-barcode" data-label="Barcode" style={{ fontFamily: "monospace", fontSize: "0.9em" }}>{event.barcode}</td> : null}
-              {visibleColumns.scanType ? <td className="column-scanType" data-label="Scan type" style={{ textTransform: "capitalize" }}>{event.scanType}</td> : null}
+              {visibleColumns.barcode ? <td className="column-barcode cell-barcode" data-label="Barcode">{event.barcode}</td> : null}
+              {visibleColumns.scanType ? <td className="column-scanType cell-capitalize" data-label="Scan type">{event.scanType}</td> : null}
               {visibleColumns.eventId ? (
                 <td className="column-eventId" data-label="Event ID">
                   <button

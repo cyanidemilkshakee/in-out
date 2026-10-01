@@ -7,13 +7,12 @@ Public API
 ----------
 build_workday_statuses(movements, people) -> list[dict]
 evaluate_scheduled_rules(rules, movements, workdays, existing_alerts) -> list[dict]
-create_scan_alert(event, subject, carried_hardware, rules, existing_alerts, alert_id) -> dict | None
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, TypedDict
 
 # ---------------------------------------------------------------------------
@@ -29,46 +28,24 @@ AlertSeverity = Literal["critical", "high", "medium"]
 AlertStatus = Literal["open", "acknowledged", "warned", "resolved"]
 AlertCategory = Literal["access_violation", "presence_anomaly", "hardware_custody", "operational"]
 ConditionKey = Literal[
-    "exit_balance",
     "no_break",
-    "unauthorized_hardware_carrier",
-    "restricted_employee_entry",
+    "irregularity",
 ]
 
+RETIRED_ALERT_RULE_IDS = frozenset({
+    "rule-exit-balance",
+    "rule-restricted-entry",
+    "rule-unauthorized-hardware",
+})
+RETIRED_ALERT_CONDITIONS = frozenset({
+    "exit_balance",
+    "restricted_employee_entry",
+    "unauthorized_hardware_carrier",
+})
+_IST = timezone(timedelta(hours=5, minutes=30))
+_ATTENDANCE_CUTOFF_HOUR = 18
+
 DEFAULT_ALERT_RULES: list[dict[str, object]] = [
-    {
-        "id": "rule-restricted-entry",
-        "name": "Restricted employee entry",
-        "description": "Alert when a restricted employee attempts access.",
-        "category": "access_violation",
-        "severity": "high",
-        "enabled": True,
-        "scope": "All checkpoints",
-        "conditionKey": "restricted_employee_entry",
-        "recentTriggers": 0,
-    },
-    {
-        "id": "rule-unauthorized-hardware",
-        "name": "Unauthorized hardware carrier",
-        "description": "Alert when an item is carried by the wrong person.",
-        "category": "hardware_custody",
-        "severity": "high",
-        "enabled": True,
-        "scope": "All checkpoints",
-        "conditionKey": "unauthorized_hardware_carrier",
-        "recentTriggers": 0,
-    },
-    {
-        "id": "rule-exit-balance",
-        "name": "Exit balance anomaly",
-        "description": "Alert when approved exits exceed approved entries.",
-        "category": "presence_anomaly",
-        "severity": "medium",
-        "enabled": True,
-        "scope": "Daily facility totals",
-        "conditionKey": "exit_balance",
-        "recentTriggers": 0,
-    },
     {
         "id": "rule-no-break",
         "name": "No break recorded",
@@ -80,11 +57,41 @@ DEFAULT_ALERT_RULES: list[dict[str, object]] = [
         "conditionKey": "no_break",
         "recentTriggers": 0,
     },
+    {
+        "id": "rule-irregularity",
+        "name": "Irregularity",
+        "description": "Alert when an active employee has no approved entry by the end of the day.",
+        "category": "presence_anomaly",
+        "severity": "medium",
+        "enabled": True,
+        "scope": "Employee attendance",
+        "conditionKey": "irregularity",
+        "recentTriggers": 0,
+    },
 ]
 
 
 def default_alert_rules() -> list[dict[str, object]]:
     return [dict(rule) for rule in DEFAULT_ALERT_RULES]
+
+
+def is_retired_alert(raw: dict[str, Any]) -> bool:
+    """Return True for alerts/rules retired from the product contract."""
+    rule_id = str(raw.get("ruleId") or raw.get("id") or "")
+    condition = str(raw.get("conditionKey") or "")
+    title = str(raw.get("title") or raw.get("name") or "").strip().lower()
+    return (
+        rule_id in RETIRED_ALERT_RULE_IDS
+        or condition in RETIRED_ALERT_CONDITIONS
+        or title in {
+            "exit balance anomaly",
+            "exit count exceeds entry count",
+            "restricted employee entry",
+            "restricted employee entry attempt",
+            "unauthorized hardware carrier",
+            "access decision denied",
+        }
+    )
 
 
 def with_default_alert_rules(rules: list[AlertRule]) -> list[AlertRule]:
@@ -97,6 +104,7 @@ def with_default_alert_rules(rules: list[AlertRule]) -> list[AlertRule]:
         for rule in rules
         if rule.get("conditionKey") not in {"manual_review", "unknown_barcode"}
         and rule.get("id") not in {"rule-manual-review", "rule-unknown-barcode"}
+        and not is_retired_alert(rule)
     ]
     existing_conditions = {rule.get("conditionKey") for rule in result}
     result.extend(
@@ -146,20 +154,6 @@ class Person(TypedDict, total=False):
     createdAt: str
 
 
-class HardwareAsset(TypedDict, total=False):
-    id: str
-    name: str
-    barcode: str
-    owner: str
-    assignedEmployeeId: str
-    assignedEmployeeName: str
-    category: str
-    allowedZones: list[str]
-    status: Literal["active", "restricted", "maintenance"]
-    inside: bool
-    createdAt: str
-
-
 class Alert(TypedDict, total=False):
     id: str
     severity: AlertSeverity
@@ -175,6 +169,8 @@ class Alert(TypedDict, total=False):
     ruleId: str
     explanation: str
     sourceEventId: str
+    subjectId: str
+    conditionKey: ConditionKey
     createdAt: str
 
 
@@ -267,6 +263,18 @@ def _find_enabled_rule(
     return None
 
 
+def _local_date(dt: datetime) -> str:
+    local = dt.astimezone(_IST)
+    return f"{local.strftime('%b')} {local.day}, {local.year}"
+
+
+def _local_time(dt: datetime) -> str:
+    local = dt.astimezone(_IST)
+    hour = local.hour % 12 or 12
+    suffix = "AM" if local.hour < 12 else "PM"
+    return f"{hour}:{local.minute:02d}:{local.second:02d} {suffix}"
+
+
 # ---------------------------------------------------------------------------
 # Public functions
 # ---------------------------------------------------------------------------
@@ -274,6 +282,7 @@ def _find_enabled_rule(
 def build_workday_statuses(
     movements: list[MovementEvent],
     people: list[Person],
+    now: datetime | None = None,
 ) -> list[WorkdayStatus]:
     """
     Compute per-employee-per-day work summaries from movement events.
@@ -281,13 +290,19 @@ def build_workday_statuses(
 
     Only approved employee movements are considered.
     Calculates total minutes inside, break minutes (gap between exit and
-    re-entry), and whether the shift ended with a final exit.
+    re-entry), and whether the shift ended with a final exit. An employee
+    who is still inside is included using the current time, so scheduled
+    rules can detect a six-hour continuous shift before the exit is scanned.
     """
+    evaluation_now = now or datetime.now(timezone.utc)
+    evaluation_timestamp = evaluation_now.timestamp() * 1_000
+    evaluation_date = _local_date(evaluation_now)
+
     # Build employee lookup (id -> Person) — employees only
     employee_by_id: dict[str, Person] = {
         p["id"]: p
         for p in people
-        if p.get("type") == "employee"
+        if p.get("id") and (p.get("type") or p.get("kind")) == "employee"
     }
 
     # Group events by (subjectId, date)
@@ -336,6 +351,12 @@ def build_workday_statuses(
                 last_exit_at = occurred_at
                 shift_ended = True
 
+        # An open entry is real working time, not an incomplete workday to
+        # discard. Only extend today's open shift; historical unmatched
+        # entries cannot be safely attributed to the current time.
+        if entry_at is not None and date == evaluation_date and evaluation_timestamp > entry_at:
+            minutes_inside += (evaluation_timestamp - entry_at) / 60_000
+
         workdays.append(
             WorkdayStatus(
                 employeeId=employee_id,
@@ -355,6 +376,8 @@ def evaluate_scheduled_rules(
     movements: list[MovementEvent],
     workdays: list[WorkdayStatus],
     existing_alerts: list[Alert],
+    employees: list[Person] | None = None,
+    now: datetime | None = None,
 ) -> list[Alert]:
     """
     Evaluate time-based / scheduled alert rules and return new Alert dicts.
@@ -362,56 +385,72 @@ def evaluate_scheduled_rules(
 
     Rules evaluated
     ---------------
-    exit_balance          : daily exit count > entry count
     no_break              : employee worked >= 6 hours without any break
+    irregularity          : active employee has no approved entry by 6 PM IST
     """
     generated: list[Alert] = []
 
+    evaluation_now = now or datetime.now(timezone.utc)
     # ------------------------------------------------------------------
-    # exit_balance rule
+    # irregularity rule
     # ------------------------------------------------------------------
-    exit_rule = _find_enabled_rule(rules, "exit_balance")
-    if exit_rule:
-        totals_by_date: dict[str, dict[str, int]] = {}
-        for event in movements:
-            if event.get("result") != "approved":
+    irregularity_rule = _find_enabled_rule(rules, "irregularity")
+    local_now = evaluation_now.astimezone(_IST)
+    today = _local_date(evaluation_now)
+    if irregularity_rule and local_now.hour >= _ATTENDANCE_CUTOFF_HOUR:
+        employee_roster = employees or []
+        entered_today = {
+            event.get("subjectId")
+            for event in movements
+            if event.get("result") == "approved"
+            and event.get("direction") == "entry"
+            and event.get("subjectType") == "employee"
+            and event.get("date") == today
+        }
+        for employee in employee_roster:
+            employee_id = employee.get("id", "")
+            status = employee.get("status", "active")
+            if (
+                not employee_id
+                or (employee.get("type") or employee.get("kind")) != "employee"
+                or status in {"inactive", "restricted", "expired"}
+                or employee_id in entered_today
+            ):
                 continue
-            date = event.get("date", "")
-            if date not in totals_by_date:
-                totals_by_date[date] = {"entries": 0, "exits": 0}
-            if event.get("direction") == "entry":
-                totals_by_date[date]["entries"] += 1
-            if event.get("direction") == "exit":
-                totals_by_date[date]["exits"] += 1
-
-        for date, totals in totals_by_date.items():
             already_raised = any(
-                a.get("ruleId") == exit_rule.get("id") and a.get("date") == date
+                a.get("ruleId") == irregularity_rule.get("id")
+                and a.get("barcode") == (employee.get("barcode") or employee_id)
+                and a.get("date") == today
                 for a in existing_alerts
             )
-            if totals["exits"] <= totals["entries"] or already_raised:
+            already_generated = any(
+                a.get("ruleId") == irregularity_rule.get("id")
+                and a.get("barcode") == (employee.get("barcode") or employee_id)
+                and a.get("date") == today
+                for a in generated
+            )
+            if already_raised or already_generated:
                 continue
             generated.append(
                 Alert(
                     id=_next_alert_id([*existing_alerts, *generated]),
-                    severity=exit_rule.get("severity", "medium"),
+                    severity=irregularity_rule.get("severity", "medium"),
                     status="open",
-                    title="Exit count exceeds entry count",
+                    title="Attendance irregularity",
                     reason=(
-                        f"{totals['exits']} exits were recorded against "
-                        f"{totals['entries']} entries."
+                        f"{employee.get('name', employee_id)} is listed as an active "
+                        "employee but has no approved entry today."
                     ),
-                    subjectName="Facility occupancy",
-                    barcode="SYSTEM",
-                    checkpoint="All checkpoints",
-                    date=date,
-                    time="6:05:00 PM",
-                    category=exit_rule.get("category", "operational"),
-                    ruleId=exit_rule.get("id"),
-                    explanation=(
-                        "Daily approved exit count is greater than the "
-                        "approved entry count."
-                    ),
+                    subjectName=employee.get("name", employee_id),
+                    barcode=employee.get("barcode") or employee_id,
+                    checkpoint="Attendance policy",
+                    date=today,
+                    time=_local_time(evaluation_now),
+                    category=irregularity_rule.get("category", "presence_anomaly"),
+                    ruleId=irregularity_rule.get("id"),
+                    conditionKey="irregularity",
+                    subjectId=employee_id,
+                    explanation="No approved employee entry was recorded before the 6:00 PM IST attendance cutoff.",
                 )
             )
 
@@ -423,13 +462,15 @@ def evaluate_scheduled_rules(
         for workday in workdays:
             already_raised = any(
                 a.get("ruleId") == break_rule.get("id")
-                and a.get("subjectName") == workday["employeeName"]
+                and (
+                    a.get("subjectId") == workday["employeeId"]
+                    or a.get("subjectName") == workday["employeeName"]
+                )
                 and a.get("date") == workday["date"]
                 for a in existing_alerts
             )
             if (
-                not workday["shiftEnded"]
-                or workday["breakMinutes"] > 0
+                workday["breakMinutes"] > 0
                 or workday["minutesInside"] < 360
                 or already_raised
             ):
@@ -440,7 +481,7 @@ def evaluate_scheduled_rules(
                     id=_next_alert_id([*existing_alerts, *generated]),
                     severity=break_rule.get("severity", "medium"),
                     status="open",
-                    title="No break recorded by end of day",
+                    title="No break recorded",
                     reason=(
                         f"{workday['employeeName']} completed {hours_worked} "
                         f"hours without a recorded break."
@@ -449,111 +490,17 @@ def evaluate_scheduled_rules(
                     barcode=workday["employeeId"],
                     checkpoint="Attendance policy",
                     date=workday["date"],
-                    time="6:00:00 PM",
+                    time=(
+                        _local_time(evaluation_now)
+                        if workday["date"] == _local_date(evaluation_now)
+                        else "6:00:00 PM"
+                    ),
                     category=break_rule.get("category", "operational"),
                     ruleId=break_rule.get("id"),
-                    explanation="Shift ended with zero qualifying break minutes.",
+                    conditionKey="no_break",
+                    subjectId=workday["employeeId"],
+                    explanation="At least six hours of approved work were recorded without a qualifying break.",
                 )
             )
 
     return generated
-
-
-def create_scan_alert(
-    event: MovementEvent,
-    subject: Any | None,
-    carried_hardware: list[HardwareAsset],
-    rules: list[AlertRule],
-    existing_alerts: list[Alert],
-    alert_id: str | None = None,
-) -> Alert | None:
-    """
-    Optionally create an alert for a denied scan event.
-    Port of createScanAlert() in ruleEngine.ts.
-
-    Returns an Alert dict when the denial matches an enabled rule (or is a
-    visitor-pending denial), otherwise returns None.
-
-    Parameters
-    ----------
-    event            : the MovementEvent that was denied
-    subject          : the resolved Person or HardwareAsset (may be None)
-    carried_hardware : hardware assets carried during the scan
-    rules            : all configured AlertRules
-    existing_alerts  : alerts already in the system (dedup check)
-    alert_id         : optional override for the generated alert ID
-    """
-    if event.get("result") != "denied":
-        return None
-
-    rule: AlertRule | None = None
-    category: AlertCategory = "access_violation"
-    title = "Access decision denied"
-
-    reason = event.get("reason", "")
-
-    if reason.startswith("Hardware assigned to"):
-        rule = _find_enabled_rule(rules, "unauthorized_hardware_carrier")
-        category = "hardware_custody"
-        title = "Unauthorized hardware carrier"
-    elif (
-        subject is not None
-        and "type" in subject
-        and subject.get("type") == "employee"
-        and subject.get("status") == "restricted"
-    ):
-        rule = _find_enabled_rule(rules, "restricted_employee_entry")
-        category = "access_violation"
-        title = "Restricted employee entry attempt"
-
-    # No matching rule and not a visitor-pending denial → skip
-    if rule is None and reason != "Temporary visitor approval pending":
-        return None
-
-    # Rule exists but is disabled → skip
-    if rule is not None and not rule.get("enabled"):
-        return None
-
-    # Dedup: same source event or same open rule alert already exists
-    event_id = event.get("id")
-    rule_id = rule.get("id") if rule else None
-    duplicate = any(
-        a.get("sourceEventId") == event_id
-        or (rule_id is not None and a.get("ruleId") == rule_id and a.get("status") != "resolved")
-        for a in existing_alerts
-    )
-    if duplicate:
-        return None
-
-    hardware_names = ", ".join(a.get("name", "") for a in carried_hardware)
-    now = datetime.now(tz=timezone.utc)
-    now_iso = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
-
-    alert = Alert(
-        id=alert_id if alert_id is not None else _next_alert_id(existing_alerts),
-        severity=rule.get("severity", "medium") if rule else "medium",
-        status="open",
-        title=title,
-        reason=reason or "Policy denied the movement.",
-        subjectName=event.get("subjectName", ""),
-        barcode=event.get("barcode", ""),
-        checkpoint=event.get("checkpoint", ""),
-        date=event.get("date", ""),
-        time=event.get("time", ""),
-        category=category,
-        explanation=(
-            f"Carrier and assigned custodian do not match for {hardware_names}."
-            if hardware_names
-            else "The access decision matched an enabled security rule."
-        ),
-    )
-
-    if rule_id is not None:
-        alert["ruleId"] = rule_id
-
-    alert["sourceEventId"] = event_id
-
-    # createdAt: prefer event's own createdAt, fall back to now
-    alert["createdAt"] = event.get("createdAt") or now_iso
-
-    return alert

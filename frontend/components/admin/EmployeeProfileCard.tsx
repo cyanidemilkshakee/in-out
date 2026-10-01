@@ -255,7 +255,7 @@ export function EmployeeProfileCard({
               })}
             </div>
             <button
-              className="icon-button"
+              className="admin-button admin-button--icon icon-button"
               type="button"
               onClick={onClose}
               style={{

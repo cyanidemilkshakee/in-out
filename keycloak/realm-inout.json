@@ -20,12 +20,12 @@
       "secret": "${KEYCLOAK_CLIENT_SECRET}",
       "redirectUris": [
         "${INOUT_APP_URL}/api/auth/callback/keycloak",
-        "http://localhost:1001/api/auth/callback/keycloak",
+        "http://localhost:3001/api/auth/callback/keycloak",
         "http://localhost:3000/api/auth/callback/keycloak"
       ],
       "webOrigins": [
         "${INOUT_APP_URL}",
-        "http://localhost:1001",
+        "http://localhost:3001",
         "http://localhost:3000"
       ],
       "standardFlowEnabled": true,
@@ -35,7 +35,7 @@
       "publicClient": false,
       "protocol": "openid-connect",
       "attributes": {
-        "post.logout.redirect.uris": "${INOUT_APP_URL}/login##${INOUT_APP_URL}/logout/complete##http://localhost:1001/login##http://localhost:1001/logout/complete##http://localhost:3000/login##http://localhost:3000/logout/complete",
+        "post.logout.redirect.uris": "${INOUT_APP_URL}/login##${INOUT_APP_URL}/logout/complete##http://localhost:3001/login##http://localhost:3001/logout/complete##http://localhost:3000/login##http://localhost:3000/logout/complete",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [

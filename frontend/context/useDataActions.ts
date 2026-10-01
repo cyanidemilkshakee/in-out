@@ -1,14 +1,10 @@
 import { useCallback, useMemo } from "react";
-import { getDashboardKPIs } from "../../lib/analyticsUtils";
 import type {
-  Alert,
   AlertEvaluationResult,
   BarcodeManualReviewInput,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
-  CreateTemporaryVisitorInput,
   HardwareAsset,
-  MovementEvent,
   MovementQuery,
   Person,
   PermissionRequest,
@@ -16,21 +12,13 @@ import type {
   UpdateAccessPermissionInput,
 } from "../../lib/types";
 import type { DataActions, DataActionDependencies } from "./dataTypes";
-import { addMovementToAnalytics, mergeById } from "./dataHelpers";
+import { mergeById } from "./dataHelpers";
+import { applyPresenceUpdate } from "./presenceUpdates";
 
 export function useDataActions({ service, setState, refresh }: DataActionDependencies): DataActions {
   const queryMovements = useCallback(
     (query: MovementQuery) => service.queryMovements(query),
     [service]
-  );
-
-  const createTemporaryVisitor = useCallback(
-    async (input: CreateTemporaryVisitorInput) => {
-      const visitor = await service.createTemporaryVisitor(input);
-      setState((current) => ({ ...current, people: [visitor, ...current.people] }));
-      return visitor;
-    },
-    [service, setState]
   );
 
   const createEmployee = useCallback(
@@ -75,9 +63,9 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     [service, setState]
   );
 
-  const updateAlert = useCallback(
-    async (alertId: string, patch: Partial<Omit<Alert, "id">>) => {
-      const updated = await service.updateAlert(alertId, patch);
+  const acknowledgeAlert = useCallback(
+    async (alertId: string) => {
+      const updated = await service.acknowledgeAlert(alertId);
       setState((current) => ({
         ...current,
         alerts: current.alerts.map((alert) => alert.id === updated.id ? updated : alert),
@@ -113,35 +101,40 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   );
 
   const decidePermissionRequest = useCallback(
-    async (requestId: string, decision: "approved" | "denied", reason: string) => {
-      const result = await service.decidePermissionRequest(requestId, decision, reason);
+    async (requestId: string, decision: "approved" | "denied", reason: string, validForMinutes?: number) => {
+      const result = await service.decidePermissionRequest(requestId, decision, reason, validForMinutes);
       setState((current) => {
         const permissionRequests = mergeById(current.permissionRequests, [result.request]);
         const permissions = result.permission ? mergeById(current.permissions, [result.permission]) : current.permissions;
         const people = result.person ? mergeById(current.people, [result.person]) : current.people;
         const hardwareAssets = result.hardwareAsset ? mergeById(current.hardwareAssets, [result.hardwareAsset]) : current.hardwareAssets;
-        const previousMovement = result.movement
-          ? current.movements.find((movement) => movement.id === result.movement?.id)
-          : undefined;
-        const movements = result.movement ? mergeById(current.movements, [result.movement]) : current.movements;
-        const scanAnalytics = result.movement
-          ? previousMovement
-            ? getDashboardKPIs(movements, people)
-            : addMovementToAnalytics(current.scanAnalytics, result.movement, people)
-          : current.scanAnalytics;
+        const updated = applyPresenceUpdate(current, {
+          movement: result.movement ?? undefined,
+          people: result.person ? [result.person] : [],
+          hardwareAssets: result.hardwareAssets ?? (result.hardwareAsset ? [result.hardwareAsset] : []),
+        });
         return {
           ...current,
           permissionRequests,
           permissions,
-          people,
-          hardwareAssets,
-          movements,
-          scanAnalytics,
+          people: result.movement ? updated.people : people,
+          hardwareAssets: result.movement ? updated.hardwareAssets : hardwareAssets,
+          movements: updated.movements,
+          scanAnalytics: updated.scanAnalytics,
           auditEvents: result.auditEvent ? mergeById(current.auditEvents, [result.auditEvent]) : current.auditEvents,
           notifications: result.notification ? [result.notification, ...current.notifications] : current.notifications,
         };
       });
       return result.request;
+    },
+    [service, setState]
+  );
+
+  const acknowledgePermissionRequest = useCallback(
+    async (requestId: string) => {
+      const request = await service.acknowledgePermissionRequest(requestId);
+      setState((current) => ({ ...current, permissionRequests: mergeById(current.permissionRequests, [request]) }));
+      return request;
     },
     [service, setState]
   );
@@ -180,14 +173,12 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     async (input: RecordScanInput, idempotencyKey?: string) => {
       const result = await service.recordScan(input, idempotencyKey);
       setState((current) => {
-        const movements = [result.decision.event, ...current.movements];
         return {
-          ...current,
-          people: mergeById(current.people, result.updatedPeople),
-          hardwareAssets: mergeById(current.hardwareAssets, result.updatedHardwareAssets),
-          movements,
-          alerts: [...result.generatedAlerts, ...current.alerts],
-          scanAnalytics: addMovementToAnalytics(current.scanAnalytics, result.decision.event, result.updatedPeople),
+          ...applyPresenceUpdate(current, {
+            movement: result.decision.event,
+            people: result.updatedPeople,
+            hardwareAssets: result.updatedHardwareAssets,
+          }),
         };
       });
       return result;
@@ -200,43 +191,6 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       const result = await service.requestBarcodeManualReview(input);
       setState((current) => ({ ...current, permissionRequests: mergeById(current.permissionRequests, [result]) }));
       return result;
-    },
-    [service, setState]
-  );
-
-  const saveMovement = useCallback(
-    async (event: MovementEvent) => {
-      const saved = await service.saveMovement(event);
-      setState((current) => {
-        const previousMovement = current.movements.find((movement) => movement.id === saved.id);
-        const exists = Boolean(previousMovement);
-        const movements = exists
-          ? current.movements.map((movement) => movement.id === saved.id ? saved : movement)
-          : [saved, ...current.movements];
-        const scanAnalytics = previousMovement
-          ? getDashboardKPIs(movements, current.people)
-          : addMovementToAnalytics(current.scanAnalytics, saved, current.people);
-        return { ...current, movements, scanAnalytics };
-      });
-      return saved;
-    },
-    [service, setState]
-  );
-
-  const syncMovements = useCallback(
-    async (eventIds?: string[]) => {
-      const movements = await service.syncMovements(eventIds);
-      setState((current) => ({ ...current, movements: mergeById(current.movements, movements) }));
-      return movements;
-    },
-    [service, setState]
-  );
-
-  const resolveMovementConflicts = useCallback(
-    async (eventIds: string[]) => {
-      const movements = await service.resolveMovementConflicts(eventIds);
-      setState((current) => ({ ...current, movements: mergeById(current.movements, movements) }));
-      return movements;
     },
     [service, setState]
   );
@@ -254,30 +208,27 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     () => ({
       refresh,
       queryMovements,
-      createTemporaryVisitor,
       createEmployee,
       createHardwareAsset,
       updatePerson,
       updateHardwareAsset,
-      updateAlert,
+      acknowledgeAlert,
       updateAccessPermission,
       submitPermissionRequest,
       decidePermissionRequest,
+      acknowledgePermissionRequest,
       updateAlertRule,
       evaluateAlertRules,
       markNotificationRead,
       recordScan,
       requestBarcodeManualReview,
-      saveMovement,
-      syncMovements,
-      resolveMovementConflicts,
       addMovementNote,
     }),
     [
       addMovementNote,
       createEmployee,
       createHardwareAsset,
-      createTemporaryVisitor,
+      acknowledgePermissionRequest,
       decidePermissionRequest,
       evaluateAlertRules,
       markNotificationRead,
@@ -285,12 +236,9 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       recordScan,
       requestBarcodeManualReview,
       refresh,
-      resolveMovementConflicts,
-      saveMovement,
       submitPermissionRequest,
-      syncMovements,
       updateAccessPermission,
-      updateAlert,
+      acknowledgeAlert,
       updateAlertRule,
       updateHardwareAsset,
       updatePerson,

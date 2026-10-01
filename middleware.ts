@@ -1,6 +1,5 @@
 import { auth } from "./auth"
 import { NextResponse } from "next/server"
-import type { NextRequest } from "next/server"
 
 export default auth((req) => {
   const session = req.auth as { access_token?: string; roles?: unknown } | null

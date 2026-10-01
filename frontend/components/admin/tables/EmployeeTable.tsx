@@ -77,8 +77,8 @@ export function EmployeeTable({
 
   return (
       <Fragment>
-      <div className="table-wrap table-wrap-condensed">
-        <table className="data-table data-table-condensed employee-table">
+      <div className="admin-table-wrap table-wrap table-wrap-condensed registry-table-wrap">
+        <table className="data-table data-table-condensed employee-table registry-table registry-table--employees">
           <thead>
             <tr>
               {sortHeader("name", "Name")}
@@ -115,19 +115,18 @@ export function EmployeeTable({
                   </td>
                   <td className="column-type" data-label="Type">
                     {person.inside ? (
-                      <span style={{ color: "var(--green)", fontWeight: 600 }}>Entry</span>
+                      <span className="employee-presence is-inside">Entry</span>
                     ) : (
-                      <span style={{ color: "var(--red)", fontWeight: 600 }}>Exit</span>
+                      <span className="employee-presence is-outside">Exit</span>
                     )}
                   </td>
                   <td className="column-activity" data-label="Activity">
                     <ActivityBar sessions={sessionsByPerson.get(person.id) ?? []} />
                   </td>
                   <td className="column-profile" data-label="Profile">
-                    <button 
-                      className="secondary-button compact-button" 
-                      type="button" 
-                      style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                    <button
+                      className="admin-button admin-button--secondary secondary-button compact-button employee-profile-button"
+                      type="button"
                       onClick={() => setSelectedPerson(person)}
                     >
                       <Eye size={14} />

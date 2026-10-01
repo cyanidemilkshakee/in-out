@@ -33,7 +33,7 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
       headers,
       cache: "no-store",
       signal: upstreamSignal,
-      body: body ? JSON.stringify(body) : undefined,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
       const errorBody = await res.json().catch(() => ({}));
@@ -57,6 +57,7 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
         path,
         error,
       });
+      throw new PythonApiError("Backend service is unavailable. Please try again.", 502);
     }
     throw error;
   }
@@ -67,6 +68,6 @@ export async function callPythonApi(path: string, method: string, body?: unknown
     return await response.json();
   } catch (error) {
     console.error("[python-api] upstream returned invalid JSON", { method, path, error });
-    throw error;
+    throw new PythonApiError("Backend returned an invalid response.", 502);
   }
 }

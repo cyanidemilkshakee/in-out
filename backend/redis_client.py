@@ -22,6 +22,8 @@ def get_redis_pool() -> aioredis.Redis:
             settings.REDIS_URL,
             encoding="utf-8",
             decode_responses=True,
+            socket_connect_timeout=3,
+            socket_timeout=3,
         )
     return _redis_pool
 
@@ -43,7 +45,7 @@ async def publish_presence_update(payload: str) -> None:
     await redis.publish(PRESENCE_CHANNEL, payload)
 
 
-async def subscribe_presence() -> AsyncIterator[str]:
+async def subscribe_presence() -> AsyncIterator[str | None]:
     """
     Async generator that yields raw JSON strings from the presence channel.
 
@@ -54,8 +56,11 @@ async def subscribe_presence() -> AsyncIterator[str]:
     pubsub = redis.pubsub()
     await pubsub.subscribe(PRESENCE_CHANNEL)
     try:
-        async for message in pubsub.listen():
-            if message["type"] == "message":
+        while True:
+            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=15)
+            if message is None:
+                yield None  # SSE comment keeps idle connections alive through Kong.
+            elif message["type"] == "message":
                 yield message["data"]
     finally:
         await pubsub.unsubscribe(PRESENCE_CHANNEL)

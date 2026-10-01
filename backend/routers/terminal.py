@@ -11,13 +11,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException
 import uuid
 import json
-from auth import verify_terminal_operator_request
+from auth import verify_terminal_access_request
 from database import get_db
 from schemas import BrowserScanPayload, ManualReviewPayload
 from terminal_scans import record_scan
 from redis_client import publish_presence_update
 from dashboard_cache import invalidate_dashboard_cache
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db
@@ -34,9 +34,11 @@ router = APIRouter(prefix="/v1/terminal", tags=["terminal"])
 @router.post("/scans")
 async def scan(payload: BrowserScanPayload,
     idempotency_key: uuid.UUID = Header(alias="Idempotency-Key"),
-    db: AsyncSession = Depends(get_db), operator: dict = Depends(verify_terminal_operator_request)):
+    db: AsyncSession = Depends(get_db), operator: dict = Depends(verify_terminal_access_request)):
     result = await record_scan(db, idempotency_key, payload, "browser:" + operator["sub"])
     await db.commit()
+    if db.info.get("scan_replayed"):
+        return result
     await invalidate_dashboard_cache()
     try:
         event = result["decision"]["event"]
@@ -57,7 +59,7 @@ async def scan(payload: BrowserScanPayload,
 async def create_manual_review(
     payload: ManualReviewPayload,
     db: AsyncSession = Depends(get_db),
-    _operator: dict = Depends(verify_terminal_operator_request),
+    _operator: dict = Depends(verify_terminal_access_request),
 ) -> dict[str, Any]:
     """Place an unregistered barcode in the Permission Manager queue."""
     checkpoint = await db.get(Checkpoint, payload.checkpoint_id)
@@ -154,7 +156,13 @@ async def get_terminal_bundle(
     review_result = await db.execute(
         select(PermissionRequestModel)
         .where(PermissionRequestModel.data["type"].astext == "manual_override")
-        .where(PermissionRequestModel.data["status"].astext == "pending")
+        .where(or_(
+            PermissionRequestModel.data["status"].astext == "pending",
+            and_(
+                PermissionRequestModel.data["terminalAcknowledgementRequired"].as_boolean().is_(True),
+                PermissionRequestModel.data["acknowledgedAt"].astext.is_(None),
+            ),
+        ))
         .order_by(PermissionRequestModel.created_at.desc())
         .limit(20)
     )

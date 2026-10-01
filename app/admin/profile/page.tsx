@@ -85,8 +85,8 @@ export default function ProfilePage() {
     setPictureError("");
 
     if (!file) return;
-    if (!file.type.startsWith("image/")) {
-      setPictureError("Choose an image file.");
+    if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
+      setPictureError("Choose a JPEG, PNG, or WebP image.");
       return;
     }
     if (file.size > 2 * 1024 * 1024) {
@@ -97,7 +97,19 @@ export default function ProfilePage() {
     const reader = new FileReader();
     reader.onload = () => {
       if (typeof reader.result === "string") {
-        updateProfile("avatarDataUrl", reader.result);
+        const image = new Image();
+        image.onload = () => {
+          const scale = Math.min(1, 256 / Math.max(image.width, image.height));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(image.width * scale));
+          canvas.height = Math.max(1, Math.round(image.height * scale));
+          const context = canvas.getContext("2d");
+          if (!context) { setPictureError("Unable to prepare the profile picture."); return; }
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+          updateProfile("avatarDataUrl", canvas.toDataURL("image/jpeg", 0.85));
+        };
+        image.onerror = () => setPictureError("The image could not be decoded. Try another file.");
+        image.src = reader.result;
       }
     };
     reader.onerror = () => setPictureError("The image could not be read. Try another file.");
@@ -233,7 +245,7 @@ export default function ProfilePage() {
           {formError || (saved ? "Your profile and preferences are saved." : "Unsaved profile changes.")}
         </span>
         <button
-          className="primary-button"
+          className="admin-button admin-button--primary primary-button"
           type="button"
           onClick={() => void savePreferences()}
           disabled={saving}

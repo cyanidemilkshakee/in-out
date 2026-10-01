@@ -226,8 +226,8 @@ export function DrillDownDoughnut({ data, onNodeClick }: DrillDownDoughnutProps)
   };
 
   return (
-    <div 
-      style={{ position: "relative", width: "100%", height: "100%" }}
+    <div
+      className="drill-down-doughnut"
       onMouseLeave={() => { if (!lockedId) setHoveredId(null); }}
     >
       <Doughnut

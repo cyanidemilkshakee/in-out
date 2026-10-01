@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "IN / OUT — Backend API (updated)",
-    "description": "All FastAPI routes. Base URL: http://localhost:1002\n\nAuthentication: use the collection-level OAuth 2.0 Authorization Code + PKCE configuration. Select Get New Access Token, sign in to Keycloak, then select Use Token. Do not paste a JWT into a collection variable: access tokens intentionally expire after five minutes.\n\nAuth:\n- Admin routes → Keycloak JWT for an admin user\n- Terminal routes → Keycloak JWT for an operator user\n- mTLS scan → cert headers via API gateway\n- Presence → any authenticated user JWT",
+    "description": "All FastAPI routes. Base URL: http://localhost:1002\n\nAuthentication: use the collection-level OAuth 2.0 Authorization Code + PKCE configuration. Select Get New Access Token, sign in to Keycloak, then select Use Token. Do not paste a JWT into a collection variable: access tokens intentionally expire after five minutes.\n\nAuth:\n- Admin routes → Keycloak JWT for an admin user\n- Terminal routes → Keycloak JWT for an admin or operator user\n- mTLS scan → client certificate verified by Kong Gateway\n- Presence → any authenticated user JWT",
     "_postman_id": "inout-backend-v2",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -9,7 +9,7 @@
     { "key": "base", "value": "http://localhost:1002", "type": "string" },
     { "key": "keycloak_issuer", "value": "http://localhost:1005/realms/inout", "type": "string" },
     { "key": "postman_client_id", "value": "inout-postman", "type": "string" },
-    { "key": "proxy_secret", "value": "YOUR_MTLS_PROXY_SECRET", "type": "string" }
+    { "key": "terminal_base", "value": "https://localhost:10443", "type": "string" }
   ],
   "auth": {
     "type": "oauth2",
@@ -41,18 +41,15 @@
 
     {
       "name": "Scans — mTLS Hardware Terminal",
-      "description": "Requires X-Client-Verify, X-Client-DN, X-Proxy-Secret forwarded by API gateway. Idempotency-Key header mandatory.",
+      "description": "Enable compose.mtls.yaml. Configure a client certificate/key and trusted server CA in Postman for localhost:10443. Kong derives terminal identity from the verified certificate; never supply gateway identity headers or the gateway secret. Idempotency-Key is mandatory.",
       "item": [
         {
           "name": "POST /v1/scans — Process scan (mTLS)",
           "request": {
             "method": "POST",
-            "url": "{{base}}/v1/scans",
+            "url": "{{terminal_base}}/v1/scans",
             "header": [
-              { "key": "Idempotency-Key", "value": "{{$guid}}" },
-              { "key": "X-Client-Verify", "value": "SUCCESS" },
-              { "key": "X-Client-DN", "value": "CN=terminal-main,O=acme" },
-              { "key": "X-Proxy-Secret", "value": "{{proxy_secret}}" }
+              { "key": "Idempotency-Key", "value": "{{$guid}}" }
             ],
             "body": {
               "mode": "raw",

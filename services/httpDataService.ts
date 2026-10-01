@@ -7,11 +7,9 @@ import type {
   AppDataSnapshot,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
-  CreateTemporaryVisitorInput,
   DataScope,
   DataService,
   HardwareAsset,
-  MovementEvent,
   MovementPage,
   MovementQuery,
   Person,
@@ -24,12 +22,11 @@ import type {
 } from "../lib/types";
 
 type Command =
-  | { action: "createTemporaryVisitor"; input: CreateTemporaryVisitorInput }
   | { action: "createEmployee"; input: CreateEmployeeInput }
   | { action: "createHardwareAsset"; input: CreateHardwareAssetInput }
   | { action: "updatePerson"; personId: string; patch: Partial<Omit<Person, "id">> }
   | { action: "updateHardwareAsset"; assetId: string; patch: Partial<Omit<HardwareAsset, "id">> }
-  | { action: "updateAlert"; alertId: string; patch: Partial<Omit<Alert, "id">> }
+  | { action: "acknowledgeAlert"; alertId: string }
   | { action: "updateAccessPermission"; input: UpdateAccessPermissionInput }
   | { action: "submitPermissionRequest"; request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'> }
 
@@ -38,15 +35,14 @@ type Command =
       requestId: string;
       decision: "approved" | "denied";
       reason: string;
+      validForMinutes?: number;
     }
+  | { action: "acknowledgePermissionRequest"; requestId: string }
   | { action: "updateAlertRule"; ruleId: string; enabled: boolean }
   | { action: "evaluateAlertRules" }
   | { action: "markNotificationRead"; notificationId: string }
   | { action: "recordScan"; input: RecordScanInput }
   | { action: "requestBarcodeManualReview"; input: BarcodeManualReviewInput }
-  | { action: "saveMovement"; event: MovementEvent }
-  | { action: "syncMovements"; eventIds?: string[] }
-  | { action: "resolveMovementConflicts"; eventIds: string[] }
   | { action: "addMovementNote"; eventId: string; note: string };
 
 export class DataServiceError extends Error {
@@ -108,10 +104,6 @@ export class HttpDataService implements DataService {
     return readResponse<T>(response);
   }
 
-  createTemporaryVisitor(input: CreateTemporaryVisitorInput) {
-    return this.command<Person>({ action: "createTemporaryVisitor", input });
-  }
-
   createEmployee(input: CreateEmployeeInput) {
     return this.command<Person>({ action: "createEmployee", input });
   }
@@ -128,8 +120,8 @@ export class HttpDataService implements DataService {
     return this.command<HardwareAsset>({ action: "updateHardwareAsset", assetId, patch });
   }
 
-  updateAlert(alertId: string, patch: Partial<Omit<Alert, "id">>) {
-    return this.command<Alert>({ action: "updateAlert", alertId, patch });
+  acknowledgeAlert(alertId: string) {
+    return this.command<Alert>({ action: "acknowledgeAlert", alertId });
   }
 
   updateAccessPermission(input: UpdateAccessPermissionInput) {
@@ -150,14 +142,20 @@ export class HttpDataService implements DataService {
   decidePermissionRequest(
     requestId: string,
     decision: "approved" | "denied",
-    reason: string
+    reason: string,
+    validForMinutes?: number
   ) {
     return this.command<PermissionDecisionMutationResult>({
       action: "decidePermissionRequest",
       requestId,
       decision,
       reason,
+      validForMinutes,
     });
+  }
+
+  acknowledgePermissionRequest(requestId: string) {
+    return this.command<PermissionRequest>({ action: "acknowledgePermissionRequest", requestId });
   }
 
   updateAlertRule(ruleId: string, enabled: boolean) {
@@ -181,18 +179,6 @@ export class HttpDataService implements DataService {
 
   requestBarcodeManualReview(input: BarcodeManualReviewInput) {
     return this.command<PermissionRequest>({ action: "requestBarcodeManualReview", input });
-  }
-
-  saveMovement(event: MovementEvent) {
-    return this.command<MovementEvent>({ action: "saveMovement", event });
-  }
-
-  syncMovements(eventIds?: string[]) {
-    return this.command<MovementEvent[]>({ action: "syncMovements", eventIds });
-  }
-
-  resolveMovementConflicts(eventIds: string[]) {
-    return this.command<MovementEvent[]>({ action: "resolveMovementConflicts", eventIds });
   }
 
   addMovementNote(eventId: string, note: string) {

@@ -1,0 +1,16 @@
+# Optional hardware-terminal HTTPS listener. Supply your own CA/server certs.
+# docker compose -f compose.yaml -f compose.mtls.yaml up -d --build
+services:
+  kong:
+    environment:
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8002, 0.0.0.0:8005, 0.0.0.0:8443 ssl"
+      KONG_SSL_CERT: /run/kong-tls/server.crt
+      KONG_SSL_CERT_KEY: /run/kong-tls/server.key
+      KONG_NGINX_PROXY_SSL_CLIENT_CERTIFICATE: /run/kong-tls/client-ca.crt
+      KONG_NGINX_PROXY_SSL_VERIFY_CLIENT: "on"
+      KONG_NGINX_PROXY_SSL_VERIFY_DEPTH: "3"
+      INOUT_TERMINAL_SECRET: ${KONG_TERMINAL_SECRET:?Set a random KONG_TERMINAL_SECRET of at least 32 characters}
+    ports:
+      - "127.0.0.1:${TERMINAL_TLS_PORT:-10443}:8443"
+    volumes:
+      - ${KONG_TLS_DIR:?Set KONG_TLS_DIR to the certificate directory}:/run/kong-tls:ro

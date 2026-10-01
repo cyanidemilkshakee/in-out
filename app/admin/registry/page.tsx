@@ -25,12 +25,6 @@ const HardwareTable = dynamic(
       (module) => module.HardwareTable
     )
 );
-const AlertHistoryTable = dynamic(
-  () =>
-    import("../../../frontend/components/admin/registry/RegistryLogTables").then(
-      (module) => module.AlertHistoryTable
-    )
-);
 const PermissionHistoryTable = dynamic(
   () =>
     import("../../../frontend/components/admin/registry/RegistryLogTables").then(
@@ -45,7 +39,7 @@ const MetricTrendChart = dynamic(
   { ssr: false }
 );
 
-type RegistryTab = "employees" | "visitors" | "hardware" | "alerts" | "permissions";
+type RegistryTab = "employees" | "visitors" | "hardware" | "permissions";
 type RegistryChartProps = {
   title: string;
   valueLabel: string;
@@ -58,14 +52,8 @@ const REGISTRY_TABS: Array<{ id: RegistryTab; label: string }> = [
   { id: "employees", label: "Employees" },
   { id: "visitors", label: "Visitors" },
   { id: "hardware", label: "Hardware" },
-  { id: "alerts", label: "Alerts" },
   { id: "permissions", label: "Permissions" },
 ];
-
-function alertTimestamp(createdAt: string | undefined, date: string, time: string) {
-  const value = createdAt ? new Date(createdAt).getTime() : new Date(`${date} ${time}`).getTime();
-  return Number.isFinite(value) ? value : 0;
-}
 
 function csvCell(value: unknown) {
   const raw = String(value ?? "");
@@ -95,10 +83,10 @@ export default function RegistryPage() {
     people: staff,
     hardwareAssets: assets,
     movements,
-    alerts,
+    permissions,
     auditEvents,
   } = useDataState();
-  const { createEmployee, createHardwareAsset, updatePerson, updateHardwareAsset } = useDataActions();
+  const { createEmployee, createHardwareAsset } = useDataActions();
   const [activeTab, setActiveTab] = useState<RegistryTab>("employees");
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
@@ -108,37 +96,33 @@ export default function RegistryPage() {
     [movements]
   );
 
-  function handleToggleInside(id: string, type: "person" | "hardware") {
-    if (type === "person") {
-      const person = staff.find((item) => item.id === id);
-      if (person) void updatePerson(id, { inside: !person.inside });
-    } else {
-      const asset = assets.find((item) => item.id === id);
-      if (asset) void updateHardwareAsset(id, { inside: !asset.inside });
-    }
-  }
-
   // Filter Employees
+  const allEmployees = useMemo(
+    () => staff.filter((person) => person.type === "employee"),
+    [staff]
+  );
   const employees = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
-    return staff.filter(
+    return allEmployees.filter(
       (person) =>
-        person.type === "employee" &&
         (!needle || person.name.toLowerCase().includes(needle) || person.barcode.toLowerCase().includes(needle))
     );
-  }, [deferredSearch, staff]);
-  const insideEmployees = useMemo(() => employees.reduce((count, person) => count + (person.inside ? 1 : 0), 0), [employees]);
+  }, [allEmployees, deferredSearch]);
+  const insideEmployees = useMemo(() => allEmployees.reduce((count, person) => count + (person.inside ? 1 : 0), 0), [allEmployees]);
 
   // Filter Visitors
+  const allVisitors = useMemo(
+    () => staff.filter((person) => person.type === "visitor"),
+    [staff]
+  );
   const visitors = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
-    return staff.filter(
+    return allVisitors.filter(
       (person) =>
-        person.type === "visitor" &&
         (!needle || person.name.toLowerCase().includes(needle) || person.barcode.toLowerCase().includes(needle))
     );
-  }, [deferredSearch, staff]);
-  const preApprovedCount = useMemo(() => visitors.reduce((count, person) => count + (person.status === "pre_approved" ? 1 : 0), 0), [visitors]);
+  }, [allVisitors, deferredSearch]);
+  const preApprovedCount = useMemo(() => allVisitors.reduce((count, person) => count + (person.status === "pre_approved" ? 1 : 0), 0), [allVisitors]);
 
   // Filter Hardware
   const filteredAssets = useMemo(() => {
@@ -150,46 +134,51 @@ export default function RegistryPage() {
   }, [assets, deferredSearch]);
   const restrictedCount = useMemo(() => assets.reduce((count, asset) => count + (asset.status === "restricted" ? 1 : 0), 0), [assets]);
 
-  const alertLogs = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    return alerts
-      .filter((alert) =>
-        !needle ||
-        alert.title.toLowerCase().includes(needle) ||
-        alert.subjectName.toLowerCase().includes(needle) ||
-        alert.checkpoint.toLowerCase().includes(needle) ||
-        alert.reason.toLowerCase().includes(needle) ||
-        alert.status.toLowerCase().includes(needle)
-      )
-      .sort((left, right) => alertTimestamp(right.createdAt, right.date, right.time) - alertTimestamp(left.createdAt, left.date, left.time));
-  }, [alerts, deferredSearch]);
-  const resolvedAlertCount = useMemo(
-    () => alerts.reduce((count, alert) => count + (alert.status === "resolved" ? 1 : 0), 0),
-    [alerts]
-  );
-
   const permissionLogs = useMemo(() => {
     const needle = deferredSearch.trim().toLowerCase();
+    const subjectById = new Map(
+      [...staff, ...assets].map((subject) => [subject.id, {
+        name: subject.name,
+        barcode: subject.barcode,
+      }])
+    );
+    for (const permission of permissions) {
+      if (!subjectById.has(permission.subjectId)) {
+        subjectById.set(permission.subjectId, {
+          name: permission.subjectName,
+          barcode: "",
+        });
+      }
+    }
+
     return auditEvents
+      .filter((event) => event.category === "permission")
+      .map((event) => {
+        const subject = subjectById.get(event.subjectId);
+        return {
+          ...event,
+          subjectName: event.subjectName || subject?.name || "Unregistered barcode",
+          barcode: event.barcode || subject?.barcode || "",
+        };
+      })
       .filter((event) =>
-        event.category === "permission" &&
         (!needle ||
           event.subjectName.toLowerCase().includes(needle) ||
+          event.barcode.toLowerCase().includes(needle) ||
           event.action.toLowerCase().includes(needle) ||
           event.actor.toLowerCase().includes(needle) ||
           event.reason.toLowerCase().includes(needle) ||
           event.decision?.toLowerCase().includes(needle))
       )
       .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-  }, [auditEvents, deferredSearch]);
+  }, [assets, auditEvents, deferredSearch, permissions, staff]);
   const grantedPermissionCount = useMemo(
     () => auditEvents.reduce((count, event) => count + (event.category === "permission" && event.decision === "granted" ? 1 : 0), 0),
     [auditEvents]
   );
 
-  let frameTitle = "Employee Directory";
-  let frameDesc = "Manage employee presence, role-linked access, and checkpoint identity records.";
-  let frameMetric = `${insideEmployees}/${employees.length} on-site`;
+  let frameDescription = "Browse employee identities, access records, and checkpoint activity.";
+  let frameMetric = `${insideEmployees}/${allEmployees.length} on-site`;
   let chartProps: RegistryChartProps = {
     title: "Working hours",
     valueLabel: "AVG WORKING HOURS",
@@ -199,24 +188,16 @@ export default function RegistryPage() {
   };
 
   if (activeTab === "visitors") {
-    frameTitle = "Visitor Access";
-    frameDesc = "Issue temporary passes, inspect host approvals, and keep visitor identities aligned.";
+    frameDescription = "Browse temporary visitor identities and their current access status.";
     frameMetric = `${preApprovedCount} pre-approved`;
     chartProps = { title: "Visitor movements", valueLabel: "VISITOR MOVEMENTS", color: "#db2777", unit: "", aggregation: "sum" };
   } else if (activeTab === "hardware") {
-    frameTitle = "Hardware Custody";
-    frameDesc = "Track restricted exits, owner departments, and physical assets moving through checkpoints.";
+    frameDescription = "Browse registered hardware, custody status, and checkpoint movement.";
     frameMetric = `${restrictedCount} restricted`;
     chartProps = { title: "Hardware scans", valueLabel: "HARDWARE SCANS", color: "#8b5cf6", unit: "", aggregation: "sum" };
-  } else if (activeTab === "alerts") {
-    frameTitle = "Alert History";
-    frameDesc = "Review raised, acknowledged, and resolved security alerts as an immutable operational record.";
-    frameMetric = `${resolvedAlertCount}/${alerts.length} resolved`;
-    chartProps = { title: "Alert history", valueLabel: "RECORDED ALERTS", color: "#ef4444", unit: "", aggregation: "sum" };
   } else if (activeTab === "permissions") {
-    frameTitle = "Permission History";
-    frameDesc = "Audit manual permissions granted or denied, including the actor, reason, and related record.";
-    frameMetric = `${grantedPermissionCount} granted`;
+    frameDescription = "Browse completed access decisions and the review notes behind them.";
+    frameMetric = `${grantedPermissionCount} allowed`;
     chartProps = { title: "Permission decisions", valueLabel: "RECORDED DECISIONS", color: "#10b981", unit: "", aggregation: "sum" };
   }
 
@@ -243,16 +224,10 @@ export default function RegistryPage() {
             : [];
         });
     }
-    if (activeTab === "alerts") {
-      return alerts.flatMap((alert) => {
-        const timestamp = alertTimestamp(alert.createdAt, alert.date, alert.time);
-        return timestamp ? [{ timestamp: new Date(timestamp).toISOString(), value: 1 }] : [];
-      });
-    }
     return auditEvents
       .filter((event) => event.category === "permission")
       .map((event) => ({ timestamp: event.createdAt, value: 1 }));
-  }, [activeTab, alerts, auditEvents, movements, sessionsByPerson]);
+  }, [activeTab, auditEvents, movements, sessionsByPerson]);
 
   function handleExport() {
     const rows: Array<Record<string, unknown>> =
@@ -290,37 +265,24 @@ export default function RegistryPage() {
                 inside: asset.inside,
                 createdAt: asset.createdAt,
               }))
-            : activeTab === "alerts"
-              ? alertLogs.map((alert) => ({
-                  date: alert.date,
-                  time: alert.time,
-                  title: alert.title,
-                  subject: alert.subjectName,
-                  barcode: alert.barcode,
-                  severity: alert.severity,
-                  checkpoint: alert.checkpoint,
-                  reason: alert.reason,
-                  status: alert.status,
-                  reference: alert.id,
-                }))
-              : permissionLogs.map((event) => ({
+            : permissionLogs.map((event) => ({
                   date: event.date,
                   time: event.time,
                   subject: event.subjectName,
+                  barcode: event.barcode,
                   action: event.action,
                   decision: event.decision,
                   actor: event.actor,
                   role: event.role,
                   reason: event.reason,
-                  reference: event.relatedId,
                 }));
     downloadCsv(`inout-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
   }
 
   return (
     <AdminPageFrame
-      title={frameTitle}
-      description={frameDesc}
+      title="Registry"
+      description={frameDescription}
       metric={frameMetric}
       preTitle={
         <div className="registry-segmented-shell">
@@ -354,39 +316,26 @@ export default function RegistryPage() {
       }
     >
       <section className="registry-workspace">
-        <div className="workspace-main">
+        <div className="admin-panel workspace-main">
           <div className="filter-bar">
-            {activeTab !== "employees" && (
-              <label className="select-control">
-                <span className="sr-only">Filter by time</span>
-                <select value={timeRange} onChange={(e) => setTimeRange(e.target.value as TimeRange)}>
-                  <option value="1Y">Last 1 Year</option>
-                  <option value="1M">Last 1 Month</option>
-                  <option value="1W">Last 1 Week</option>
-                  <option value="1D">Last 24 Hours</option>
-                </select>
-              </label>
-            )}
-            
             {activeTab === "employees" && <EmployeeCreator onCreate={createEmployee} />}
             {activeTab === "hardware" && <HardwareCreator onCreate={createHardwareAsset} />}
             
             <button
-              className="ghost-button"
+              className="admin-button admin-button--ghost ghost-button"
               type="button"
               onClick={handleExport}
               disabled={
                 (activeTab === "employees" && employees.length === 0) ||
                 (activeTab === "visitors" && visitors.length === 0) ||
                 (activeTab === "hardware" && filteredAssets.length === 0) ||
-                (activeTab === "alerts" && alertLogs.length === 0) ||
                 (activeTab === "permissions" && permissionLogs.length === 0)
               }
             >
               <Download />
               Export
             </button>
-            <label className="search-control" style={{ marginLeft: "auto" }}>
+            <label className="search-control registry-search-control">
               <span className="sr-only">Search</span>
               <input
                 type="search"
@@ -404,9 +353,8 @@ export default function RegistryPage() {
               sessionsByPerson={sessionsByPerson}
             />
           )}
-          {activeTab === "visitors" && <PeopleTable title="Visitors" people={visitors} onToggleInside={(id) => handleToggleInside(id, "person")} />}
-          {activeTab === "hardware" && <HardwareTable assets={filteredAssets} onToggleInside={(id) => handleToggleInside(id, "hardware")} />}
-          {activeTab === "alerts" && <AlertHistoryTable alerts={alertLogs} />}
+          {activeTab === "visitors" && <PeopleTable title="Visitors" people={visitors} />}
+          {activeTab === "hardware" && <HardwareTable assets={filteredAssets} />}
           {activeTab === "permissions" && <PermissionHistoryTable events={permissionLogs} />}
         </div>
       </section>

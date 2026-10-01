@@ -5,11 +5,9 @@ import type { Person } from '../../../../lib/types';
 export function PeopleTable({
   title,
   people: rows,
-  onToggleInside,
 }: {
   title: string;
   people: Person[];
-  onToggleInside: (personId: string) => void;
 }) {
   const [sortKey, setSortKey] = useState<keyof Person>("name");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -44,8 +42,8 @@ export function PeopleTable({
   }
 
   return (
-      <div className="table-wrap">
-        <table className="data-table people-table">
+      <div className="admin-table-wrap table-wrap registry-table-wrap">
+        <table className="data-table people-table registry-table registry-table--people">
           <caption className="sr-only">{title}</caption>
           <thead>
             <tr>
@@ -55,7 +53,6 @@ export function PeopleTable({
               {sortHeader("company", "Department / Company")}
               {sortHeader("status", "Status")}
               {sortHeader("inside", "Inside")}
-              <th className="column-actions">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -70,15 +67,10 @@ export function PeopleTable({
                 <td className="column-barcode" data-label="Barcode">{person.barcode}</td>
                 <td className="column-company" data-label="Department / Company">{person.department ?? person.company ?? "-"}</td>
                 <td className="column-status" data-label="Status">{person.status}</td>
-                <td className="column-inside" data-label="Inside">{person.inside ? "Inside" : "Outside"}</td>
-                <td className="column-actions" data-label="Actions">
-                  <button
-                    className="secondary-button compact-button"
-                    type="button"
-                    onClick={() => onToggleInside(person.id)}
-                  >
-                    Mark {person.inside ? "outside" : "inside"}
-                  </button>
+                <td className="column-inside" data-label="Inside">
+                  <span className={`registry-presence ${person.inside ? "is-inside" : "is-outside"}`}>
+                    {person.inside ? "Inside" : "Outside"}
+                  </span>
                 </td>
               </tr>
             ))}

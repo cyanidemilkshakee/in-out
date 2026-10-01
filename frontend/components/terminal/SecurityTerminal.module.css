@@ -11,15 +11,16 @@
 }
 
 .shell {
+  --terminal-gutter: clamp(14px, 2vw, 28px);
   width: 100%;
   min-height: 100dvh;
   margin: 0;
-  padding: 0 clamp(20px, 3vw, 48px) 32px;
+  padding: 0 var(--terminal-gutter) 32px;
   background: var(--admin-bg);
 }
 
-.topbar, .brand, .headerActions, .heading, .sectionHeading, .scanActions,
-.resultActions, .activityHeader, .viewSwitch, .direction, .mode {
+.topbar, .brand, .headerActions, .heading, .resultActions, .activityHeader,
+.direction {
   display: flex;
   align-items: center;
 }
@@ -78,21 +79,7 @@
 .queueStatus button:disabled { cursor: not-allowed; opacity: .55; }
 .queueStatus small { width: 100%; color: var(--admin-muted); font-size: 12px; font-weight: 500; }
 
-/* Scan workspace: scan form left, result right — full width */
-.scanWorkspace {
-  display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-  padding: 28px 0;
-  gap: 0;
-  min-height: 320px;
-}
-.scanSection { min-width: 0; padding-right: clamp(20px, 3vw, 56px); border-right: 1px solid var(--admin-line); }
-.sectionHeading { justify-content: space-between; gap: 12px; margin-bottom: 22px; }
-.sectionHeading h2 { margin: 0; font-size: 20px; font-weight: 800; letter-spacing: -0.3px; }
-.mode { gap: 5px; color: var(--admin-muted); font-size: 13px; font-weight: 600; }
-.mode svg, .direction svg { width: 15px; height: 15px; }
-.scanForm { display: grid; gap: 11px; }
-.fieldLabel { color: var(--admin-muted); font-size: 13px; font-weight: 600; }
+.direction svg { width: 15px; height: 15px; }
 .barcodeInput { display: flex; align-items: center; gap: 13px; min-height: 62px; border: 1px solid var(--admin-line-strong); border-radius: 10px; padding: 0 16px; background: color-mix(in srgb, var(--admin-bg) 65%, white); transition: border-color 140ms, box-shadow 140ms; }
 .barcodeInput > svg { width: 22px; height: 22px; flex-shrink: 0; color: var(--admin-muted); }
 .barcodeInput input { width: 100%; min-width: 0; padding: 16px 0; outline: 0; border: 0; background: transparent; color: var(--admin-text); font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
@@ -103,26 +90,18 @@
 .hardwareField input { width: 100%; min-width: 0; padding: 13px 14px; border: 0; border-radius: 8px; outline: 0; color: var(--admin-text); background: transparent; font-size: 15px; font-weight: 600; }
 .hardwareField:focus-within { outline: 2px solid var(--admin-line-strong); outline-offset: 2px; }
 .hardwareField .iconButton { flex-shrink: 0; }
-.textButton { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: fit-content; padding: 5px 0; border: 0; background: transparent; color: var(--admin-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.textButton { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 7px; background: transparent; color: var(--admin-muted); cursor: pointer; }
 .textButton svg { width: 16px; height: 16px; }
 .textButton:hover:not(:disabled) { color: var(--admin-text); }
-.scanActions { gap: 18px; margin-top: 12px; flex-wrap: wrap; }
-.primaryButton, .secondaryButton { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-height: 48px; padding: 0 24px; border: 1px solid var(--admin-text); border-radius: 8px; background: var(--admin-text); color: var(--admin-bg); font-size: 15px; font-weight: 700; cursor: pointer; }
-.primaryButton svg, .secondaryButton svg { width: 17px; height: 17px; }
-.primaryButton:hover:not(:disabled) { opacity: .88; }
-.secondaryButton { min-height: 42px; padding: 0 15px; background: transparent; color: var(--admin-text); border-color: var(--admin-line-strong); font-size: 14px; font-weight: 700; gap: 7px; }
+.secondaryButton { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 42px; border: 1px solid var(--admin-line-strong); border-radius: 8px; background: transparent; color: var(--admin-text); padding: 0 15px; font-size: 14px; font-weight: 700; cursor: pointer; }
+.secondaryButton svg { width: 17px; height: 17px; }
 .secondaryButton:hover:not(:disabled) { background: var(--admin-surface-strong); }
-.assignButton { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 18px; border: 1px solid var(--admin-line-strong); border-radius: 8px; background: transparent; color: var(--admin-text); font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; }
-.assignButton:hover { background: var(--admin-surface-strong); }
-.keyboardHint { color: var(--admin-muted); font-size: 12px; font-weight: 500; }
-.keyboardHint kbd { display: inline-block; margin-left: 4px; padding: 2px 6px; border: 1px solid var(--admin-line); border-radius: 4px; font: inherit; }
 .scanError { margin: 0; color: var(--terminal-danger); font-size: 13px; font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
 .directionChoice { display: flex; gap: 4px; width: fit-content; padding: 3px; margin-bottom: 6px; border: 1px solid var(--admin-line); border-radius: 8px; }
 .directionChoice button { display: flex; align-items: center; gap: 6px; border: 0; border-radius: 5px; padding: 8px 14px; background: transparent; color: var(--admin-muted); font-size: 13px; font-weight: 700; cursor: pointer; }
 .directionChoice button[aria-pressed="true"] { background: var(--admin-text); color: var(--admin-bg); }
 .directionChoice svg { width: 15px; height: 15px; }
 
-/* Result panel — horizontal: icon left, content right */
 .result {
   display: flex;
   flex-direction: column;
@@ -132,7 +111,6 @@
   padding: 20px clamp(20px, 3vw, 48px);
 }
 .resultEyebrow { color: var(--admin-muted); font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 16px; }
-/* icon + content side by side */
 .resultBody { display: flex; align-items: flex-start; gap: 18px; }
 .resultIcon {
   display: grid; place-items: center;
@@ -144,13 +122,14 @@
 }
 .resultIcon svg { width: 27px; height: 27px; stroke-width: 1.8; }
 .resultContent { display: flex; flex-direction: column; gap: 4px; min-width: 0; flex: 1; }
+.resultTitleLine { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 10px; }
 .result h2 { margin: 0; color: var(--admin-text); font-size: clamp(20px, 2vw, 28px); font-weight: 900; line-height: 1.1; letter-spacing: -0.6px; }
 .result p { max-width: 400px; margin: 4px 0 0; color: var(--admin-muted); font-size: 14px; font-weight: 500; line-height: 1.5; overflow-wrap: anywhere; }
 .resultSubject { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; overflow-wrap: anywhere; }
 .resultSubject strong { font-size: 17px; font-weight: 800; }
 .resultSubject span { font-size: 13px; color: var(--admin-muted); font-weight: 500; }
-/* highlighted meta chips */
 .resultMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.resultTitleLine .resultMeta { margin-top: 0; }
 .resultChip {
   display: inline-flex; align-items: center;
   padding: 3px 10px;
@@ -164,9 +143,8 @@
 .resultChip[data-direction="exit"]  { background: color-mix(in srgb, var(--terminal-exit)  14%, transparent); color: var(--terminal-exit); }
 .resultChip[data-type="time"] { font-variant-numeric: tabular-nums; }
 .resultActions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; }
-.reviewNote { display: grid; gap: 6px; margin-top: 12px; }
+.reviewNote { display: grid; gap: 6px; margin-top: 6px; }
 .reviewNote > span { color: var(--admin-muted); font-size: 12px; font-weight: 700; }
-.reviewNote small { margin-left: 6px; font-weight: 500; }
 .reviewNote textarea { min-height: 72px; resize: vertical; border: 1px solid var(--admin-line); border-radius: 8px; padding: 9px 11px; background: transparent; color: var(--admin-text); font: inherit; font-size: 13px; line-height: 1.45; }
 .reviewNote textarea:focus { outline: 2px solid var(--admin-line-strong); outline-offset: 2px; }
 .result[data-result="approved"] .resultIcon { background: color-mix(in srgb, var(--terminal-success) 14%, transparent); color: var(--terminal-success); border-radius: 14px; }
@@ -176,16 +154,11 @@
 .result[data-result="approved"] h2 { color: var(--terminal-success); }
 .result[data-result="denied"]   h2 { color: var(--terminal-danger); }
 
-/* Entry = green, Exit = red in activity direction column */
 .direction[data-direction="entry"] { color: var(--terminal-entry); font-weight: 700; }
 .direction[data-direction="exit"] { color: var(--terminal-exit); font-weight: 700; }
 
 .activity { border-top: 1px solid var(--admin-line-strong); }
 .activityHeader { justify-content: space-between; gap: 12px; min-height: 60px; }
-.viewSwitch { gap: 24px; }
-.viewSwitch > button { display: inline-flex; align-items: center; gap: 8px; position: relative; min-height: 60px; padding: 0; border: 0; background: transparent; color: var(--admin-muted); font-size: 15px; font-weight: 700; white-space: nowrap; cursor: pointer; }
-.viewSwitch > button[aria-pressed="true"] { color: var(--admin-text); }
-.viewSwitch > button[aria-pressed="true"]::after { content: ""; position: absolute; bottom: 0; left: 0; right: 0; height: 2px; background: var(--admin-text); }
 .count { display: grid; place-items: center; min-width: 20px; height: 20px; border-radius: 5px; padding: 0 5px; background: var(--admin-surface-strong); color: var(--admin-text); font-size: 11px; font-weight: 700; }
 .activityHint { color: var(--admin-muted); font-size: 12px; font-weight: 500; }
 .tableScroll { width: 100%; overflow-x: auto; }
@@ -214,15 +187,14 @@
 :global([data-admin-theme="dark"]) .page { --terminal-success: #4ade80; --terminal-entry: #4ade80; --terminal-exit: #f87171; --terminal-danger: #f87171; --terminal-warning: #e8bd71; }
 :global([data-admin-theme="dark"]) .barcodeInput { background: var(--admin-surface); }
 
-@media (max-width: 900px) {
+@media (max-width: 1199px) {
   .shell { padding-inline: 24px; }
   .heading h1 { font-size: 30px; }
   .scanSection { padding-right: 24px; }
   .result { padding-left: 24px; padding-right: 0; }
   .barcodeInput input { font-size: 17px; }
-  .keyboardHint { display: none; }
 }
-@media (max-width: 680px) {
+@media (max-width: 767px) {
   .topbar { min-height: 56px; }
   .brand { font-size: 18px; gap: 10px; }
   .heading { flex-direction: column; align-items: flex-start; gap: 16px; padding: 16px 0; }
@@ -230,17 +202,216 @@
   .checkpointControl { width: 100%; max-width: none; min-width: 0; }
   .scanWorkspace { grid-template-columns: minmax(0, 1fr); padding: 22px 0; gap: 22px; }
   .scanSection { padding: 0; border-right: 0; border-bottom: 1px solid var(--admin-line); padding-bottom: 22px; }
-  .sectionHeading { margin-bottom: 18px; }
-  .primaryButton { width: 100%; min-height: 50px; }
-  .scanActions { margin-top: 8px; }
   .result { min-height: auto; padding: 20px 12px; border-left: 0; border-radius: 12px; background: var(--admin-surface); }
   .resultEyebrow { margin-bottom: 12px; }
   .activityHint { display: none; }
-  .viewSwitch { gap: 20px; }
-  .viewSwitch > button { min-height: 56px; font-size: 14px; }
   .activityHeader { min-height: 56px; }
   .activityTable { min-width: 440px; }
   .activityTable th:not(:last-child), .activityTable td:not(:last-child) { padding-right: 16px; }
   .activityTable th:first-child { width: 40%; }
 }
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+
+.shell { position: relative; overflow: hidden; }
+.topbar { min-height: 57px; margin-bottom: 0; }
+.heading {
+  display: grid;
+  grid-template-columns: minmax(200px, 1fr) minmax(330px, 1.55fr) minmax(200px, 1fr);
+  grid-template-rows: auto auto;
+  row-gap: 20px;
+  align-items: start;
+  padding: 24px 0 20px;
+  border: 0;
+}
+.headingCopy { grid-column: 2; grid-row: 1; text-align: center; }
+.heading h1 { margin-bottom: 7px; font-size: clamp(34px, 3.15vw, 52px); font-weight: 900; line-height: 1; letter-spacing: -2px; }
+.heading p { font-size: 17px; }
+.checkpointControl { grid-column: 1; grid-row: 2; width: min(260px, 100%); margin: 0; }
+.selectWrap select { min-height: 51px; border-radius: 12px; padding-left: 17px; font-size: 16px; font-weight: 750; }
+.selectWrap > svg { right: 15px; width: 17px; height: 17px; }
+
+.queueStatus {
+  position: absolute;
+  z-index: 2;
+  top: 73px;
+  right: var(--terminal-gutter);
+  justify-content: center;
+  gap: 3px 10px;
+  max-width: 300px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--admin-bg) 88%, transparent);
+  font-size: 12px;
+  text-align: center;
+}
+.queueStatus button { border: 0; padding: 2px 0; background: transparent; color: var(--admin-text); font: inherit; font-size: 12px; font-weight: 800; text-decoration: underline; }
+.queueStatus small { font-size: 11px; }
+.connectionError { margin: 0 0 14px; border-radius: 10px; }
+
+.scanWorkspace {
+  --terminal-stack-gap: clamp(28px, 3.5vw, 40px);
+  display: grid;
+  grid-template-columns: minmax(48px, 1fr) minmax(400px, 620px) minmax(265px, 400px);
+  grid-template-rows: auto auto;
+  column-gap: clamp(28px, 5vw, 90px);
+  align-items: center;
+  min-height: 300px;
+  padding-block: var(--terminal-stack-gap);
+}
+.scanSection { grid-column: 2; grid-row: 2; min-width: 0; padding: 0; border: 0; }
+.scanForm { display: grid; gap: 11px; }
+.fieldLabel { display: none; }
+.barcodeInput { min-height: 65px; gap: 13px; padding: 5px 8px 5px 18px; border-color: var(--admin-text); border-radius: 12px; background: color-mix(in srgb, var(--admin-bg) 88%, white); box-shadow: 0 0 0 3px color-mix(in srgb, var(--admin-text) 4%, transparent); }
+.barcodeInput input { padding: 13px 0; font-size: 18px; font-weight: 650; }
+.barcodeInput:focus-within { box-shadow: 0 0 0 4px color-mix(in srgb, var(--admin-text) 10%, transparent); }
+.submitButton { display: inline-grid; width: 44px; height: 44px; flex: 0 0 auto; place-items: center; border: 0; border-radius: 9px; background: var(--admin-text); color: var(--admin-bg); transition: transform 140ms ease, opacity 140ms ease; }
+.submitButton svg { width: 19px; height: 19px; }
+.submitButton:hover:not(:disabled) { transform: translateX(2px); }
+.submitButton:disabled { cursor: not-allowed; opacity: .58; }
+.result { grid-column: 2; grid-row: 1; min-height: 0; margin-bottom: 14px; padding: 0; }
+.resultEyebrow { display: none; }
+.resultBody { align-items: center; gap: 17px; }
+.resultIcon { width: 72px; height: 72px; border-radius: 20px; }
+.resultIcon svg { width: 31px; height: 31px; }
+.result h2 { font-size: clamp(25px, 2vw, 34px); font-weight: 900; letter-spacing: -1.2px; }
+.result p { max-width: 430px; font-size: 15px; }
+.resultActions { margin-top: 8px; }
+.reviewNote { width: min(100%, 430px); }
+
+.pendingPanel { grid-column: 3; grid-row: 1 / span 2; align-self: stretch; display: flex; flex-direction: column; min-height: 230px; border: 1px solid var(--admin-line-strong); border-radius: 17px; padding: 16px; background: color-mix(in srgb, var(--admin-bg) 93%, white); }
+.pendingPanelHeader { display: flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; border-bottom: 1px solid var(--admin-line); }
+.pendingPanelHeader h2 { margin: 0; color: var(--admin-text); font-size: 15px; font-weight: 850; letter-spacing: -.2px; }
+.pendingPanelHeader svg { width: 16px; height: 16px; }
+.pendingEmpty { display: grid; flex: 1; place-content: center; justify-items: center; padding: 25px 14px; text-align: center; }
+.pendingEmpty strong { margin-top: 10px; color: var(--admin-text); font-size: 14px; font-weight: 850; }
+.pendingEmpty p { margin: 3px 0 0; color: var(--admin-muted); font-size: 12px; font-weight: 500; }
+.pendingList { display: grid; gap: 0; margin: 6px 0 0; padding: 0; list-style: none; }
+.pendingList li { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--admin-line); }
+.pendingList li:last-child { border-bottom: 0; }
+.pendingIdentity { display: grid; min-width: 0; gap: 3px; }
+.pendingIdentity strong { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; color: var(--admin-text); font-size: 13px; font-weight: 800; overflow-wrap: anywhere; }
+.pendingIdentity strong > span { color: var(--admin-muted); font-size: 12px; font-weight: 600; }
+.pendingResolution { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.pendingResolution button { min-height: 26px; padding: 0 8px; border: 1px solid var(--admin-line-strong); border-radius: 6px; background: transparent; color: var(--admin-text); font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.pendingResolution button:hover:not(:disabled) { background: var(--admin-surface-strong); }
+.pendingResolution button:disabled { cursor: wait; opacity: .6; }
+
+.pendingPanel { border-color: transparent; border-radius: 16px; padding: 14px 12px 10px; background: transparent; transition: border-color 160ms ease; }
+.pendingPanel:hover, .pendingPanel:focus-within { border-color: var(--admin-line-strong); }
+.pendingPanelHeader { padding: 3px 2px 12px; border-bottom-color: transparent; transition: border-color 160ms ease; }
+.pendingPanel:hover .pendingPanelHeader, .pendingPanel:focus-within .pendingPanelHeader { border-bottom-color: var(--admin-line); }
+.pendingIdentityGroup { display: flex; min-width: 0; gap: 8px; align-items: flex-start; }
+.pendingStatusIcon { display: inline-grid; width: 28px; height: 28px; flex: 0 0 28px; place-items: center; border-radius: 9px; }
+.pendingStatusIcon svg { width: 16px; height: 16px; stroke-width: 2.2; }
+.pendingStatusIcon[data-status="pending"] { background: color-mix(in srgb, var(--terminal-warning) 14%, transparent); color: var(--terminal-warning); }
+.pendingStatusIcon[data-status="approved"] { background: color-mix(in srgb, var(--terminal-success) 14%, transparent); color: var(--terminal-success); }
+.pendingStatusIcon[data-status="denied"] { background: color-mix(in srgb, var(--terminal-danger) 14%, transparent); color: var(--terminal-danger); }
+.pendingNote { display: block; margin-top: 5px; color: var(--admin-muted); font-size: 12px; line-height: 1.4; white-space: pre-wrap; overflow-wrap: anywhere; }
+.pendingResolution button:hover:not(:disabled), .pendingResolution button:focus-visible { border-color: var(--admin-text); background: var(--admin-surface-strong); outline: 0; }
+
+.activity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; padding-top: 0; border-top: 0; }
+.activityColumn { min-width: 0; }
+.activityHeader { min-height: 57px; border-bottom: 1px solid var(--admin-line); }
+.activityHeader h2 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--admin-text); font-size: 14px; font-weight: 850; }
+.activityTable th { font-size: 10px; }
+.activityTable td { padding: 13px 0; }
+
+.scanFeedback { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; overflow: hidden; pointer-events: none; color: var(--terminal-success); background: radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--terminal-success) 17%, transparent), color-mix(in srgb, var(--terminal-success) 6%, transparent) 42%, transparent 74%); animation: feedbackWash 2400ms ease-out both; }
+.scanFeedback[data-outcome="denied"] { color: var(--terminal-danger); background: radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--terminal-danger) 18%, transparent), color-mix(in srgb, var(--terminal-danger) 7%, transparent) 42%, transparent 74%); }
+.feedbackBurst { position: absolute; top: 50%; left: 50%; width: 1px; height: 1px; }
+.particle0 { --particle: 0; }
+.particle1 { --particle: 1; }
+.particle2 { --particle: 2; }
+.particle3 { --particle: 3; }
+.particle4 { --particle: 4; }
+.particle5 { --particle: 5; }
+.particle6 { --particle: 6; }
+.particle7 { --particle: 7; }
+.particle8 { --particle: 8; }
+.particle9 { --particle: 9; }
+.particle10 { --particle: 10; }
+.particle11 { --particle: 11; }
+.particle12 { --particle: 12; }
+.particle13 { --particle: 13; }
+.particle14 { --particle: 14; }
+.particle15 { --particle: 15; }
+.particle16 { --particle: 16; }
+.particle17 { --particle: 17; }
+.feedbackBurst span { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: currentColor; box-shadow: 0 0 18px color-mix(in srgb, currentColor 55%, transparent); transform: rotate(calc(var(--particle) * 20deg)) translateY(0) scale(.45); animation: feedbackParticle 1550ms cubic-bezier(.1, .85, .25, 1) both; }
+.feedbackMessage { position: relative; display: grid; justify-items: center; width: min(380px, calc(100vw - 48px)); padding: 27px 30px; border: 1px solid color-mix(in srgb, currentColor 42%, transparent); border-radius: 22px; background: color-mix(in srgb, var(--admin-bg) 87%, transparent); box-shadow: 0 22px 65px color-mix(in srgb, currentColor 18%, transparent); text-align: center; animation: feedbackMessage 760ms cubic-bezier(.18, .9, .24, 1) both; }
+.feedbackMessage > span { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; background: color-mix(in srgb, currentColor 14%, transparent); }
+.feedbackMessage svg { width: 31px; height: 31px; stroke-width: 2.3; }
+.feedbackMessage strong { margin-top: 12px; color: var(--admin-text); font-size: 26px; font-weight: 900; letter-spacing: -1px; }
+.feedbackMessage p { margin: 5px 0 0; color: var(--admin-muted); font-size: 14px; font-weight: 600; }
+
+@keyframes feedbackWash { 0% { opacity: 0; } 14%, 70% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes feedbackMessage { 0% { opacity: 0; transform: scale(.78) translateY(18px); } 55% { opacity: 1; transform: scale(1.03) translateY(0); } 100% { opacity: 1; transform: scale(1); } }
+@keyframes feedbackParticle { 0% { opacity: 0; transform: rotate(calc(var(--particle) * 20deg)) translateY(0) scale(.4); } 18% { opacity: .95; } 100% { opacity: 0; transform: rotate(calc(var(--particle) * 20deg)) translateY(calc(-100px - (var(--particle) * 5px))) scale(1.2); } }
+
+@media (max-width: 1199px) {
+  .heading { grid-template-columns: minmax(190px, 1fr) minmax(320px, 1.4fr) minmax(160px, .6fr); }
+  .scanWorkspace { grid-template-columns: minmax(0, 1fr) minmax(250px, 330px); column-gap: 36px; row-gap: var(--terminal-stack-gap); }
+  .scanSection, .result { grid-column: 1; }
+  .pendingPanel { grid-column: 2; }
+  .activity { gap: 32px; }
+}
+@media (max-width: 767px) {
+  .shell { --terminal-gutter: 16px; padding-inline: var(--terminal-gutter); }
+  .queueStatus { position: static; width: fit-content; max-width: 100%; margin: 12px 0 0 auto; }
+  .heading { display: flex; min-height: 0; flex-direction: column; align-items: stretch; gap: 24px; padding: 24px 0; }
+  .headingCopy { text-align: left; }
+  .heading h1 { font-size: 38px; }
+  .checkpointControl { width: 100%; margin: 0; }
+  .scanWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; gap: var(--terminal-stack-gap); }
+  .result, .scanSection, .pendingPanel { grid-column: 1; grid-row: auto; }
+  .result { margin-bottom: 0; padding: 0; }
+  .pendingPanel { min-height: 200px; }
+  .activity { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+}
+@media (max-width: 767px) {
+  .shell { --terminal-gutter: 12px; padding-inline: var(--terminal-gutter); }
+  .heading h1 { font-size: 34px; letter-spacing: -1.5px; }
+  .resultBody { align-items: flex-start; gap: 13px; }
+  .resultIcon { width: 60px; height: 60px; border-radius: 16px; }
+  .resultIcon svg { width: 27px; height: 27px; }
+  .result h2 { font-size: 25px; }
+  .barcodeInput { min-height: 59px; padding-left: 14px; gap: 10px; }
+  .barcodeInput input { font-size: 16px; }
+  .submitButton { width: 42px; height: 42px; }
+  .activityTable { min-width: 440px; }
+  .activityHint { display: none; }
+  .feedbackMessage strong { font-size: 24px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scanFeedback, .feedbackMessage, .feedbackBurst span { animation-duration: 1ms; animation-iteration-count: 1; }
+}
+
+@media (min-width: 1200px) {
+  .scanWorkspace {
+    display: block;
+    position: relative;
+    min-height: 300px;
+  }
+
+  .result {
+    width: min(480px, calc(100% - 48px));
+    min-height: 0;
+    margin: 0 auto var(--terminal-stack-gap);
+    padding: 0;
+  }
+
+  .scanSection {
+    width: min(930px, calc(100% - 48px));
+    margin: 0 auto;
+    padding: 0;
+    border: 0;
+  }
+
+  .pendingPanel {
+    position: absolute;
+    top: 24px;
+    right: 0;
+    width: min(400px, 24vw);
+    min-height: 230px;
+  }
+}

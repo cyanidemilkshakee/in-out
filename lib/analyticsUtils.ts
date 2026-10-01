@@ -42,12 +42,54 @@ export type PersonSessionIndex = Map<string, DayPattern[]>;
 
 // Helper to convert time string (e.g. "5:59:38 PM") to decimal hours
 export const timeToDecimal = (timeStr: string): number => {
-  const [time, period] = timeStr.split(" ");
-  let [hours, minutes] = time.split(":").map(Number);
+  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i);
+  if (!match) return Number.NaN;
+  const period = match[4].toUpperCase();
+  let hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  const seconds = Number(match[3] ?? 0);
   if (period === "PM" && hours !== 12) hours += 12;
   if (period === "AM" && hours === 12) hours = 0;
-  return hours + minutes / 60;
+  return hours + minutes / 60 + seconds / 3600;
 };
+
+function facilityDateParts(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
+  }).formatToParts(new Date(timestamp));
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    hour: value("hour") % 24,
+    minute: value("minute"),
+    second: value("second"),
+  };
+}
+
+function facilityDayKey(timestamp: number) {
+  const parts = facilityDateParts(timestamp);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function facilityDateObject(timestamp: number) {
+  const parts = facilityDateParts(timestamp);
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+}
+
+function facilityDecimalHour(timestamp: number) {
+  const parts = facilityDateParts(timestamp);
+  return parts.hour + parts.minute / 60 + parts.second / 3600;
+}
 // Main function to calculate a person's exact worked hours and sessions per day
 function buildSessions(movements: MovementEvent[]): DayPattern[] {
   // Sort chronologically
@@ -55,26 +97,32 @@ function buildSessions(movements: MovementEvent[]): DayPattern[] {
     return movementTimestamp(a) - movementTimestamp(b);
   });
 
-  // Group by date string
-  const grouped: Record<string, MovementEvent[]> = {};
+  // Group by the facility's calendar day rather than the browser's local day.
+  const grouped = new Map<string, { dateObj: Date; events: MovementEvent[] }>();
   for (const m of sorted) {
-    if (!grouped[m.date]) grouped[m.date] = [];
-    grouped[m.date].push(m);
+    const timestamp = movementTimestamp(m);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) continue;
+    const key = facilityDayKey(timestamp);
+    const group = grouped.get(key);
+    if (group) {
+      group.events.push(m);
+    } else {
+      grouped.set(key, { dateObj: facilityDateObject(timestamp), events: [m] });
+    }
   }
 
   const result: DayPattern[] = [];
 
-  for (const date of Object.keys(grouped)) {
-    const events = grouped[date];
-    const dateObj = new Date(date);
-    if (!Number.isFinite(dateObj.getTime())) continue;
+  for (const { dateObj, events } of grouped.values()) {
+    const date = facilityDayKey(dateObj.getTime());
     const sessions: Session[] = [];
     let currentEntry: number | null = null;
     let workedHours = 0;
 
     for (let i = 0; i < events.length; i++) {
       const e = events[i];
-      const decTime = timeToDecimal(e.time);
+      const decTime = facilityDecimalHour(movementTimestamp(e));
+      if (!Number.isFinite(decTime)) continue;
       
       if (e.direction === "entry" && currentEntry === null) {
         currentEntry = decTime;
@@ -96,22 +144,9 @@ function buildSessions(movements: MovementEvent[]): DayPattern[] {
 
     // Only extend an open session to the real current time, and only for today.
     if (currentEntry !== null) {
-      const now = new Date();
-      const facilityDate = now.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-        timeZone: "Asia/Kolkata",
-      });
-      if (date === facilityDate) {
-        const facilityTime = now.toLocaleTimeString("en-US", {
-          hour: "numeric",
-          minute: "2-digit",
-          second: "2-digit",
-          hour12: true,
-          timeZone: "Asia/Kolkata",
-        });
-        const end = timeToDecimal(facilityTime);
+      const now = Date.now();
+      if (date === facilityDayKey(now)) {
+        const end = facilityDecimalHour(now);
         if (end > currentEntry) {
           sessions.push({ start: currentEntry, end, type: "work", zIndex: 1 });
           workedHours += end - currentEntry;
@@ -121,7 +156,7 @@ function buildSessions(movements: MovementEvent[]): DayPattern[] {
 
     const percentage = Math.round((workedHours / 8) * 100);
     result.push({
-      dateStr: `${dateObj.getDate()} ${MONTH_NAMES[dateObj.getMonth()]}`,
+      dateStr: `${dateObj.getUTCDate()} ${MONTH_NAMES[dateObj.getUTCMonth()]}`,
       dateObj,
       percentage: Math.min(percentage, 100),
       sessions,

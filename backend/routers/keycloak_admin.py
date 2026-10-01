@@ -7,14 +7,15 @@ master-admin password and deliberately has no delete-user endpoint.
 """
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
+import math
 import time
 from urllib.parse import quote
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from auth import verify_admin_request
 from config import settings
@@ -30,7 +31,7 @@ class UserCreateRequest(BaseModel):
     first_name: str = Field("", alias="firstName", max_length=100)
     last_name: str = Field("", alias="lastName", max_length=100)
     email: str = Field("", max_length=320)
-    password: str = Field(min_length=12, max_length=128)
+    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=12, max_length=128)
     temporary_password: bool = Field(True, alias="temporaryPassword")
     roles: list[Literal["admin", "operator"]] = Field(default_factory=list)
     enabled: bool = True
@@ -76,7 +77,8 @@ async def _admin_context(
         raise HTTPException(status_code=401, detail="Bearer token required")
     claims = await verify_admin_request(credentials)
     auth_time = claims.get("auth_time")
-    if isinstance(auth_time, bool) or not isinstance(auth_time, (int, float)) or time.time() - auth_time > settings.KEYCLOAK_STEP_UP_MAX_AGE_SECONDS:
+    if (isinstance(auth_time, bool) or not isinstance(auth_time, (int, float)) or
+        not math.isfinite(auth_time) or not -30 <= time.time() - auth_time <= settings.KEYCLOAK_STEP_UP_MAX_AGE_SECONDS):
         raise HTTPException(status_code=401, detail="Step-up authentication required before managing users")
     return credentials.credentials
 
@@ -121,7 +123,8 @@ async def _request(token: str, method: str, path: str, payload: Any = None) -> h
                 detail = body["errorMessage"]
         except ValueError:
             pass
-        raise HTTPException(status_code=409 if response.status_code == 409 else 400, detail=detail)
+        status = response.status_code if response.status_code in {401, 409, 429} else 503 if response.status_code >= 500 else 400
+        raise HTTPException(status_code=status, detail=detail)
     return response
 
 
@@ -152,10 +155,13 @@ async def _replace_roles(token: str, user_id: str, requested: list[str]) -> list
     for role in sorted(set(requested)):
         role_models.append((await _request(token, "GET", f"roles/{quote(role, safe='')}")).json())
     path = f"users/{quote(user_id, safe='')}/role-mappings/realm"
-    if current:
-        await _request(token, "DELETE", path, current)
-    if role_models:
-        await _request(token, "POST", path, role_models)
+    current_names = {role["name"] for role in current}
+    additions = [role for role in role_models if role["name"] not in current_names]
+    removals = [role for role in current if role["name"] not in requested]
+    if additions:
+        await _request(token, "POST", path, additions)
+    if removals:
+        await _request(token, "DELETE", path, removals)
     return sorted(set(requested))
 
 
@@ -211,7 +217,7 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
         "lastName": updates.get("last_name", current.get("lastName", "")),
         "email": updates.get("email", current.get("email", "")),
         "enabled": updates.get("enabled", current.get("enabled", False)),
-        "emailVerified": current.get("emailVerified", False),
+        "emailVerified": current.get("emailVerified", False) if updates.get("email", current.get("email", "")) == current.get("email", "") else False,
     }
     await _request(token, "PUT", f"users/{quote(user_id, safe='')}", body)
     return _user_summary((await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json(), await _user_roles(token, user_id))

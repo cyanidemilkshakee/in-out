@@ -12,9 +12,11 @@ export function AutomatedRules({
 }) {
   const [draft, setDraft] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    setDraft(Object.fromEntries(rules.map((rule) => [rule.id, rule.enabled])));
+    setDraft(current => Object.fromEntries(Object.entries(current).filter(([id, enabled]) =>
+      rules.some(rule => rule.id === id && rule.enabled !== enabled))));
   }, [rules]);
 
   const changes = useMemo(
@@ -26,8 +28,11 @@ export function AutomatedRules({
 
   async function saveRules() {
     setSaving(true);
+    setError("");
     try {
       await onSave(changes);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to save alert rules.");
     } finally {
       setSaving(false);
     }
@@ -38,7 +43,7 @@ export function AutomatedRules({
       <div className="permission-section-heading">
         <div>
           <h2 id="alert-rules-title">Automated rules</h2>
-          <p>Conditions are evaluated after every scan and at end of day.</p>
+          <p>Attendance rules run every five minutes; the no-entry rule starts at 6:00 PM IST.</p>
         </div>
         <span>{rules.filter((rule) => (draft[rule.id] ?? rule.enabled)).length} enabled</span>
       </div>
@@ -49,6 +54,7 @@ export function AutomatedRules({
         </button>
       </div>
       <div className="alert-rule-list">
+        {error && <p role="alert">{error}</p>}
         {rules.map((rule) => (
           <article className="alert-rule-card" key={rule.id}>
             <header>
@@ -59,6 +65,7 @@ export function AutomatedRules({
               <label className="permission-switch">
                 <input
                   type="checkbox"
+                  disabled={saving}
                   checked={draft[rule.id] ?? rule.enabled}
                   onChange={(event) => {
                     const enabled = event.target.checked;

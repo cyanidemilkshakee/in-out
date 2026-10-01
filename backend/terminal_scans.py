@@ -9,12 +9,13 @@ from sqlalchemy import select, func
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert
 
-from models import Subject, PresenceState, ScanRequest, Movement, Checkpoint, Alert, AlertRule, AccessPermission
+from models import Subject, PresenceState, ScanRequest, Movement, Checkpoint, AccessPermission
 from movement_logic import evaluate_scan, apply_movement_state, _current_date, _current_time
 
 
 async def record_scan(db, key, payload, terminal_id):
-    normalized = payload.model_dump()
+    db.info["scan_replayed"] = False
+    normalized = payload.model_dump(mode="json")
     normalized["barcode"] = payload.barcode.strip().lower()
     normalized["selected_hardware_ids"] = sorted(set(payload.selected_hardware_ids))
     fingerprint = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
@@ -26,6 +27,7 @@ async def record_scan(db, key, payload, terminal_id):
             raise HTTPException(409, "Idempotency key belongs to another terminal")
         if cached.request_fingerprint and cached.request_fingerprint != fingerprint:
             raise HTTPException(409, "Idempotency key was already used for a different scan")
+        db.info["scan_replayed"] = True
         return cached.response_body
 
     subject = (await db.execute(select(Subject).where(
@@ -52,24 +54,13 @@ async def record_scan(db, key, payload, terminal_id):
         if payload.captured_offline_at:
             event["capturedOfflineAt"] = payload.captured_offline_at.isoformat()
         decision = {"event": event, "carriedHardware": []}
-        # ``alerts.source_event_id`` is a foreign key to ``movements.id``.
-        # Flush the movement before adding the alert so SQLAlchemy/Postgres
-        # cannot attempt the child insert first during a flush.
         db.add(Movement(id=event["id"], subject_id=None, checkpoint_id=checkpoint.id,
             occurred_at=now, result="denied", direction=direction,
             denial_code="barcode_not_registered", scan_type=payload.scan_type,
             subject_type="visitor", sync_state=event["syncState"], data=event))
         await db.flush()
-        from rule_engine import create_scan_alert, default_alert_rules, with_default_alert_rules
-        rule_rows = (await db.execute(select(AlertRule.data))).scalars().all()
-        rules = with_default_alert_rules(rule_rows or default_alert_rules())
-        existing = (await db.execute(select(Alert.data))).scalars().all()
-        alert = create_scan_alert(event, None, [], rules, existing, str(uuid.uuid4()))
-        if alert:
-            db.add(Alert(id=alert["id"], source_event_id=event["id"], created_at=now, data=alert))
         result = {"allowed": False, "reason": event["reason"], "subject_id": None,
-            "decision": decision, "updatedPeople": [], "updatedHardwareAssets": [],
-            "generatedAlerts": [alert] if alert else []}
+            "decision": decision, "updatedPeople": [], "updatedHardwareAssets": []}
         db.add(ScanRequest(idempotency_key=key, subject_id=None, terminal_id=terminal_id,
             status_code=200, response_body=result, request_fingerprint=fingerprint))
         await db.flush()
@@ -163,15 +154,9 @@ async def record_scan(db, key, payload, terminal_id):
         denial_code=event.get("denialCode"), scan_type=payload.scan_type,
         subject_type=subject.kind, sync_state=event["syncState"], data=event))
     await db.flush()
-    from rule_engine import create_scan_alert, default_alert_rules, with_default_alert_rules
-    rules = with_default_alert_rules((await db.execute(select(AlertRule.data))).scalars().all() or default_alert_rules())
-    existing = (await db.execute(select(Alert.data))).scalars().all()
-    alert = create_scan_alert(event, decision["subject"], decision["carriedHardware"], rules, existing, str(uuid.uuid4()))
-    if alert:
-        db.add(Alert(id=alert["id"], source_event_id=event["id"], created_at=now, data=alert))
     result = {"allowed": event["result"] == "approved", "reason": event.get("reason"),
         "subject_id": subject.id, "decision": decision, "updatedPeople": updated["people"],
-        "updatedHardwareAssets": updated["hardware"], "generatedAlerts": [alert] if alert else []}
+        "updatedHardwareAssets": updated["hardware"]}
     db.add(ScanRequest(idempotency_key=key, subject_id=subject.id, terminal_id=terminal_id,
         status_code=200, response_body=result, request_fingerprint=fingerprint))
     await db.flush()

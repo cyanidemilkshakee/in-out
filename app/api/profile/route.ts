@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withApiSession } from "../authSession";
 import { callPythonApi, PythonApiError } from "../pythonApi";
+import { readJsonBody, RequestBodyError } from "../../../lib/requestJson";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -26,7 +27,7 @@ function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Profile request failed.";
   return NextResponse.json(
     { error: message },
-    { status: error instanceof PythonApiError ? error.status : message.includes("already exists") ? 409 : 400 }
+    { status: error instanceof PythonApiError || error instanceof RequestBodyError ? error.status : message.includes("already exists") ? 409 : 400 }
   );
 }
 
@@ -41,7 +42,7 @@ async function getProfile() {
 
 async function patchProfile(request: NextRequest) {
   try {
-    const raw = await callPythonApi('/v1/admin/profile', 'PATCH', await request.json()) as Record<string, unknown>;
+    const raw = await callPythonApi('/v1/admin/profile', 'PATCH', await readJsonBody(request, 256 * 1024)) as Record<string, unknown>;
     return response(normalizeProfile(raw));
   } catch (error) {
     return errorResponse(error);

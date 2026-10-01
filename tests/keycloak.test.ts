@@ -4,7 +4,7 @@ import { authTimeFromAccessToken, keycloakLogoutUrl, keycloakSession, refreshKey
 import { signStepUpIntent, verifyStepUpIntent } from "../lib/userManagementStepUp"
 
 const now = 2_000_000
-const config = { issuer: "http://keycloak:8080/realms/inout", clientId: "inout-frontend", clientSecret: "test-secret" }
+const config = { issuer: "http://keycloak:1105/realms/inout", clientId: "inout-frontend", clientSecret: "test-secret" }
 const accessToken = (roles: unknown) => `header.${Buffer.from(JSON.stringify({ realm_access: { roles } })).toString("base64url")}.signature`
 const expired: RoleToken = { access_token: accessToken(["admin"]), refresh_token: "refresh", expires_at: 1, roles: ["admin"] }
 

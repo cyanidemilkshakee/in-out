@@ -9,7 +9,7 @@ from redis_client import get_redis_pool
 
 logger = logging.getLogger(__name__)
 
-_KEY = "dashboard:summary:v1"
+_KEY = "dashboard:summary:v2"
 _TTL_SECONDS = 15
 
 

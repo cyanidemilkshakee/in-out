@@ -78,7 +78,7 @@ export default function LogsPage() {
     auditEvents,
     movementNotes: initialEventNotes,
   } = useDataState();
-  const { addMovementNote, queryMovements, updateAlert } = useDataActions();
+  const { addMovementNote, queryMovements, acknowledgeAlert } = useDataActions();
   const [search, setSearch] = useState("");
   const [linkedEventId, setLinkedEventId] = useState("");
   const [checkpointFilter, setCheckpointFilter] = useState("all");
@@ -298,7 +298,7 @@ export default function LogsPage() {
       }
     >
     <section className={`split-workspace log-workspace${selectedEvent ? " has-detail-drawer" : ""}`}>
-      <div className="workspace-main">
+      <div className="admin-panel workspace-main">
 
         <div className="filter-bar">
           <ReportBuilder movements={movementPage.chartItems} alerts={alerts} auditEvents={auditEvents} />
@@ -362,7 +362,7 @@ export default function LogsPage() {
               <option value="exit">Exit</option>
             </select>
           </label>
-          <label className="search-control" style={{ marginLeft: 'auto' }}>
+          <label className="search-control">
             <span className="sr-only">Search events</span>
             <input
               type="search"
@@ -424,10 +424,7 @@ export default function LogsPage() {
           onNoteDraftChange={setDrawerDraft}
           onAddNote={() => handleSaveNote(selectedEvent.id)}
           onAcknowledge={() => {
-            if (selectedAlert) void updateAlert(selectedAlert.id, { status: "acknowledged" });
-          }}
-          onResolve={() => {
-            if (selectedAlert) void updateAlert(selectedAlert.id, { status: "resolved" });
+            if (selectedAlert) void acknowledgeAlert(selectedAlert.id).catch(error => setQueryError(error instanceof Error ? error.message : "Unable to acknowledge alert."));
           }}
           onClose={() => setSelectedEventId("")}
         />

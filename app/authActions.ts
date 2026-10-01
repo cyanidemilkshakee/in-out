@@ -29,7 +29,6 @@ async function publicAppUrl(): Promise<string | undefined> {
     const url = new URL(configured)
     // 0.0.0.0 is only a server bind address, never a browser destination.
     if (url.hostname === "0.0.0.0") url.hostname = "localhost"
-    if (url.port === "1001" && process.env.PUBLIC_PORT) url.port = process.env.PUBLIC_PORT
     return url.origin
   } catch {
     return undefined

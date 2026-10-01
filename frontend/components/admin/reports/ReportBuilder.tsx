@@ -5,6 +5,7 @@ import { Download, FileBarChart, X } from "lucide-react";
 import type { Alert, AuditEvent, MovementEvent } from "../../../../lib/types";
 import { CalendarDatePicker } from "../../analytics/CalendarDatePicker";
 import { parseDateInput } from "../../../../lib/dateRanges";
+import { escapeCsv } from "../../../../lib/csv";
 
 type ReportSource = "movements" | "alerts" | "permissions";
 
@@ -23,10 +24,6 @@ const SOURCE_OPTIONS: Array<{ id: ReportSource; label: string; description: stri
   { id: "alerts", label: "Alerts raised", description: "Rule and operator-created security alerts" },
   { id: "permissions", label: "Manual permissions", description: "Permissions granted or denied by administrators" },
 ];
-
-function escapeCsv(value: string) {
-  return `"${value.replaceAll('"', '""')}"`;
-}
 
 function parseReportDate(date: string, time: string, createdAt?: string) {
   const createdTimestamp = createdAt ? new Date(createdAt).getTime() : NaN;

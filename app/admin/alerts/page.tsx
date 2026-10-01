@@ -6,7 +6,6 @@ import { AdminPageFrame } from "../../../frontend/components/admin/tables/AdminP
 import { AlertActivity } from "../../../frontend/components/admin/alerts/AlertActivity";
 import { AutomatedRules } from "../../../frontend/components/admin/alerts/AutomatedRules";
 import type { TimeRange } from "../../../frontend/components/analytics/TrendChart";
-import type { Alert } from "../../../lib/types";
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import { compactRangeBounds } from "../../../lib/dateRanges";
 
@@ -20,15 +19,16 @@ const MetricTrendChart = dynamic(
 
 export default function AlertsPage() {
   const { alerts, alertRules } = useDataState();
-  const { updateAlert, updateAlertRule, evaluateAlertRules } = useDataActions();
+  const { acknowledgeAlert, updateAlertRule, evaluateAlertRules } = useDataActions();
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationMessage, setEvaluationMessage] = useState("");
   const deferredSearch = useDeferredValue(search);
 
-  function handleUpdateAlert(alertId: string, status: Alert["status"]) {
-    void updateAlert(alertId, { status });
+  function handleAcknowledgeAlert(alertId: string) {
+    void acknowledgeAlert(alertId).catch(error =>
+      setEvaluationMessage(error instanceof Error ? error.message : "Unable to acknowledge alert."));
   }
 
   async function handleEvaluateRules() {
@@ -49,7 +49,7 @@ export default function AlertsPage() {
   }
 
   const activeAlerts = useMemo(
-    () => alerts.filter((alert) => alert.status !== "resolved"),
+    () => alerts.filter((alert) => alert.status === "open"),
     [alerts]
   );
   const filteredAlerts = useMemo(() => {
@@ -86,7 +86,7 @@ export default function AlertsPage() {
   return (
     <AdminPageFrame
       title="Alert Command"
-      description="See every alert in the system for immediate security response."
+      description="Review open alerts and scheduled attendance-rule activity."
       metric={`${activeAlerts.length} active alerts`}
       headerRight={
         <MetricTrendChart
@@ -116,7 +116,7 @@ export default function AlertsPage() {
           <div className="alert-run-control">
             <button
               type="button"
-              className="secondary-button compact-button"
+              className="admin-button admin-button--secondary secondary-button compact-button"
               onClick={() => void handleEvaluateRules()}
               disabled={isEvaluating}
             >
@@ -124,7 +124,7 @@ export default function AlertsPage() {
             </button>
             {evaluationMessage && <span role="status">{evaluationMessage}</span>}
           </div>
-          <label className="search-control" style={{ marginLeft: "auto" }}>
+          <label className="search-control">
             <span className="sr-only">Search alerts</span>
             <input
               type="search"
@@ -137,7 +137,7 @@ export default function AlertsPage() {
         <div className="alerts-command-grid">
           <AlertActivity
             alerts={filteredAlerts}
-            onUpdate={handleUpdateAlert}
+            onAcknowledge={handleAcknowledgeAlert}
           />
           <AutomatedRules
             rules={alertRules}

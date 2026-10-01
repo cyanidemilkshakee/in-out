@@ -20,9 +20,9 @@ export function AdminPageFrame({
       <section className="admin-model-hero">
         <div className="admin-hero-copy">
           <div>
-            {preTitle && <div style={{ marginBottom: "16px" }}>{preTitle}</div>}
-            <h1 style={{ lineHeight: 1.25 }}>{title}</h1>
-            <p style={{ lineHeight: 1.5 }}>{description}</p>
+            {preTitle && <div className="admin-hero-pretitle">{preTitle}</div>}
+            <h1 className="admin-hero-title">{title}</h1>
+            <p className="admin-hero-description">{description}</p>
             {metric ? <div className="admin-hero-metric">{metric}</div> : null}
           </div>
         </div>

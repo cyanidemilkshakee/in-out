@@ -20,9 +20,9 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.engine import make_url
 from database import get_db, get_read_db
 from models import Subject, Person, HardwareAsset, Checkpoint, Movement, PresenceState, PermissionRequestModel, AccessPermission, AuditEvent, Alert, Notification
-from schemas import BrowserScanPayload
+from schemas import BrowserScanPayload, ScanPayload
 from terminal_scans import record_scan
-from auth import verify_admin_request, verify_terminal_operator_request
+from auth import verify_admin_request, verify_terminal_access_request
 from routers import movements, terminal, permissions, registry, alerts, notifications, admin_profile
 from permission_decisions import apply_permission_decision
 
@@ -54,7 +54,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         self.app = FastAPI()
         self.app.include_router(movements.router, dependencies=[Depends(verify_admin_request)])
-        self.app.include_router(terminal.router, dependencies=[Depends(verify_terminal_operator_request)])
+        self.app.include_router(terminal.router, dependencies=[Depends(verify_terminal_access_request)])
         self.app.include_router(permissions.router)
         self.app.include_router(registry.router)
         self.app.include_router(registry.bundle_router, dependencies=[Depends(verify_admin_request)])
@@ -78,9 +78,77 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get("/v1/movements")).status_code, 401)
         self.assertEqual((await self.client.post("/v1/terminal/scans", json={})).status_code, 401)
 
+    async def test_offline_timestamp_and_hardware_payloads_are_retryable(self):
+        async with self.sessions() as db:
+            body = BrowserScanPayload(barcode="p1", checkpointId="cp1", capturedOfflineAt="2026-09-28T10:00:00Z")
+            key = uuid.uuid4()
+            first = await record_scan(db, key, body, "operator")
+            await db.commit()
+            self.assertEqual(first, await record_scan(db, key, body, "operator"))
+            self.assertTrue(db.info["scan_replayed"])
+            hardware = ScanPayload(barcode="h1", terminal_id="physical", checkpoint_id="cp1", direction="entry")
+            result = await record_scan(db, uuid.uuid4(), hardware, "physical")
+            self.assertTrue(result["allowed"])
+            self.assertFalse(db.info["scan_replayed"])
+            await db.commit()
+
+    async def test_retry_does_not_publish_an_old_presence_event(self):
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
+        headers = {"Idempotency-Key": str(uuid.uuid4())}
+        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish, \
+             patch("routers.terminal.invalidate_dashboard_cache", new=AsyncMock()):
+            for _ in range(2):
+                response = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp1"}, headers=headers)
+                self.assertEqual(response.status_code, 200, response.text)
+            publish.assert_awaited_once()
+
+    async def test_approval_window_is_persisted_and_dashboard_excludes_equipment(self):
+        from routers.dashboard import get_dashboard
+        async with self.sessions() as db:
+            now = datetime.now(timezone.utc)
+            db.add(PermissionRequestModel(id="window", subject_id="p1", created_at=now, data={
+                "id": "window", "subjectId": "p1", "subjectName": "Alice", "status": "pending", "type": "zone_access",
+                "requestedZones": ["Office"], "validFrom": now.isoformat(), "validTo": now.isoformat()}))
+            await db.commit()
+            result = await apply_permission_decision(db, "window", "approved", "admin", "Checked", valid_for_minutes=45)
+            await db.commit()
+            saved = (await db.get(PermissionRequestModel, "window")).data
+            self.assertEqual(saved["validTo"], result["permission"]["validTo"])
+            self.assertEqual(datetime.fromisoformat(saved["validTo"]) - datetime.fromisoformat(saved["validFrom"]), timedelta(minutes=45))
+            db.add_all([PresenceState(subject_id="p1", state="inside"), PresenceState(subject_id="h1", state="inside")])
+            await db.commit()
+            with patch("routers.dashboard.get_dashboard_cache", new=AsyncMock(return_value=None)), \
+                 patch("routers.dashboard.set_dashboard_cache", new=AsyncMock()):
+                dashboard = await get_dashboard(db)
+            self.assertEqual(dashboard["analytics"]["activeInside"], 1)
+
+    async def test_subject_deletion_preserves_history_and_deletes_unused_subject(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        async with self.sessions() as db:
+            await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp1"), "operator")
+            await db.commit()
+        retained = await self.client.delete("/v1/registry/subjects/p1")
+        self.assertEqual(retained.status_code, 409, retained.text)
+        removed = await self.client.delete("/v1/registry/subjects/h1")
+        self.assertEqual(removed.status_code, 204, removed.text)
+
+    async def test_retention_keeps_manual_review_evidence(self):
+        from maintenance import cleanup
+        async with self.sessions() as db:
+            result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="unknown", checkpointId="cp1"), "operator")
+            await db.commit()
+            event = result["decision"]["event"]
+            await self._create_review(db, barcode="unknown", event=event)
+            movement = await db.get(Movement, event["id"])
+            movement.occurred_at = datetime.now(timezone.utc) - timedelta(days=10)
+            await db.commit()
+        with patch("maintenance.async_session", self.sessions), patch("maintenance.settings.MOVEMENT_RETENTION_DAYS", 1):
+            result = await cleanup(apply=True)
+        self.assertEqual(result["movements"], 0)
+
     async def test_browser_scan_retry_hardware_and_movement_filters(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
-        self.app.dependency_overrides[verify_terminal_operator_request] = lambda: {"sub": "test-operator"}
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         body = {"barcode": "p1", "checkpointId": "cp1", "selectedHardwareIds": ["h1"], "scanType": "auto", "online": True}
         headers = {"Idempotency-Key": str(uuid.uuid4())}
         with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
@@ -180,7 +248,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_manual_unknown_entry_persists_and_exits_once(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
-        self.app.dependency_overrides[verify_terminal_operator_request] = lambda: {"sub": "test-operator"}
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         scan_body = {"barcode": "new-visitor", "checkpointId": "cp1"}
         with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
              patch("permission_decisions.publish_presence_update", new=AsyncMock()), \
@@ -198,7 +266,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(review.status_code, 200, review.text)
             self.assertEqual(review.json()["operatorNote"], "Verified photo ID at the gate.")
             url = f"/v1/permission-requests/{review.json()['id']}/decide"
-            no_note = await self.client.post(url, json={"decision": "approved"})
+            no_note = await self.client.post(url, json={"decision": "denied"})
             self.assertEqual(no_note.status_code, 422, no_note.text)
             approval = {"decision": "approved", "admin_id": "spoofed", "reason": "Checked ID"}
             response = await self.client.post(url, json=approval)
@@ -213,6 +281,10 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(state.state, "inside")
                 self.assertEqual(state.entry_override["requestId"], review.json()["id"])
                 self.assertEqual(result["auditEvent"]["actor"], "test-admin")
+                self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
+                resolved = await db.get(Movement, denied.json()["decision"]["event"]["id"])
+                self.assertEqual(resolved.result, "approved")
+                self.assertEqual(resolved.data["overrideRequestId"], review.json()["id"])
             # A fresh HTTP request must use the saved presence, including an immediate exit.
             exit_response = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
             self.assertEqual(exit_response.status_code, 200, exit_response.text)
@@ -379,6 +451,23 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(Alert(id="visible", created_at=now, data={"id": "visible", "title": "Restricted access", "status": "open"}))
             db.add(Alert(id="review", created_at=now, data={"id": "review", "manualReview": True, "status": "open"}))
+            db.add(Movement(
+                id="registry-movement",
+                subject_id="p1",
+                checkpoint_id="cp1",
+                occurred_at=now,
+                result="approved",
+                direction="entry",
+                scan_type="manual",
+                subject_type="employee",
+                sync_state="synced",
+                data={"id": "registry-movement", "subjectName": "Alice", "barcode": "p1"},
+            ))
+            db.add(AuditEvent(
+                id="registry-audit",
+                created_at=now,
+                data={"id": "registry-audit", "category": "permission", "action": "Granted"},
+            ))
             db.add(Notification(id="unread-null", created_at=now, data={"id": "unread-null", "read": None}))
             await db.commit()
         response = await self.client.get("/v1/alerts")
@@ -386,15 +475,23 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([item["id"] for item in response.json()["items"]], ["visible"])
         bundle = await self.client.get("/v1/registry/bundle")
         self.assertEqual([item["id"] for item in bundle.json()["alerts"]], ["visible"])
+        self.assertEqual([item["id"] for item in bundle.json()["movements"]], ["registry-movement"])
+        self.assertEqual([item["id"] for item in bundle.json()["auditEvents"]], ["registry-audit"])
         unread = await self.client.get("/v1/notifications?read=false")
         self.assertEqual([item["id"] for item in unread.json()], ["unread-null"])
 
     async def test_review_deduplication_and_source_validation(self):
-        self.app.dependency_overrides[verify_terminal_operator_request] = lambda: {"sub": "operator"}
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
         async with self.sessions() as db:
             denial = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="unknown-review", checkpointId="cp1"), "test")
             await db.commit()
-        body = {"barcode": "unknown-review", "checkpointId": "cp1", "direction": "entry", "eventId": denial["decision"]["event"]["id"]}
+        body = {
+            "barcode": "unknown-review",
+            "checkpointId": "cp1",
+            "direction": "entry",
+            "eventId": denial["decision"]["event"]["id"],
+            "operatorNote": "Verified at the gate before requesting review.",
+        }
         with patch("routers.terminal.get_temporal_client", new=AsyncMock()), patch("routers.terminal.publish_presence_update", new=AsyncMock()):
             first, second = await asyncio.gather(*[self.client.post("/v1/terminal/manual-reviews", json=body) for _ in range(2)])
             self.assertEqual(first.status_code, 200, first.text)
@@ -487,26 +584,18 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.client.get(url)).json(), ["Checked at gate"])
         self.assertEqual((await self.client.post(url, json={"note": "  "})).status_code, 422)
 
-    async def test_scheduled_rules_respect_disabled_state_and_persist_once(self):
-        from workflows.activities import run_alert_rule_evaluation
-        from models import AlertRule
-        now = datetime.now(timezone.utc)
-        async with self.sessions() as db:
-            db.add(AlertRule(id="rule-exit-balance", data={"id": "rule-exit-balance", "conditionKey": "exit_balance", "enabled": False}))
-            db.add(Movement(id="unbalanced-exit", subject_id="p1", checkpoint_id="cp1", occurred_at=now,
-                result="approved", direction="exit", scan_type="auto", subject_type="employee", sync_state="synced",
-                data={"id": "unbalanced-exit", "subjectId": "p1", "subjectType": "employee"}))
-            await db.commit()
-        with patch("workflows.activities.async_session", self.sessions):
-            self.assertEqual(await run_alert_rule_evaluation(), 0)
-            async with self.sessions() as db:
-                rule = await db.get(AlertRule, "rule-exit-balance")
-                rule.data = {**rule.data, "enabled": True}
-                await db.commit()
-            outcomes = await asyncio.gather(run_alert_rule_evaluation(), run_alert_rule_evaluation())
-            self.assertEqual(sum(outcomes), 1)
-        async with self.sessions() as db:
-            self.assertEqual(await db.scalar(select(func.count()).select_from(Alert)), 1)
+    async def test_retired_alert_rules_do_not_trigger(self):
+        from rule_engine import evaluate_scheduled_rules
+
+        generated = evaluate_scheduled_rules(
+            [{"id": "rule-exit-balance", "conditionKey": "exit_balance", "enabled": True}],
+            [],
+            [],
+            [],
+            employees=[{"id": "p1", "name": "Alice", "type": "employee", "status": "active"}],
+            now=datetime(2026, 9, 29, 13, 30, tzinfo=timezone.utc),
+        )
+        self.assertEqual(generated, [])
 
     async def test_workflow_notification_retry_does_not_duplicate(self):
         from workflows.activities import notify_admins_of_override

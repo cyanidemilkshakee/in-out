@@ -52,7 +52,7 @@ export function CreationDialog({
   return (
     <div className="temporary-id-popover">
       <button
-        className={`ghost-button temporary-create-trigger ${triggerClassName || ""}`.trim()}
+        className={`admin-button admin-button--ghost ghost-button temporary-create-trigger ${triggerClassName || ""}`.trim()}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -89,7 +89,7 @@ export function CreationDialog({
                     <span>{description}</span>
                   </div>
                   <button
-                    className="icon-button compact-button"
+                    className="admin-button admin-button--icon icon-button compact-button"
                     type="button"
                     onClick={() => setOpen(false)}
                     aria-label={`Close ${title.toLowerCase()}`}
@@ -101,7 +101,7 @@ export function CreationDialog({
                 {children}
 
                 {error ? <p className="temporary-id-form-error" role="alert">{error}</p> : null}
-                <button className="primary-button creation-dialog-submit" type="submit" disabled={submitting}>
+                <button className="admin-button admin-button--primary primary-button creation-dialog-submit" type="submit" disabled={submitting}>
                   {submitting ? "Creating..." : submitLabel}
                 </button>
               </form>

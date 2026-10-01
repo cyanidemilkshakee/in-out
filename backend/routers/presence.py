@@ -7,6 +7,8 @@ GET /v1/presence/stream → SSE stream; emits an event whenever a scan changes p
 
 import logging
 import asyncio
+import time
+from contextlib import aclosing
 from typing import AsyncGenerator
 
 from fastapi import APIRouter, Depends, Request
@@ -18,6 +20,7 @@ from database import get_read_db
 from models import PresenceState, Subject
 from schemas import PresenceEntry
 from redis_client import subscribe_presence
+from auth import verify_authenticated_request
 
 logger = logging.getLogger(__name__)
 
@@ -47,16 +50,17 @@ async def get_presence_snapshot(
     ]
 
 
-async def _sse_event_generator(request: Request) -> AsyncGenerator[str, None]:
+async def _sse_event_generator(request: Request, expires_at: float) -> AsyncGenerator[str, None]:
     """
     Yield SSE-formatted strings from the Redis presence channel until the
     client disconnects.
     """
     try:
-        async for message in subscribe_presence():
-            if await request.is_disconnected():
-                break
-            yield f"data: {message}\n\n"
+        async with aclosing(subscribe_presence()) as stream:
+            async for message in stream:
+                if time.time() >= expires_at or await request.is_disconnected():
+                    break
+                yield ": heartbeat\n\n" if message is None else f"data: {message}\n\n"
     except asyncio.CancelledError:
         pass
     except Exception:
@@ -64,7 +68,7 @@ async def _sse_event_generator(request: Request) -> AsyncGenerator[str, None]:
 
 
 @router.get("/stream")
-async def stream_presence(request: Request) -> StreamingResponse:
+async def stream_presence(request: Request, claims: dict = Depends(verify_authenticated_request)) -> StreamingResponse:
     """
     Server-Sent Events stream of presence change events.
 
@@ -76,10 +80,9 @@ async def stream_presence(request: Request) -> StreamingResponse:
     presence state on each message.
     """
     return StreamingResponse(
-        _sse_event_generator(request),
+        _sse_event_generator(request, float(claims["exp"])),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
         },
     )

@@ -13,7 +13,7 @@ from sqlalchemy import and_, delete, exists, func, select
 
 from config import settings
 from database import async_session
-from models import Alert, AuditEvent, Movement, Notification, ScanRequest
+from models import Alert, AuditEvent, Movement, Notification, ScanRequest, PermissionRequestModel
 
 
 RETENTION_TARGETS = (
@@ -38,7 +38,9 @@ async def cleanup(*, apply: bool) -> dict[str, int]:
             criteria = field < cutoff
             if model is Movement:
                 # Do not delete a movement that is still evidence for an alert.
-                criteria = and_(criteria, ~exists(select(Alert.id).where(Alert.source_event_id == Movement.id)))
+                criteria = and_(criteria,
+                    ~exists(select(Alert.id).where(Alert.source_event_id == Movement.id)),
+                    ~exists(select(PermissionRequestModel.id).where(PermissionRequestModel.data["eventId"].astext == Movement.id)))
             count = await db.scalar(select(func.count()).select_from(model).where(criteria))
             results[label] = int(count or 0)
             if apply and count:

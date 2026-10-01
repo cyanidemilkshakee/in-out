@@ -102,7 +102,8 @@ try {
     const frontendToken = await signIn("inout-frontend");
     for (const [path, expectedStatus] of [
       ["/v1/checkpoints", roleName === "admin" ? 200 : 403],
-      ["/v1/terminal/bundle", roleName === "operator" ? 200 : 403],
+      // Both supported application roles can operate the terminal.
+      ["/v1/terminal/bundle", 200],
     ]) {
       const response = await fetch(`http://localhost:${apiPort}${path}`, {
         signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${frontendToken}` },

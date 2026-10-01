@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException
 from schemas import BrowserScanPayload
 from movement_logic import evaluate_scan, apply_movement_state
-from auth import verify_admin_request, verify_terminal_operator_request
+from auth import verify_admin_request, verify_terminal_access_request
 from fastapi.security import HTTPAuthorizationCredentials
 from auth import verify_keycloak_token
 from jose import jwt, jwk
@@ -44,17 +44,15 @@ class ContractTests(unittest.TestCase):
                 asyncio.run(verify_admin_request(None))
         self.assertEqual(error.exception.status_code, 401)
 
-    def test_terminal_access_allows_admin_or_operator(self):
+    def test_terminal_access_allows_admins_and_operators(self):
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-token")
-        with patch("auth.verify_keycloak_token", return_value={"sub": "operator", "realm_access": {"roles": ["operator"]}}):
-            self.assertEqual(asyncio.run(verify_terminal_operator_request(credentials))["sub"], "operator")
-        for roles in (["admin"], ["admin", "operator"]):
-            with patch("auth.verify_keycloak_token", return_value={"sub": "admin", "realm_access": {"roles": roles}}):
-                self.assertEqual(asyncio.run(verify_terminal_operator_request(credentials))["sub"], "admin")
+        for role, roles in (("operator", ["operator"]), ("admin", ["admin"]), ("admin", ["admin", "operator"])):
+            with patch("auth.verify_keycloak_token", return_value={"sub": role, "realm_access": {"roles": roles}}):
+                self.assertEqual(asyncio.run(verify_terminal_access_request(credentials))["sub"], role)
         for roles in ([],):
             with patch("auth.verify_keycloak_token", return_value={"realm_access": {"roles": roles}}):
                 with self.assertRaises(HTTPException) as error:
-                    asyncio.run(verify_terminal_operator_request(credentials))
+                    asyncio.run(verify_terminal_access_request(credentials))
                 self.assertEqual(error.exception.status_code, 403)
 
     def test_hardware_is_recognized_and_updates_presence(self):

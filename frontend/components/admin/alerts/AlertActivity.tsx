@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle } from "lucide-react";
 import type { Alert } from "../../../../lib/types";
 
 function alertTimestamp(alert: Alert) {
@@ -13,10 +13,10 @@ function alertTimestamp(alert: Alert) {
 
 export function AlertActivity({
   alerts,
-  onUpdate,
+  onAcknowledge,
 }: {
   alerts: Alert[];
-  onUpdate: (alertId: string, status: Alert["status"]) => void;
+  onAcknowledge: (alertId: string) => void;
 }) {
   const sortedAlerts = useMemo(
     () => [...alerts].sort((a, b) => alertTimestamp(b) - alertTimestamp(a)),
@@ -28,9 +28,9 @@ export function AlertActivity({
       <div className="permission-section-heading">
         <div>
           <h2 id="alert-activity-title">Active alerts</h2>
-          <p>Open and acknowledged conditions requiring security action.</p>
+          <p>Acknowledging hides an alert here; its record remains stored for history.</p>
         </div>
-        <span>{sortedAlerts.length} active</span>
+        <span>{sortedAlerts.length} open</span>
       </div>
       <div className="alert-activity-list">
         {sortedAlerts.length ? sortedAlerts.map((alert) => (
@@ -47,27 +47,14 @@ export function AlertActivity({
               {alert.explanation ? <em>{alert.explanation}</em> : null}
             </span>
             <span className="alert-activity-actions">
-              <span className={`alert-status alert-status-${alert.status}`}>{alert.status}</span>
-              {alert.status === "resolved" ? (
-                <span className="alert-complete"><CheckCircle2 size={15} /> Resolved</span>
-              ) : (
-                <>
-                  {alert.status === "open" ? (
-                    <button type="button" onClick={() => onUpdate(alert.id, "acknowledged")}>Acknowledge</button>
-                  ) : null}
-                  {alert.status !== "warned" ? (
-                    <button type="button" onClick={() => onUpdate(alert.id, "warned")}>Warn</button>
-                  ) : null}
-                  <button type="button" onClick={() => onUpdate(alert.id, "resolved")}>Resolve</button>
-                </>
-              )}
+              <button type="button" onClick={() => onAcknowledge(alert.id)}>Acknowledge</button>
             </span>
           </article>
         )) : (
           <div className="alert-activity-empty">
             <AlertTriangle size={22} />
-            <strong>No active alerts match this search.</strong>
-            <span>Clear the search or review alert history in Registry.</span>
+            <strong>No open alerts match this search.</strong>
+            <span>Clear the search to check for other open alerts.</span>
           </div>
         )}
       </div>

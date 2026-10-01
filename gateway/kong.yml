@@ -1,0 +1,72 @@
+_format_version: "3.0"
+_transform: true
+
+# Listener-specific routes preserve the existing app, API, and Keycloak URLs.
+# Kong's Admin API is disabled; this file is the source of truth.
+services:
+  - name: inout-web
+    url: http://app:3000
+    retries: 0
+    read_timeout: 60000
+    routes:
+      - name: web-events
+        expression: http.headers.inoutlistener == "8000" && http.path == "/api/presence"
+        priority: 100
+        strip_path: false
+        preserve_host: true
+        response_buffering: false
+      - name: web
+        expression: http.headers.inoutlistener == "8000"
+        priority: 10
+        strip_path: false
+        preserve_host: true
+
+  - name: inout-api
+    url: http://python-api:1102
+    retries: 0
+    read_timeout: 60000
+    routes:
+      - name: api-events
+        expression: http.headers.inoutlistener == "8002" && http.path == "/v1/presence/stream"
+        priority: 110
+        strip_path: false
+        response_buffering: false
+      - name: api
+        expression: http.headers.inoutlistener == "8002"
+        priority: 20
+        strip_path: false
+      - name: terminal-mtls
+        expression: http.headers.inoutlistener == "8443" && (http.path == "/v1/scans" || http.path == "/v1/scans/")
+        protocols: [https]
+        priority: 120
+        strip_path: false
+    plugins:
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 256
+          size_unit: kilobytes
+          require_content_length: false
+      - name: rate-limiting
+        config:
+          minute: 1200
+          policy: local
+          limit_by: ip
+          hide_client_headers: false
+
+  - name: inout-identity
+    url: http://keycloak:1105
+    retries: 0
+    routes:
+      - name: identity
+        expression: http.headers.inoutlistener == "8005"
+        priority: 30
+        strip_path: false
+        preserve_host: true
+
+plugins:
+  - name: inout-terminal-identity
+  - name: correlation-id
+    config:
+      header_name: X-Request-ID
+      generator: uuid
+      echo_downstream: true

@@ -2,7 +2,7 @@
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from sqlalchemy import select, func
@@ -116,11 +116,51 @@ async def _manual_movement(db, req, decision, actor, reason, now):
         state = states[item.id]
         state.state = "inside" if direction == "entry" else "outside"
         state.last_scan_timestamp = now
-        state.entry_override = {"requestId": req.id, "hardwareIds": hardware_ids} if direction == "entry" else None
+        state.entry_override = (
+            {"requestId": req.id, "hardwareIds": hardware_ids, "validTo": data.get("validTo")}
+            if direction == "entry" else None
+        )
         metadata = item.hardware if item.kind == "hardware" else item.person
         if metadata is None:
             raise HTTPException(422, "Subject metadata is missing")
         metadata.data = {**metadata.data, "id": item.id, "barcode": item.barcode, "inside": direction == "entry"}
+    if source:
+        # A manual review completes the original scan; it is not another scan.
+        # Preserve the original event ID and timestamp so dashboards and the
+        # movement ledger count one access attempt with its final outcome.
+        event = {
+            **source.data,
+            "id": source.id,
+            "checkpointId": source.checkpoint_id,
+            "checkpoint": checkpoint.data.get("name", checkpoint.id),
+            "direction": direction,
+            "subjectId": subject_id or source.data.get("subjectId", "unregistered"),
+            "subjectName": data.get("subjectName") or source.data.get("subjectName") or data.get("barcode", "Unknown"),
+            "subjectType": subject.kind if subject else source.subject_type,
+            "barcode": subject.barcode if subject else data.get("barcode", source.data.get("barcode", "")),
+            "result": decision,
+            "reason": reason,
+            "hardwareIds": hardware_ids,
+            "overrideRequestId": req.id,
+            "adminId": actor,
+            "manualReviewedAt": now.isoformat(),
+            "initialResult": source.data.get("initialResult", source.result),
+            "initialReason": source.data.get("initialReason", source.data.get("reason")),
+        }
+        if decision == "denied":
+            event["denialCode"] = "manual_review"
+        else:
+            event.pop("denialCode", None)
+        source.subject_id = subject_id
+        source.result = decision
+        source.direction = direction
+        source.subject_type = event["subjectType"]
+        source.denial_code = event.get("denialCode")
+        source.data = event
+        return event, subjects
+
+    # Older records may not carry an originating scan. Those manual decisions
+    # remain their own movement because there is no scan to finalize.
     event_id = "MAN-" + uuid.uuid4().hex
     event = {
         "id": event_id, "date": _current_date(now), "time": _current_time(now),
@@ -142,7 +182,7 @@ async def _manual_movement(db, req, decision, actor, reason, now):
     return event, subjects
 
 
-async def apply_permission_decision(db, request_id, decision, actor, reason, *, from_activity=False):
+async def apply_permission_decision(db, request_id, decision, actor, reason, *, valid_for_minutes=None, from_activity=False):
     req = await db.scalar(select(PermissionRequestModel).where(PermissionRequestModel.id == request_id).with_for_update())
     if not req:
         raise HTTPException(404, "Request not found")
@@ -161,10 +201,17 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
     if kind not in {"manual_override", "visitor", "zone_access", "hardware_custody"}:
         raise HTTPException(422, "Unsupported permission request type")
     now = datetime.now(timezone.utc)
+    if decision == "approved" and valid_for_minutes is not None:
+        data["validFrom"] = now.isoformat()
+        data["validTo"] = (now + timedelta(minutes=valid_for_minutes)).isoformat()
+    req.data = data
     movement = None
     changed_subjects = []
     permission = None
     if kind == "manual_override":
+        # Make the admin-selected window visible to the movement handler before
+        # it records a temporary entry override.
+        req.data = data
         movement, changed_subjects = await _manual_movement(db, req, decision, actor, reason, now)
         if req.subject_id:
             perm = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == req.subject_id))
@@ -205,10 +252,12 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
                 metadata.data = {**metadata.data, "status": "pre_approved" if subject.kind == "visitor" and decision == "approved" else state,
                     **({"allowedZones": permission["zones"], "validFrom": permission["validFrom"], "validTo": permission["validTo"]} if decision == "approved" else {})}
     req.data = {**req.data, "status": decision, "decidedAt": data.get("decidedAt") or now.isoformat(),
-                "decidedBy": data.get("decidedBy") or actor, "decisionReason": reason, "appliedAt": now.isoformat()}
+                "decidedBy": data.get("decidedBy") or actor, "decisionReason": reason, "appliedAt": now.isoformat(),
+                **({"terminalAcknowledgementRequired": True} if kind == "manual_override" else {})}
     audit_id = "AUD-" + uuid.uuid4().hex
     audit = {"id": audit_id, "category": "permission", "action": f"{kind.replace('_', ' ').title()} {decision}",
-        "subjectId": req.subject_id or "", "actor": actor, "role": "Administrator" if actor != "system" else "System",
+        "subjectId": req.subject_id or "", "subjectName": data.get("subjectName") or "Unregistered barcode",
+        "barcode": data.get("barcode") or "", "actor": actor, "role": "Administrator" if actor != "system" else "System",
         "decision": "granted" if decision == "approved" else "denied", "reason": reason,
         "relatedId": req.id, "createdAt": now.isoformat()}
     db.add(AuditEvent(id=audit_id, created_at=now, data=audit))
@@ -218,6 +267,8 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
     hardware = next(({**item.hardware.data, "id": item.id, "barcode": item.barcode}
                      for item in changed_subjects if item.kind == "hardware" and item.hardware), None)
     return {"request": req.data, "movement": movement, "auditEvent": audit, "permission": permission,
+            "hardwareAssets": [{**item.hardware.data, "id": item.id, "barcode": item.barcode}
+                               for item in changed_subjects if item.kind == "hardware" and item.hardware],
             "person": person, "hardwareAsset": hardware}
 
 
@@ -232,7 +283,7 @@ async def publish_decision(result):
             "movement": result.get("movement"),
             "request": result["request"],
             "people": [result["person"]] if result.get("person") else [],
-            "hardwareAssets": [result["hardwareAsset"]] if result.get("hardwareAsset") else [],
+            "hardwareAssets": result.get("hardwareAssets", [result["hardwareAsset"]] if result.get("hardwareAsset") else []),
         }))
     except Exception:
         logger.exception("Permission decision committed; presence notification failed")

@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import verify_admin_or_operator_request, verify_admin_request
 from database import get_db, get_read_db
 from models import (
-    Subject, PermissionRequestModel, Movement, Checkpoint,
+    Subject, PermissionRequestModel, Checkpoint,
     AccessPermission, Person, HardwareAsset, AuditEvent, Notification,
 )
 from schemas import PermissionRequestCreate, PermissionDecision
@@ -69,6 +69,8 @@ async def create_permission_request(
     validate_window(valid_from, valid_to)
     direction = payload.direction
     if payload.request_type == "manual_override":
+        if not payload.operator_note:
+            raise HTTPException(status_code=422, detail="A note is required for a manual permission request")
         source = await review_source(db, payload.event_id, subject.barcode, checkpoint.id, direction)
         direction = direction or (source.direction if source else None) or ("exit" if checkpoint.data.get("mode") == "exit" else "entry")
         existing = await pending_manual_review(db, subject.barcode, checkpoint.id, direction)
@@ -149,10 +151,16 @@ async def decide_permission_request(
 ):
     from permission_decisions import apply_permission_decision, publish_decision
 
+    reason = (payload.reason or "").strip()
+    if payload.decision == "denied" and not reason:
+        raise HTTPException(status_code=422, detail="A decision note is required when denying a permission request")
+    if payload.valid_for_minutes is not None and payload.valid_for_minutes not in {15, 30, 60, 120, 240}:
+        raise HTTPException(status_code=422, detail="Choose one of the available Valid for durations")
+
     # The row lock, decision, identity, movement and presence share one transaction.
     result = await apply_permission_decision(
         db, req_id, payload.decision, admin.get("sub", "unknown"),
-        payload.reason,
+        reason or "Permission approved.", valid_for_minutes=payload.valid_for_minutes,
     )
     await db.commit()
     await publish_decision(result)
@@ -162,13 +170,49 @@ async def decide_permission_request(
         try:
             client = await get_temporal_client()
             prefix = "override" if req_type == "manual_override" else "visitor"
-            args = ([payload.decision, admin.get("sub", "unknown"), payload.reason]
-                    if req_type == "manual_override" else [payload.decision, payload.reason])
+            args = ([payload.decision, admin.get("sub", "unknown"), reason or "Permission approved."]
+                    if req_type == "manual_override" else [payload.decision, reason or "Permission approved."])
             await client.get_workflow_handle(f"{prefix}-{req_id}").signal("admin_decision", args=args)
             workflow_signaled = True
         except Exception:
             logger.exception("Decision committed; workflow signal unavailable")
     return {**result, "workflowSignaled": workflow_signaled}
+
+
+@router.post("/v1/permission-requests/{req_id}/acknowledge")
+async def acknowledge_permission_request(
+    req_id: str,
+    db: AsyncSession = Depends(get_db),
+    actor: dict = Depends(verify_admin_or_operator_request),
+):
+    """Let the terminal operator close a completed manual-review notice."""
+    req = await db.scalar(
+        select(PermissionRequestModel)
+        .where(PermissionRequestModel.id == req_id)
+        .with_for_update()
+    )
+    if not req:
+        raise HTTPException(status_code=404, detail="Request not found")
+
+    data = dict(req.data or {})
+    if data.get("type") != "manual_override":
+        raise HTTPException(status_code=422, detail="Only manual-review decisions can be acknowledged")
+    if data.get("status") not in {"approved", "denied"}:
+        raise HTTPException(status_code=409, detail="A permission decision is required before acknowledgement")
+    if not data.get("terminalAcknowledgementRequired"):
+        raise HTTPException(status_code=409, detail="This decision does not require acknowledgement")
+    if data.get("acknowledgedAt"):
+        return data
+
+    data = {
+        **data,
+        "acknowledgedAt": datetime.now(timezone.utc).isoformat(),
+        "acknowledgedBy": actor.get("sub") or "Terminal Operator",
+    }
+    req.data = data
+    await db.commit()
+    await publish_decision({"request": data})
+    return data
 
 
 # ===========================================================================
@@ -318,12 +362,19 @@ async def update_permission(
 
     # 6. Insert AuditEvent
     audit_id = str(uuid.uuid4())
+    subject_metadata = (person.data if person else hw.data if hw else {}) or {}
     audit_data: dict[str, Any] = {
         "id":         audit_id,
         "category":   "permission",
         "action":     audit_action,
         "subjectId":  subject_id,
+        "subjectName": subject_metadata.get("name") or subject.barcode,
+        "barcode":    subject.barcode,
         "state":      new_state,
+        "decision":   "granted" if new_state == "active" else "denied",
+        "reason":     merged_data.get("reason") or "",
+        "actor":      _admin.get("sub", "unknown"),
+        "role":       "Administrator",
         "timestamp":  now.isoformat(),
         "performedBy": _admin.get("sub", "unknown"),
     }

@@ -1,9 +1,10 @@
 import { PythonApiError } from "../pythonApi";
-import { apiSession } from "../authSession";
+import { apiSession, withApiSession } from "../authSession";
+import type { NextRequest } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-export async function GET(request: Request) {
+async function getPresence(request: NextRequest) {
   try {
     const session = await apiSession();
     const accessToken = session?.access_token;
@@ -36,7 +37,6 @@ export async function GET(request: Request) {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache",
-        "X-Accel-Buffering": "no", // disable Nginx buffering for SSE
       },
     });
   } catch (error) {
@@ -50,3 +50,5 @@ export async function GET(request: Request) {
     return Response.json({ error: "Stream unavailable" }, { status: 502 });
   }
 }
+
+export const GET = withApiSession(getPresence);

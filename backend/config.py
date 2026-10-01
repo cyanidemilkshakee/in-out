@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "postgresql+asyncpg://inout:inout@localhost:1003/inout"
     READ_DATABASE_URL: str = ""
 
-    # Environment — set to "dev" to bypass mTLS check locally
+    # Authentication remains mandatory in every environment.
     ENV: str = "production"
 
     # Redis (Phase 2)
@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     KEYCLOAK_AUDIENCE: str = "inout-frontend"
     KEYCLOAK_JWKS_CACHE_TTL: int = Field(default=300, ge=30)
     KEYCLOAK_STEP_UP_MAX_AGE_SECONDS: int = Field(default=300, ge=60, le=900)
-    MTLS_PROXY_SECRET: str = ""
+    KONG_TERMINAL_SECRET: str = ""
     MAX_REQUEST_BODY_BYTES: int = Field(default=262_144, ge=1_024, le=10_485_760)
     WRITE_RATE_LIMIT_PER_MINUTE: int = Field(default=300, ge=10, le=10_000)
 

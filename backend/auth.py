@@ -159,10 +159,10 @@ async def verify_admin_request(
     return payload
 
 
-async def verify_terminal_operator_request(
+async def verify_terminal_access_request(
     credentials: HTTPAuthorizationCredentials = Depends(_bearer),
 ) -> dict[str, Any]:
-    """Require the operator role; administrators are deliberately excluded."""
+    """Allow administrators and terminal operators to use terminal routes."""
     payload = await verify_authenticated_request(credentials)
     if not has_admin_role(payload) and not has_operator_role(payload):
         raise HTTPException(status_code=403, detail="Terminal access requires the admin or operator realm role")
