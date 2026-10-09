@@ -42,8 +42,8 @@ async def list_alerts(
         | (Alert.data["ruleId"].astext == "rule-unknown-barcode")
         | Alert.data["title"].astext.ilike("Unknown barcode%")
     )
-    alerts_q = select(Alert).where(~excluded_alert).order_by(Alert.created_at.desc())
-    count_q = select(func.count()).select_from(Alert).where(~excluded_alert)
+    alerts_q = select(Alert).where(~func.coalesce(excluded_alert, False)).order_by(Alert.created_at.desc())
+    count_q = select(func.count()).select_from(Alert).where(~func.coalesce(excluded_alert, False))
 
     if status:
         alerts_q = alerts_q.where(Alert.data["status"].astext == status)

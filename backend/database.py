@@ -9,11 +9,10 @@ class Base(DeclarativeBase):
     pass
 
 
-# --- Write engine (routes through PgBouncer on port 6432) ---
-# IMPORTANT: prepared_statement_cache_size=0 is required when PgBouncer runs in
-# transaction pooling mode. asyncpg uses server-side prepared statements by
-# default; transaction mode returns the connection to the pool before the
-# session is torn down, so the next consumer sees stale/missing statement names.
+# --- Write engine ---
+# The prepared-statement settings keep this safe if DATABASE_URL is later
+# pointed at a transaction-pooled PgBouncer endpoint; local Compose connects
+# directly to PostgreSQL.
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=False,
@@ -28,7 +27,7 @@ engine = create_async_engine(
     },
 )
 
-# --- Read engine (routes to Postgres replica for analytics / dashboard queries) ---
+# --- Read engine (a replica when READ_DATABASE_URL is configured) ---
 read_engine = create_async_engine(
     settings.READ_DATABASE_URL,
     echo=False,

@@ -165,7 +165,7 @@ export function KPICards({
   ] as const;
 
   return (
-    <div className="dashboard-kpi-grid animate-slide-up delay-100">
+    <div className="dashboard-kpi-grid">
       {metricCards.map((card) => {
         const Icon = card.icon;
         return (

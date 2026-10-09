@@ -1,14 +1,18 @@
+import { apiSession } from "./authSession"
+
 export class PythonApiError extends Error {
   constructor(message: string, public status: number) { super(message); }
 }
+
+const UPSTREAM_TIMEOUT_MS = 15_000;
+
 export async function fetchPythonApi(path: string, method: string, body?: unknown, idempotencyKey?: string, signal?: AbortSignal) {
-  const base = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:8000';
+  const base = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:1002';
   const url = base + path;
 
-  // Obtain the Keycloak access_token from the current NextAuth session.
-  // The token is stored in the session by the jwt/session callbacks in auth.ts.
-  const session = await import("../../auth").then((m) => m.auth())
-  const accessToken = (session as any)?.access_token as string | undefined
+  // Server auth() includes the bearer token; /api/auth/session never exposes it.
+  const session = await apiSession()
+  const accessToken = session?.access_token
   if (!session || !accessToken) throw new PythonApiError("Please sign in again.", 401);
 
   const headers: Record<string, string> = {
@@ -22,11 +26,13 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
   }
 
   try {
+    const timeout = AbortSignal.timeout(UPSTREAM_TIMEOUT_MS);
+    const upstreamSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const res = await fetch(url, {
       method,
       headers,
       cache: "no-store",
-      signal,
+      signal: upstreamSignal,
       body: body ? JSON.stringify(body) : undefined,
     });
     if (!res.ok) {
@@ -43,6 +49,9 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
     return res;
   } catch (error) {
     if (!(error instanceof PythonApiError)) {
+      if (error instanceof DOMException && error.name === "TimeoutError") {
+        throw new PythonApiError("Backend request timed out.", 504);
+      }
       console.error("[python-api] upstream request could not be completed", {
         method,
         path,

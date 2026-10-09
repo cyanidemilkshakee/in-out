@@ -74,6 +74,22 @@ export default function PermissionManagerPage() {
   const [validTo, setValidTo] = useState("");
   const [formError, setFormError] = useState("");
   const [feedback, setFeedback] = useState("");
+  const [actionError, setActionError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
+
+  async function runAction(action: () => Promise<void>) {
+    if (busy) return;
+    setBusy(true);
+    setActionError("");
+    try {
+      await action();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Unable to save the permission decision.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   const pendingRequests = useMemo(
     () => permissionRequests.filter((request) => request.status === "pending"),
@@ -133,15 +149,25 @@ export default function PermissionManagerPage() {
   }
 
   async function decide(request: PermissionRequest, decision: "approved" | "denied") {
-    const reason = decision === "approved"
-      ? "Approved by Permission Manager after policy review"
-      : "Denied by Permission Manager after policy review";
+    const reason = decisionNotes[request.id]?.trim();
+    if (!reason) {
+      setActionError("Add a decision note before allowing or denying this request.");
+      return;
+    }
     await decidePermissionRequest(request.id, decision, reason);
+    setDecisionNotes((current) => {
+      const next = { ...current };
+      delete next[request.id];
+      return next;
+    });
     const relatedNotification = notifications.find(
       (notification) => notification.relatedId === request.id && !notification.read
     );
-    if (relatedNotification) await markNotificationRead(relatedNotification.id);
     setFeedback(`${request.subjectName}: request ${decision === "approved" ? "allowed" : "denied"}.`);
+    if (relatedNotification) {
+      try { await markNotificationRead(relatedNotification.id); }
+      catch { setActionError("The decision was saved, but its notification could not be marked read."); }
+    }
   }
 
   function openAssignDialog() {
@@ -183,6 +209,7 @@ export default function PermissionManagerPage() {
 
   return (
     <div className="permission-page">
+      {actionError ? <p className="permission-form-error" role="alert">{actionError}</p> : null}
       <header className="permission-header">
         <div>
           <h1>Permission Manager</h1>
@@ -279,7 +306,7 @@ export default function PermissionManagerPage() {
                     <td>{permission.zones.join(" / ")}</td>
                     <td><span>{permission.validFrom}</span><small>{permission.validTo}</small></td>
                     <td>
-                      <button type="button" className="permission-row-action" onClick={() => void runQuickAction(permission)}>
+                      <button type="button" disabled={busy} className="permission-row-action" onClick={() => void runAction(() => runQuickAction(permission))}>
                         {permissionAction(permission)} <ChevronRight size={15} />
                       </button>
                     </td>
@@ -307,9 +334,20 @@ export default function PermissionManagerPage() {
                   <div><dt>Access</dt><dd>{request.requestedZones.join(" / ")}</dd></div>
                   <div><dt>Valid</dt><dd>{request.validFrom} - {request.validTo}</dd></div>
                 </dl>
+                {request.operatorNote ? <p className="permission-request-note"><strong>Operator note</strong>{request.operatorNote}</p> : null}
+                <label className="permission-decision-note">
+                  <span>Decision note <em>Required</em></span>
+                  <textarea
+                    value={decisionNotes[request.id] ?? ""}
+                    disabled={busy}
+                    maxLength={1000}
+                    placeholder="Explain why you are allowing or denying this request."
+                    onChange={(event) => setDecisionNotes((current) => ({ ...current, [request.id]: event.target.value }))}
+                  />
+                </label>
                 <div className="request-actions">
-                  <button type="button" onClick={() => void decide(request, "approved")}>Allow</button>
-                  <button type="button" onClick={() => void decide(request, "denied")}>Deny</button>
+                  <button type="button" disabled={busy || !decisionNotes[request.id]?.trim()} onClick={() => void runAction(() => decide(request, "approved"))}>Allow</button>
+                  <button type="button" disabled={busy || !decisionNotes[request.id]?.trim()} onClick={() => void runAction(() => decide(request, "denied"))}>Deny</button>
                 </div>
               </article>
             )) : (
@@ -334,7 +372,7 @@ export default function PermissionManagerPage() {
             </div>
             <small>Facility time: UTC+05:30. Start date must not be after end date.</small>
             {formError ? <p className="permission-form-error">{formError}</p> : null}
-            <footer><button type="button" onClick={() => setAssignOpen(false)}>Cancel</button><button type="button" onClick={() => void submitAssignment()}>Assign permission</button></footer>
+            <footer><button type="button" onClick={() => setAssignOpen(false)}>Cancel</button><button type="button" disabled={busy} onClick={() => void runAction(submitAssignment)}>Assign permission</button></footer>
           </section>
         </div>
       ) : null}

@@ -1,12 +1,48 @@
+# This file is for a loopback-bound local deployment. Do not publish Keycloak
+# or the API directly to the Internet: use a TLS-terminating gateway that
+# strips client-certificate headers and applies its own rate limits.
 services:
+  db-test:
+    image: postgres:17-alpine
+    profiles: [test]
+    environment:
+      POSTGRES_DB: inout_test
+      POSTGRES_USER: test
+      POSTGRES_PASSWORD: test
+    tmpfs:
+      - /var/lib/postgresql/data
+    networks: [test]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test -d inout_test"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  backend-tests:
+    profiles: [test]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app:ro
+    environment:
+      TEST_DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
+      DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
+      READ_DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
+    networks: [test]
+    command: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+    depends_on:
+      db-test:
+        condition: service_healthy
+
   postgres-primary:
     image: postgres:17-alpine
     environment:
       - POSTGRES_DB=inout
       - POSTGRES_USER=inout
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-inout}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-1003}:5432"
     volumes:
       - pg-primary-data:/var/lib/postgresql/data
     healthcheck:
@@ -14,34 +50,51 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "127.0.0.1:${REDIS_PORT:-1004}:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 5
+    restart: unless-stopped
+
+  keycloak-realm-renderer:
+    image: alpine:3.20
+    environment:
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      - INOUT_APP_URL=${AUTH_URL:-http://localhost:${APP_PORT:-1008}}
+    volumes:
+      - ./keycloak/realm-inout.json:/templates/realm-inout.json:ro
+      - ./keycloak/render-realm.sh:/scripts/render-realm.sh:ro
+      - keycloak-import:/import
+    command: ["/bin/sh", "/scripts/render-realm.sh"]
+    restart: "no"
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.2
+    image: quay.io/keycloak/keycloak:${KEYCLOAK_VERSION:-26.2.5}
     command: start-dev --import-realm
     environment:
-      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:-admin}
-      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME in .env}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
       - KC_DB=postgres
       - KC_DB_SCHEMA=keycloak
       - KC_DB_URL=jdbc:postgresql://postgres-primary:5432/inout
       - KC_DB_USERNAME=inout
-      - KC_DB_PASSWORD=${POSTGRES_PASSWORD:-inout}
+      - KC_DB_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - KC_HEALTH_ENABLED=true
-      - KC_HOSTNAME=http://localhost:8081
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      - INOUT_APP_URL=${AUTH_URL:-http://localhost:${APP_PORT:-1008}}
+      - KC_HOSTNAME=http://localhost:${KEYCLOAK_PORT:-1005}
+      - KC_HOSTNAME_ADMIN=http://localhost:${KEYCLOAK_PORT:-1005}
     ports:
-      - "8081:8080"
+      - "127.0.0.1:${KEYCLOAK_PORT:-1005}:8080"
     volumes:
-      - ./keycloak:/opt/keycloak/data/import
+      - keycloak-import:/opt/keycloak/data/import:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"]
       interval: 10s
@@ -51,22 +104,40 @@ services:
     depends_on:
       postgres-primary:
         condition: service_healthy
+      keycloak-realm-renderer:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+  backend-init:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres-primary:5432/inout
+    command: ["sh", "-c", "alembic upgrade head && python seed.py reference"]
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
 
   python-api:
     build:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:-inout}@postgres-primary:5432/inout
+      - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres-primary:5432/inout
       - REDIS_URL=redis://redis:6379/0
+      - TEMPORAL_HOST=temporal:7233
       - ENV=production
       - MTLS_PROXY_SECRET=${MTLS_PROXY_SECRET:-}
-      - KEYCLOAK_ISSUER=http://localhost:8081/realms/inout
+      - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
+      - KEYCLOAK_JWKS_CACHE_TTL=${KEYCLOAK_JWKS_CACHE_TTL:-300}
+      - PUBLIC_PORT=${PYTHON_API_PORT:-1002}
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${PYTHON_API_PORT:-1002}:8000"
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/live')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health/ready')\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -74,32 +145,69 @@ services:
     depends_on:
       postgres-primary:
         condition: service_healthy
+      backend-init:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       keycloak:
         condition: service_healthy
       temporal:
         condition: service_healthy
+    restart: unless-stopped
+
+  temporal-worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://inout:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres-primary:5432/inout
+      - REDIS_URL=redis://redis:6379/0
+      - TEMPORAL_HOST=temporal:7233
+      - ENV=production
+      - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
+      - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
+      - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
+    command: ["python", "-m", "temporal_worker"]
+    depends_on:
+      backend-init:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+    restart: unless-stopped
+
+  temporal-scheduler:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - TEMPORAL_HOST=temporal:7233
+    command: ["python", "-m", "scheduler"]
+    depends_on:
+      temporal:
+        condition: service_healthy
+      temporal-worker:
+        condition: service_started
+    restart: on-failure:5
 
   app:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        - NEXT_PUBLIC_API_URL=http://localhost:8000
     environment:
-      - DATABASE_URL=postgresql://inout:${POSTGRES_PASSWORD:-inout}@postgres-primary:5432/inout
       - PYTHON_API_URL=http://python-api:8000
       - AUTH_TRUST_HOST=true
-      - AUTH_URL=${AUTH_URL:-http://localhost:1001}
+      - AUTH_URL=${AUTH_URL:-http://localhost:${APP_PORT:-1008}}
       - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
       - KEYCLOAK_CLIENT_ID=inout-frontend
-      - KEYCLOAK_CLIENT_SECRET=inout-frontend-secret
-      - KEYCLOAK_ISSUER=http://localhost:8081/realms/inout
+      - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      - KEYCLOAK_ISSUER=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:8080/realms/inout
-      - KEYCLOAK_ISSUER_PUBLIC=http://localhost:8081/realms/inout
+      - KEYCLOAK_ISSUER_PUBLIC=http://localhost:${KEYCLOAK_PORT:-1005}/realms/inout
+      - PUBLIC_PORT=${APP_PORT:-1008}
     ports:
-      - "1001:1001"
+      - "127.0.0.1:${APP_PORT:-1008}:1001"
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -107,23 +215,13 @@ services:
         condition: service_healthy
       python-api:
         condition: service_healthy
-
-  db-test:
-    image: postgres:17-alpine
-    profiles: ["test"]
-    environment:
-      POSTGRES_DB: inout_test
-      POSTGRES_USER: inout
-      POSTGRES_PASSWORD: inout
-    ports:
-      - "5433:5432"
-    tmpfs:
-      - /var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U inout -d inout_test"]
-      interval: 2s
-      timeout: 3s
-      retries: 20
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:1001/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
 
   temporal:
     image: temporalio/auto-setup:1.26.2
@@ -131,11 +229,11 @@ services:
       - DB=postgres12
       - DB_PORT=5432
       - POSTGRES_USER=inout
-      - POSTGRES_PWD=${POSTGRES_PASSWORD:-inout}
+      - POSTGRES_PWD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       - POSTGRES_SEEDS=postgres-primary
       - TEMPORAL_ADDRESS=temporal:7233
     ports:
-      - "7233:7233"
+      - "127.0.0.1:${TEMPORAL_PORT:-1006}:7233"
     depends_on:
       postgres-primary:
         condition: service_healthy
@@ -145,16 +243,23 @@ services:
       timeout: 5s
       retries: 10
       start_period: 30s
+    restart: unless-stopped
 
   temporal-ui:
     image: temporalio/ui:2.31.2
     environment:
       - TEMPORAL_ADDRESS=temporal:7233
-      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+      - TEMPORAL_CORS_ORIGINS=http://localhost:${APP_PORT:-1008}
     ports:
-      - "8233:8080"
+      - "127.0.0.1:${TEMPORAL_UI_PORT:-1007}:8080"
     depends_on:
       - temporal
+    restart: unless-stopped
 
 volumes:
   pg-primary-data:
+  keycloak-import:
+
+networks:
+  test:
+    internal: true

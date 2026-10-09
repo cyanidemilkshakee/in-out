@@ -11,3 +11,7 @@ README.md
 .venv-review
 .test-dist
 backend/.venv
+.data
+.next-*
+**/__pycache__
+*.tsbuildinfo

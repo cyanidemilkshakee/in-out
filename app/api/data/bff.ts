@@ -1,13 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { DataScope } from "../../../lib/types";
+import { DATA_SCOPE_ENDPOINTS, DATA_SCOPES } from "../../../lib/dataScopes";
 import {
-  normalizeAlertsSnapshot,
   normalizeDashboardMovement,
-  normalizeDashboardSnapshot,
-  normalizeLogsSnapshot,
-  normalizePermissionsSnapshot,
-  normalizeRegistrySnapshot,
-  normalizeTerminalSnapshot,
+  normalizeDataScope,
 } from "../../../lib/normalizeDashboard";
 import { callPythonApi } from "../pythonApi";
 
@@ -65,27 +61,6 @@ export function requireString(value: unknown, label: string) {
   return value.trim();
 }
 
-const DATA_SCOPES = new Set<DataScope>([
-  "dashboard",
-  "logs",
-  "registry",
-  "permissions",
-  "alerts",
-  "profile",
-  "terminal",
-  "all",
-]);
-
-const SCOPE_TO_ENDPOINT: Partial<Record<DataScope, string>> = {
-  dashboard: "/v1/dashboard",
-  all: "/v1/dashboard",
-  alerts: "/v1/alerts",
-  permissions: "/v1/permissions",
-  logs: "/v1/audit-events",
-  registry: "/v1/registry/bundle",
-  terminal: "/v1/terminal/bundle",
-};
-
 function normalizeScope(rawScope: string | null): DataScope {
   return DATA_SCOPES.has(rawScope as DataScope) ? (rawScope as DataScope) : "all";
 }
@@ -94,30 +69,26 @@ export async function handleGet(request: NextRequest, timing: ServerTiming) {
   if (request.nextUrl.searchParams.get("resource") === "movements") {
     const queryParams = new URLSearchParams(request.nextUrl.searchParams.toString());
     queryParams.delete("resource");
-    const page = await callPythonApi(`/v1/movements?${queryParams.toString()}`, "GET");
+    const [page, analytics] = await Promise.all([
+      callPythonApi(`/v1/movements?${queryParams.toString()}`, "GET"),
+      callPythonApi(`/v1/movements/analytics?${queryParams.toString()}`, "GET"),
+    ]);
     return response(
       {
         ...page,
         items: page.items.map(normalizeDashboardMovement),
-        chartItems: page.chartItems.map(normalizeDashboardMovement),
+        chartItems: analytics.items.map(normalizeDashboardMovement),
+        checkpoints: analytics.checkpoints,
+        analytics: analytics.summary,
+        chartBuckets: analytics.buckets,
       },
       timing
     );
   }
 
   const scope = normalizeScope(request.nextUrl.searchParams.get("scope"));
-  const raw = await callPythonApi(SCOPE_TO_ENDPOINT[scope] ?? "/v1/dashboard", "GET");
-
-  const snapshot = (() => {
-    switch (scope) {
-      case "alerts": return normalizeAlertsSnapshot(raw);
-      case "permissions": return normalizePermissionsSnapshot(raw);
-      case "logs": return normalizeLogsSnapshot(raw);
-      case "registry": return normalizeRegistrySnapshot(raw);
-      case "terminal": return normalizeTerminalSnapshot(raw);
-      default: return normalizeDashboardSnapshot(raw);
-    }
-  })();
+  const raw = await callPythonApi(DATA_SCOPE_ENDPOINTS[scope] ?? "/v1/dashboard", "GET");
+  const snapshot = normalizeDataScope(scope, raw);
 
   return response(snapshot, timing);
 }

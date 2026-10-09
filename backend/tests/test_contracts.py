@@ -6,12 +6,15 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException
-from schemas import BrowserScanPayload
+from starlette.requests import Request
+from schemas import BrowserScanPayload, ScanPayload
 from movement_logic import evaluate_scan, apply_movement_state
 from auth import verify_admin_request, verify_terminal_operator_request
+from config import settings
+from main import protect_write_requests
 from fastapi.security import HTTPAuthorizationCredentials
 from auth import verify_keycloak_token
-from jose import jwt
+from jose import jwt, jwk
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from datetime import datetime, timezone, timedelta
@@ -21,14 +24,15 @@ class ContractTests(unittest.TestCase):
     def test_signed_tokens_require_the_configured_audience(self):
         private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         key = private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-        public = private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo)
-        claims = {"sub": "admin", "iss": "https://identity.test/realms/inout", "aud": "another-client", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}
-        with patch("auth._load_jwks", return_value=public), patch("auth.settings.KEYCLOAK_ISSUER", claims["iss"]):
+        public = jwk.construct(private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo), "RS256").to_dict()
+        public["kid"] = "contract-key"
+        claims = {"sub": "admin", "typ": "Bearer", "iss": "https://identity.test/realms/inout", "aud": "another-client", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}
+        with patch("auth._load_jwks", return_value=[public]), patch("auth.settings.KEYCLOAK_ISSUER", claims["iss"]):
             with self.assertRaises(HTTPException) as error:
-                verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256"))
+                verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256", headers={"kid": "contract-key"}))
             self.assertEqual(error.exception.status_code, 401)
             claims["aud"] = "inout-frontend"
-            self.assertEqual(verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256"))["sub"], "admin")
+            self.assertEqual(verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256", headers={"kid": "contract-key"}))["sub"], "admin")
 
     def test_browser_scan_payload(self):
         payload = BrowserScanPayload.model_validate({"barcode": "a1", "checkpointId": "cp1",
@@ -36,6 +40,36 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(payload.checkpoint_id, "cp1")
         self.assertEqual(payload.selected_hardware_ids, ["h1"])
         self.assertIsNone(payload.direction)
+
+    def test_scan_payloads_support_offline_replay_timestamps(self):
+        captured_at = datetime.now(timezone.utc)
+        browser = BrowserScanPayload.model_validate({
+            "barcode": "a1", "checkpointId": "cp1", "capturedOfflineAt": captured_at.isoformat(),
+        })
+        certificate = ScanPayload.model_validate({
+            "barcode": "a1", "terminal_id": "terminal-main", "checkpoint_id": "cp1",
+            "direction": "entry", "captured_offline_at": captured_at.isoformat(),
+        })
+        serialized = browser.model_dump(mode="json")["captured_offline_at"]
+        self.assertEqual(datetime.fromisoformat(serialized.replace("Z", "+00:00")), captured_at)
+        self.assertEqual(certificate.captured_offline_at, captured_at)
+
+    def test_write_requests_require_a_bounded_content_length(self):
+        async def call_next(request):
+            raise AssertionError("unbounded requests must not reach the application")
+
+        def request_with_headers(headers):
+            return Request({
+                "type": "http", "method": "POST", "headers": headers,
+                "client": ("127.0.0.1", 1234), "scheme": "http",
+                "server": ("testserver", 80), "path": "/v1/scans",
+                "raw_path": b"/v1/scans", "query_string": b"",
+            })
+
+        chunked = request_with_headers([(b"transfer-encoding", b"chunked")])
+        self.assertEqual(asyncio.run(protect_write_requests(chunked, call_next)).status_code, 411)
+        oversized = request_with_headers([(b"content-length", str(settings.MAX_REQUEST_BODY_BYTES + 1).encode())])
+        self.assertEqual(asyncio.run(protect_write_requests(oversized, call_next)).status_code, 413)
 
     def test_missing_bearer_is_401_even_in_dev(self):
         with patch("auth.settings.ENV", "dev"):

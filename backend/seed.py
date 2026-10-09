@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:6432/inout"
+    "DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:1003/inout"
 )
 
 
@@ -68,6 +68,17 @@ async def seed_demo_data(engine) -> None:
                 "ON CONFLICT (id) DO NOTHING"
             ),
             {"id": subject_id, "kind": "employee", "barcode": "DEMO-BARCODE-123"},
+        )
+        await conn.execute(
+            text(
+                "INSERT INTO people (subject_id, data) VALUES (:sid, :data) "
+                "ON CONFLICT (subject_id) DO NOTHING"
+            ),
+            {
+                "sid": subject_id,
+                "data": '{"name":"Demo Employee","status":"active",'
+                         '"allowedZones":["public","secure"],"inside":false}',
+            },
         )
         await conn.execute(
             text(

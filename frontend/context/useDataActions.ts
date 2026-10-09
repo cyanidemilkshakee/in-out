@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import { getDashboardKPIs } from "../../lib/analyticsUtils";
 import type {
   Alert,
+  AlertEvaluationResult,
   BarcodeManualReviewInput,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
@@ -105,7 +106,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   const submitPermissionRequest = useCallback(
     async (request: Omit<PermissionRequest, "id" | "status" | "createdAt">) => {
       const result = await service.submitPermissionRequest(request);
-      setState((current) => ({ ...current, permissionRequests: [result, ...current.permissionRequests] }));
+      setState((current) => ({ ...current, permissionRequests: mergeById(current.permissionRequests, [result]) }));
       return result;
     },
     [service, setState]
@@ -119,7 +120,15 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
         const permissions = result.permission ? mergeById(current.permissions, [result.permission]) : current.permissions;
         const people = result.person ? mergeById(current.people, [result.person]) : current.people;
         const hardwareAssets = result.hardwareAsset ? mergeById(current.hardwareAssets, [result.hardwareAsset]) : current.hardwareAssets;
+        const previousMovement = result.movement
+          ? current.movements.find((movement) => movement.id === result.movement?.id)
+          : undefined;
         const movements = result.movement ? mergeById(current.movements, [result.movement]) : current.movements;
+        const scanAnalytics = result.movement
+          ? previousMovement
+            ? getDashboardKPIs(movements, people)
+            : addMovementToAnalytics(current.scanAnalytics, result.movement, people)
+          : current.scanAnalytics;
         return {
           ...current,
           permissionRequests,
@@ -127,8 +136,8 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
           people,
           hardwareAssets,
           movements,
-          scanAnalytics: result.movement ? getDashboardKPIs(movements, people) : current.scanAnalytics,
-          auditEvents: result.auditEvent ? [result.auditEvent, ...current.auditEvents] : current.auditEvents,
+          scanAnalytics,
+          auditEvents: result.auditEvent ? mergeById(current.auditEvents, [result.auditEvent]) : current.auditEvents,
           notifications: result.notification ? [result.notification, ...current.notifications] : current.notifications,
         };
       });
@@ -149,6 +158,12 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     [service, setState]
   );
 
+  const evaluateAlertRules = useCallback(async (): Promise<AlertEvaluationResult> => {
+    const result = await service.evaluateAlertRules();
+    await refresh();
+    return result;
+  }, [refresh, service]);
+
   const markNotificationRead = useCallback(
     async (notificationId: string) => {
       const updated = await service.markNotificationRead(notificationId);
@@ -162,8 +177,8 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   );
 
   const recordScan = useCallback(
-    async (input: RecordScanInput) => {
-      const result = await service.recordScan(input);
+    async (input: RecordScanInput, idempotencyKey?: string) => {
+      const result = await service.recordScan(input, idempotencyKey);
       setState((current) => {
         const movements = [result.decision.event, ...current.movements];
         return {
@@ -183,7 +198,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   const requestBarcodeManualReview = useCallback(
     async (input: BarcodeManualReviewInput) => {
       const result = await service.requestBarcodeManualReview(input);
-      setState((current) => ({ ...current, permissionRequests: [result, ...current.permissionRequests] }));
+      setState((current) => ({ ...current, permissionRequests: mergeById(current.permissionRequests, [result]) }));
       return result;
     },
     [service, setState]
@@ -193,11 +208,15 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     async (event: MovementEvent) => {
       const saved = await service.saveMovement(event);
       setState((current) => {
-        const exists = current.movements.some((movement) => movement.id === saved.id);
+        const previousMovement = current.movements.find((movement) => movement.id === saved.id);
+        const exists = Boolean(previousMovement);
         const movements = exists
           ? current.movements.map((movement) => movement.id === saved.id ? saved : movement)
           : [saved, ...current.movements];
-        return { ...current, movements, scanAnalytics: getDashboardKPIs(movements, current.people) };
+        const scanAnalytics = previousMovement
+          ? getDashboardKPIs(movements, current.people)
+          : addMovementToAnalytics(current.scanAnalytics, saved, current.people);
+        return { ...current, movements, scanAnalytics };
       });
       return saved;
     },
@@ -245,6 +264,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       submitPermissionRequest,
       decidePermissionRequest,
       updateAlertRule,
+      evaluateAlertRules,
       markNotificationRead,
       recordScan,
       requestBarcodeManualReview,
@@ -259,6 +279,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       createHardwareAsset,
       createTemporaryVisitor,
       decidePermissionRequest,
+      evaluateAlertRules,
       markNotificationRead,
       queryMovements,
       recordScan,

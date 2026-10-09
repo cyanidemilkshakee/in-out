@@ -1,13 +1,15 @@
 import logging
 import uuid
-import asyncio
 import secrets
 import json
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
+from time import monotonic
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Depends, Header, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_admin_request, verify_authenticated_request, verify_terminal_operator_request
@@ -16,39 +18,26 @@ from database import get_db, get_read_db, engine, read_engine
 from schemas import ScanPayload, ScanResponse
 from terminal_scans import record_scan
 from redis_client import get_redis_pool, close_redis_pool, publish_presence_update
+from dashboard_cache import invalidate_dashboard_cache
 from routers import presence, movements, registry, permissions
 from routers import dashboard, alerts, notifications, audit, checkpoints, terminal, admin_profile
-from temporal_worker import run_worker, get_temporal_client, TASK_QUEUE
-from workflows.alert_rule_cron import AlertRuleCronWorkflow
+from temporal_worker import get_temporal_client
 
 logger = logging.getLogger(__name__)
+_write_windows: dict[str, deque[float]] = defaultdict(deque)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-    """Manage startup and graceful shutdown of DB and Redis connection pools."""
-    # Warm up Redis connection pool on startup
+    """Manage only HTTP-process resources.
+
+    Migrations/seeding, Temporal scheduling, and the worker run in dedicated
+    services, so the API can be restarted and scaled independently.
+    """
     get_redis_pool()
-
-    # Start Temporal worker
-    worker_task = asyncio.create_task(run_worker())
-
-    # Start the cron workflow (it will run every 5 mins)
-    try:
-        client = await get_temporal_client()
-        await client.start_workflow(
-            AlertRuleCronWorkflow.run,
-            id="alert-rule-cron",
-            task_queue=TASK_QUEUE,
-            cron_schedule="*/5 * * * *",
-        )
-        logger.info("AlertRuleCronWorkflow scheduled")
-    except Exception as e:
-        logger.warning(f"Cron workflow could not be started (might already be running): {e}")
 
     yield
 
-    worker_task.cancel()
     await engine.dispose()
     await read_engine.dispose()
     await close_redis_pool()
@@ -85,6 +74,36 @@ async def verify_mtls_terminal(request: Request) -> str:
 
 app = FastAPI(title="InOut Backend", lifespan=lifespan)
 
+
+@app.middleware("http")
+async def protect_write_requests(request: Request, call_next):
+    """Reject unbounded commands and limit write bursts before body parsing.
+
+    This is a process-local backstop. A public deployment should apply the
+    equivalent limit at its trusted reverse proxy as well.
+    """
+    is_write = request.method in {"POST", "PUT", "PATCH", "DELETE"}
+    content_length = request.headers.get("content-length")
+    if is_write:
+        # Do not let chunked or otherwise unbounded requests reach FastAPI's
+        # JSON parser. The gateway is responsible for buffering such requests
+        # and supplying a verified Content-Length when it forwards them.
+        if content_length is None or not content_length.isdecimal():
+            return JSONResponse(status_code=411, content={"detail": "A bounded Content-Length is required"})
+        if int(content_length) > settings.MAX_REQUEST_BODY_BYTES:
+            return JSONResponse(status_code=413, content={"detail": "Request payload is too large"})
+
+    if is_write:
+        client = request.client.host if request.client else "unknown"
+        now = monotonic()
+        window = _write_windows[client]
+        while window and now - window[0] >= 60:
+            window.popleft()
+        if len(window) >= settings.WRITE_RATE_LIMIT_PER_MINUTE:
+            return JSONResponse(status_code=429, content={"detail": "Too many write requests; try again shortly"})
+        window.append(now)
+    return await call_next(request)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[],
@@ -107,6 +126,12 @@ app.include_router(audit.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(checkpoints.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(terminal.router, dependencies=[Depends(verify_terminal_operator_request)])
 app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
+
+
+@app.get("/", include_in_schema=False)
+async def api_root() -> dict:
+    """Return a lightweight response for direct API root requests."""
+    return {"service": "InOut Backend", "status": "ok", "health": "/health/live"}
 
 
 @app.post("/v1/scans", response_model=ScanResponse)
@@ -138,14 +163,21 @@ async def process_scan(
         )
 
     try:
-        response = ScanResponse(**await record_scan(db, idempotency_key, payload, payload.terminal_id))
+        raw_response = await record_scan(db, idempotency_key, payload, payload.terminal_id)
+        response = ScanResponse(**raw_response)
         await db.commit()
-        if response.allowed:
-            try:
-                await publish_presence_update(json.dumps({"subject_id": response.subject_id,
-                    "state": "inside" if payload.direction == "entry" else "outside"}))
-            except Exception:
-                logger.exception("Presence publication failed after scan commit")
+        await invalidate_dashboard_cache()
+        try:
+            await publish_presence_update(json.dumps({
+                "type": "scan",
+                "subject_id": response.subject_id,
+                "state": ("inside" if payload.direction == "entry" else "outside") if response.allowed else None,
+                "movement": raw_response["decision"]["event"],
+                "people": raw_response.get("updatedPeople", []),
+                "hardwareAssets": raw_response.get("updatedHardwareAssets", []),
+            }))
+        except Exception:
+            logger.exception("Presence publication failed after scan commit")
         return response
     except HTTPException:
         await db.rollback()
@@ -164,11 +196,18 @@ async def health_live() -> dict:
 
 @app.get("/health/ready")
 async def health_ready(db: AsyncSession = Depends(get_read_db)) -> dict:
-    """Kubernetes readiness probe — checks the database is reachable."""
+    """Readiness probe for the API's required data and event dependencies."""
     try:
         from sqlalchemy import text
         await db.execute(text("SELECT 1"))
-        return {"status": "ready"}
+        await get_redis_pool().ping()
+        temporal_client = await get_temporal_client()
+        from temporalio.api.workflowservice.v1 import GetClusterInfoRequest
+        await temporal_client.workflow_service.get_cluster_info(GetClusterInfoRequest())
+        return {
+            "status": "ready",
+            "dependencies": {"database": "ready", "redis": "ready", "temporal": "ready"},
+        }
     except Exception:
         logger.exception("Readiness check failed")
-        raise HTTPException(status_code=503, detail="Database unavailable")
+        raise HTTPException(status_code=503, detail="Required dependency unavailable")

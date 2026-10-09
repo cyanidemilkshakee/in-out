@@ -14,6 +14,7 @@ import type {
   MovementEvent,
   PermissionRequest,
 } from "./types";
+import type { DataScope } from "./types";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -21,7 +22,7 @@ import type {
 
 export function normalizeDashboardMovement(raw: Record<string, unknown>): MovementEvent {
   const data = (raw.data ?? raw) as Record<string, unknown>;
-  const occurredAt = (raw.occurred_at ?? raw.occurredAt ?? "") as string;
+  const occurredAt = (raw.occurred_at ?? raw.occurredAt ?? data.createdAt ?? "") as string;
   const date = occurredAt ? occurredAt.split("T")[0] : "";
   const time = occurredAt ? occurredAt.split("T")[1]?.slice(0, 5) ?? "" : "";
   return {
@@ -126,6 +127,8 @@ function normalizePermissionRequest(raw: unknown): PermissionRequest {
     direction: request.direction === "entry" || request.direction === "exit" ? request.direction : undefined,
     eventId: typeof request.eventId === "string" ? request.eventId : undefined,
     barcode: typeof request.barcode === "string" ? request.barcode : undefined,
+    operatorNote: typeof request.operatorNote === "string" ? request.operatorNote : undefined,
+    decisionReason: typeof request.decisionReason === "string" ? request.decisionReason : undefined,
   };
 }
 
@@ -305,6 +308,7 @@ export function normalizeRegistrySnapshot(raw: unknown): AppDataSnapshot {
 export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
   const r = raw as {
     subjects?: Array<Record<string, unknown>>;
+    hardwareAssets?: AppDataSnapshot["hardwareAssets"];
     presence?: Array<{ subjectId: string; state: string }>;
     checkpoints?: AppDataSnapshot["checkpoints"];
     movements?: unknown[];
@@ -316,9 +320,30 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
     ...EMPTY,
     checkpoints: r.checkpoints ?? [],
     people: subjects.filter(s => s.type !== "hardware") as AppDataSnapshot["people"],
-    hardwareAssets: subjects.filter(s => s.type === "hardware") as AppDataSnapshot["hardwareAssets"],
+    hardwareAssets: r.hardwareAssets ?? (subjects.filter(s => s.type === "hardware") as AppDataSnapshot["hardwareAssets"]),
     movements: ((r.movements ?? []) as Record<string, unknown>[]).map(normalizeDashboardMovement),
     permissionRequests: ((r.permissionRequests ?? []) as unknown[]).map(normalizePermissionRequest),
   };
 
+}
+
+/** Normalize any backend bundle using the same mapping for SSR and BFF loads. */
+export function normalizeDataScope(scope: DataScope, raw: unknown): AppDataSnapshot {
+  switch (scope) {
+    case "alerts":
+      return normalizeAlertsSnapshot(raw);
+    case "permissions":
+      return normalizePermissionsSnapshot(raw);
+    case "logs":
+      return normalizeLogsSnapshot(raw);
+    case "registry":
+      return normalizeRegistrySnapshot(raw);
+    case "terminal":
+      return normalizeTerminalSnapshot(raw);
+    case "dashboard":
+    case "all":
+    case "profile":
+    default:
+      return normalizeDashboardSnapshot(raw);
+  }
 }

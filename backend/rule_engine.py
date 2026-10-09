@@ -526,9 +526,8 @@ def create_scan_alert(
         return None
 
     hardware_names = ", ".join(a.get("name", "") for a in carried_hardware)
-    now_iso = datetime.now(tz=timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + (
-        f"{datetime.now(tz=timezone.utc).microsecond // 1000:03d}Z"
-    )
+    now = datetime.now(tz=timezone.utc)
+    now_iso = now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
 
     alert = Alert(
         id=alert_id if alert_id is not None else _next_alert_id(existing_alerts),

@@ -2,16 +2,13 @@
 
 import { type ChangeEvent, useEffect, useState } from "react";
 import {
-  Bell,
   Camera,
   KeyRound,
   Save,
   UserCog,
   UserRound
 } from "lucide-react";
-import { AdminCreator, type CreateAdminInput } from "../../../frontend/components/admin/AdminCreator";
 import {
-  createAdminAccount,
   getAdminProfile,
   updateAdminProfile,
   type ProfileSettings,
@@ -34,8 +31,6 @@ const defaultProfile: ProfileIdentity = {
 };
 
 const defaultSettings: ProfileSettings = {
-  syncAlerts: true,
-  weeklyDigest: false,
   requireReviewNote: true
 };
 
@@ -83,11 +78,6 @@ export default function ProfilePage() {
 
   function updateProfile(key: keyof ProfileIdentity, value: string) {
     setProfile((current) => ({ ...current, [key]: value }));
-    markChanged();
-  }
-
-  function toggleSetting(key: keyof ProfileSettings) {
-    setSettings((current) => ({ ...current, [key]: !current[key] }));
     markChanged();
   }
 
@@ -166,25 +156,9 @@ export default function ProfilePage() {
     }
   }
 
-  async function createAdmin(input: CreateAdminInput) {
-    const result = await createAdminAccount(input);
-    setProfile({
-      name: result.name,
-      nickname: result.nickname,
-      email: result.email,
-      avatarDataUrl: result.avatarDataUrl,
-    });
-    setAutoLock(result.autoLock);
-    setSettings(result.settings);
-    setSaved(false);
-    setFormError("");
-  }
 
   return (
     <main className="profile-workspace" aria-label="Profile settings">
-      <div className="profile-top-actions">
-        <AdminCreator onCreate={createAdmin} />
-      </div>
       <header className="profile-identity-band">
         <label className="profile-avatar-picker" aria-label="Change profile picture">
           <div className="profile-avatar-large">
@@ -240,28 +214,6 @@ export default function ProfilePage() {
           </div>
         </section>
 
-        <section className="settings-section notification-section">
-          <div className="settings-section-title">
-            <Bell aria-hidden="true" />
-            <div>
-              <h2>Notifications</h2>
-              <p>Choose what reaches this admin session.</p>
-            </div>
-          </div>
-          <SettingsToggle
-            checked={settings.syncAlerts}
-            label="System health alerts"
-            description="Hardware connectivity and processing failures."
-            onChange={() => toggleSetting("syncAlerts")}
-          />
-          <SettingsToggle
-            checked={settings.weeklyDigest}
-            label="Weekly digest"
-            description="Summary of movements and alerts."
-            onChange={() => toggleSetting("weeklyDigest")}
-          />
-        </section>
-
         <section className="settings-section security-section">
           <div className="settings-section-title security-section-title">
             <KeyRound aria-hidden="true" />
@@ -287,9 +239,9 @@ export default function ProfilePage() {
           </label>
           <SettingsToggle
             checked={settings.requireReviewNote}
-            label="Require manual-review notes"
-            description="Ask for a note before closing review cases."
-            onChange={() => toggleSetting("requireReviewNote")}
+            label="Manual-review decision notes"
+            description="A decision note is required for every administrator approval or denial."
+            disabled
           />
         </section>
 
@@ -317,12 +269,14 @@ function SettingsToggle({
   checked,
   label,
   description,
-  onChange
+  onChange,
+  disabled = false,
 }: {
   checked: boolean;
   label: string;
   description: string;
-  onChange: () => void;
+  onChange?: () => void;
+  disabled?: boolean;
 }) {
   return (
     <label className="settings-toggle">
@@ -330,7 +284,7 @@ function SettingsToggle({
         <strong>{label}</strong>
         <small>{description}</small>
       </span>
-      <input type="checkbox" checked={checked} onChange={onChange} />
+      <input type="checkbox" checked={checked} onChange={onChange} disabled={disabled} />
     </label>
   );
 }

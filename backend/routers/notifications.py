@@ -36,7 +36,7 @@ async def list_notifications(
             # Unread = field missing OR explicitly false
             q = q.where(
                 (Notification.data["read"].astext != "true")
-                | Notification.data["read"].is_(None)
+                | Notification.data["read"].astext.is_(None)
             )
 
     result = await db.execute(q)
