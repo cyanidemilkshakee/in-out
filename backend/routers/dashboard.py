@@ -10,7 +10,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db
-from dashboard_cache import get_dashboard_cache, set_dashboard_cache
 
 router = APIRouter(prefix="/v1/dashboard", tags=["dashboard"])
 
@@ -26,10 +25,6 @@ async def get_dashboard(
     - openAlerts: up to 10 open alerts
     - presenceCounts: inside/outside counts
     """
-
-    cached = await get_dashboard_cache()
-    if cached is not None:
-        return cached
 
     analytics_sql = text("""
         WITH duplicate_review_sources AS (
@@ -53,14 +48,14 @@ async def get_dashboard(
                 WHERE result = 'denied'
                 AND denial_code IN (
                     'asset_restricted','access_restricted',
-                    'hardware_restricted','zone_not_permitted'
+                    'hardware_restricted','zone_not_permitted','cross_building_access'
                 )
             )                                                                  AS restricted,
             count(*) FILTER (
                 WHERE result = 'denied'
                 AND (denial_code IS NULL OR denial_code NOT IN (
                     'asset_restricted','access_restricted',
-                    'hardware_restricted','zone_not_permitted',
+                    'hardware_restricted','zone_not_permitted','cross_building_access',
                     'expired_pass'
                 ))
             )                                                                  AS other_denied,
@@ -92,7 +87,7 @@ async def get_dashboard(
     alerts_sql = text("""
         SELECT id, created_at, data
         FROM alerts
-        WHERE data->>'status' = 'open'
+        WHERE COALESCE(data->>'status', 'open') IN ('open', 'warned')
           AND COALESCE(data->>'title', '') NOT ILIKE 'Access decision denied'
           AND COALESCE(data->>'manualReview', 'false') <> 'true'
           AND COALESCE(data->>'ruleId', '') <> 'rule-manual-review'
@@ -173,5 +168,4 @@ async def get_dashboard(
         "pendingDecisions": pending_decisions,
         "presenceCounts":  presence_counts,
     }
-    await set_dashboard_cache(payload)
     return payload

@@ -94,6 +94,13 @@ def is_retired_alert(raw: dict[str, Any]) -> bool:
     )
 
 
+def eligible_alert_subject_types(rule: dict[str, Any]) -> tuple[str, ...]:
+    """Only implemented, nonretired conditions can be assigned to subjects."""
+    if rule.get("conditionKey") in ("no_break", "irregularity") and not is_retired_alert(rule):
+        return ("employee",)
+    return ()
+
+
 def with_default_alert_rules(rules: list[AlertRule]) -> list[AlertRule]:
     """Keep older databases usable when they predate one of the built-in rules."""
     # Manual reviews and unknown barcodes are not alert rules. Strip legacy
@@ -140,10 +147,8 @@ class Person(TypedDict, total=False):
     name: str
     type: Literal["employee", "visitor"]
     barcode: str
-    department: str
     company: str
     phone: str
-    accessLevel: str
     allowedZones: list[str]
     status: Literal["active", "inactive", "pre_approved", "pending_approval", "restricted", "expired"]
     host: str
@@ -254,11 +259,15 @@ def _next_alert_id(existing_alerts: list[Alert], offset: int = 1) -> str:
 
 
 def _find_enabled_rule(
-    rules: list[AlertRule], condition_key: ConditionKey
+    rules: list[AlertRule], condition_key: ConditionKey,
+    subject_id: str | None = None, rule_assignments: dict[str, list[str]] | None = None,
 ) -> AlertRule | None:
-    """Return the first enabled rule matching condition_key."""
+    """Find an enabled matching rule within a subject's complete selection."""
     for rule in rules:
-        if rule.get("conditionKey") == condition_key and rule.get("enabled"):
+        if (rule.get("conditionKey") == condition_key and rule.get("enabled")
+                and eligible_alert_subject_types(rule)
+                and (subject_id is None or rule_assignments is None
+                     or subject_id not in rule_assignments or rule.get("id") in rule_assignments[subject_id])):
             return rule
     return None
 
@@ -378,6 +387,8 @@ def evaluate_scheduled_rules(
     existing_alerts: list[Alert],
     employees: list[Person] | None = None,
     now: datetime | None = None,
+    rule_assignments: dict[str, list[str]] | None = None,
+    irregularity_skip_dates: dict[str, list[str]] | None = None,
 ) -> list[Alert]:
     """
     Evaluate time-based / scheduled alert rules and return new Alert dicts.
@@ -386,7 +397,12 @@ def evaluate_scheduled_rules(
     Rules evaluated
     ---------------
     no_break              : employee worked >= 6 hours without any break
-    irregularity          : active employee has no approved entry by 6 PM IST
+    irregularity          : active employee has no approved entry by 6 PM (Asia/Kolkata)
+
+    Missing assignment entries inherit all eligible rules. A present empty
+    list disables all rules for that subject without affecting other subjects.
+    Irregularity skip dates suppress only that employee's attendance check on
+    the matching Asia/Kolkata calendar date.
     """
     generated: list[Alert] = []
 
@@ -417,14 +433,19 @@ def evaluate_scheduled_rules(
                 or employee_id in entered_today
             ):
                 continue
+            if local_now.date().isoformat() in (irregularity_skip_dates or {}).get(employee_id, []):
+                continue
+            employee_rule = _find_enabled_rule(rules, "irregularity", employee_id, rule_assignments)
+            if employee_rule is None:
+                continue
             already_raised = any(
-                a.get("ruleId") == irregularity_rule.get("id")
+                a.get("ruleId") == employee_rule.get("id")
                 and a.get("barcode") == (employee.get("barcode") or employee_id)
                 and a.get("date") == today
                 for a in existing_alerts
             )
             already_generated = any(
-                a.get("ruleId") == irregularity_rule.get("id")
+                a.get("ruleId") == employee_rule.get("id")
                 and a.get("barcode") == (employee.get("barcode") or employee_id)
                 and a.get("date") == today
                 for a in generated
@@ -434,7 +455,7 @@ def evaluate_scheduled_rules(
             generated.append(
                 Alert(
                     id=_next_alert_id([*existing_alerts, *generated]),
-                    severity=irregularity_rule.get("severity", "medium"),
+                    severity=employee_rule.get("severity", "medium"),
                     status="open",
                     title="Attendance irregularity",
                     reason=(
@@ -446,11 +467,11 @@ def evaluate_scheduled_rules(
                     checkpoint="Attendance policy",
                     date=today,
                     time=_local_time(evaluation_now),
-                    category=irregularity_rule.get("category", "presence_anomaly"),
-                    ruleId=irregularity_rule.get("id"),
+                    category=employee_rule.get("category", "presence_anomaly"),
+                    ruleId=employee_rule.get("id"),
                     conditionKey="irregularity",
                     subjectId=employee_id,
-                    explanation="No approved employee entry was recorded before the 6:00 PM IST attendance cutoff.",
+                    explanation="No approved employee entry was recorded before the 6:00 PM attendance cutoff.",
                 )
             )
 
@@ -459,12 +480,17 @@ def evaluate_scheduled_rules(
     # ------------------------------------------------------------------
     break_rule = _find_enabled_rule(rules, "no_break")
     if break_rule:
+        employee_by_id = {employee.get("id"): employee for employee in employees or []}
         for workday in workdays:
+            workday_rule = _find_enabled_rule(rules, "no_break", workday["employeeId"], rule_assignments)
+            if workday_rule is None:
+                continue
+            employee_barcode = employee_by_id.get(workday["employeeId"], {}).get("barcode") or workday["employeeId"]
             already_raised = any(
-                a.get("ruleId") == break_rule.get("id")
+                a.get("ruleId") == workday_rule.get("id")
                 and (
                     a.get("subjectId") == workday["employeeId"]
-                    or a.get("subjectName") == workday["employeeName"]
+                    or (not a.get("subjectId") and a.get("barcode") in {employee_barcode, workday["employeeId"]})
                 )
                 and a.get("date") == workday["date"]
                 for a in existing_alerts
@@ -479,7 +505,7 @@ def evaluate_scheduled_rules(
             generated.append(
                 Alert(
                     id=_next_alert_id([*existing_alerts, *generated]),
-                    severity=break_rule.get("severity", "medium"),
+                    severity=workday_rule.get("severity", "medium"),
                     status="open",
                     title="No break recorded",
                     reason=(
@@ -487,7 +513,7 @@ def evaluate_scheduled_rules(
                         f"hours without a recorded break."
                     ),
                     subjectName=workday["employeeName"],
-                    barcode=workday["employeeId"],
+                    barcode=employee_barcode,
                     checkpoint="Attendance policy",
                     date=workday["date"],
                     time=(
@@ -495,8 +521,8 @@ def evaluate_scheduled_rules(
                         if workday["date"] == _local_date(evaluation_now)
                         else "6:00:00 PM"
                     ),
-                    category=break_rule.get("category", "operational"),
-                    ruleId=break_rule.get("id"),
+                    category=workday_rule.get("category", "operational"),
+                    ruleId=workday_rule.get("id"),
                     conditionKey="no_break",
                     subjectId=workday["employeeId"],
                     explanation="At least six hours of approved work were recorded without a qualifying break.",

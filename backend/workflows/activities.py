@@ -9,44 +9,10 @@ import json
 from datetime import datetime, timezone
 
 from temporalio import activity
-from sqlalchemy import select, func
+from sqlalchemy import select
 
 from database import async_session  # use the session factory directly in activities
-from dashboard_cache import invalidate_dashboard_cache
-from models import PermissionRequestModel, Notification
 from redis_client import publish_presence_update
-
-@activity.defn
-async def notify_admins_of_override(request_id: str) -> None:
-    """Insert a high-priority notification for the pending override request."""
-    async with async_session() as db:
-        stmt = select(PermissionRequestModel).where(PermissionRequestModel.id == request_id).with_for_update()
-        req = (await db.execute(stmt)).scalar_one_or_none()
-        if not req:
-            raise ValueError(f"Permission request {request_id} not found")
-        notif_id = f"NOT-override-{request_id}"
-        if req.data.get("status") != "pending" or await db.get(Notification, notif_id):
-            return
-        now_dt = datetime.now(timezone.utc)
-        now = now_dt.isoformat()
-        notification = Notification(
-            id=notif_id,
-            created_at=now_dt,
-            data={
-                "id": notif_id,
-                "title": "Manual Override Pending",
-                "message": f"Override request {request_id} awaiting admin decision.",
-                "category": "approval_request",
-                "priority": "high",
-                "relatedId": request_id,
-                "href": f"/admin/permissions?request={request_id}",
-                "createdAt": now,
-                "read": False,
-            }
-        )
-        db.add(notification)
-        await db.commit()
-
 
 async def _apply_decision(request_id, decision, actor, reason):
     from permission_decisions import apply_permission_decision, publish_decision
@@ -90,21 +56,33 @@ async def auto_deny_visitor(request_id: str) -> None:
 @activity.defn
 async def run_alert_rule_evaluation() -> int:
     """Evaluate scheduled alert rules and persist any newly triggered alerts."""
-    from rule_engine import evaluate_scheduled_rules, build_workday_statuses, default_alert_rules, with_default_alert_rules
-    from models import AlertRule, Alert as AlertModel, Movement as MovementModel, Person, Subject
+    from rule_engine import evaluate_scheduled_rules, build_workday_statuses
+    from models import AlertRuleAssignment, Alert as AlertModel, Movement as MovementModel, Person, Subject
+    from alert_rule_assignments import assignment_rule_catalog, lock_scheduled_alert_evaluation
+    from critical_entry_restrictions import activate_critical_entry_restrictions
+    from subject_metadata import current_subject_metadata
     from datetime import timedelta
     import uuid
     async with async_session() as db:
         # Manual evaluations and worker retries must not duplicate alerts.
-        await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("scheduled-alert-evaluation", 0))))
+        await lock_scheduled_alert_evaluation(db)
+        # Match scan/review lock order before reading workdays and assignments.
+        # The advisory lock also serializes complete selection replacements.
+        subject_ids = list((await db.scalars(select(Subject.id)
+            .where(Subject.kind.in_(("employee", "hardware")))
+            .order_by(Subject.id).with_for_update())).all())
         # Compare PostgreSQL timestamptz columns with a datetime value, not an
         # ISO string. Passing the string makes asyncpg bind VARCHAR and causes
         # ``timestamptz >= varchar`` failures in the cron activity.
         since = datetime.now(timezone.utc) - timedelta(hours=48)
-        rules_result = await db.execute(select(AlertRule))
-        rules = with_default_alert_rules([r.data for r in rules_result.scalars().all()] or default_alert_rules())
+        rules = await assignment_rule_catalog(db)
         if not rules:
             return 0
+        assignments = (await db.scalars(select(AlertRuleAssignment)
+            .where(AlertRuleAssignment.subject_id.in_(subject_ids)))).all()
+        rule_assignments = {row.subject_id: row.rule_ids if isinstance(row.rule_ids, list) else []
+            for row in assignments if row.rules_customized}
+        irregularity_skip_dates = {row.subject_id: row.irregularity_skip_dates if isinstance(row.irregularity_skip_dates, list) else [] for row in assignments}
         movements_result = await db.execute(
             select(MovementModel).where(MovementModel.occurred_at >= since).order_by(MovementModel.occurred_at)
         )
@@ -117,7 +95,7 @@ async def run_alert_rule_evaluation() -> int:
         )
         people = [
             {
-                **(person.data or {}),
+                **current_subject_metadata(subject.kind, person.data),
                 "id": subject.id,
                 "barcode": subject.barcode,
                 "type": subject.kind,
@@ -137,16 +115,24 @@ async def run_alert_rule_evaluation() -> int:
             existing_alerts,
             employees=people,
             now=evaluation_now,
+            rule_assignments=rule_assignments,
+            irregularity_skip_dates=irregularity_skip_dates,
         )
+        alert_rows = []
         for alert_data in triggered:
             alert_id = f"AL-{uuid.uuid4().hex[:8].upper()}"
             alert_data["id"] = alert_id
             created_at = datetime.now(timezone.utc)
             alert_data["createdAt"] = created_at.isoformat()
-            db.add(AlertModel(id=alert_id, data=alert_data, created_at=created_at))
+            alert_row = AlertModel(id=alert_id, data=alert_data, created_at=created_at)
+            db.add(alert_row)
+            alert_rows.append(alert_row)
+        # Restriction and alert must become visible in the same commit. Scans
+        # serialize on the same subject rows, so no acknowledged-alert gap exists.
+        restrictions = await activate_critical_entry_restrictions(db, alert_rows)
+        triggered = [{**row.data, "entryRestriction": restrictions.get(row.data.get("subjectId"))} for row in alert_rows]
         await db.commit()
         if triggered:
-            await invalidate_dashboard_cache()
             try:
                 await publish_presence_update(json.dumps({
                     "type": "alerts",

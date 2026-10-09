@@ -1,0 +1,24 @@
+.table { min-width: 1280px; width: 100%; table-layout: fixed; }
+.table th:nth-child(1) { width: 8%; }
+.table th:nth-child(2) { width: 6%; }
+.table th:nth-child(3) { width: 16%; }
+.table th:nth-child(4) { width: 12%; }
+.table th:nth-child(5) { width: 7%; }
+.table th:nth-child(6) { width: 9%; }
+.table th:nth-child(7) { width: 8%; }
+.table th:nth-child(8) { width: 6%; }
+.table th:nth-child(9) { width: 16%; }
+.table th:nth-child(10) { width: 12%; }
+.table td { overflow-wrap: anywhere; }
+.table td strong, .table td span, .table td small { display: block; }
+.table td span, .table td small { margin-top: 5px; }
+.table td small { color: var(--ui-text-secondary); }
+.table td strong { font-weight: var(--weight-semibold); }
+.subjectType { text-transform: capitalize; }
+.reviewCell { min-width: 0; }
+.table .reviewState { display: inline-flex; width: fit-content; max-width: 100%; min-height: 26px; align-items: center; margin: 0; }
+.table .reviewReason { display: block; max-width: 100%; margin-top: 8px; color: var(--ui-text-secondary); font-size: var(--type-15); line-height: 1.4; overflow-wrap: anywhere; }
+.pagination { padding: 16px; }
+.scope { padding: 0 16px; color: var(--ui-text-secondary); }
+.scope a { text-decoration: underline; }
+.error { padding: 0 16px; color: var(--ui-text-danger); }

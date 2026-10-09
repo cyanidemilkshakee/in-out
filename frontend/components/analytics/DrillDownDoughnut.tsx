@@ -247,10 +247,10 @@ export function DrillDownDoughnut({ data, onNodeClick }: DrillDownDoughnutProps)
             },
             tooltip: {
               backgroundColor: "#000000",
-              bodyFont: { size: 13, family: "Urbanist, Arial, sans-serif" },
+              bodyFont: { size: 15, family: "Urbanist, Arial, sans-serif" },
               cornerRadius: 8,
               displayColors: false,
-              titleFont: { size: 13, weight: 800, family: "Urbanist, Arial, sans-serif" },
+              titleFont: { size: 15, weight: 800, family: "Urbanist, Arial, sans-serif" },
               padding: 8,
               callbacks: {
                 title: () => "",

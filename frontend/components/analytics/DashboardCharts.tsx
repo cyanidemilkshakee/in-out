@@ -16,6 +16,7 @@ import { PendingDecisionsWidget } from "./PendingDecisionsWidget";
 import { UsersRound, Package } from "lucide-react";
 import type { Alert, MovementEvent } from "../../../lib/types";
 import { getDrillDownData, getDashboardKPIs } from "../../../lib/analyticsUtils";
+import { mergeMovementRevisions } from "../../../lib/movementRevisions";
 import {
   dashboardRangeBounds,
   eventTimestamp,
@@ -62,13 +63,7 @@ export function DashboardCharts({
   );
 
   useEffect(() => {
-    setAvailableMovements((current) => {
-      const currentIds = new Set(current.map((movement) => movement.id));
-      const additions = movements.filter(
-        (movement) => !currentIds.has(movement.id)
-      );
-      return additions.length ? [...additions, ...current] : current;
-    });
+    setAvailableMovements((current) => mergeMovementRevisions(current, movements));
   }, [movements]);
 
   useEffect(() => {
@@ -95,7 +90,9 @@ export function DashboardCharts({
       sortDirection: "desc",
     })
       .then((result) => {
-        if (!cancelled) setAvailableMovements(result.chartItems);
+        if (!cancelled) {
+          setAvailableMovements((current) => mergeMovementRevisions(current, result.chartItems));
+        }
       })
       .catch(() => {
         // Keep the already-rendered server snapshot if an on-demand range fails.
@@ -180,15 +177,15 @@ export function DashboardCharts({
         boxHeight: 9,
         boxWidth: 9,
         color: themeColors.muted,
-        font: { ...chartFont, size: 12, weight: 700 }
+        font: { ...chartFont, size: 15, weight: 700 }
       }
     },
     tooltip: {
       backgroundColor: "#000000",
-      bodyFont: { ...chartFont, size: 12 },
+      bodyFont: { ...chartFont, size: 15 },
       cornerRadius: 8,
       displayColors: false,
-      titleFont: { ...chartFont, size: 12, weight: 800 }
+      titleFont: { ...chartFont, size: 15, weight: 800 }
     }
   }), [themeColors]);
 
@@ -341,7 +338,7 @@ export function DashboardCharts({
           <div className="dashboard-breakdown-title">Total Scan Breakdown</div>
         </div>
 
-        <div className="vertical-pill-segmented-group">
+        <div className="vertical-pill-segmented-group" role="group" aria-label="Filter scan breakdown by subject type">
           <button
             type="button"
             className={`icon-filter-button ${subjectTypeFilter === "people" ? "active" : ""}`}
@@ -351,6 +348,7 @@ export function DashboardCharts({
             title="People"
           >
             <UsersRound size={18} strokeWidth={subjectTypeFilter === "people" ? 1.6 : 1.2} />
+            <span className="dashboard-subject-filter-label">People</span>
           </button>
           <button
             type="button"
@@ -361,6 +359,7 @@ export function DashboardCharts({
             title="Hardware"
           >
             <Package size={18} strokeWidth={subjectTypeFilter === "hardware" ? 1.6 : 1.2} />
+            <span className="dashboard-subject-filter-label">Hardware</span>
           </button>
         </div>
       </div>
@@ -440,9 +439,9 @@ export function DashboardCharts({
       <button
         type="button"
         className="dashboard-scroll-indicator"
-        aria-label="Scroll to recent movement logs"
+        aria-label="Scroll to recent logs"
         onClick={() => {
-          const tableHeader = Array.from(document.querySelectorAll('h2')).find(h => h.textContent === 'Recent Movement Logs');
+          const tableHeader = Array.from(document.querySelectorAll('h2')).find(h => h.textContent === 'Recent Logs');
           if (tableHeader) {
             tableHeader.scrollIntoView({ behavior: 'smooth' });
           } else {

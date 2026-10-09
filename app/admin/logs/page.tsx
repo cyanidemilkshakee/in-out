@@ -1,14 +1,12 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import {
-  useDeferredValue,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import Link from "next/link";
+import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { ChevronDown, Download } from "lucide-react";
 import type {
+  AlertPage,
   MovementPage,
   VisibleColumn,
   SortDirection,
@@ -16,8 +14,9 @@ import type {
 } from "../../../lib/types";
 import { AdminPageFrame } from "../../../frontend/components/admin/tables/AdminPageFrame";
 import { MovementTable } from "../../../frontend/components/admin/tables/MovementTable";
-import type { TimeRange } from "../../../frontend/components/analytics/TrendChart";
 import { CalendarDatePicker } from "../../../frontend/components/analytics/CalendarDatePicker";
+import { AcknowledgedPermissionRequestsTable } from "../../../frontend/components/admin/permissions/AcknowledgedPermissionRequestsTable";
+import { AlertsHistoryTable } from "../../../frontend/components/admin/alerts/AlertsHistoryTable";
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import { isMovementEventId } from "../../../lib/movementReferences";
 import {
@@ -25,13 +24,6 @@ import {
   parseDateInput,
 } from "../../../lib/dateRanges";
 
-const TrendChart = dynamic(
-  () =>
-    import("../../../frontend/components/analytics/TrendChart").then(
-      (module) => module.TrendChart
-    ),
-  { ssr: false }
-);
 const ReportBuilder = dynamic(
   () =>
     import("../../../frontend/components/admin/reports/ReportBuilder").then(
@@ -39,28 +31,140 @@ const ReportBuilder = dynamic(
     ),
   { ssr: false }
 );
-const DetailDrawer = dynamic(
-  () =>
-    import("../../../frontend/components/admin/tables/DetailDrawer").then(
-      (module) => module.DetailDrawer
-    ),
-  { ssr: false }
-);
-
 type StatusFilter = ResultStatus | "all";
+type LogsTab = "movements" | "permissions" | "alerts";
+type TimeRange = "ALL" | "1D" | "1W" | "1M" | "1Y";
+
+const TIME_RANGE_OPTIONS: Array<{ value: TimeRange; label: string }> = [
+  { value: "ALL", label: "All Time" },
+  { value: "1Y", label: "Last 1 Year" },
+  { value: "1M", label: "Last 1 Month" },
+  { value: "1W", label: "Last 1 Week" },
+  { value: "1D", label: "Last 24 Hours" },
+];
+
+function LogTimeRangeDropdown({
+  range,
+  startDate,
+  endDate,
+  onRangeChange,
+  onDateRangeChange,
+}: {
+  range: TimeRange;
+  startDate: string;
+  endDate: string;
+  onRangeChange: (range: TimeRange) => void;
+  onDateRangeChange: (start: string, end: string) => void;
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const hasDateRange = Boolean(startDate || endDate);
+  const rangeLabel = hasDateRange
+    ? startDate && endDate
+      ? `${startDate} – ${endDate}`
+      : startDate
+        ? `From ${startDate}`
+        : `Until ${endDate}`
+    : TIME_RANGE_OPTIONS.find((option) => option.value === range)?.label ?? "Last 24 Hours";
+
+  useEffect(() => {
+    if (!isOpen) return;
+    function handlePointerDown(event: PointerEvent) {
+      if (containerRef.current && !containerRef.current.contains(event.target as Node)) setIsOpen(false);
+    }
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setIsOpen(false);
+    }
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  function selectRange(nextRange: TimeRange) {
+    onRangeChange(nextRange);
+    onDateRangeChange("", "");
+    setIsOpen(false);
+  }
+
+  return (
+    <div className="log-time-range-dropdown" ref={containerRef}>
+      <button
+        type="button"
+        className="log-time-range-trigger"
+        aria-haspopup="dialog"
+        aria-expanded={isOpen}
+        aria-controls="logs-time-range-menu"
+        onClick={() => setIsOpen((open) => !open)}
+      >
+        <span>{rangeLabel}</span>
+        <ChevronDown size={16} aria-hidden="true" />
+      </button>
+      {isOpen && (
+        <div id="logs-time-range-menu" className="log-time-range-menu" role="dialog" aria-label="Time range">
+          <div className="log-time-range-options" role="group" aria-label="Quick ranges">
+            {TIME_RANGE_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                aria-pressed={!hasDateRange && range === option.value}
+                onClick={() => selectRange(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+          <CalendarDatePicker
+            variant="inline"
+            startDate={startDate}
+            endDate={endDate}
+            onRangeChange={(start, end) => {
+              onDateRangeChange(start, end);
+              setIsOpen(false);
+            }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function csvCell(value: unknown) {
+  const raw = String(value ?? "");
+  const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
+  return `"${safe.replaceAll('"', '""')}"`;
+}
+
+function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
+  if (!rows.length) return;
+  const columns = Object.keys(rows[0]);
+  const csv = [
+    columns.map(csvCell).join(","),
+    ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(",")),
+  ].join("\r\n");
+  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
 
 const defaultVisibleColumns: Record<VisibleColumn, boolean> = {
   date: true,
   time: true,
   createdAt: false,
   name: true,
+  active: true,
   type: true,
   direction: true,
   checkpoint: true,
   result: true,
   barcode: true,
   scanType: true,
-  eventId: true
+  eventId: false
 };
 
 function updateEventUrl(eventId?: string) {
@@ -70,15 +174,18 @@ function updateEventUrl(eventId?: string) {
   window.history.replaceState(window.history.state, "", url);
 }
 
-export default function LogsPage() {
+function LogsWorkspace() {
   const {
+    people,
     movements: initialEvents,
     movementPage: initialMovementPage,
     alerts,
     auditEvents,
     movementNotes: initialEventNotes,
+    permissionRequests,
   } = useDataState();
-  const { addMovementNote, queryMovements, acknowledgeAlert } = useDataActions();
+  const { queryMovements } = useDataActions();
+  const [queryRevision, setQueryRevision] = useState(0);
   const [search, setSearch] = useState("");
   const [linkedEventId, setLinkedEventId] = useState("");
   const [checkpointFilter, setCheckpointFilter] = useState("all");
@@ -90,11 +197,7 @@ export default function LogsPage() {
   const rowsPerPage = 25;
   const [sortKey, setSortKey] = useState<VisibleColumn>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const [selectedEventId, setSelectedEventId] = useState(
-    initialEvents[0]?.id ?? ""
-  );
-  const [drawerDraft, setDrawerDraft] = useState("");
-  const [timeRange, setTimeRange] = useState<TimeRange>("1D");
+  const [timeRange, setTimeRange] = useState<TimeRange>("ALL");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const deferredSearch = useDeferredValue(search);
@@ -118,6 +221,21 @@ export default function LogsPage() {
   }));
   const [queryError, setQueryError] = useState("");
   const initialQueryPending = useRef(Boolean(initialMovementPage));
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams.get("tab");
+  const activeTab: LogsTab = requestedTab === "permissions" || requestedTab === "alerts" ? requestedTab : "movements";
+  const subjectId = searchParams.get("subject") || undefined;
+  const [alertHistoryPage, setAlertHistoryPage] = useState<AlertPage>({ items: [], total: 0, limit: 50, offset: 0 });
+  const acknowledgedRequests = useMemo(() => {
+    const needle = deferredSearch.trim().toLowerCase();
+    return permissionRequests
+      .filter((request) => request.status !== "pending" && Boolean(request.notificationDismissedAt))
+      .filter((request) => !needle || [request.subjectName, request.barcode,
+        request.type.replaceAll("_", " "), request.status, request.checkpoint, request.operatorNote,
+        request.decisionReason]
+        .some((value) => value?.toLowerCase().includes(needle)))
+      .sort((left, right) => (right.notificationDismissedAt ?? "").localeCompare(left.notificationDismissedAt ?? ""));
+  }, [permissionRequests, deferredSearch]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -138,19 +256,42 @@ export default function LogsPage() {
     if (eventId) {
       setLinkedEventId(eventId);
       setSearch(eventId);
-      setSelectedEventId("");
     }
     setFiltersReady(true);
   }, []);
 
   useEffect(() => {
-    if (filtersReady) updateEventUrl(eventIdLookup || selectedEventId || undefined);
-  }, [eventIdLookup, filtersReady, selectedEventId]);
+    if (filtersReady && activeTab === "movements") updateEventUrl(eventIdLookup || undefined);
+  }, [activeTab, eventIdLookup, filtersReady]);
+
+  useEffect(() => {
+    const receiveMovement = (event: Event) => {
+      try {
+        const update = JSON.parse((event as CustomEvent<string>).detail);
+        if (update?.type === "manual_review_decision") {
+          setQueryRevision(current => current + 1);
+        }
+      } catch {
+        // Ignore malformed stream events; reconnect reloads the ledger.
+      }
+    };
+    const reloadLedger = () => setQueryRevision(current => current + 1);
+    window.addEventListener("inout:presence-message", receiveMovement);
+    window.addEventListener("inout:presence-reconnected", reloadLedger);
+    return () => {
+      window.removeEventListener("inout:presence-message", receiveMovement);
+      window.removeEventListener("inout:presence-reconnected", reloadLedger);
+    };
+  }, []);
 
   const rangeBounds = useMemo(() => {
-    const preset = compactRangeBounds(timeRange);
+    const preset = timeRange === "ALL"
+      ? { start: Number.NEGATIVE_INFINITY, end: Number.POSITIVE_INFINITY }
+      : compactRangeBounds(timeRange);
     const rangeStart = startDate ? parseDateInput(startDate) ?? preset.start : preset.start;
-    const rangeEnd = endDate ? parseDateInput(endDate, true) ?? preset.end : preset.end;
+    const rangeEnd = timeRange === "ALL" && !startDate && !endDate
+      ? preset.end
+      : Math.min(endDate ? parseDateInput(endDate, true) ?? preset.end : preset.end, Date.now());
     return { rangeStart, rangeEnd };
   }, [endDate, startDate, timeRange]);
 
@@ -203,10 +344,6 @@ export default function LogsPage() {
       .then((result) => {
         if (cancelled) return;
         setMovementPage(result);
-        setSelectedEventId((current) =>
-          eventIdLookup ? result.items[0]?.id ?? "" :
-            result.items.some((event) => event.id === current) ? current : ""
-        );
       })
       .catch((error) => {
         if (!cancelled) {
@@ -231,6 +368,7 @@ export default function LogsPage() {
     filtersReady,
     page,
     queryMovements,
+    queryRevision,
     rangeBounds.rangeEnd,
     rangeBounds.rangeStart,
     scanTypeFilter,
@@ -245,79 +383,83 @@ export default function LogsPage() {
     setSortDirection((current) => (sortKey === column && current === "asc" ? "desc" : "asc"));
   }
 
-  function handleSaveNote(eventId: string) {
-    const trimmed = drawerDraft.trim();
-    if (!trimmed) return;
-    void addMovementNote(eventId, trimmed).then((notes) => {
-      setMovementPage((current) => ({
-        ...current,
-        movementNotes: {
-          ...current.movementNotes,
-          [eventId]: notes,
-        },
-      }));
-    });
-    setDrawerDraft("");
-  }
-
-  const selectedEvent = useMemo(
-    () => movementPage.items.find((event) => event.id === selectedEventId),
-    [movementPage.items, selectedEventId]
-  );
-  const selectedAlert = useMemo(
-    () => alerts.find((alert) => alert.sourceEventId === selectedEventId),
-    [alerts, selectedEventId]
-  );
   const totalPages = Math.max(
     1,
     Math.ceil(movementPage.total / rowsPerPage)
   );
+  function exportHistory() {
+    const rows: Array<Record<string, unknown>> = activeTab === "permissions"
+      ? acknowledgedRequests.map((request) => ({
+          requestType: request.type,
+          subject: request.subjectName,
+          barcode: request.barcode,
+          checkpoint: request.checkpoint,
+          decision: request.status,
+          decidedAt: request.decidedAt,
+          operatorNote: request.operatorNote,
+          decisionNote: request.decisionReason,
+        }))
+      : alertHistoryPage.items.map((alert) => ({
+          alertId: alert.id,
+          alert: alert.title,
+          subject: alert.subjectName,
+          barcode: alert.barcode,
+          severity: alert.severity,
+          triggeredAt: alert.createdAt,
+          checkpoint: alert.checkpoint,
+          reason: alert.reason,
+          status: alert.status,
+          decision: alert.review?.decision,
+          reviewedAt: alert.review?.reviewedAt,
+          reviewedBy: alert.review?.reviewedBy,
+          reviewNote: alert.review?.reason,
+          warningResetAt: alert.warningResetAt,
+          warningResetBy: alert.warningResetBy,
+          warningResetReason: alert.warningResetReason,
+        }));
+    downloadCsv(`inout-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+  }
 
   return (
     <AdminPageFrame
-      title="Movement Ledger"
-      description="Search every entry, exit, denial, and offline movement with row-level review for security handoff."
-      headerRight={<TrendChart events={movementPage.chartItems} timeRange={timeRange} onTimeRangeChange={setTimeRange} />}
+      title={activeTab === "movements" ? "Movement Logs" : activeTab === "permissions" ? "Permission Logs" : "Alert Logs"}
+      metric={activeTab === "permissions" ? `${acknowledgedRequests.length} acknowledged requests` : activeTab === "alerts" ? `${alertHistoryPage.total} alerts` : undefined}
       preTitle={
-        <div className="pill-segmented-group">
-          <button
-            className={`pill-segmented-button ${subjectTypeFilter === "people" ? "active" : ""}`}
-            type="button"
-            onClick={() => setSubjectTypeFilter("people")}
-          >
-            People
-          </button>
-          <button
-            className={`pill-segmented-button ${subjectTypeFilter === "hardware" ? "active" : ""}`}
-            type="button"
-            onClick={() => setSubjectTypeFilter("hardware")}
-          >
-            Hardware
-          </button>
-        </div>
+        <>
+          <nav className="registry-segmented-shell" aria-label="Log categories">
+            <div className="pill-segmented-group registry-segmented-group">
+              <Link href="/admin/logs" className={`pill-segmented-button ${activeTab === "movements" ? "active" : ""}`} aria-current={activeTab === "movements" ? "page" : undefined}>Movements</Link>
+              <Link href="/admin/logs?tab=permissions" className={`pill-segmented-button ${activeTab === "permissions" ? "active" : ""}`} aria-current={activeTab === "permissions" ? "page" : undefined}>Permissions</Link>
+              <Link href={subjectId ? `/admin/logs?tab=alerts&subject=${encodeURIComponent(subjectId)}` : "/admin/logs?tab=alerts"} className={`pill-segmented-button ${activeTab === "alerts" ? "active" : ""}`} aria-current={activeTab === "alerts" ? "page" : undefined}>Alerts</Link>
+            </div>
+          </nav>
+          {activeTab === "movements" ? <div className="pill-segmented-group">
+            <button
+              className={`pill-segmented-button ${subjectTypeFilter === "people" ? "active" : ""}`}
+              type="button"
+              onClick={() => setSubjectTypeFilter("people")}
+            >People</button>
+            <button
+              className={`pill-segmented-button ${subjectTypeFilter === "hardware" ? "active" : ""}`}
+              type="button"
+              onClick={() => setSubjectTypeFilter("hardware")}
+            >Hardware</button>
+          </div> : null}
+        </>
       }
     >
-    <section className={`split-workspace log-workspace${selectedEvent ? " has-detail-drawer" : ""}`}>
+    {activeTab === "movements" ? (
+    <section className="split-workspace log-workspace">
       <div className="admin-panel workspace-main">
 
         <div className="filter-bar">
           <ReportBuilder movements={movementPage.chartItems} alerts={alerts} auditEvents={auditEvents} />
-          <label className="select-control">
-            <span className="sr-only">Filter by time</span>
-            <select
-              value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value as TimeRange)}
-            >
-              <option value="1Y">Last 1 Year</option>
-              <option value="1M">Last 1 Month</option>
-              <option value="1W">Last 1 Week</option>
-              <option value="1D">Last 24 Hours</option>
-            </select>
-          </label>
-          <CalendarDatePicker 
-            startDate={startDate} 
-            endDate={endDate} 
-            onRangeChange={(s, e) => { setStartDate(s); setEndDate(e); }}
+          <LogTimeRangeDropdown
+            range={timeRange}
+            startDate={startDate}
+            endDate={endDate}
+            onRangeChange={(value) => { setTimeRange(value); setPage(1); }}
+            onDateRangeChange={(start, end) => { setStartDate(start); setEndDate(end); setPage(1); }}
           />
           <label className="select-control">
             <span className="sr-only">Filter by checkpoint</span>
@@ -381,13 +523,13 @@ export default function LogsPage() {
         {queryError ? <p className="inline-note" role="alert">{queryError}</p> : null}
         <MovementTable
           events={movementPage.items}
-          selectedId={selectedEventId}
+          people={people}
           visibleColumns={defaultVisibleColumns}
           sortKey={sortKey}
           sortDirection={sortDirection}
           density="compact"
+          layout="logs"
           onSort={updateSort}
-          onSelect={setSelectedEventId}
         />
         <span className="sr-only" role="status" aria-live="polite">
           {queryError ||
@@ -415,21 +557,42 @@ export default function LogsPage() {
         </div>
       </div>
 
-      {selectedEvent ? (
-        <DetailDrawer
-          alert={selectedAlert}
-          event={selectedEvent}
-          notes={movementPage.movementNotes[selectedEvent.id] ?? []}
-          noteDraft={drawerDraft}
-          onNoteDraftChange={setDrawerDraft}
-          onAddNote={() => handleSaveNote(selectedEvent.id)}
-          onAcknowledge={() => {
-            if (selectedAlert) void acknowledgeAlert(selectedAlert.id).catch(error => setQueryError(error instanceof Error ? error.message : "Unable to acknowledge alert."));
-          }}
-          onClose={() => setSelectedEventId("")}
-        />
-      ) : null}
     </section>
+    ) : activeTab === "permissions" ? (
+      <section className="registry-workspace">
+        <div className="admin-panel workspace-main">
+          <div className="filter-bar">
+            <button className="admin-button admin-button--ghost ghost-button" type="button" onClick={exportHistory} disabled={!acknowledgedRequests.length}>
+              <Download />Export
+            </button>
+            <label className="search-control registry-search-control">
+              <span className="sr-only">Search acknowledged permission requests</span>
+              <input type="search" maxLength={200} placeholder="Search permissions..." value={search} onChange={(event) => setSearch(event.target.value)} />
+            </label>
+          </div>
+          <AcknowledgedPermissionRequestsTable permissions={acknowledgedRequests} people={people} />
+        </div>
+      </section>
+    ) : (
+      <section className="registry-workspace">
+        <div className="admin-panel workspace-main">
+          <div className="filter-bar">
+            <button className="admin-button admin-button--ghost ghost-button" type="button" onClick={exportHistory} disabled={!alertHistoryPage.items.length}>
+              <Download />Export page
+            </button>
+            <label className="search-control registry-search-control">
+              <span className="sr-only">Search alert history</span>
+              <input type="search" maxLength={200} placeholder="Search alerts..." value={search} onChange={(event) => setSearch(event.target.value)} />
+            </label>
+          </div>
+          <AlertsHistoryTable search={deferredSearch} subjectId={subjectId} people={people} onLoad={setAlertHistoryPage} />
+        </div>
+      </section>
+    )}
     </AdminPageFrame>
   );
+}
+
+export default function LogsPage() {
+  return <Suspense fallback={<p role="status">Loading logs…</p>}><LogsWorkspace /></Suspense>;
 }

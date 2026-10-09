@@ -1,23 +1,27 @@
 import type { Dispatch, ReactNode, SetStateAction } from "react";
 import type {
-  AccessPermission,
+  AlertPage,
+  AlertQuery,
+  AuditEventPage,
+  AuditEventQuery,
   Alert,
   AlertEvaluationResult,
-  AlertRule,
+  AlertRuleAssignment,
   AppDataSnapshot,
   BarcodeManualReviewInput,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
+  CreateVisitorInput,
+  CreateVisitorResult,
   DataScope,
   DataService,
   HardwareAsset,
   MovementPage,
   MovementQuery,
   Person,
-  PermissionNotification,
   PermissionRequest,
+  PermissionRequestInput,
   RecordScanInput,
-  UpdateAccessPermissionInput,
 } from "../../lib/types";
 
 export type DataState = AppDataSnapshot & {
@@ -28,7 +32,10 @@ export type DataState = AppDataSnapshot & {
 export type DataActions = {
   refresh: () => Promise<void>;
   queryMovements: (query: MovementQuery) => Promise<MovementPage>;
+  queryAlerts: (query: AlertQuery) => Promise<AlertPage>;
+  queryAuditEvents: (query: AuditEventQuery) => Promise<AuditEventPage>;
   createEmployee: (input: CreateEmployeeInput) => Promise<Person>;
+  createVisitor: (input: CreateVisitorInput) => Promise<CreateVisitorResult>;
   createHardwareAsset: (input: CreateHardwareAssetInput) => Promise<HardwareAsset>;
   updatePerson: (
     personId: string,
@@ -39,9 +46,9 @@ export type DataActions = {
     patch: Partial<Omit<HardwareAsset, "id">>
   ) => Promise<HardwareAsset>;
   acknowledgeAlert: (alertId: string) => Promise<Alert>;
-  updateAccessPermission: (
-    input: UpdateAccessPermissionInput
-  ) => Promise<AccessPermission>;
+  reviewAlert: (alertId: string, decision: "confirmed" | "excused", reason?: string) => Promise<Alert>;
+  resetAlertWarnings: (subjectId: string, reason: string) => Promise<void>;
+  setAlertRuleAssignments: (subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision?: number) => Promise<AlertRuleAssignment>;
   submitPermissionRequest: (
     request: Omit<PermissionRequest, "id" | "status" | "createdAt">
   ) => Promise<PermissionRequest>;
@@ -51,9 +58,9 @@ export type DataActions = {
     reason: string,
     validForMinutes?: number
   ) => Promise<PermissionRequest>;
-  acknowledgePermissionRequest: (requestId: string) => Promise<PermissionRequest>;
-  updateAlertRule: (ruleId: string, enabled: boolean) => Promise<AlertRule>;
-  markNotificationRead: (notificationId: string) => Promise<PermissionNotification>;
+  grantPermission: (input: PermissionRequestInput) => Promise<PermissionRequest>;
+  releaseEntryRestriction: (alertId: string, reason: string) => Promise<void>;
+  dismissPermissionNotification: (requestId: string) => Promise<PermissionRequest>;
   recordScan: (input: RecordScanInput, idempotencyKey?: string) => ReturnType<DataService["recordScan"]>;
   evaluateAlertRules: () => Promise<AlertEvaluationResult>;
   requestBarcodeManualReview: (

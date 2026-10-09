@@ -2,13 +2,12 @@
 
 import dynamic from "next/dynamic";
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
-import { movementLogHref } from "../../../lib/movementReferences";
 import { MovementTable } from "../../../frontend/components/admin/tables/MovementTable";
 import { useDataState } from "../../../frontend/context/DataContext";
 import type {
   Alert,
   MovementEvent,
+  Person,
   PermissionRequest,
   SortDirection,
   VisibleColumn,
@@ -32,6 +31,7 @@ const dashboardVisibleColumns: Record<VisibleColumn, boolean> = {
   time: true,
   createdAt: false,
   name: true,
+  active: false,
   type: true,
   direction: true,
   checkpoint: true,
@@ -44,16 +44,17 @@ const dashboardVisibleColumns: Record<VisibleColumn, boolean> = {
 function DashboardOverview({
   alerts,
   events,
+  people,
   pendingRequests,
 }: {
   alerts: Alert[];
   events: MovementEvent[];
+  people: Person[];
   pendingRequests: PermissionRequest[];
 }) {
   const latestEvents = useMemo(() => events.slice(0, 10), [events]);
   const [sortKey, setSortKey] = useState<VisibleColumn>("time");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
-  const router = useRouter();
 
   return (
     <section className="dashboard-overview" aria-label="Operational overview">
@@ -66,9 +67,10 @@ function DashboardOverview({
       </div>
 
       <div className="dashboard-log-section">
-        <h2 id="recent-movement-heading">Recent Movement Logs</h2>
+        <h2 id="recent-log-heading">Recent Logs</h2>
         <MovementTable
           events={latestEvents}
+          people={people}
           visibleColumns={dashboardVisibleColumns}
           sortKey={sortKey}
           sortDirection={sortDirection}
@@ -83,7 +85,6 @@ function DashboardOverview({
               setSortDirection("desc");
             }
           }}
-          onSelect={(id) => router.push(movementLogHref(id))}
         />
       </div>
     </section>
@@ -91,12 +92,13 @@ function DashboardOverview({
 }
 
 export default function AdminDashboardPage() {
-  const { alerts, movements, permissionRequests } = useDataState();
+  const { alerts, movements, people, permissionRequests } = useDataState();
 
   return (
     <DashboardOverview
       alerts={alerts}
       events={movements}
+      people={people}
       pendingRequests={permissionRequests.filter((request) => request.status === "pending")}
     />
   );

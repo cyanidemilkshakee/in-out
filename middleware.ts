@@ -9,12 +9,18 @@ export default auth((req) => {
   const isOperator = roles.includes("operator")
   const canUseTerminal = isAdmin || isOperator
   const isAuthPage = req.nextUrl.pathname.startsWith('/login')
+  const isUserManagementStepUpLogin =
+    req.nextUrl.searchParams.get('stepUp') === '1' &&
+    req.nextUrl.searchParams.get('from') === '/admin/users'
   const isAdminPage = req.nextUrl.pathname.startsWith('/admin')
   const isTerminalPage = req.nextUrl.pathname.startsWith('/terminal')
   const home = isAdmin ? '/admin/dashboard' : '/terminal'
 
   if (isAuthPage) {
     if (isLoggedIn) {
+      // An administrator with an expired/locked step-up session must be able
+      // to reach the sign-in page for a fresh Keycloak authentication.
+      if (isAdmin && isUserManagementStepUpLogin) return null
       return NextResponse.redirect(new URL(home, req.url))
     }
     return null

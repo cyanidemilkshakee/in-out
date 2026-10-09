@@ -1,8 +1,20 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import Optional
 from datetime import datetime
 
 BARCODE_PATTERN = r"^[A-Za-z0-9._:/-]+$"
+MANUAL_APPROVAL_MINUTES = frozenset({15, 30, 60, 120, 240})
+DEFAULT_MANUAL_APPROVAL_MINUTES = 60
+
+
+def manual_approval_minutes(value):
+    """Use one bounded duration for HTTP decisions and direct activity calls."""
+    if value is None:
+        return DEFAULT_MANUAL_APPROVAL_MINUTES
+    # bool is an int subclass; accepting coercion would bypass the UI policy.
+    if type(value) is not int or value not in MANUAL_APPROVAL_MINUTES:
+        raise ValueError("Choose one of the available Valid for durations: 15, 30, 60, 120, or 240 minutes")
+    return value
 
 
 class APIModel(BaseModel):
@@ -74,6 +86,7 @@ class SubjectResponse(BaseModel):
     barcode: str
     kind: str
     data: dict
+    request: Optional[dict] = None
 
 
 class SubjectListResponse(BaseModel):
@@ -86,7 +99,7 @@ class PermissionRequestCreate(APIModel):
     subject_id: str
     checkpoint_id: str
     request_type: str = Field(..., pattern="^(visitor|hardware_custody|manual_override|zone_access)$")
-    reason: str
+    reason: str = Field(default="", max_length=1000)
     subject_name: Optional[str] = None
     barcode: Optional[str] = Field(None, min_length=1, max_length=64, pattern=BARCODE_PATTERN)
     requester: Optional[str] = None
@@ -100,8 +113,29 @@ class PermissionRequestCreate(APIModel):
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
     operator_note: Optional[str] = Field(None, max_length=1000)
 
+class NewVisitorPermission(APIModel):
+    name: str = Field(min_length=1, max_length=100)
+    host: str = Field(min_length=1, max_length=100)
+    company: Optional[str] = Field(None, max_length=120)
+
+
+class PermissionGrantCreate(PermissionRequestCreate):
+    request_type: str = Field(pattern="^(visitor|hardware_custody|zone_access)$")
+    reason: str = Field(default="", max_length=1000)
+    new_visitor: Optional[NewVisitorPermission] = None
+    permanent_access: bool = False
+
+
 class PermissionDecision(APIModel):
     decision: str = Field(..., pattern="^(approved|denied)$", description="'approved' or 'denied'")
     reason: Optional[str] = Field(None, max_length=1000)
-    valid_for_minutes: Optional[int] = Field(None, ge=15, le=240)
+    valid_for_minutes: Optional[int] = Field(None, strict=True, ge=15, le=240,
+        description="Manual approval duration in minutes: 15, 30, 60, 120, or 240; defaults to 60")
     admin_id: Optional[str] = None  # Legacy clients; the authenticated token owns attribution.
+
+    @field_validator("valid_for_minutes")
+    @classmethod
+    def supported_approval_minutes(cls, value):
+        if value is not None:
+            manual_approval_minutes(value)
+        return value

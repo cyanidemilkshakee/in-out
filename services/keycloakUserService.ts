@@ -8,6 +8,7 @@ export type ManagedUser = {
   emailVerified: boolean;
   createdTimestamp?: number;
   roles?: Array<"admin" | "operator">;
+  checkpointId?: "cp-main" | "server-room" | null;
 };
 
 async function request<T>(method: "GET" | "POST", body?: unknown, query?: string): Promise<T> {
@@ -24,6 +25,10 @@ async function request<T>(method: "GET" | "POST", body?: unknown, query?: string
 
 export function listManagedUsers(search = "") {
   return request<{ items: ManagedUser[] }>("GET", undefined, `search=${encodeURIComponent(search)}&max=100`);
+}
+
+export function getManagedUser(userId: string) {
+  return request<ManagedUser>("GET", undefined, `userId=${encodeURIComponent(userId)}`);
 }
 
 export function createManagedUser(input: Record<string, unknown>) {

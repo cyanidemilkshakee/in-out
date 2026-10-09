@@ -1,34 +1,44 @@
 import type {
-  AccessPermissionMutationResult,
+  AlertPage,
+  AlertQuery,
+  AuditEventPage,
+  AuditEventQuery,
   Alert,
   AlertEvaluationResult,
-  AlertRule,
+  AlertRuleAssignment,
   BarcodeManualReviewInput,
   AppDataSnapshot,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
+  CreateVisitorInput,
+  CreateVisitorResult,
   DataScope,
   DataService,
   HardwareAsset,
   MovementPage,
   MovementQuery,
   Person,
-  PermissionNotification,
   PermissionDecisionMutationResult,
   PermissionRequest,
+  PermissionRequestInput,
+  EntryRestriction,
   RecordScanInput,
   RecordScanResult,
-  UpdateAccessPermissionInput,
 } from "../lib/types";
 
 type Command =
   | { action: "createEmployee"; input: CreateEmployeeInput }
+  | { action: "createVisitor"; input: CreateVisitorInput }
   | { action: "createHardwareAsset"; input: CreateHardwareAssetInput }
   | { action: "updatePerson"; personId: string; patch: Partial<Omit<Person, "id">> }
   | { action: "updateHardwareAsset"; assetId: string; patch: Partial<Omit<HardwareAsset, "id">> }
   | { action: "acknowledgeAlert"; alertId: string }
-  | { action: "updateAccessPermission"; input: UpdateAccessPermissionInput }
+  | { action: "reviewAlert"; alertId: string; decision: "confirmed" | "excused"; reason?: string }
+  | { action: "resetAlertWarnings"; subjectId: string; reason: string }
+  | { action: "setAlertRuleAssignments"; subjectId: string; ruleIds: string[]; irregularitySkipDates: string[]; expectedRevision?: number }
   | { action: "submitPermissionRequest"; request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'> }
+  | { action: "grantPermission"; input: PermissionRequestInput }
+  | { action: "releaseEntryRestriction"; alertId: string; reason: string }
 
   | {
       action: "decidePermissionRequest";
@@ -37,10 +47,8 @@ type Command =
       reason: string;
       validForMinutes?: number;
     }
-  | { action: "acknowledgePermissionRequest"; requestId: string }
-  | { action: "updateAlertRule"; ruleId: string; enabled: boolean }
+  | { action: "dismissPermissionNotification"; requestId: string }
   | { action: "evaluateAlertRules" }
-  | { action: "markNotificationRead"; notificationId: string }
   | { action: "recordScan"; input: RecordScanInput }
   | { action: "requestBarcodeManualReview"; input: BarcodeManualReviewInput }
   | { action: "addMovementNote"; eventId: string; note: string };
@@ -66,6 +74,10 @@ async function readResponse<T>(response: Response): Promise<T> {
 }
 
 export class HttpDataService implements DataService {
+  async queryOpenAlertCount(): Promise<number> {
+    return readResponse<number>(await fetch("/api/data?resource=openAlertCount", { cache: "no-store" }));
+  }
+
   async getSnapshot(scope: DataScope = "all") {
     const response = await fetch(`/api/data?scope=${encodeURIComponent(scope)}`, {
       cache: "no-store",
@@ -95,6 +107,36 @@ export class HttpDataService implements DataService {
     return readResponse<MovementPage>(response);
   }
 
+  async queryAuditEvents(query: AuditEventQuery) {
+    const params = new URLSearchParams({
+      resource: "auditEvents",
+      limit: String(query.limit),
+      offset: String(query.offset),
+    });
+    for (const [key, value] of Object.entries(query)) {
+      if (key !== "limit" && key !== "offset" && value !== undefined && value !== "") {
+        params.set(key, String(value));
+      }
+    }
+    const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store" });
+    return readResponse<AuditEventPage>(response);
+  }
+
+  async queryAlerts(query: AlertQuery) {
+    const params = new URLSearchParams({
+      resource: "alerts",
+      limit: String(query.limit),
+      offset: String(query.offset),
+    });
+    for (const [key, value] of Object.entries(query)) {
+      if (key !== "limit" && key !== "offset" && value !== undefined && value !== "") {
+        params.set(key, String(value));
+      }
+    }
+    const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store" });
+    return readResponse<AlertPage>(response);
+  }
+
   private async command<T>(command: Command, idempotencyKey = crypto.randomUUID()) {
     const response = await fetch("/api/data", {
       method: "POST",
@@ -106,6 +148,10 @@ export class HttpDataService implements DataService {
 
   createEmployee(input: CreateEmployeeInput) {
     return this.command<Person>({ action: "createEmployee", input });
+  }
+
+  createVisitor(input: CreateVisitorInput) {
+    return this.command<CreateVisitorResult>({ action: "createVisitor", input });
   }
 
   createHardwareAsset(input: CreateHardwareAssetInput) {
@@ -124,19 +170,31 @@ export class HttpDataService implements DataService {
     return this.command<Alert>({ action: "acknowledgeAlert", alertId });
   }
 
-  updateAccessPermission(input: UpdateAccessPermissionInput) {
-    return this.command<AccessPermissionMutationResult>({
-      action: "updateAccessPermission",
-      input,
-    });
+  reviewAlert(alertId: string, decision: "confirmed" | "excused", reason = "") {
+    return this.command<{ alert: Alert }>({ action: "reviewAlert", alertId, decision, reason });
   }
 
+  resetAlertWarnings(subjectId: string, reason: string) {
+    return this.command<unknown>({ action: "resetAlertWarnings", subjectId, reason });
+  }
+
+  setAlertRuleAssignments(subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision?: number) {
+    return this.command<AlertRuleAssignment>({ action: "setAlertRuleAssignments", subjectId, ruleIds, irregularitySkipDates, expectedRevision });
+  }
 
   submitPermissionRequest(request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'>) {
     return this.command<PermissionRequest>({
       action: "submitPermissionRequest",
       request,
     });
+  }
+
+  grantPermission(input: PermissionRequestInput) {
+    return this.command<PermissionDecisionMutationResult>({ action: "grantPermission", input });
+  }
+
+  releaseEntryRestriction(alertId: string, reason: string) {
+    return this.command<{ entryRestriction: EntryRestriction }>({ action: "releaseEntryRestriction", alertId, reason });
   }
 
   decidePermissionRequest(
@@ -154,23 +212,12 @@ export class HttpDataService implements DataService {
     });
   }
 
-  acknowledgePermissionRequest(requestId: string) {
-    return this.command<PermissionRequest>({ action: "acknowledgePermissionRequest", requestId });
-  }
-
-  updateAlertRule(ruleId: string, enabled: boolean) {
-    return this.command<AlertRule>({ action: "updateAlertRule", ruleId, enabled });
+  dismissPermissionNotification(requestId: string) {
+    return this.command<PermissionRequest>({ action: "dismissPermissionNotification", requestId });
   }
 
   evaluateAlertRules() {
     return this.command<AlertEvaluationResult>({ action: "evaluateAlertRules" });
-  }
-
-  markNotificationRead(notificationId: string) {
-    return this.command<PermissionNotification>({
-      action: "markNotificationRead",
-      notificationId,
-    });
   }
 
   recordScan(input: RecordScanInput, idempotencyKey?: string) {

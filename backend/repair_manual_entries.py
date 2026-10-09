@@ -17,16 +17,19 @@ from sqlalchemy.orm import selectinload
 from database import async_session, engine
 from models import Subject, Movement, PermissionRequestModel, PresenceState, AccessPermission, Person, HardwareAsset
 from permission_decisions import ensure_review_subject
+from access_validation import validate_zones
 
 
 async def repair_manual_entries(db, *, apply=False):
+    manual_request_id = Movement.data["overrideRequestId"].astext
+    rescan_request_id = Movement.data["manualApprovalRequestId"].astext
     movements = list((await db.scalars(select(Movement).where(
-        Movement.result == "approved", Movement.data["overrideRequestId"].astext.is_not(None)
+        Movement.result == "approved", or_(manual_request_id.is_not(None), rescan_request_id.is_not(None))
     ).order_by(Movement.occurred_at, Movement.id))).all())
     counts = {"manualApprovalsChecked": len(movements), "unlinkedMovements": 0, "presenceRepairs": 0}
     touched = set()
     for movement in movements:
-        request_id = movement.data["overrideRequestId"]
+        request_id = movement.data.get("overrideRequestId") or movement.data.get("manualApprovalRequestId")
         req = await db.get(PermissionRequestModel, request_id)
         if not movement.subject_id:
             counts["unlinkedMovements"] += 1
@@ -52,8 +55,10 @@ async def repair_manual_entries(db, *, apply=False):
         if not latest:
             continue
         inside = latest.direction == "entry"
-        grant = ({"requestId": latest.data["overrideRequestId"], "hardwareIds": latest.data.get("hardwareIds") or []}
-                 if inside and latest.data.get("overrideRequestId") else None)
+        request_id = latest.data.get("overrideRequestId") or latest.data.get("manualApprovalRequestId")
+        grant = ({"requestId": request_id, "hardwareIds": latest.data.get("hardwareIds") or [],
+                  **({"validTo": latest.data["manualApprovalValidTo"]} if latest.data.get("manualApprovalValidTo") else {})}
+                 if inside and request_id else None)
         state = await db.get(PresenceState, subject.id)
         metadata = subject.hardware if subject.kind == "hardware" else subject.person
         if state and state.state == ("inside" if inside else "outside") and state.entry_override == grant and metadata and metadata.data.get("inside") == inside:
@@ -101,7 +106,7 @@ async def repair_manual_entries(db, *, apply=False):
             db.add(AccessPermission(id=permission_id, subject_id=subject.id, data={
                 "id": permission_id, "subjectId": subject.id, "subjectType": subject.kind,
                 "subjectName": data.get("name", subject.barcode), "assignment": subject.kind.title(),
-                "state": state, "zones": data.get("allowedZones") or [], "source": "policy",
+                "state": state, "zones": validate_zones(data.get("allowedZones") or []), "source": "policy",
                 "validFrom": data.get("validFrom") or "", "validTo": data.get("validTo") or "",
                 "updatedAt": datetime.now(timezone.utc).isoformat(), "updatedBy": "registry-repair",
             }))

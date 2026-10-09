@@ -7,7 +7,7 @@
   },
   "variable": [
     { "key": "base", "value": "http://localhost:1002", "type": "string" },
-    { "key": "keycloak_issuer", "value": "http://localhost:1005/realms/inout", "type": "string" },
+    { "key": "keycloak_issuer", "value": "http://auth.localhost:1005/realms/inout", "type": "string" },
     { "key": "postman_client_id", "value": "inout-postman", "type": "string" },
     { "key": "terminal_base", "value": "https://localhost:10443", "type": "string" }
   ],
@@ -272,7 +272,7 @@
             "url": "{{base}}/v1/permission-requests",
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"barcode\": \"EMP-001\",\n  \"checkpoint_id\": \"cp-main\",\n  \"direction\": \"entry\",\n  \"event_id\": \"evt-uuid-here\",\n  \"type\": \"manual_override\",\n  \"subject_id\": \"sub-uuid-here\",\n  \"subject_name\": \"Alice Smith\",\n  \"requester\": \"Terminal Operator\",\n  \"purpose\": \"Emergency access\",\n  \"requested_zones\": [\"zone-a\"],\n  \"valid_from\": \"2024-01-01T09:00:00Z\",\n  \"valid_to\": \"2024-01-01T10:00:00Z\"\n}",
+              "raw": "{\n  \"barcode\": \"EMP-001\",\n  \"checkpoint_id\": \"cp-main\",\n  \"direction\": \"entry\",\n  \"event_id\": \"evt-uuid-here\",\n  \"type\": \"manual_override\",\n  \"subject_id\": \"sub-uuid-here\",\n  \"subject_name\": \"Alice Smith\",\n  \"requester\": \"Terminal Operator\",\n  \"purpose\": \"Emergency access\",\n  \"requested_zones\": [\"public\"],\n  \"valid_from\": \"2024-01-01T09:00:00Z\",\n  \"valid_to\": \"2024-01-01T10:00:00Z\"\n}",
               "options": { "raw": { "language": "json" } }
             }
           }
@@ -291,6 +291,15 @@
           }
         },
         {
+          "name": "POST /v1/permission-requests/:id/dismiss — Close completed terminal notice",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/permission-requests/:req_id/dismiss",
+            "description": "Optional close for a completed approved or denied manual-review notice. Pending requests cannot be dismissed. Operators require assignment to the request's checkpoint; administrators may dismiss across checkpoints. The decision, presence, scan totals, and movement/audit history remain unchanged. No scan Idempotency-Key or request body is required.",
+            "variable": [{ "key": "req_id", "value": "" }]
+          }
+        },
+        {
           "name": "GET /v1/permissions — All permissions snapshot",
           "request": {
             "method": "GET",
@@ -299,19 +308,6 @@
               "host": ["{{base}}"],
               "path": ["v1","permissions"],
               "query": [{ "key": "subject_id", "value": "" }]
-            }
-          }
-        },
-        {
-          "name": "PATCH /v1/permissions/:subject_id — Update access",
-          "request": {
-            "method": "PATCH",
-            "url": "{{base}}/v1/permissions/:subject_id",
-            "variable": [{ "key": "subject_id", "value": "" }],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"allowed_checkpoints\": [\"cp-main\"],\n  \"valid_from\": \"2024-01-01T00:00:00Z\",\n  \"valid_to\": \"2024-12-31T23:59:59Z\"\n}",
-              "options": { "raw": { "language": "json" } }
             }
           }
         }
@@ -349,12 +345,12 @@
           "request": {
             "method": "GET",
             "url": {
-              "raw": "{{base}}/v1/alerts?status=active&page=1&limit=50",
+              "raw": "{{base}}/v1/alerts?status=active&offset=0&limit=50",
               "host": ["{{base}}"],
               "path": ["v1","alerts"],
               "query": [
                 { "key": "status", "value": "active" },
-                { "key": "page", "value": "1" },
+                { "key": "offset", "value": "0" },
                 { "key": "limit", "value": "50" }
               ]
             }
@@ -374,6 +370,32 @@
           }
         },
         {
+          "name": "POST /v1/alerts/:id/review — Accept or excuse alert",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/alerts/:alert_id/review",
+            "variable": [{ "key": "alert_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"decision\": \"confirmed\",\n  \"reason\": \"Verified as a real attendance event\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
+          "name": "POST /v1/alert-warnings/:subject_id/reset — Reset warnings",
+          "request": {
+            "method": "POST",
+            "url": "{{base}}/v1/alert-warnings/:subject_id/reset",
+            "variable": [{ "key": "subject_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Admin reviewed the subject and cleared the warning count\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          }
+        },
+        {
           "name": "POST /v1/alerts/evaluate — Trigger rule evaluation",
           "request": {
             "method": "POST",
@@ -382,7 +404,7 @@
           }
         },
         {
-          "name": "PATCH /v1/alert-rules/:id — Enable / disable rule",
+          "name": "PATCH /v1/alert-rules/:id — Read-only guard (expect 403)",
           "request": {
             "method": "PATCH",
             "url": "{{base}}/v1/alert-rules/:rule_id",
@@ -393,20 +415,25 @@
               "options": { "raw": { "language": "json" } }
             }
           }
-        }
-      ]
-    },
-
-    {
-      "name": "Notifications",
-      "item": [
-        { "name": "GET /v1/notifications — List notifications", "request": { "method": "GET", "url": "{{base}}/v1/notifications" } },
+        },
         {
-          "name": "PATCH /v1/notifications/:id/read — Mark as read",
+          "name": "GET /v1/alert-rule-assignments — Directory",
           "request": {
-            "method": "PATCH",
-            "url": "{{base}}/v1/notifications/:notification_id/read",
-            "variable": [{ "key": "notification_id", "value": "" }]
+            "method": "GET",
+            "url": "{{base}}/v1/alert-rule-assignments"
+          }
+        },
+        {
+          "name": "PUT /v1/alert-rule-assignments/:subject_id — Save employee rules",
+          "request": {
+            "method": "PUT",
+            "url": "{{base}}/v1/alert-rule-assignments/:subject_id",
+            "variable": [{ "key": "subject_id", "value": "" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"ruleIds\": [\"rule-no-break\"],\n  \"expectedRevision\": 0\n}",
+              "options": { "raw": { "language": "json" } }
+            }
           }
         }
       ]

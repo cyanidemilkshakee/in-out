@@ -8,6 +8,8 @@
 
 import type {
   Alert,
+  AlertWarningSummary,
+  AlertRuleAssignment,
   AccessPermission,
   AppDataSnapshot,
   AuditEvent,
@@ -15,6 +17,7 @@ import type {
   PermissionRequest,
 } from "./types";
 import type { DataScope } from "./types";
+import { canonicalCheckpointId, normalizeFacilityCheckpoints, normalizeFacilityZones, normalizeSubjectZones } from "./facilityZones";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -29,7 +32,7 @@ export function normalizeDashboardMovement(raw: Record<string, unknown>): Moveme
     id:           (raw.id ?? data.id ?? "") as string,
     date:         (data.date as string | undefined) ?? date,
     time:         (data.time as string | undefined) ?? time,
-    checkpointId: (raw.checkpoint_id ?? data.checkpointId ?? "") as string,
+    checkpointId: canonicalCheckpointId((raw.checkpoint_id ?? data.checkpointId ?? "") as string),
     checkpoint:   (data.checkpoint ?? "") as string,
     direction:    (raw.direction ?? data.direction ?? "entry") as MovementEvent["direction"],
     subjectId:    (raw.subject_id ?? data.subjectId ?? "") as string,
@@ -43,12 +46,20 @@ export function normalizeDashboardMovement(raw: Record<string, unknown>): Moveme
     syncState:    (raw.sync_state ?? data.syncState ?? "synced") as MovementEvent["syncState"],
     hardwareIds:  (data.hardwareIds ?? []) as string[],
     createdAt:    occurredAt || undefined,
+    source: data.source === "paper_register" ? "paper_register" : undefined,
+    paperReference: typeof data.paperReference === "string" ? data.paperReference : undefined,
+    loggedAt: typeof data.loggedAt === "string" ? data.loggedAt : undefined,
+    historicalVisitId: typeof data.historicalVisitId === "string" ? data.historicalVisitId : undefined,
+    manualReviewedAt: typeof data.manualReviewedAt === "string" ? data.manualReviewedAt : undefined,
+    overrideRequestId: typeof data.overrideRequestId === "string" ? data.overrideRequestId : undefined,
+    manualApprovalRequestId: typeof data.manualApprovalRequestId === "string" ? data.manualApprovalRequestId : undefined,
   };
 }
 
-function normalizeAlert(raw: unknown): Alert {
+export function normalizeAlert(raw: unknown): Alert {
   // Python /v1/alerts returns a.data directly (already flat)
   const a = (raw ?? {}) as Record<string, unknown>;
+  const review = a.review && typeof a.review === "object" ? a.review as Record<string, unknown> : undefined;
   return {
     id:            (a.id ?? "") as string,
     severity:      (a.severity ?? "medium") as Alert["severity"],
@@ -60,11 +71,55 @@ function normalizeAlert(raw: unknown): Alert {
     checkpoint:    (a.checkpoint ?? "") as string,
     date:          (a.date ?? "") as string,
     time:          (a.time ?? "") as string,
+    subjectType: a.subjectType === "employee" || a.subjectType === "visitor" || a.subjectType === "hardware"
+      ? a.subjectType
+      : undefined,
     category:      a.category as Alert["category"] | undefined,
     ruleId:        a.ruleId as string | undefined,
     explanation:   a.explanation as string | undefined,
+    subjectId: typeof a.subjectId === "string" ? a.subjectId : undefined,
+    review: review && (review.decision === "confirmed" || review.decision === "excused") ? {
+      decision: review.decision, reason: typeof review.reason === "string" ? review.reason : "",
+      reviewedAt: typeof review.reviewedAt === "string" ? review.reviewedAt : "",
+      reviewedBy: typeof review.reviewedBy === "string" ? review.reviewedBy : "",
+    } : undefined,
+    warningCount: typeof a.warningCount === "number" && Number.isSafeInteger(a.warningCount) && a.warningCount >= 0 ? a.warningCount : 0,
+    warningResetAt: typeof a.warningResetAt === "string" ? a.warningResetAt : undefined,
+    warningResetBy: typeof a.warningResetBy === "string" ? a.warningResetBy : undefined,
+    warningResetReason: typeof a.warningResetReason === "string" ? a.warningResetReason : undefined,
+    warningReset: a.warningReset && typeof a.warningReset === "object" ? a.warningReset as Alert["warningReset"] : undefined,
+    entryRestriction: a.entryRestriction && typeof a.entryRestriction === "object" ? a.entryRestriction as Alert["entryRestriction"] : undefined,
     sourceEventId: a.sourceEventId as string | undefined,
     createdAt:     a.createdAt as string | undefined,
+  };
+}
+
+export function normalizeAlertWarningSummary(raw: unknown): AlertWarningSummary {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  return {
+    subjectId: typeof value.subjectId === "string" ? value.subjectId : "",
+    subjectName: typeof value.subjectName === "string" ? value.subjectName : "Unknown subject",
+    subjectType: value.subjectType === "hardware" ? "hardware" : "employee",
+    barcode: typeof value.barcode === "string" ? value.barcode : "",
+    count: typeof value.count === "number" && Number.isSafeInteger(value.count) && value.count >= 0 ? value.count : 0,
+    resetAt: typeof value.resetAt === "string" ? value.resetAt : undefined,
+    resetBy: typeof value.resetBy === "string" ? value.resetBy : undefined,
+    resetReason: typeof value.resetReason === "string" ? value.resetReason : undefined,
+    entryRestriction: value.entryRestriction && typeof value.entryRestriction === "object" ? value.entryRestriction as AlertWarningSummary["entryRestriction"] : undefined,
+  };
+}
+
+export function normalizeAlertRuleAssignment(raw: unknown): AlertRuleAssignment {
+  const value = (raw ?? {}) as Record<string, unknown>;
+  return {
+    subjectId: typeof value.subjectId === "string" ? value.subjectId : "",
+    subjectName: typeof value.subjectName === "string" ? value.subjectName : "Unknown subject",
+    subjectType: value.subjectType === "hardware" ? "hardware" : "employee",
+    barcode: typeof value.barcode === "string" ? value.barcode : "",
+    ruleIds: Array.isArray(value.ruleIds) ? value.ruleIds.filter((id): id is string => typeof id === "string") : [],
+    irregularitySkipDates: Array.isArray(value.irregularitySkipDates) ? [...new Set(value.irregularitySkipDates.filter((day): day is string => typeof day === "string" && /^\d{4}-\d{2}-\d{2}$/.test(day)))].sort() : [],
+    source: value.source === "custom" ? "custom" : "default",
+    revision: typeof value.revision === "number" && Number.isSafeInteger(value.revision) && value.revision >= 0 ? value.revision : 0,
   };
 }
 
@@ -98,12 +153,10 @@ function normalizeDashboardAlert(a: Record<string, unknown>): Alert {
   };
 }
 
-function normalizePermissionRequest(raw: unknown): PermissionRequest {
+export function normalizePermissionRequest(raw: unknown): PermissionRequest {
   const request = (raw ?? {}) as Record<string, unknown>;
-  const requestedZones = Array.isArray(request.requestedZones)
-    ? request.requestedZones.filter((zone): zone is string => typeof zone === "string")
-    : [];
-  const type = request.type === "visitor" || request.type === "hardware_custody"
+  const requestedZones = normalizeFacilityZones(request.requestedZones);
+  const type = request.type === "visitor" || request.type === "hardware_custody" || request.type === "zone_access"
     ? request.type
     : "manual_override";
   const status = request.status === "approved" || request.status === "denied"
@@ -125,19 +178,28 @@ function normalizePermissionRequest(raw: unknown): PermissionRequest {
     hardwareId: typeof request.hardwareId === "string" ? request.hardwareId : undefined,
     carrierId: typeof request.carrierId === "string" ? request.carrierId : undefined,
     carrierName: typeof request.carrierName === "string" ? request.carrierName : undefined,
-    checkpointId: typeof request.checkpointId === "string" ? request.checkpointId : undefined,
+    checkpointId: typeof request.checkpointId === "string" ? canonicalCheckpointId(request.checkpointId) : undefined,
+    checkpoint: typeof request.checkpoint === "string" ? request.checkpoint : undefined,
     direction: request.direction === "entry" || request.direction === "exit" ? request.direction : undefined,
     eventId: typeof request.eventId === "string" ? request.eventId : undefined,
     barcode: typeof request.barcode === "string" ? request.barcode : undefined,
     operatorNote: typeof request.operatorNote === "string" ? request.operatorNote : undefined,
     decisionReason: typeof request.decisionReason === "string" ? request.decisionReason : undefined,
-    terminalAcknowledgementRequired: request.terminalAcknowledgementRequired === true,
-    acknowledgedAt: typeof request.acknowledgedAt === "string" ? request.acknowledgedAt : undefined,
-    acknowledgedBy: typeof request.acknowledgedBy === "string" ? request.acknowledgedBy : undefined,
+    notificationDismissedAt: typeof request.notificationDismissedAt === "string" ? request.notificationDismissedAt : undefined,
+    notificationDismissedBy: typeof request.notificationDismissedBy === "string" ? request.notificationDismissedBy : undefined,
+    decidedAt: typeof request.decidedAt === "string" ? request.decidedAt : undefined,
+    consumedAt: typeof request.consumedAt === "string" ? request.consumedAt : undefined,
+    consumedMovementId: typeof request.consumedMovementId === "string" ? request.consumedMovementId : undefined,
+    consumedBy: typeof request.consumedBy === "string" ? request.consumedBy : undefined,
+    previousCarrierId: typeof request.previousCarrierId === "string" ? request.previousCarrierId : undefined,
+    previousCarrierName: typeof request.previousCarrierName === "string" ? request.previousCarrierName : undefined,
+    previousZones: Array.isArray(request.previousZones) ? normalizeFacilityZones(request.previousZones) : undefined,
+    previousValidFrom: typeof request.previousValidFrom === "string" ? request.previousValidFrom : undefined,
+    previousValidTo: typeof request.previousValidTo === "string" ? request.previousValidTo : undefined,
   };
 }
 
-function normalizeAccessPermission(raw: unknown): AccessPermission {
+export function normalizeAccessPermission(raw: unknown): AccessPermission {
   const permission = (raw ?? {}) as Record<string, unknown>;
   const subjectType = permission.subjectType === "visitor" || permission.subjectType === "hardware"
     ? permission.subjectType
@@ -148,9 +210,7 @@ function normalizeAccessPermission(raw: unknown): AccessPermission {
   const source = permission.source === "manual" || permission.source === "request"
     ? permission.source
     : "policy";
-  const zones = Array.isArray(permission.zones)
-    ? permission.zones.filter((zone): zone is string => typeof zone === "string")
-    : [];
+  const zones = normalizeFacilityZones(permission.zones);
 
   return {
     id: typeof permission.id === "string" ? permission.id : "",
@@ -166,10 +226,12 @@ function normalizeAccessPermission(raw: unknown): AccessPermission {
     reason: typeof permission.reason === "string" ? permission.reason : undefined,
     updatedAt: typeof permission.updatedAt === "string" ? permission.updatedAt : "",
     updatedBy: typeof permission.updatedBy === "string" ? permission.updatedBy : "",
+    entryRestriction: permission.entryRestriction && typeof permission.entryRestriction === "object"
+      ? permission.entryRestriction as AccessPermission["entryRestriction"] : undefined,
   };
 }
 
-function normalizeAuditEvent(raw: unknown): AuditEvent {
+export function normalizeAuditEvent(raw: unknown): AuditEvent {
   const a = (raw ?? {}) as Record<string, unknown>;
   const createdAt = (a.createdAt ?? a.timestamp ?? "") as string;
   const date = (a.date ?? (createdAt ? createdAt.slice(0, 10) : "")) as string;
@@ -206,8 +268,9 @@ const EMPTY: AppDataSnapshot = {
   movementNotes:      {},
   permissions:        [],
   permissionRequests: [],
-  notifications:      [],
   alertRules:         [],
+  alertWarnings:      [],
+  alertRuleAssignments: [],
   auditEvents:        [],
 };
 
@@ -257,7 +320,10 @@ export function normalizeAlertsSnapshot(raw: unknown): AppDataSnapshot {
 
   return {
     ...EMPTY,
+    people: (Array.isArray(r.people) ? r.people : []).map((person) => normalizeSubjectZones(person as AppDataSnapshot["people"][number])),
     alerts:     items.filter((item) => !isRemovedAlert(item)).map(normalizeAlert),
+    alertWarnings: (Array.isArray(r.warnings) ? r.warnings : []).map(normalizeAlertWarningSummary),
+    alertRuleAssignments: (Array.isArray(r.assignments) ? r.assignments : []).map(normalizeAlertRuleAssignment),
     alertRules: rules.map((rule) => ({
       id:             (rule.id ?? "") as string,
       name:           (rule.name ?? "") as string,
@@ -268,6 +334,7 @@ export function normalizeAlertsSnapshot(raw: unknown): AppDataSnapshot {
       scope:          (rule.scope ?? "") as string,
       conditionKey:   (rule.conditionKey ?? "irregularity") as "no_break" | "irregularity",
       recentTriggers: (rule.recentTriggers ?? 0) as number,
+      eligibleSubjectTypes: (Array.isArray(rule.eligibleSubjectTypes) ? rule.eligibleSubjectTypes : ["employee"]).filter((kind): kind is "employee" | "hardware" => kind === "employee" || kind === "hardware"),
     })).filter((rule) =>
       String(rule.conditionKey) !== "manual_review" &&
       String(rule.conditionKey) !== "unknown_barcode" &&
@@ -286,11 +353,22 @@ export function normalizeAlertsSnapshot(raw: unknown): AppDataSnapshot {
 /** /v1/permissions → AppDataSnapshot */
 export function normalizePermissionsSnapshot(raw: unknown): AppDataSnapshot {
   const r = (raw ?? {}) as Record<string, unknown>;
+  const hasGroupedPermissions = Array.isArray(r.people) || Array.isArray(r.hardware);
+  const rawPermissions = hasGroupedPermissions
+    ? [
+        ...(Array.isArray(r.people) ? r.people : []),
+        ...(Array.isArray(r.hardware) ? r.hardware : []),
+      ]
+    : Array.isArray(r.permissions)
+      ? r.permissions
+      : [];
   return {
     ...EMPTY,
-    permissions:        ((r.permissions   ?? []) as unknown[]).map(normalizeAccessPermission),
+    people: (Array.isArray(r.subjects) ? r.subjects.filter((item) => item.type !== "hardware").map(normalizeSubjectZones) : []) as AppDataSnapshot["people"],
+    hardwareAssets: (Array.isArray(r.subjects) ? r.subjects.filter((item) => item.type === "hardware").map(normalizeSubjectZones) : []) as AppDataSnapshot["hardwareAssets"],
+    checkpoints: normalizeFacilityCheckpoints(r.checkpoints),
+    permissions:        rawPermissions.map(normalizeAccessPermission),
     permissionRequests: ((r.requests      ?? []) as unknown[]).map(normalizePermissionRequest),
-    notifications:      ((r.notifications ?? []) as unknown[]) as AppDataSnapshot["notifications"],
   };
 }
 
@@ -311,11 +389,15 @@ export function normalizeRegistrySnapshot(raw: unknown): AppDataSnapshot {
   const r = (raw ?? {}) as Record<string, unknown>;
   return {
     ...EMPTY,
-    people:         ((r.people         ?? []) as unknown[]) as AppDataSnapshot["people"],
-    hardwareAssets: ((r.hardwareAssets ?? []) as unknown[]) as AppDataSnapshot["hardwareAssets"],
+    people:         ((r.people ?? []) as AppDataSnapshot["people"]).map(normalizeSubjectZones),
+    hardwareAssets: ((r.hardwareAssets ?? []) as AppDataSnapshot["hardwareAssets"]).map(normalizeSubjectZones),
     movements:      ((r.movements      ?? []) as Record<string, unknown>[]).map(normalizeDashboardMovement),
-    permissions:    ((r.permissions    ?? []) as unknown[]) as AppDataSnapshot["permissions"],
+    permissions:    ((r.permissions ?? []) as unknown[]).map(normalizeAccessPermission),
+    permissionRequests: ((r.permissionRequests ?? []) as unknown[]).map(normalizePermissionRequest),
+    checkpoints: normalizeFacilityCheckpoints(r.checkpoints),
     auditEvents:    ((r.auditEvents    ?? []) as unknown[]).map(normalizeAuditEvent),
+    alerts: ((r.alerts ?? []) as unknown[]).map(normalizeAlert),
+    alertWarnings: (Array.isArray(r.warnings) ? r.warnings : []).map(normalizeAlertWarningSummary),
   };
 }
 
@@ -329,14 +411,16 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
     movements?: unknown[];
     permissionRequests?: unknown[];
     adminAvailability?: AppDataSnapshot["adminAvailability"];
+    terminalAssignment?: AppDataSnapshot["terminalAssignment"];
   };
   const presence = new Map((r.presence ?? []).map(p => [p.subjectId, p.state === "inside"]));
-  const subjects: Record<string, unknown>[] = (r.subjects ?? []).map(s => ({ ...s, type: s.type ?? s.kind, inside: presence.get(String(s.id)) ?? Boolean(s.inside) }));
+  const subjects: Record<string, unknown>[] = (r.subjects ?? []).map(s => normalizeSubjectZones({ ...s, allowedZones: s.allowedZones, type: s.type ?? s.kind, inside: presence.get(String(s.id)) ?? Boolean(s.inside) }));
   return {
     ...EMPTY,
-    checkpoints: r.checkpoints ?? [],
+    checkpoints: normalizeFacilityCheckpoints(r.checkpoints).filter(checkpoint => !r.terminalAssignment || checkpoint.id === r.terminalAssignment.checkpointId),
+    terminalAssignment: r.terminalAssignment,
     people: subjects.filter(s => s.type !== "hardware") as AppDataSnapshot["people"],
-    hardwareAssets: r.hardwareAssets ?? (subjects.filter(s => s.type === "hardware") as AppDataSnapshot["hardwareAssets"]),
+    hardwareAssets: r.hardwareAssets?.map(normalizeSubjectZones) ?? (subjects.filter(s => s.type === "hardware") as AppDataSnapshot["hardwareAssets"]),
     movements: ((r.movements ?? []) as Record<string, unknown>[]).map(normalizeDashboardMovement),
     permissionRequests: ((r.permissionRequests ?? []) as unknown[]).map(normalizePermissionRequest),
     adminAvailability: r.adminAvailability && typeof r.adminAvailability === "object"

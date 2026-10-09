@@ -83,6 +83,7 @@ async def stream_presence(request: Request, claims: dict = Depends(verify_authen
         _sse_event_generator(request, float(claims["exp"])),
         media_type="text/event-stream",
         headers={
-            "Cache-Control": "no-cache",
+            "Cache-Control": "no-cache, no-transform",
+            "X-Accel-Buffering": "no",
         },
     )

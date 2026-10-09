@@ -1,19 +1,25 @@
 import { useCallback, useMemo } from "react";
 import type {
+  AlertQuery,
+  AuditEventQuery,
   AlertEvaluationResult,
   BarcodeManualReviewInput,
   CreateEmployeeInput,
   CreateHardwareAssetInput,
+  CreateVisitorInput,
   HardwareAsset,
   MovementQuery,
   Person,
   PermissionRequest,
+  PermissionRequestInput,
   RecordScanInput,
-  UpdateAccessPermissionInput,
 } from "../../lib/types";
 import type { DataActions, DataActionDependencies } from "./dataTypes";
 import { mergeById } from "./dataHelpers";
+import { mergePermissionRequests } from "../../lib/permissionRequestRevisions";
+import { mergeAlerts } from "../../lib/alertRevisions";
 import { applyPresenceUpdate } from "./presenceUpdates";
+import { refreshOpenAlertCount } from "./activityEvents";
 
 export function useDataActions({ service, setState, refresh }: DataActionDependencies): DataActions {
   const queryMovements = useCallback(
@@ -66,6 +72,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   const acknowledgeAlert = useCallback(
     async (alertId: string) => {
       const updated = await service.acknowledgeAlert(alertId);
+      refreshOpenAlertCount();
       setState((current) => ({
         ...current,
         alerts: current.alerts.map((alert) => alert.id === updated.id ? updated : alert),
@@ -75,36 +82,59 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     [service, setState]
   );
 
-  const updateAccessPermission = useCallback(
-    async (input: UpdateAccessPermissionInput) => {
-      const result = await service.updateAccessPermission(input);
-      setState((current) => ({
-        ...current,
-        permissions: mergeById(current.permissions, [result.permission]),
-        people: result.person ? mergeById(current.people, [result.person]) : current.people,
-        hardwareAssets: result.hardwareAsset ? mergeById(current.hardwareAssets, [result.hardwareAsset]) : current.hardwareAssets,
-        auditEvents: [result.auditEvent, ...current.auditEvents],
-        notifications: [result.notification, ...current.notifications],
-      }));
-      return result.permission;
-    },
-    [service, setState]
-  );
+  const reviewAlert = useCallback(async (alertId: string, decision: "confirmed" | "excused", reason = "") => {
+    const result = await service.reviewAlert(alertId, decision, reason);
+    setState(current => ({ ...current, alerts: mergeAlerts(current.alerts, [result.alert]) }));
+    refreshOpenAlertCount();
+    await refresh();
+    return result.alert;
+  }, [service, setState, refresh]);
+
+  const resetAlertWarnings = useCallback(async (subjectId: string, reason: string) => {
+    await service.resetAlertWarnings(subjectId, reason);
+    refreshOpenAlertCount();
+    await refresh();
+  }, [service, refresh]);
+
+  const setAlertRuleAssignments = useCallback(async (subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision?: number) => {
+    const result = await service.setAlertRuleAssignments(subjectId, ruleIds, irregularitySkipDates, expectedRevision);
+    await refresh();
+    return result;
+  }, [service, refresh]);
 
   const submitPermissionRequest = useCallback(
     async (request: Omit<PermissionRequest, "id" | "status" | "createdAt">) => {
       const result = await service.submitPermissionRequest(request);
-      setState((current) => ({ ...current, permissionRequests: mergeById(current.permissionRequests, [result]) }));
+      setState((current) => ({ ...current, permissionRequests: mergePermissionRequests(current.permissionRequests, [result]) }));
       return result;
     },
     [service, setState]
   );
 
+  const grantPermission = useCallback(async (input: PermissionRequestInput) => {
+    const result = await service.grantPermission(input);
+    setState(current => ({ ...current,
+      permissionRequests: mergePermissionRequests(current.permissionRequests, [result.request]),
+      permissions: result.permission ? mergeById(current.permissions, [result.permission]) : current.permissions,
+      people: result.person ? mergeById(current.people, [result.person]) : current.people,
+      hardwareAssets: result.hardwareAssets?.length ? mergeById(current.hardwareAssets, result.hardwareAssets)
+        : result.hardwareAsset ? mergeById(current.hardwareAssets, [result.hardwareAsset]) : current.hardwareAssets,
+      auditEvents: result.auditEvent ? mergeById(current.auditEvents, [result.auditEvent]) : current.auditEvents,
+    }));
+    await refresh();
+    return result.request;
+  }, [service, setState, refresh]);
+
+  const releaseEntryRestriction = useCallback(async (alertId: string, reason: string) => {
+    await service.releaseEntryRestriction(alertId, reason);
+    await refresh();
+  }, [service, refresh]);
+
   const decidePermissionRequest = useCallback(
     async (requestId: string, decision: "approved" | "denied", reason: string, validForMinutes?: number) => {
       const result = await service.decidePermissionRequest(requestId, decision, reason, validForMinutes);
       setState((current) => {
-        const permissionRequests = mergeById(current.permissionRequests, [result.request]);
+        const permissionRequests = mergePermissionRequests(current.permissionRequests, [result.request]);
         const permissions = result.permission ? mergeById(current.permissions, [result.permission]) : current.permissions;
         const people = result.person ? mergeById(current.people, [result.person]) : current.people;
         const hardwareAssets = result.hardwareAsset ? mergeById(current.hardwareAssets, [result.hardwareAsset]) : current.hardwareAssets;
@@ -122,52 +152,52 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
           movements: updated.movements,
           scanAnalytics: updated.scanAnalytics,
           auditEvents: result.auditEvent ? mergeById(current.auditEvents, [result.auditEvent]) : current.auditEvents,
-          notifications: result.notification ? [result.notification, ...current.notifications] : current.notifications,
         };
       });
+      await refresh();
       return result.request;
     },
-    [service, setState]
+    [service, setState, refresh]
   );
 
-  const acknowledgePermissionRequest = useCallback(
-    async (requestId: string) => {
-      const request = await service.acknowledgePermissionRequest(requestId);
-      setState((current) => ({ ...current, permissionRequests: mergeById(current.permissionRequests, [request]) }));
-      return request;
+  const queryAlerts = useCallback(
+    (query: AlertQuery) => service.queryAlerts(query),
+    [service]
+  );
+
+  const queryAuditEvents = useCallback(
+    (query: AuditEventQuery) => service.queryAuditEvents(query),
+    [service]
+  );
+
+  const createVisitor = useCallback(
+    async (input: CreateVisitorInput) => {
+      const result = await service.createVisitor(input);
+      setState((current) => ({
+        ...current,
+        people: mergeById(current.people, [result.visitor]),
+        permissionRequests: mergePermissionRequests(current.permissionRequests, [result.request]),
+      }));
+      return result;
     },
     [service, setState]
   );
 
-  const updateAlertRule = useCallback(
-    async (ruleId: string, enabled: boolean) => {
-      const updated = await service.updateAlertRule(ruleId, enabled);
-      setState((current) => ({
-        ...current,
-        alertRules: current.alertRules.map((rule) => rule.id === ruleId ? updated : rule),
-      }));
-      return updated;
+  const dismissPermissionNotification = useCallback(
+    async (requestId: string) => {
+      const request = await service.dismissPermissionNotification(requestId);
+      setState((current) => ({ ...current, permissionRequests: mergePermissionRequests(current.permissionRequests, [request]) }));
+      return request;
     },
     [service, setState]
   );
 
   const evaluateAlertRules = useCallback(async (): Promise<AlertEvaluationResult> => {
     const result = await service.evaluateAlertRules();
+    refreshOpenAlertCount();
     await refresh();
     return result;
   }, [refresh, service]);
-
-  const markNotificationRead = useCallback(
-    async (notificationId: string) => {
-      const updated = await service.markNotificationRead(notificationId);
-      setState((current) => ({
-        ...current,
-        notifications: current.notifications.map((notification) => notification.id === notificationId ? updated : notification),
-      }));
-      return updated;
-    },
-    [service, setState]
-  );
 
   const recordScan = useCallback(
     async (input: RecordScanInput, idempotencyKey?: string) => {
@@ -179,6 +209,9 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
             people: result.updatedPeople,
             hardwareAssets: result.updatedHardwareAssets,
           }),
+          permissionRequests: result.manualApprovalRequest
+            ? mergePermissionRequests(current.permissionRequests, [result.manualApprovalRequest])
+            : current.permissionRequests,
         };
       });
       return result;
@@ -189,7 +222,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   const requestBarcodeManualReview = useCallback(
     async (input: BarcodeManualReviewInput) => {
       const result = await service.requestBarcodeManualReview(input);
-      setState((current) => ({ ...current, permissionRequests: mergeById(current.permissionRequests, [result]) }));
+      setState((current) => ({ ...current, permissionRequests: mergePermissionRequests(current.permissionRequests, [result]) }));
       return result;
     },
     [service, setState]
@@ -208,18 +241,23 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     () => ({
       refresh,
       queryMovements,
+      queryAlerts,
+      queryAuditEvents,
       createEmployee,
+      createVisitor,
       createHardwareAsset,
       updatePerson,
       updateHardwareAsset,
       acknowledgeAlert,
-      updateAccessPermission,
+      reviewAlert,
+      resetAlertWarnings,
+      setAlertRuleAssignments,
       submitPermissionRequest,
+      grantPermission,
+      releaseEntryRestriction,
       decidePermissionRequest,
-      acknowledgePermissionRequest,
-      updateAlertRule,
+      dismissPermissionNotification,
       evaluateAlertRules,
-      markNotificationRead,
       recordScan,
       requestBarcodeManualReview,
       addMovementNote,
@@ -227,19 +265,24 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     [
       addMovementNote,
       createEmployee,
+      createVisitor,
       createHardwareAsset,
-      acknowledgePermissionRequest,
+      dismissPermissionNotification,
       decidePermissionRequest,
       evaluateAlertRules,
-      markNotificationRead,
       queryMovements,
+      queryAlerts,
+      queryAuditEvents,
       recordScan,
       requestBarcodeManualReview,
       refresh,
       submitPermissionRequest,
-      updateAccessPermission,
+      grantPermission,
+      releaseEntryRestriction,
       acknowledgeAlert,
-      updateAlertRule,
+      reviewAlert,
+      resetAlertWarnings,
+      setAlertRuleAssignments,
       updateHardwareAsset,
       updatePerson,
     ]

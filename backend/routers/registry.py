@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db, get_read_db
 from auth import verify_admin_or_operator_request, verify_admin_request, has_admin_role
+from terminal_assignments import browser_identity, require_checkpoint
 from models import (
     AccessPermission,
     AuditEvent,
@@ -30,7 +31,11 @@ from models import (
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
 from temporal_worker import get_temporal_client, TASK_QUEUE
 from workflows.visitor_approval import VisitorApprovalWorkflow
-from access_validation import validate_window, validate_zones
+from access_validation import validate_checkpoint_id, validate_window, validate_permission_window, validate_zones
+from facility_zones import CHECKPOINT_IDS, normalize_facility_document
+from permission_decisions import publish_decision
+from redis_client import publish_data_changed
+from subject_metadata import current_subject_metadata
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +50,6 @@ _METADATA_LIMITS = {
     "host": 100,
     "reason": 240,
     "purpose": 240,
-    "department": 100,
     "owner": 100,
     "category": 80,
 }
@@ -53,7 +57,14 @@ _METADATA_LIMITS = {
 
 def _validated_metadata(payload: SubjectCreate) -> dict[str, Any]:
     """Normalize user-entered metadata before it reaches the JSON columns."""
-    incoming = dict(payload.data or {})
+    incoming = current_subject_metadata(payload.kind, payload.data)
+    incoming.pop("entryRestriction", None)
+    if payload.kind == "visitor":
+        incoming.pop("phone", None)
+    if "allowedZone" in incoming:
+        zones = validate_zones([incoming["allowedZone"]])
+        incoming["allowedZone"] = zones[0] if len(zones) == 1 else "All Zones"
+    incoming = normalize_facility_document(incoming)
     for field, limit in _METADATA_LIMITS.items():
         value = incoming.get(field)
         if value is None:
@@ -72,18 +83,22 @@ def _validated_metadata(payload: SubjectCreate) -> dict[str, Any]:
             if not str(incoming.get(field) or "").strip():
                 raise HTTPException(status_code=422, detail=f"{field} is required")
 
-    if payload.kind == "visitor":
-        hours = incoming.get("hours")
-        if isinstance(hours, bool) or not isinstance(hours, (int, float)) or not 1 <= hours <= 24:
-            raise HTTPException(status_code=422, detail="hours must be between 1 and 24")
-
-    for field in ("validFrom", "validUntil"):
+    for field in ("validFrom", "validTo", "validUntil"):
         value = incoming.get(field)
         if value is not None:
             if not isinstance(value, str) or not value.strip() or len(value) > 40:
                 raise HTTPException(status_code=422, detail=f"{field} must be a valid date-time")
             incoming[field] = value.strip()
     return incoming
+
+
+def _is_barcode_conflict(error: exc.IntegrityError) -> bool:
+    original = error.orig
+    constraint = getattr(getattr(original, "diag", None), "constraint_name", None)
+    if constraint in {"uq_subjects_barcode_ci", "subjects_barcode_key"}:
+        return True
+    message = str(original or error).casefold()
+    return "barcode" in message and ("duplicate" in message or "unique" in message)
 
 
 @router.get("", response_model=SubjectListResponse)
@@ -112,7 +127,7 @@ async def list_subjects(
     for sub in subjects:
         data = {}
         if sub.person:
-            data = sub.person.data
+            data = current_subject_metadata(sub.kind, sub.person.data)
         elif sub.hardware:
             data = sub.hardware.data
         
@@ -146,7 +161,7 @@ async def get_subject(
 
     data = {}
     if sub.person:
-        data = sub.person.data
+        data = current_subject_metadata(sub.kind, sub.person.data)
     elif sub.hardware:
         data = sub.hardware.data
 
@@ -164,6 +179,7 @@ async def create_subject(
         raise HTTPException(status_code=403, detail="Terminal operators may create temporary visitors only")
     subject_id = str(uuid.uuid4())
     incoming = _validated_metadata(payload)
+    barcode = payload.barcode.strip()
     requested_zones = incoming.get("allowedZones")
     if not isinstance(requested_zones, list):
         requested_zones = [incoming["allowedZone"]] if isinstance(incoming.get("allowedZone"), str) else []
@@ -172,10 +188,38 @@ async def create_subject(
     now = datetime.now(timezone.utc)
     valid_from = incoming.get("validFrom") or now.isoformat()
     valid_to = incoming.get("validTo") or incoming.get("validUntil") or ""
-    if payload.kind == "visitor" and not valid_to:
-        valid_to = (now + timedelta(hours=incoming["hours"])).isoformat()
+    visitor_checkpoint = None
+    if payload.kind == "visitor":
+        if not incoming.get("validFrom") or not incoming.get("validTo"):
+            hours = incoming.get("hours")
+            if isinstance(hours, bool) or not isinstance(hours, (int, float)) or not 1 <= hours <= 24:
+                raise HTTPException(status_code=422, detail="Visitor valid from and valid to are required")
+            valid_from = now.isoformat()
+            valid_to = (now + timedelta(hours=hours)).isoformat()
+        checkpoint_id = validate_checkpoint_id(incoming.get("checkpointId") or "cp-main")
+        if not has_admin_role(actor):
+            checkpoint_id = await require_checkpoint(db, browser_identity(actor), checkpoint_id)
+        async with db.no_autoflush:
+            checkpoint_result = await db.execute(select(Checkpoint).where(Checkpoint.id == checkpoint_id))
+        visitor_checkpoint = checkpoint_result.scalar_one_or_none()
+        if not visitor_checkpoint:
+            raise HTTPException(status_code=422, detail="Checkpoint not registered")
+        incoming["checkpointId"] = checkpoint_id
+        validate_permission_window(valid_from, valid_to, now=now)
+        parsed_valid_to = datetime.fromisoformat(valid_to.replace("Z", "+00:00"))
+        if parsed_valid_to.tzinfo is None:
+            parsed_valid_to = parsed_valid_to.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+        if parsed_valid_to <= now:
+            raise HTTPException(status_code=422, detail="Visitor valid to must be in the future")
     validate_window(valid_from, valid_to)
+    if payload.kind != "visitor" and (incoming.get("validFrom") or incoming.get("validTo") or incoming.get("validUntil")):
+        validate_permission_window(valid_from, valid_to, now=now)
+    if payload.kind == "visitor" and not requested_zones and visitor_checkpoint:
+        requested_zones = [visitor_checkpoint.data.get("zone", "public")]
     requested_zones = validate_zones(requested_zones)
+    if payload.kind == "visitor":
+        incoming["validFrom"] = valid_from
+        incoming["validTo"] = valid_to
     data = {
         **incoming,
         # Server-owned fields must be applied last. Operators cannot create an
@@ -183,18 +227,16 @@ async def create_subject(
         # registry payload.
         "status": "pending_approval" if payload.kind == "visitor" else incoming.get("status", "active") if payload.kind == "hardware" else "active",
         "inside": False,
-        "phone": str(incoming.get("phone") or ""),
-        "accessLevel": str(incoming.get("accessLevel") or "Standard"),
-        "allowedZones": [zone for zone in requested_zones if isinstance(zone, str)] if has_admin_role(actor) else [],
+        "allowedZones": [zone for zone in requested_zones if isinstance(zone, str)] if has_admin_role(actor) and payload.kind != "visitor" else [],
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "id": subject_id,
-        "barcode": payload.barcode,
+        "barcode": barcode,
         "type": payload.kind,
         "validFrom": valid_from,
         "validTo": valid_to,
         "createdAt": now.isoformat(),
     }
-    new_sub = Subject(id=subject_id, kind=payload.kind, barcode=payload.barcode)
+    new_sub = Subject(id=subject_id, kind=payload.kind, barcode=barcode)
     
     if payload.kind in ("employee", "visitor"):
         new_sub.person = Person(data=data)
@@ -210,54 +252,58 @@ async def create_subject(
             data={
                 "id": permission_id,
                 "subjectId": subject_id,
-                "subjectName": data.get("name") or payload.barcode,
+                "subjectName": data.get("name") or barcode,
                 "subjectType": payload.kind,
                 "assignment": "Temporary visitor" if payload.kind == "visitor" else payload.kind.title(),
                 "state": "pending_approval" if payload.kind == "visitor" else "active" if data["status"] == "active" else "restricted",
                 "zones": data.get("allowedZones") or [],
                 "validFrom": data.get("validFrom") or "",
                 "validTo": data.get("validTo") or data.get("validUntil") or "",
-                "source": "request",
+                "source": "request" if payload.kind == "visitor" else "policy",
                 "updatedAt": datetime.now(timezone.utc).isoformat(),
                 "updatedBy": actor.get("sub", "Terminal Operator"),
             },
         ))
-    try:
-        await db.commit()
-        await db.refresh(new_sub)
-    except exc.IntegrityError:
-        await db.rollback()
-        raise HTTPException(status_code=409, detail="Barcode already exists")
-    except Exception:
-        await db.rollback()
-        logger.exception("Error creating subject")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
+    visitor_request = None
     if payload.kind == "visitor":
         request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
-        now = datetime.now(timezone.utc)
-        checkpoint_result = await db.execute(select(Checkpoint).order_by(Checkpoint.id).limit(1))
-        checkpoint = checkpoint_result.scalar_one_or_none()
-        checkpoint_id = checkpoint.id if checkpoint else "main-gate"
-        checkpoint_name = checkpoint.data.get("name", checkpoint_id) if checkpoint else checkpoint_id
+        checkpoint_id = visitor_checkpoint.id
+        checkpoint_name = visitor_checkpoint.data.get("name", checkpoint_id)
         visitor_request = {
             "id": request_id,
             "subjectId": subject_id,
             "subjectName": data.get("name") or payload.barcode,
+            "barcode": barcode,
             "subjectType": "visitor",
             "type": "visitor",
             "purpose": data.get("purpose") or data.get("reason") or "Temporary visitor access",
             "checkpointId": checkpoint_id,
             "checkpoint": checkpoint_name,
             "requester": actor.get("sub", "Terminal Operator"),
-            "requestedZones": data.get("allowedZones") or [checkpoint.data.get("zone", "public")] if checkpoint else ["public"],
+            "requestedZones": requested_zones,
             "validFrom": data.get("validFrom") or now.isoformat(),
             "validTo": data.get("validTo") or data.get("validUntil") or now.isoformat(),
             "status": "pending",
             "createdAt": now.isoformat(),
         }
         db.add(PermissionRequestModel(id=request_id, subject_id=subject_id, data=visitor_request, created_at=now))
+
+    try:
         await db.commit()
+        await db.refresh(new_sub)
+    except exc.IntegrityError as error:
+        await db.rollback()
+        if _is_barcode_conflict(error):
+            raise HTTPException(status_code=409, detail="This barcode is already registered")
+        logger.exception("Registry integrity error while creating subject")
+        raise HTTPException(status_code=500, detail="Unable to register subject")
+    except Exception:
+        await db.rollback()
+        logger.exception("Error creating subject")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+    if visitor_request:
+        await publish_decision({"request": visitor_request, "person": data})
         try:
             client = await get_temporal_client()
             await client.start_workflow(
@@ -268,10 +314,10 @@ async def create_subject(
             )
         except Exception as e:
             logger.exception("Failed to start VisitorApprovalWorkflow")
+    else:
+        await publish_data_changed()
 
-    return SubjectResponse(
-        id=new_sub.id, barcode=new_sub.barcode, kind=new_sub.kind, data=data
-    )
+    return SubjectResponse(id=new_sub.id, barcode=new_sub.barcode, kind=new_sub.kind, data=data, request=visitor_request)
 
 
 @router.put("/{subject_id}", response_model=SubjectResponse)
@@ -298,7 +344,12 @@ async def update_subject(
         sub.barcode = payload.barcode
 
     patch = {key: value for key, value in (payload.data or {}).items()
-             if key not in {"id", "type", "kind", "barcode", "inside", "entryOverride", "createdAt"}}
+             if key not in {"id", "type", "kind", "barcode", "inside", "entryOverride", "entryRestriction", "createdAt"}}
+    patch = current_subject_metadata(sub.kind, patch)
+    if "allowedZone" in patch:
+        zones = validate_zones([patch["allowedZone"]])
+        patch["allowedZone"] = zones[0] if len(zones) == 1 else "All Zones"
+        patch.setdefault("allowedZones", zones)
     if "allowedZones" in patch:
         patch["allowedZones"] = validate_zones(patch["allowedZones"])
     if "status" in patch:
@@ -327,8 +378,11 @@ async def update_subject(
         elif sub.hardware:
             current_data = sub.hardware.data
 
-    current_data = {**current_data, "id": sub.id, "barcode": sub.barcode, "type": sub.kind}
+    current_data = {**current_subject_metadata(sub.kind, current_data), "id": sub.id, "barcode": sub.barcode, "type": sub.kind}
     validate_window(current_data.get("validFrom"), current_data.get("validTo"))
+    if "validFrom" in patch or "validTo" in patch:
+        validate_permission_window(current_data.get("validFrom"), current_data.get("validTo"),
+            allow_past_start="validFrom" not in patch)
     metadata = sub.hardware if sub.kind == "hardware" else sub.person
     if metadata:
         metadata.data = current_data
@@ -344,13 +398,18 @@ async def update_subject(
         permission.data = permission_data
     try:
         await db.commit()
-    except exc.IntegrityError:
+    except exc.IntegrityError as error:
         await db.rollback()
-        raise HTTPException(status_code=409, detail="Barcode already exists")
+        if _is_barcode_conflict(error):
+            raise HTTPException(status_code=409, detail="This barcode is already registered")
+        logger.exception("Registry integrity error while updating subject")
+        raise HTTPException(status_code=500, detail="Unable to update subject")
     except Exception:
         await db.rollback()
         logger.exception("Error updating subject")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+    await publish_data_changed()
 
     return SubjectResponse(id=sub.id, barcode=sub.barcode, kind=sub.kind, data=current_data)
 
@@ -382,6 +441,8 @@ async def delete_subject(
         logger.exception("Error deleting subject")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+    await publish_data_changed()
+
 
 @bundle_router.get("/bundle")
 async def registry_bundle(db: AsyncSession = Depends(get_read_db)) -> dict[str, Any]:
@@ -393,17 +454,20 @@ async def registry_bundle(db: AsyncSession = Depends(get_read_db)) -> dict[str, 
             selectinload(Subject.presence_state),
         ).order_by(Subject.id)
     )).scalars().all()
+    from critical_entry_restrictions import entry_restrictions_for_subjects
+    restrictions = await entry_restrictions_for_subjects(db, [subject.id for subject in subjects])
     people = []
     hardware = []
     for subject in subjects:
         presence = subject.presence_state.state == "inside" if subject.presence_state else False
         if subject.person:
             people.append({
-                **(subject.person.data or {}),
+                **current_subject_metadata(subject.kind, subject.person.data),
                 "id": subject.id,
                 "barcode": subject.barcode,
                 "type": subject.kind,
                 "inside": presence,
+                "entryRestriction": restrictions.get(subject.id),
             })
         if subject.hardware:
             hardware.append({
@@ -411,6 +475,7 @@ async def registry_bundle(db: AsyncSession = Depends(get_read_db)) -> dict[str, 
                 "id": subject.id,
                 "barcode": subject.barcode,
                 "inside": presence,
+                "entryRestriction": restrictions.get(subject.id),
             })
     permissions = [permission.data for permission in (await db.execute(
         select(AccessPermission).order_by(AccessPermission.id)
@@ -477,4 +542,11 @@ async def registry_bundle(db: AsyncSession = Depends(get_read_db)) -> dict[str, 
         "permissions": permissions,
         "movements": movements,
         "auditEvents": audit_events,
+        "permissionRequests": [request.data for request in (await db.execute(
+            select(PermissionRequestModel)
+            .order_by(PermissionRequestModel.created_at.desc())
+        )).scalars().all()],
+        "checkpoints": [{**(checkpoint.data or {}), "id": checkpoint.id} for checkpoint in (await db.execute(
+            select(Checkpoint).where(Checkpoint.id.in_(CHECKPOINT_IDS)).order_by(Checkpoint.id)
+        )).scalars().all()],
     }

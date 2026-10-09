@@ -6,7 +6,7 @@ import { emptyData } from "./dataDefaults";
 import { scopeForPath } from "./dataHelpers";
 import { useDataActions as useDataActionSet } from "./useDataActions";
 import type { DataActions, DataProviderProps, DataState } from "./dataTypes";
-import { applyPresenceUpdate, parsePresenceUpdate } from "./presenceUpdates";
+import { applyPresenceUpdate, parsePresenceUpdate, type PresenceUpdate } from "./presenceUpdates";
 
 export type { DataActions, DataState } from "./dataTypes";
 
@@ -28,16 +28,27 @@ export function DataProvider({
   }));
   const hydratedScope = useRef(initialData ? initialScope ?? scope : undefined);
   const refreshVersion = useRef(0);
-  const streamOpened = useRef(false);
+  const streamRevision = useRef(0);
+  const bufferedUpdates = useRef<Array<{ revision: number; update: PresenceUpdate }>>([]);
+  const snapshotInFlight = useRef(false);
   const reconnectRefresh = useRef<number | undefined>(undefined);
 
   const refresh = useCallback(async () => {
     const version = ++refreshVersion.current;
+    const revisionAtStart = streamRevision.current;
+    snapshotInFlight.current = true;
+    bufferedUpdates.current = [];
     setState((current) => ({ ...current, isLoading: true, error: null }));
     try {
       const snapshot = await service.getSnapshot(scope);
       if (version !== refreshVersion.current) return;
-      setState({ ...emptyData, ...snapshot, isLoading: false, error: null });
+      // A request snapshot can finish after a newer scan arrived on the stream.
+      // Replay those updates over it; immutable movement IDs deduplicate events
+      // that the database snapshot already contains.
+      const updates = bufferedUpdates.current.filter(item => item.revision > revisionAtStart);
+      const base: DataState = { ...emptyData, ...snapshot, isLoading: false, error: null };
+      setState(updates.reduce((next, item) => applyPresenceUpdate(next, item.update), base));
+      bufferedUpdates.current = [];
     } catch (error) {
       if (version !== refreshVersion.current) return;
       setState((current) => ({
@@ -45,6 +56,8 @@ export function DataProvider({
         isLoading: false,
         error: error instanceof Error ? error.message : "Unable to load application data.",
       }));
+    } finally {
+      if (version === refreshVersion.current) snapshotInFlight.current = false;
     }
   }, [scope, service]);
 
@@ -60,39 +73,64 @@ export function DataProvider({
 
   useEffect(() => {
     if (scope === "profile") return;
-    const eventSource = new EventSource("/api/presence");
-    eventSource.onopen = () => {
-      if (streamOpened.current) {
-        // A stream reconnect can have missed events. Restore consistency once
-        // without returning to a permanent polling loop.
-        window.clearTimeout(reconnectRefresh.current);
-        reconnectRefresh.current = window.setTimeout(() => void refresh(), 500);
-      }
-      streamOpened.current = true;
-    };
-    eventSource.onmessage = (event) => {
-      if (!event.data?.trim()) return;
+    const receiveMessage = (raw: string) => {
+      if (!raw?.trim()) return;
       try {
-        const update = parsePresenceUpdate(event.data);
+        const update = parsePresenceUpdate(raw);
         if (update) {
+          const revision = ++streamRevision.current;
+          if (snapshotInFlight.current) bufferedUpdates.current.push({ revision, update });
           setState((current) => applyPresenceUpdate(current, update));
-          // Manual requests and decisions can change both the queue and the
-          // aggregate snapshot. The local merge makes the UI immediate; this
-          // refresh makes every scoped view converge to the persisted state.
-          if (update.request?.type === "manual_override") void refresh();
+          if (update.request || update.permission || update.type === "data_changed" || (scope === "terminal" && update.type === "terminal_assignment")) void refresh();
         }
       } catch {
-        // Ignore malformed transient events; the next reconnect fetches a
-        // consistent snapshot.
+        // A reconnect refresh restores state after a malformed event.
       }
     };
+    if (pathname.startsWith("/admin")) {
+      // The admin chrome owns one shared stream for page data and alert counts.
+      const receive = (event: Event) => receiveMessage((event as CustomEvent<string>).detail);
+      const syncFromServer = () => void refresh();
+      const restore = () => {
+        if (document.visibilityState === "visible") void refresh();
+      };
+      window.addEventListener("inout:presence-message", receive);
+      window.addEventListener("inout:presence-sync", syncFromServer);
+      window.addEventListener("focus", restore);
+      window.addEventListener("online", restore);
+      document.addEventListener("visibilitychange", restore);
+      return () => {
+        window.removeEventListener("inout:presence-message", receive);
+        window.removeEventListener("inout:presence-sync", syncFromServer);
+        window.removeEventListener("focus", restore);
+        window.removeEventListener("online", restore);
+        document.removeEventListener("visibilitychange", restore);
+      };
+    }
+    const eventSource = new EventSource("/api/presence");
+    eventSource.onopen = () => {
+      // Reconcile the initial snapshot and any gap left by a lost connection.
+      window.clearTimeout(reconnectRefresh.current);
+      reconnectRefresh.current = window.setTimeout(() => void refresh(), 250);
+    };
+    eventSource.onmessage = (event) => {
+      receiveMessage(event.data);
+    };
+    const restore = () => {
+      if (document.visibilityState === "visible") void refresh();
+    };
+    window.addEventListener("focus", restore);
+    window.addEventListener("online", restore);
+    document.addEventListener("visibilitychange", restore);
     return () => {
       eventSource.close();
+      window.removeEventListener("focus", restore);
+      window.removeEventListener("online", restore);
+      document.removeEventListener("visibilitychange", restore);
       window.clearTimeout(reconnectRefresh.current);
       reconnectRefresh.current = undefined;
-      streamOpened.current = false;
     };
-  }, [refresh, scope]);
+  }, [refresh, scope, pathname]);
 
   const actions = useDataActionSet({ service, setState, refresh });
 

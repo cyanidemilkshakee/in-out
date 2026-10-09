@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { CreateHardwareAssetInput } from "../../../../lib/types";
+import { FACILITY_ZONES } from "../../../../lib/facilityZones";
 import { CreationDialog } from "./CreationDialog";
 
 const initialHardware: CreateHardwareAssetInput = {
@@ -7,7 +8,7 @@ const initialHardware: CreateHardwareAssetInput = {
   barcode: "",
   owner: "",
   category: "Laptop",
-  allowedZone: "Main Entrance",
+  allowedZone: "public",
   status: "active",
 };
 
@@ -57,7 +58,7 @@ export function HardwareCreator({
         </label>
         <label>
           <span>Owner</span>
-          <input value={form.owner} onChange={(event) => update("owner", event.target.value)} placeholder="Owner or department" required />
+          <input value={form.owner} onChange={(event) => update("owner", event.target.value)} placeholder="Owner" required />
         </label>
         <label>
           <span>Category</span>
@@ -73,11 +74,7 @@ export function HardwareCreator({
         <label>
           <span>Allowed zone</span>
           <select value={form.allowedZone} onChange={(event) => update("allowedZone", event.target.value)}>
-            <option>Main Entrance</option>
-            <option>IT Lab</option>
-            <option>Server Room</option>
-            <option>Warehouse</option>
-            <option>Auditorium</option>
+            {FACILITY_ZONES.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
           </select>
         </label>
         <label>

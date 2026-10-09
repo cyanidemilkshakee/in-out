@@ -13,12 +13,11 @@ from sqlalchemy import and_, delete, exists, func, select
 
 from config import settings
 from database import async_session
-from models import Alert, AuditEvent, Movement, Notification, ScanRequest, PermissionRequestModel
+from models import Alert, AuditEvent, Movement, ScanRequest, PermissionRequestModel
 
 
 RETENTION_TARGETS = (
     ("idempotency requests", ScanRequest, "created_at", "IDEMPOTENCY_RETENTION_DAYS"),
-    ("notifications", Notification, "created_at", "NOTIFICATION_RETENTION_DAYS"),
     ("audit events", AuditEvent, "created_at", "AUDIT_RETENTION_DAYS"),
     ("alerts", Alert, "created_at", "ALERT_RETENTION_DAYS"),
     ("movements", Movement, "occurred_at", "MOVEMENT_RETENTION_DAYS"),

@@ -3,10 +3,9 @@ PermissionOverrideWorkflow — Human-in-the-loop override approval.
 
 Lifecycle:
   1. Started when POST /v1/permission-requests (type=manual_override) is received.
-  2. Notifies admins via the notify_admins_of_override activity.
-  3. Waits up to 10 minutes for an `admin_decision` Signal.
-  4a. Signal received → runs approve_override or deny_override activity.
-  4b. Timeout → runs auto_deny_override activity.
+  2. Waits up to 10 minutes for an `admin_decision` Signal.
+  3a. Signal received → runs approve_override or deny_override activity.
+  3b. Timeout → runs auto_deny_override activity.
 """
 from __future__ import annotations
 
@@ -19,13 +18,13 @@ from temporalio.common import RetryPolicy
 
 with workflow.unsafe.imports_passed_through():
     from workflows.activities import (
-        notify_admins_of_override,
         approve_override,
         deny_override,
         auto_deny_override,
     )
 
 _RETRY = RetryPolicy(maximum_attempts=3, initial_interval=timedelta(seconds=5))
+MANUAL_REVIEW_TIMEOUT_MINUTES = 10
 
 
 @workflow.defn
@@ -36,19 +35,11 @@ class PermissionOverrideWorkflow:
 
     @workflow.run
     async def run(self, request_id: str) -> str:
-        # 1. Notify admins
-        await workflow.execute_activity(
-            notify_admins_of_override,
-            request_id,
-            start_to_close_timeout=timedelta(seconds=30),
-            retry_policy=_RETRY,
-        )
-
-        # 2. Wait up to 10 minutes for a Signal
+        # Wait up to 10 minutes for a Signal.
         try:
             await workflow.wait_condition(
                 lambda: self._decision is not None,
-                timeout=timedelta(minutes=10),
+                timeout=timedelta(minutes=MANUAL_REVIEW_TIMEOUT_MINUTES),
             )
         except asyncio.TimeoutError:
             self._status = "auto_denied"
@@ -60,7 +51,7 @@ class PermissionOverrideWorkflow:
             )
             return "auto_denied"
 
-        # 3. Process admin decision
+        # Process the admin decision.
         decision = self._decision["decision"]
         admin_id = self._decision.get("admin_id", "unknown")
         reason = self._decision.get("reason", "")

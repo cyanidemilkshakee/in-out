@@ -9,19 +9,25 @@ export type RoleToken = JWT & {
   roles?: string[]
   auth_time?: number
   step_up_expires_at?: number
+  step_up_duration_minutes?: number
+  step_up_extension_seconds?: number
   error?: "RefreshTokenError"
 }
 
 export type AppSession = Session & {
+  subject?: string
   access_token?: string
+  refresh_token?: string
   provider?: string
   roles: string[]
   authTime?: number
   stepUpExpiresAt?: number
+  stepUpDurationMinutes?: number
+  stepUpExtensionSeconds?: number
   error?: "RefreshTokenError"
 }
 
-function accessTokenClaims(value: unknown): Record<string, unknown> {
+function tokenClaims(value: unknown): Record<string, unknown> {
   if (typeof value !== "string") return {}
   try {
     const encoded = value.split(".")[1]
@@ -35,15 +41,22 @@ function accessTokenClaims(value: unknown): Record<string, unknown> {
 }
 
 export function rolesFromAccessToken(value: unknown): string[] {
-  const payload = accessTokenClaims(value) as { realm_access?: { roles?: unknown } }
+  const payload = tokenClaims(value) as { realm_access?: { roles?: unknown } }
   const roles = payload.realm_access?.roles
   return Array.isArray(roles) ? roles.filter((role): role is string => typeof role === "string") : []
 }
 
-export function authTimeFromAccessToken(value: unknown): number | undefined {
-  const authTime = accessTokenClaims(value).auth_time
+/** Read auth_time from an OIDC token. For a fresh-login step-up, pass the
+ * ID token: Keycloak normally places auth_time there, not in the access token.
+ */
+export function authTimeFromToken(value: unknown): number | undefined {
+  const authTime = tokenClaims(value).auth_time
   return typeof authTime === "number" && Number.isFinite(authTime) ? authTime : undefined
 }
+
+// Kept as a compatibility alias for existing callers. auth_time is usually
+// available only in the ID token, despite the historical function name.
+export const authTimeFromAccessToken = authTimeFromToken
 
 export function invalidSession(token: RoleToken, error: RoleToken["error"] = "RefreshTokenError"): RoleToken {
   return { ...token, access_token: undefined, refresh_token: undefined, expires_at: undefined, roles: [], error }
@@ -86,7 +99,9 @@ export async function refreshKeycloakToken(
       refresh_token: (refreshed.refresh_token as string | undefined) ?? token.refresh_token,
       expires_at: Math.floor(now / 1000) + refreshed.expires_in,
       roles: rolesFromAccessToken(refreshed.access_token),
-      auth_time: authTimeFromAccessToken(refreshed.access_token),
+      // Refresh responses generally do not carry auth_time. Preserve the
+      // original authentication time unless the new token explicitly has it.
+      auth_time: authTimeFromToken(refreshed.access_token) ?? token.auth_time,
       error: undefined,
     }
   } catch {
@@ -95,16 +110,19 @@ export async function refreshKeycloakToken(
 }
 
 export function keycloakSession(session: Session, token: RoleToken, serverOnly: boolean): AppSession {
-  // Explicitly construct the public shape: never return the JWT or refresh token.
+  // Only the server-only auth instance receives bearer and refresh tokens.
   return {
     user: session.user,
+    subject: token.error ? undefined : token.sub,
     expires: session.expires,
     provider: token.provider,
     roles: token.error ? [] : token.roles ?? [],
     authTime: token.auth_time,
     stepUpExpiresAt: token.step_up_expires_at,
+    stepUpDurationMinutes: token.step_up_duration_minutes,
+    stepUpExtensionSeconds: token.step_up_extension_seconds,
     error: token.error,
-    ...(serverOnly && !token.error ? { access_token: token.access_token } : {}),
+    ...(serverOnly && !token.error ? { access_token: token.access_token, refresh_token: token.refresh_token } : {}),
   }
 }
 

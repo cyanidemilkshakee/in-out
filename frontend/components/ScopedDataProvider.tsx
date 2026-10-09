@@ -4,6 +4,7 @@ import { callPythonApi } from "../../app/api/pythonApi";
 import { DATA_SCOPE_ENDPOINTS } from "../../lib/dataScopes";
 import { normalizeDataScope } from "../../lib/normalizeDashboard";
 import { AppProviders } from "./AppProviders";
+import { loadAllAlerts } from "../../app/api/data/serverQueries";
 
 export async function ScopedDataProvider({
   children,
@@ -16,7 +17,9 @@ export async function ScopedDataProvider({
   const endpoint = DATA_SCOPE_ENDPOINTS[scope];
   try {
     if (endpoint) {
-      const raw = await callPythonApi(endpoint, "GET");
+      const raw = scope === "alerts"
+        ? await loadAllAlerts()
+        : await callPythonApi(endpoint, "GET");
       initialData = normalizeDataScope(scope, raw);
     }
     // profile scope has no bundle endpoint — let client fetch on mount

@@ -1,4 +1,5 @@
 import type { Checkpoint, HardwareAsset, RecordScanInput } from "../../lib/types";
+import { normalizeFacilityCheckpoints, normalizeSubjectZones } from "../../lib/facilityZones";
 
 const DATABASE_NAME = "inout-terminal-offline";
 const DATABASE_VERSION = 1;
@@ -17,6 +18,7 @@ export type QueuedTerminalScan = {
 };
 
 export type CachedTerminalConfig = {
+  operatorSubject?: string;
   checkpoints: Checkpoint[];
   hardwareAssets: HardwareAsset[];
   savedAt: string;
@@ -134,7 +136,11 @@ export async function cacheTerminalConfig(config: Omit<CachedTerminalConfig, "sa
   const database = await openDatabase();
   try {
     const transaction = database.transaction(CONFIG_STORE, "readwrite");
-    transaction.objectStore(CONFIG_STORE).put({ id: CONFIG_KEY, ...config, savedAt: new Date().toISOString() });
+    transaction.objectStore(CONFIG_STORE).put({ id: CONFIG_KEY,
+      operatorSubject: config.operatorSubject,
+      checkpoints: normalizeFacilityCheckpoints(config.checkpoints),
+      hardwareAssets: config.hardwareAssets.map(normalizeSubjectZones),
+      savedAt: new Date().toISOString() });
     await transactionComplete(transaction);
   } finally {
     database.close();
@@ -149,8 +155,9 @@ export async function loadCachedTerminalConfig(): Promise<CachedTerminalConfig |
     await transactionComplete(transaction);
     if (!cached || !Array.isArray(cached.checkpoints) || !Array.isArray(cached.hardwareAssets)) return null;
     return {
-      checkpoints: cached.checkpoints,
-      hardwareAssets: cached.hardwareAssets,
+      operatorSubject: cached.operatorSubject,
+      checkpoints: normalizeFacilityCheckpoints(cached.checkpoints),
+      hardwareAssets: cached.hardwareAssets.map(normalizeSubjectZones),
       savedAt: cached.savedAt,
     };
   } finally {

@@ -40,6 +40,8 @@ export interface DayPattern {
 
 export type PersonSessionIndex = Map<string, DayPattern[]>;
 
+const MAX_BREAK_DURATION_MS = 2 * 60 * 60 * 1000;
+
 // Helper to convert time string (e.g. "5:59:38 PM") to decimal hours
 export const timeToDecimal = (timeStr: string): number => {
   const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i);
@@ -127,12 +129,15 @@ function buildSessions(movements: MovementEvent[]): DayPattern[] {
       if (e.direction === "entry" && currentEntry === null) {
         currentEntry = decTime;
         
-        // If there was a previous exit on this same day, the gap is a break!
+        // Only a short same-day exit-to-entry gap is considered a break.
         if (i > 0) {
           const prevExit = events[i - 1];
           if (prevExit.direction === "exit") {
-            const prevExitTime = timeToDecimal(prevExit.time);
-            sessions.push({ start: prevExitTime, end: currentEntry, type: "break", zIndex: 2 });
+            const gapMs = movementTimestamp(e) - movementTimestamp(prevExit);
+            if (gapMs >= 0 && gapMs <= MAX_BREAK_DURATION_MS) {
+              const prevExitTime = facilityDecimalHour(movementTimestamp(prevExit));
+              sessions.push({ start: prevExitTime, end: currentEntry, type: "break", zIndex: 2 });
+            }
           }
         }
       } else if (e.direction === "exit" && currentEntry !== null) {
@@ -219,7 +224,8 @@ export const getDashboardKPIs = (
         m.denialCode === "asset_restricted" ||
         m.denialCode === "access_restricted" ||
         m.denialCode === "hardware_restricted" ||
-        m.denialCode === "zone_not_permitted"
+        m.denialCode === "zone_not_permitted" ||
+        m.denialCode === "cross_building_access"
       ) {
         totalRestricted++;
       }
@@ -279,7 +285,8 @@ export const getDrillDownData = (movements: MovementEvent[]) => {
         m.denialCode === "asset_restricted" ||
         m.denialCode === "access_restricted" ||
         m.denialCode === "hardware_restricted" ||
-        m.denialCode === "zone_not_permitted";
+        m.denialCode === "zone_not_permitted" ||
+        m.denialCode === "cross_building_access";
       const expired = m.denialCode === "expired_pass";
       if (m.scanType === "auto") {
         autoDen++;

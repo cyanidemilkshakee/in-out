@@ -32,6 +32,34 @@ class GatewayTests(unittest.TestCase):
             with self.assertRaises(httpx.ConnectError):
                 client.get('http://kong:8001/')
 
+    def test_chunked_auth_session_request_and_response_headers(self):
+        # A session carrying identity-provider tokens can cross Node's default
+        # 16 KiB request limit and Nginx's former 16 KiB upstream header buffer.
+        cookie = '; '.join(f'authjs.session-token.{index}=' + str(index) * 3500
+            for index in range(6))
+        self.assertGreater(len(cookie.encode()), 16384)
+        self.assertLess(len(cookie.encode()), 32768)
+        with httpx.Client(timeout=10) as client:
+            response = client.get('http://kong:8000/api/auth/fixture-session',
+                headers={'Cookie': cookie})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()['headers']['cookie'], cookie)
+        chunks = response.headers.get_list('set-cookie')
+        self.assertEqual(len(chunks), 6)
+        self.assertGreater(sum(len(chunk.encode()) for chunk in chunks), 16384)
+        for index, chunk in enumerate(chunks):
+            self.assertLessEqual(len(chunk.encode()), 4096)
+            self.assertEqual(chunk, f'authjs.session-token.{index}='
+                + str(index) * 3500 + '; Path=/; HttpOnly; SameSite=Lax')
+
+    def test_request_header_limit_remains_bounded(self):
+        # Each field must fit within one 32 KiB large-header buffer. Raising
+        # the auth allowance must not remove that gateway boundary.
+        with httpx.Client(timeout=10) as client:
+            response = client.get('http://kong:8000/api/auth/fixture-session',
+                headers={'Cookie': 'authjs.session-token=' + 'x' * 32768})
+        self.assertIn(response.status_code, (400, 431), response.text)
+
     def test_http_cannot_spoof_terminal_identity(self):
         for port in (8000, 8002, 8005):
             response = httpx.post(f'http://kong:{port}/v1/scans', headers={

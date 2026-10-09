@@ -1,0 +1,201 @@
+/* Keep the existing alert layout; scope its spacing and type to this page. */
+:global(.role-admin) :global(.admin-page-frame):has(.stack) {
+  gap: 28px;
+  padding-top: 28px;
+  padding-bottom: 56px;
+}
+
+:global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.admin-hero-copy) {
+  padding-block: 16px 24px;
+}
+
+.headerSkips {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+}
+
+.headerSkips > section {
+  flex: 1;
+  width: 100%;
+  min-width: 0;
+}
+
+:global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.admin-hero-copy) h1 {
+  margin-bottom: 16px;
+  font-size: clamp(30px, 3vw, 42px);
+  line-height: 1.2;
+  font-weight: 700;
+}
+
+:global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.admin-hero-metric) {
+  font-size: 15px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+:global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.admin-hero-pretitle):has(:global(.alert-run-pretitle)) {
+  margin-bottom: 16px;
+}
+
+:global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.alert-run-control) {
+  gap: 12px;
+}
+
+:global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.alert-run-control) button {
+  min-height: 44px;
+  padding: 10px 16px;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+:global(.role-admin) .stack,
+:global(.role-admin) .stack :global(.alerts-command-grid),
+:global(.role-admin) .stack :global(.alert-support-stack) {
+  gap: 22px;
+}
+
+:global(.role-admin) .stack :global(.permission-section-heading) {
+  padding: 20px 22px;
+}
+
+:global(.role-admin) .stack :global(.permission-section-heading) h2 {
+  font-size: 20px;
+  line-height: 1.3;
+  font-weight: 700;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-section--open) :global(.permission-section-heading),
+:global(.role-admin) .stack :global(.alert-rules-section) :global(.permission-section-heading) {
+  padding-bottom: 6px;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-section--open) :global(.alert-activity-list),
+:global(.role-admin) .stack :global(.alert-rule-list) {
+  gap: 14px;
+  padding: 0 16px 16px;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-list) article {
+  gap: 16px;
+  padding: 20px;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-copy) {
+  gap: 6px;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-title-row) > strong {
+  font-size: 17px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-list) time strong {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-list) time small,
+:global(.role-admin) .stack :global(.alert-activity-barcode),
+:global(.role-admin) .stack :global(.alert-activity-copy) > small {
+  font-size: 16px;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-warning-subject) {
+  font-size: 19px;
+  line-height: 1.35;
+  font-weight: 700;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-copy) p {
+  margin-top: 4px;
+  font-size: 15px;
+  line-height: 1.55;
+  font-weight: 400;
+}
+
+:global(.role-admin) .stack :global(.alert-review-controls) {
+  gap: 12px;
+}
+:global(.role-admin) .stack :global(.alert-review-controls) input{
+  min-height: 44px;
+  padding-inline: 12px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+:global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) {
+  gap: 10px;
+}
+:global(.role-admin) .stack :global(.alert-activity-actions) button{
+  min-height: 44px;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+:global(.role-admin) .stack :global(.alert-rule-card) header small {
+  font-size: 15px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+:global(.role-admin) .stack :global(.alert-rule-card) {
+  gap: 16px;
+  padding: 20px;
+}
+
+:global(.role-admin) .stack :global(.alert-rule-card) header strong {
+  font-size: 16px;
+  line-height: 1.4;
+  font-weight: 700;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-empty) {
+  gap: 10px;
+  padding: 44px 22px;
+  font-size: 15px;
+  line-height: 1.5;
+  font-weight: 400;
+}
+
+@media (max-width: 767px) {
+  :global(.role-admin) :global(.admin-page-frame):has(.stack) {
+    gap: 22px;
+    padding-top: 20px;
+    padding-bottom: calc(28px + var(--mobile-admin-nav-height));
+  }
+
+  :global(.role-admin) .stack :global(.permission-section-heading) {
+    padding: 18px 16px;
+  }
+
+  :global(.role-admin) .stack :global(.permission-section-heading) h2 {
+    font-size: 19px;
+  }
+
+  :global(.role-admin) .stack :global(.alert-activity-section--open) :global(.alert-activity-list),
+  :global(.role-admin) .stack :global(.alert-rule-list) {
+    padding: 0 12px 12px;
+  }
+
+  :global(.role-admin) .stack :global(.alert-activity-list) article {
+    gap: 12px;
+    padding: 16px;
+  }
+
+  :global(.role-admin) .stack :global(.alert-rule-card) {
+    padding: 16px;
+  }
+
+  :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) button {
+    /* The existing mobile actions stack vertically; keep their height compact. */
+    flex-basis: auto;
+  }
+
+  :global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.admin-hero-copy) h1 {
+    font-size: 30px;
+  }
+}

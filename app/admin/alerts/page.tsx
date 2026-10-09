@@ -1,37 +1,25 @@
 "use client";
 
-import dynamic from "next/dynamic";
-import { useDeferredValue, useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { AdminPageFrame } from "../../../frontend/components/admin/tables/AdminPageFrame";
 import { AlertActivity } from "../../../frontend/components/admin/alerts/AlertActivity";
 import { AutomatedRules } from "../../../frontend/components/admin/alerts/AutomatedRules";
-import type { TimeRange } from "../../../frontend/components/analytics/TrendChart";
+import { EmployeeAlertManagement } from "../../../frontend/components/admin/alerts/EmployeeAlertManagement";
+import { ScheduledIrregularitySkips } from "../../../frontend/components/admin/alerts/ScheduledIrregularitySkips";
+import { getAlertReviewState } from "../../../frontend/components/admin/alerts/alertPresentation";
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
-import { compactRangeBounds } from "../../../lib/dateRanges";
-
-const MetricTrendChart = dynamic(
-  () =>
-    import("../../../frontend/components/analytics/MetricTrendChart").then(
-      (module) => module.MetricTrendChart
-    ),
-  { ssr: false }
-);
+import styles from "./AlertsPage.module.css";
 
 export default function AlertsPage() {
-  const { alerts, alertRules } = useDataState();
-  const { acknowledgeAlert, updateAlertRule, evaluateAlertRules } = useDataActions();
-  const [timeRange, setTimeRange] = useState<TimeRange>("1D");
-  const [search, setSearch] = useState("");
+  const { alerts, alertRules, alertWarnings, alertRuleAssignments, people, isLoading, error } = useDataState();
+  const { reviewAlert, resetAlertWarnings, setAlertRuleAssignments, evaluateAlertRules, refresh } = useDataActions();
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationMessage, setEvaluationMessage] = useState("");
-  const deferredSearch = useDeferredValue(search);
-
-  function handleAcknowledgeAlert(alertId: string) {
-    void acknowledgeAlert(alertId).catch(error =>
-      setEvaluationMessage(error instanceof Error ? error.message : "Unable to acknowledge alert."));
-  }
+  const evaluationPending = useRef(false);
 
   async function handleEvaluateRules() {
+    if (evaluationPending.current) return;
+    evaluationPending.current = true;
     setIsEvaluating(true);
     setEvaluationMessage("");
     try {
@@ -44,109 +32,66 @@ export default function AlertsPage() {
     } catch (error) {
       setEvaluationMessage(error instanceof Error ? error.message : "Unable to evaluate alert rules.");
     } finally {
+      evaluationPending.current = false;
       setIsEvaluating(false);
     }
   }
 
-  const activeAlerts = useMemo(
-    () => alerts.filter((alert) => alert.status === "open"),
+  const openAlerts = useMemo(
+    () => alerts.filter((alert) => getAlertReviewState(alert) === "needs_review"),
     [alerts]
   );
-  const filteredAlerts = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    const { start, end } = compactRangeBounds(timeRange);
-    return activeAlerts.filter((alert) => {
-      const timestamp = alert.createdAt
-        ? new Date(alert.createdAt).getTime()
-        : new Date(`${alert.date} ${alert.time}`).getTime();
-      const matchesTime =
-        Number.isFinite(timestamp) && timestamp >= start && timestamp <= end;
-      const matchesSearch =
-        !needle ||
-        alert.subjectName.toLowerCase().includes(needle) ||
-        alert.reason.toLowerCase().includes(needle) ||
-        alert.title.toLowerCase().includes(needle) ||
-        alert.checkpoint.toLowerCase().includes(needle);
-      return matchesTime && matchesSearch;
-    });
-  }, [activeAlerts, deferredSearch, timeRange]);
-  const alertPoints = useMemo(
-    () =>
-      alerts.flatMap((alert) => {
-        const timestamp = alert.createdAt
-          ? new Date(alert.createdAt).getTime()
-          : new Date(`${alert.date} ${alert.time}`).getTime();
-        return Number.isFinite(timestamp)
-          ? [{ timestamp: new Date(timestamp).toISOString(), value: 1 }]
-          : [];
-      }),
-    [alerts]
-  );
-
+  const employeeWarnings = alertWarnings.filter((subject) => subject.subjectType === "employee");
+  const confirmedWarnings = employeeWarnings.reduce((total, subject) => total + subject.count, 0);
   return (
     <AdminPageFrame
-      title="Alert Command"
-      description="Review open alerts and scheduled attendance-rule activity."
-      metric={`${activeAlerts.length} active alerts`}
+      title="Alert Command Center"
+      metric={`${openAlerts.length} open alerts · ${confirmedWarnings} confirmed warnings`}
       headerRight={
-        <MetricTrendChart
-          title="Alerts"
-          valueLabel="ALERTS IN RANGE"
-          timeRange={timeRange}
-          onTimeRangeChange={setTimeRange}
-          color="#ff3b30"
-          points={alertPoints}
-        />
+        <div className={styles.headerSkips}>
+          <ScheduledIrregularitySkips assignments={alertRuleAssignments} />
+        </div>
       }
-    >
-      <section className="alerts-command-stack">
-        <div className="filter-bar alerts-filter-bar">
-          <label className="select-control">
-            <span className="sr-only">Filter by time</span>
-            <select
-              value={timeRange}
-              onChange={(e) => setTimeRange(e.target.value as TimeRange)}
-            >
-              <option value="1Y">Last 1 Year</option>
-              <option value="1M">Last 1 Month</option>
-              <option value="1W">Last 1 Week</option>
-              <option value="1D">Last 24 Hours</option>
-            </select>
-          </label>
+      preTitle={
+        <div className="alert-run-pretitle">
           <div className="alert-run-control">
             <button
               type="button"
               className="admin-button admin-button--secondary secondary-button compact-button"
               onClick={() => void handleEvaluateRules()}
-              disabled={isEvaluating}
+              disabled={isEvaluating || isLoading}
             >
               {isEvaluating ? "Evaluating…" : "Run rules now"}
             </button>
             {evaluationMessage && <span role="status">{evaluationMessage}</span>}
           </div>
-          <label className="search-control">
-            <span className="sr-only">Search alerts</span>
-            <input
-              type="search"
-              placeholder="Search alerts..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-            />
-          </label>
         </div>
+      }
+    >
+      <section className={`alerts-command-stack ${styles.stack}`}>
+        {error && <div className="alert-page-error admin-surface" role="status"><span>{error}</span><button type="button" disabled={isLoading} onClick={() => void refresh()}>{isLoading ? "Retrying…" : "Retry"}</button></div>}
         <div className="alerts-command-grid">
           <AlertActivity
-            alerts={filteredAlerts}
-            onAcknowledge={handleAcknowledgeAlert}
+            alerts={openAlerts}
+            people={people}
+            onReview={reviewAlert}
+            filter="needs_review"
+            isLoading={isLoading}
           />
-          <AutomatedRules
-            rules={alertRules}
-            onSave={async (changes) => {
-              for (const change of changes) {
-                await updateAlertRule(change.ruleId, change.enabled);
-              }
-            }}
-          />
+          <aside className="alert-support-stack" aria-label="Employee warnings and automated rules">
+            <EmployeeAlertManagement
+              assignments={alertRuleAssignments}
+              warnings={employeeWarnings}
+              alerts={alerts}
+              people={people}
+              rules={alertRules}
+              onReset={resetAlertWarnings}
+              onSave={async (subjectId, ruleIds, irregularitySkipDates, revision) => { await setAlertRuleAssignments(subjectId, ruleIds, irregularitySkipDates, revision); }}
+              onReload={refresh}
+              isLoading={isLoading}
+            />
+            <AutomatedRules rules={alertRules} />
+          </aside>
         </div>
       </section>
     </AdminPageFrame>

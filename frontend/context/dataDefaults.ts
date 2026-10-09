@@ -22,7 +22,8 @@ export const emptyData: AppDataSnapshot = {
   movementNotes: {},
   permissions: [],
   permissionRequests: [],
-  notifications: [],
   alertRules: [],
+  alertWarnings: [],
+  alertRuleAssignments: [],
   auditEvents: [],
 };

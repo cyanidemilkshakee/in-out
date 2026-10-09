@@ -1,36 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { Calendar as CalendarIcon, Check, X } from "lucide-react";
+import { facilityToday, parseFacilityDate, validateHistoricalDateRange } from "../../../lib/dateTimeValidation";
+import { useDateTimeNow } from "../../hooks/useDateTimeNow";
 
 export interface CalendarDatePickerProps {
   startDate: string;
   endDate: string;
   onRangeChange: (start: string, end: string) => void;
   className?: string;
-  variant?: "icon" | "segment";
+  variant?: "icon" | "segment" | "inline";
   active?: boolean;
-}
-
-const MIN_DATE = "2016-01-01";
-
-function getFacilityToday() {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(new Date());
-  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
-  return `${values.year}-${values.month}-${values.day}`;
-}
-
-function validDate(value: string) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : "";
-}
-
-function displayRange(start: string, end: string) {
-  if (!start && !end) return "Custom dates";
-  if (start && end) return `${start} → ${end}`;
-  return start ? `From ${start}` : `Until ${end}`;
 }
 
 export function CalendarDatePicker({
@@ -45,8 +24,14 @@ export function CalendarDatePicker({
   const [draftStart, setDraftStart] = useState(startDate);
   const [draftEnd, setDraftEnd] = useState(endDate);
   const [error, setError] = useState("");
+  const errorId = useId();
   const containerRef = useRef<HTMLDivElement>(null);
-  const maximumDate = getFacilityToday();
+  const startRef = useRef<HTMLInputElement>(null);
+  const endRef = useRef<HTMLInputElement>(null);
+  const isInline = variant === "inline";
+  const now = useDateTimeNow(isOpen || isInline);
+  const maximumDate = facilityToday(now);
+  const startMaximum = parseFacilityDate(draftEnd) !== undefined && draftEnd < maximumDate ? draftEnd : maximumDate;
   const isSegment = variant === "segment";
 
   useEffect(() => {
@@ -83,14 +68,15 @@ export function CalendarDatePicker({
   }
 
   function applyRange() {
-    const nextStart = validDate(draftStart);
-    const nextEnd = validDate(draftEnd);
-    if (nextStart && nextEnd && nextStart > nextEnd) {
-      setError("Start date must not be after end date.");
+    const errors = validateHistoricalDateRange(draftStart, draftEnd);
+    if (errors.start || errors.end) {
+      setError(errors.start || errors.end || "Choose a valid date range.");
+      (errors.start ? startRef : endRef).current?.focus();
       return;
     }
-    onRangeChange(nextStart, nextEnd);
-    setIsOpen(false);
+    if (!startRef.current?.reportValidity() || !endRef.current?.reportValidity()) return;
+    onRangeChange(draftStart, draftEnd);
+    if (!isInline) setIsOpen(false);
   }
 
   function clearRange() {
@@ -98,7 +84,46 @@ export function CalendarDatePicker({
     setDraftStart("");
     setDraftEnd("");
     setError("");
-    setIsOpen(false);
+    if (!isInline) setIsOpen(false);
+  }
+
+  if (isInline) {
+    return (
+      <div className={`calendar-picker-container calendar-picker-inline ${className}`} ref={containerRef}>
+        <div className="calendar-date-fields">
+          <label>
+            <span>Start date</span>
+            <input
+              type="date"
+              ref={startRef}
+              value={draftStart}
+              max={startMaximum}
+              aria-describedby={error ? errorId : undefined}
+              onChange={(event) => { setDraftStart(event.target.value); setError(""); }}
+            />
+          </label>
+          <label>
+            <span>End date</span>
+            <input
+              type="date"
+              ref={endRef}
+              value={draftEnd}
+              min={parseFacilityDate(draftStart) !== undefined ? draftStart : undefined}
+              max={maximumDate}
+              aria-describedby={error ? errorId : undefined}
+              onChange={(event) => { setDraftEnd(event.target.value); setError(""); }}
+            />
+          </label>
+        </div>
+        {error && <small id={errorId} role="alert" className="calendar-range-error">{error}</small>}
+        <div className="calendar-popover-actions">
+          <button type="button" className="calendar-clear-button" onClick={clearRange}>Clear</button>
+          <button type="button" className="calendar-apply-button" onClick={applyRange}>
+            <Check size={15} />Apply range
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -107,8 +132,8 @@ export function CalendarDatePicker({
         type="button"
         className={`${isSegment ? "dashboard-time-range-button dashboard-calendar-segment" : "icon-filter-button"}${isOpen ? " active" : ""}${isSegment && active ? " is-active" : ""}`}
         onClick={() => (isOpen ? setIsOpen(false) : openPicker())}
-        title="Choose custom date range"
-        aria-label="Choose custom date range"
+        title="Choose date range"
+        aria-label="Choose date range"
         aria-expanded={isOpen}
         aria-pressed={isSegment ? active : undefined}
       >
@@ -117,12 +142,9 @@ export function CalendarDatePicker({
       </button>
 
       {isOpen ? (
-        <div className="calendar-popover" role="dialog" aria-label="Custom date range">
+        <div className="calendar-popover" role="dialog" aria-label="Date range">
           <div className="calendar-popover-heading">
-            <div>
-              <strong>Custom date range</strong>
-              <small>{displayRange(draftStart, draftEnd)}</small>
-            </div>
+            <strong>Date range</strong>
             <button type="button" aria-label="Close date picker" onClick={() => setIsOpen(false)}>
               <X size={16} />
             </button>
@@ -133,27 +155,28 @@ export function CalendarDatePicker({
               <span>Start date</span>
               <input
                 type="date"
+                ref={startRef}
                 value={draftStart}
-                min={MIN_DATE}
-                max={draftEnd || maximumDate}
-                onChange={(event) => setDraftStart(event.target.value)}
+                max={startMaximum}
+                aria-describedby={error ? errorId : undefined}
+                onChange={(event) => { setDraftStart(event.target.value); setError(""); }}
               />
             </label>
             <label>
               <span>End date</span>
               <input
                 type="date"
+                ref={endRef}
                 value={draftEnd}
-                min={draftStart || MIN_DATE}
+                min={parseFacilityDate(draftStart) !== undefined ? draftStart : undefined}
                 max={maximumDate}
-                onChange={(event) => setDraftEnd(event.target.value)}
+                aria-describedby={error ? errorId : undefined}
+                onChange={(event) => { setDraftEnd(event.target.value); setError(""); }}
               />
             </label>
           </div>
 
-          <small className={error ? "calendar-range-error" : "calendar-timezone-note"}>
-            {error || "Facility time · UTC+05:30 · Future dates are unavailable."}
-          </small>
+          {error && <small id={errorId} role="alert" className="calendar-range-error">{error}</small>}
 
           <div className="calendar-popover-actions">
             <button type="button" className="calendar-clear-button" onClick={clearRange}>

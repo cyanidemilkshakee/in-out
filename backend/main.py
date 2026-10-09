@@ -14,10 +14,10 @@ from request_limits import RequestLimitsMiddleware
 from database import get_db, get_read_db, engine, read_engine
 from schemas import ScanPayload, ScanResponse
 from terminal_scans import record_scan
+from terminal_assignments import require_checkpoint
 from redis_client import get_redis_pool, close_redis_pool, publish_presence_update
-from dashboard_cache import invalidate_dashboard_cache
 from routers import presence, movements, registry, permissions
-from routers import dashboard, alerts, notifications, audit, checkpoints, terminal, admin_profile, keycloak_admin
+from routers import dashboard, alerts, audit, checkpoints, terminal, admin_profile, keycloak_admin
 from temporal_worker import get_temporal_client
 
 logger = logging.getLogger(__name__)
@@ -75,7 +75,6 @@ app.include_router(permissions.router)
 # Phase 2 — new routers
 app.include_router(dashboard.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(alerts.router, dependencies=[Depends(verify_admin_request)])
-app.include_router(notifications.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(audit.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(checkpoints.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(keycloak_admin.router)
@@ -118,18 +117,19 @@ async def process_scan(
         )
 
     try:
+        await require_checkpoint(db, "mtls:" + cert_terminal_id, payload.checkpoint_id)
         raw_response = await record_scan(db, idempotency_key, payload, payload.terminal_id)
         response = ScanResponse(**raw_response)
         await db.commit()
         if db.info.get("scan_replayed"):
             return response
-        await invalidate_dashboard_cache()
         try:
             await publish_presence_update(json.dumps({
                 "type": "scan",
                 "subject_id": response.subject_id,
                 "state": ("inside" if raw_response["decision"]["event"]["direction"] == "entry" else "outside") if response.allowed else None,
                 "movement": raw_response["decision"]["event"],
+                "alerts": db.info.get("scan_alerts", []),
                 "people": raw_response.get("updatedPeople", []),
                 "hardwareAssets": raw_response.get("updatedHardwareAssets", []),
             }))

@@ -169,8 +169,8 @@ export function MetricTrendChart({
           bodyColor: "#4b5563",
           borderColor: "#d8dde6",
           borderWidth: 1,
-          titleFont: { ...chartFont, size: 13, weight: 700 as const },
-          bodyFont: { ...chartFont, size: 12 },
+          titleFont: { ...chartFont, size: 15, weight: 700 as const },
+          bodyFont: { ...chartFont, size: 15 },
           padding: 10,
           cornerRadius: 8,
           displayColors: false,
@@ -181,7 +181,7 @@ export function MetricTrendChart({
           grid: { display: false, drawBorder: false },
           ticks: {
             color: "#667085",
-            font: { ...chartFont, size: 10, weight: 600 as const },
+            font: { ...chartFont, size: 15, weight: 600 as const },
             padding: 8,
           },
           border: { display: false },
@@ -192,7 +192,7 @@ export function MetricTrendChart({
           grid: { display: false, drawBorder: false },
           ticks: {
             color: "#667085",
-            font: { ...chartFont, size: 10, weight: 600 as const },
+            font: { ...chartFont, size: 15, weight: 600 as const },
             maxTicksLimit: 4,
           },
           border: { display: false },
@@ -204,12 +204,15 @@ export function MetricTrendChart({
   );
 
   const accent = accentClass(color);
+  const normalizeHeading = (label: string) => label.trim().toLowerCase().replace(/^(?:avg|average)\s+/, "");
 
   return (
     <div className="metric-trend-chart">
       <div className="metric-trend-header">
         <div>
-          <div className="metric-trend-title">{title}</div>
+          {normalizeHeading(title) !== normalizeHeading(valueLabel) && (
+            <div className="metric-trend-title">{title}</div>
+          )}
           <div className="metric-trend-value-row">
             <strong>
               {average.toLocaleString()}

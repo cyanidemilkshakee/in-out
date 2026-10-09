@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import type { HardwareAsset } from '../../../../lib/types';
+import Link from 'next/link';
 
 export function HardwareTable({
   assets,
@@ -40,7 +41,7 @@ export function HardwareTable({
   }
 
   return (
-      <div className="admin-table-wrap table-wrap registry-table-wrap">
+      <div className="admin-table-wrap table-wrap">
         <table className="data-table hardware-table registry-table registry-table--hardware">
           <thead>
             <tr>
@@ -51,6 +52,7 @@ export function HardwareTable({
               {sortHeader("category", "Category")}
               {sortHeader("status", "Status")}
               {sortHeader("inside", "Inside")}
+              <th scope="col">Requests</th>
             </tr>
           </thead>
           <tbody>
@@ -71,6 +73,7 @@ export function HardwareTable({
                     {asset.inside ? "Inside" : "Outside"}
                   </span>
                 </td>
+                <td className="column-requests" data-label="Requests"><Link className="admin-button admin-button--secondary secondary-button compact-button" href={`/admin/permissions?subject=${encodeURIComponent(asset.id)}&requestType=hardware_custody`} aria-label={`Request custody of ${asset.name}`}>Request custody</Link></td>
               </tr>
             ))}
           </tbody>

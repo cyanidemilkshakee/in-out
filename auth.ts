@@ -1,8 +1,9 @@
 import NextAuth, { customFetch, type NextAuthConfig } from "next-auth"
 import Keycloak from "next-auth/providers/keycloak"
 import { cookies } from "next/headers"
-import { authTimeFromAccessToken, keycloakSession, refreshKeycloakToken, rolesFromAccessToken, type RoleToken } from "./lib/keycloakSession"
-import { USER_MANAGEMENT_STEP_UP_COOKIE, verifyStepUpIntent } from "./lib/userManagementStepUp"
+import { authTimeFromToken, keycloakSession, rolesFromAccessToken, type RoleToken } from "./lib/keycloakSession"
+import { refreshKeycloakTokenSingleFlight } from "./lib/keycloakRefresh"
+import { completedStepUpWindow, USER_MANAGEMENT_STEP_UP_COOKIE, verifyStepUpIntent } from "./lib/userManagementStepUp"
 
 const keycloakConfigured = !!process.env.KEYCLOAK_CLIENT_ID &&
   !!process.env.KEYCLOAK_CLIENT_SECRET && !!process.env.KEYCLOAK_ISSUER
@@ -24,17 +25,12 @@ async function clearAdminOfflineStatus(accessToken: unknown): Promise<void> {
   }
 }
 
-async function completedUserManagementStepUp(accessToken: unknown): Promise<number | undefined> {
+async function completedUserManagementStepUp(idToken: unknown) {
   const secret = process.env.AUTH_SECRET;
   if (!secret) return undefined;
   const cookieStore = await cookies();
-  const issuedAt = await verifyStepUpIntent(cookieStore.get(USER_MANAGEMENT_STEP_UP_COOKIE)?.value, secret);
-  if (issuedAt === null) return undefined;
-  const authTime = authTimeFromAccessToken(accessToken);
-  // Keycloak must have authenticated after this specific unlock request.
-  if (!authTime || authTime * 1000 < issuedAt - 5_000) return undefined;
-  cookieStore.delete(USER_MANAGEMENT_STEP_UP_COOKIE);
-  return Math.floor(Date.now() / 1000) + 300;
+  const intent = await verifyStepUpIntent(cookieStore.get(USER_MANAGEMENT_STEP_UP_COOKIE)?.value, secret);
+  return intent ? completedStepUpWindow(intent, authTimeFromToken(idToken)) : undefined;
 }
 
 // Both instances share the same provider/cookie configuration. Only the
@@ -59,7 +55,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
       async jwt({ token, account }) {
         if (account) {
           await clearAdminOfflineStatus(account.access_token)
-          const stepUpExpiresAt = await completedUserManagementStepUp(account.access_token)
+          const stepUp = await completedUserManagementStepUp(account.id_token)
           const roleToken: RoleToken = {
           ...token,
           access_token: account.access_token,
@@ -67,13 +63,15 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
           expires_at: account.expires_at,
           provider: account.provider,
           roles: rolesFromAccessToken(account.access_token),
-          auth_time: authTimeFromAccessToken(account.access_token),
-          step_up_expires_at: stepUpExpiresAt,
+          auth_time: authTimeFromToken(account.id_token),
+          step_up_expires_at: stepUp?.expiresAt,
+          step_up_duration_minutes: stepUp?.durationMinutes,
+          step_up_extension_seconds: stepUp?.extensionSeconds,
           error: undefined,
           }
           return roleToken
         }
-        return refreshKeycloakToken(token as RoleToken, {
+        return refreshKeycloakTokenSingleFlight(token as RoleToken, {
           issuer: process.env.KEYCLOAK_JWKS_BASE || keycloakPublicIssuer,
           clientId: process.env.KEYCLOAK_CLIENT_ID,
           clientSecret: process.env.KEYCLOAK_CLIENT_SECRET,

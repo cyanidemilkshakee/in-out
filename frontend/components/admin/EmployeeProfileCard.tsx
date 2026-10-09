@@ -1,10 +1,12 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
-import type { Person } from "../../../lib/types";
+import type { AccessPermission, Alert, MovementEvent, Person } from "../../../lib/types";
 import { MONTH_NAMES, type DayPattern } from "../../../lib/analyticsUtils";
+import { eventTimestamp } from "../../../lib/dateRanges";
+import { useDataActions } from "../../context/DataContext";
 import { WorkPatternChart } from "./WorkPatternChart";
 import { Line } from "react-chartjs-2";
 import {
@@ -21,6 +23,26 @@ import {
 import type { ChartOptions } from "chart.js";
 import { useAdminTheme } from "../../hooks/useAdminTheme";
 
+function alertTimestamp(alert: Alert) {
+  const created = alert.createdAt ? new Date(alert.createdAt).getTime() : Number.NaN;
+  const legacy = new Date(`${alert.date} ${alert.time}`).getTime();
+  return Number.isFinite(created) ? created : Number.isFinite(legacy) ? legacy : 0;
+}
+
+function formatProfileDate(value?: string) {
+  if (!value) return "Not recorded";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+function alertReviewLabel(alert: Alert) {
+  if (alert.review?.decision === "excused" || alert.status === "resolved") return "Excused";
+  if (alert.review?.decision === "confirmed" || alert.status === "warned") return "Confirmed warning";
+  return alert.status === "acknowledged" ? "Acknowledged" : "Open";
+}
+
 ChartJS.register(
   CategoryScale,
   LinearScale,
@@ -35,15 +57,60 @@ ChartJS.register(
 export function EmployeeProfileCard({
   person,
   sessions,
+  permissions,
+  alerts,
+  movements,
   onClose,
 }: {
   person: Person;
   sessions: DayPattern[];
+  permissions: AccessPermission[];
+  alerts: Alert[];
+  movements: MovementEvent[];
   onClose: () => void;
 }) {
-  const [timeRange, setTimeRange] = useState("1W");
+  const { queryAlerts, queryMovements } = useDataActions();
+  const [timeRange, setTimeRange] = useState<"1Y" | "1M" | "1W">("1W");
   const [mounted, setMounted] = useState(false);
+  const profilePermissions = useMemo(
+    () => permissions.filter((permission) => permission.subjectId === person.id)
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)),
+    [permissions, person.id]
+  );
+  const initialAlerts = useMemo(() => alerts
+    .filter((alert) => alert.subjectId === person.id || (!alert.subjectId && alert.barcode.toLowerCase() === person.barcode.toLowerCase()))
+    .sort((left, right) => alertTimestamp(right) - alertTimestamp(left)), [alerts, person.barcode, person.id]);
+  const initialMovements = useMemo(() => movements
+    .filter((movement) => movement.subjectId === person.id || (!movement.subjectId && movement.barcode.toLowerCase() === person.barcode.toLowerCase()))
+    .sort((left, right) => eventTimestamp(right) - eventTimestamp(left)), [movements, person.barcode, person.id]);
+  const [profileAlerts, setProfileAlerts] = useState<Alert[]>(() => initialAlerts.slice(0, 8));
+  const [alertTriggerCount, setAlertTriggerCount] = useState(initialAlerts.length);
+  const [movementLogs, setMovementLogs] = useState<MovementEvent[]>(() => initialMovements.slice(0, 8));
+  const [movementLogCount, setMovementLogCount] = useState(initialMovements.length);
+  const [historyLoading, setHistoryLoading] = useState(true);
+  const [historyError, setHistoryError] = useState("");
   const darkTheme = useAdminTheme() === "dark";
+
+  useEffect(() => {
+    let active = true;
+    setHistoryLoading(true);
+    setHistoryError("");
+    const requests = [
+      queryAlerts({ limit: 8, offset: 0, subjectId: person.id }).then((page) => {
+        if (!active) return;
+        setProfileAlerts(page.items);
+        setAlertTriggerCount(page.total);
+      }).catch(() => { if (active) setHistoryError("Some alert history could not be loaded."); }),
+      queryMovements({ page: 1, pageSize: 8, subject_id: person.id, includeChart: false }).then((page) => {
+        if (!active) return;
+        setMovementLogs(page.items);
+        setMovementLogCount(page.total);
+      }).catch(() => { if (active) setHistoryError("Some movement history could not be loaded."); }),
+    ];
+    void Promise.all(requests).finally(() => { if (active) setHistoryLoading(false); });
+    return () => { active = false; };
+  }, [person.id, queryAlerts, queryMovements]);
+
   useEffect(() => {
     setMounted(true);
   }, []);
@@ -80,18 +147,17 @@ export function EmployeeProfileCard({
       dataPoints.push(Number(threeDayTotal.toFixed(1)));
     }
   } else if (timeRange === "1Y") {
-    const monthlyData: Record<string, number> = {};
-    for (const s of sessions.slice(0, 365)) {
-      const m = MONTH_NAMES[s.dateObj.getMonth()];
-      monthlyData[m] = (monthlyData[m] || 0) + s.workedHours;
+    const monthlyData = new Map<string, number>();
+    for (const session of sessions) {
+      const key = `${session.dateObj.getFullYear()}-${session.dateObj.getMonth()}`;
+      monthlyData.set(key, (monthlyData.get(key) ?? 0) + session.workedHours);
     }
     const today = new Date();
     for (let i = 11; i >= 0; i--) {
       const d = new Date(today);
       d.setMonth(d.getMonth() - i);
-      const m = MONTH_NAMES[d.getMonth()];
-      labels.push(m);
-      dataPoints.push(monthlyData[m] || 0);
+      labels.push(MONTH_NAMES[d.getMonth()]);
+      dataPoints.push(monthlyData.get(`${d.getFullYear()}-${d.getMonth()}`) ?? 0);
     }
   }
 
@@ -125,6 +191,7 @@ export function EmployeeProfileCard({
 
   const chartFont = {
     family: "var(--admin-font, 'Urbanist', sans-serif)",
+    size: 14,
   };
 
   const chartOptions: ChartOptions<"line"> = {
@@ -151,8 +218,8 @@ export function EmployeeProfileCard({
         bodyColor: tooltipBody,
         borderColor,
         borderWidth: 1,
-        titleFont: { ...chartFont, size: 13, weight: 700 as const },
-        bodyFont: { ...chartFont, size: 12 },
+        titleFont: { ...chartFont, weight: 700 as const },
+        bodyFont: { ...chartFont },
       },
     },
     scales: {
@@ -185,69 +252,41 @@ export function EmployeeProfileCard({
 
   return createPortal(
     <div
+      className="employee-profile-overlay"
       style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 100,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
         background: "rgba(0, 0, 0, 0.4)",
         backdropFilter: "blur(4px)",
       }}
       onClick={onClose}
     >
       <div
+        className="employee-profile-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="employee-profile-title"
         style={{
           "--admin-bg": panelBackground,
           "--admin-text": textColor,
           "--admin-muted": mutedColor,
           "--admin-line": panelLine,
-          background: panelBackground,
-          color: textColor,
-          width: "100%",
-          maxWidth: "850px",
-          borderRadius: "12px",
-          boxShadow: darkTheme ? "0 24px 80px rgba(0, 0, 0, 0.48)" : "var(--shadow)",
-          display: "flex",
-          flexDirection: "column",
-          overflow: "hidden",
-          fontFamily: "var(--admin-font, 'Urbanist', sans-serif)",
+          "--profile-border": borderColor,
+          "--profile-shadow": darkTheme ? "0 24px 80px rgba(0, 0, 0, 0.48)" : "0 24px 60px rgba(45, 56, 54, 0.2)",
         } as CSSProperties}
         onClick={(e) => e.stopPropagation()}
       >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            padding: "16px 24px",
-            borderBottom: `1px solid ${borderColor}`,
-          }}
-        >
-          <h2 style={{ margin: 0, fontSize: "1.25rem" }}>Employee Profile</h2>
-          <div style={{ display: "flex", gap: "16px", alignItems: "center" }}>
-            <div style={{ display: "flex", gap: "8px" }}>
-              {["1Y", "1M", "1W"].map((range) => {
+        <div className="employee-profile-header">
+          <h2 id="employee-profile-title">Employee Profile</h2>
+          <div className="employee-profile-header-actions">
+            <div className="employee-profile-range-controls">
+              {(["1Y", "1M", "1W"] as const).map((range) => {
                 const isSelected = range === timeRange;
-                const rangeTextColor = isSelected ? textColor : mutedColor;
                 return (
                   <button
                     key={range}
                     type="button"
                     onClick={() => setTimeRange(range)}
-                    style={{
-                      background: "transparent",
-                      color: rangeTextColor,
-                      border: `1px solid ${isSelected ? textColor : mutedColor}`,
-                      padding: "6px 16px",
-                      borderRadius: "20px",
-                      fontSize: "11px",
-                      fontWeight: 700,
-                      cursor: "pointer",
-                      letterSpacing: "1px",
-                      transition: "all 0.2s ease"
-                    }}
+                    className="employee-profile-range-button"
+                    aria-pressed={isSelected}
                   >
                     {range}
                   </button>
@@ -255,75 +294,110 @@ export function EmployeeProfileCard({
               })}
             </div>
             <button
-              className="admin-button admin-button--icon icon-button"
+              className="admin-button admin-button--icon icon-button employee-profile-close"
               type="button"
               onClick={onClose}
-              style={{
-                background: "transparent",
-                border: "none",
-                cursor: "pointer",
-                padding: "4px",
-              }}
+              aria-label="Close employee profile"
             >
               <X size={20} />
             </button>
           </div>
         </div>
 
-        <div style={{ padding: "24px", display: "flex", flexDirection: "column", gap: "24px" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "24px" }}>
-            <div>
-              <div style={{ fontSize: "13px", color: mutedColor, textTransform: "uppercase", fontWeight: 500, letterSpacing: "0.5px", marginBottom: "4px" }}>Name</div>
-              <div style={{ fontWeight: 700, fontSize: "18px", color: textColor }}>{person.name}</div>
+        <div className="employee-profile-content">
+          <div className="employee-profile-details">
+            <div className="employee-profile-detail">
+              <div className="employee-profile-detail-label">Name</div>
+              <div className="employee-profile-detail-value" style={{ color: textColor }}>{person.name}</div>
             </div>
-            <div>
-              <div style={{ fontSize: "13px", color: mutedColor, textTransform: "uppercase", fontWeight: 500, letterSpacing: "0.5px", marginBottom: "4px" }}>Barcode</div>
-              <div style={{ fontWeight: 700, fontSize: "18px", color: textColor }}>{person.barcode}</div>
+            <div className="employee-profile-detail">
+              <div className="employee-profile-detail-label">Barcode</div>
+              <div className="employee-profile-detail-value" style={{ color: textColor }}>{person.barcode}</div>
             </div>
-            <div>
-              <div style={{ fontSize: "13px", color: mutedColor, textTransform: "uppercase", fontWeight: 500, letterSpacing: "0.5px", marginBottom: "4px" }}>Department</div>
-              <div style={{ fontWeight: 700, fontSize: "18px", color: textColor }}>{person.department || "-"}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: "13px", color: mutedColor, textTransform: "uppercase", fontWeight: 500, letterSpacing: "0.5px", marginBottom: "4px" }}>Access Level</div>
-              <div style={{ fontWeight: 700, fontSize: "18px", color: textColor }}>{person.accessLevel}</div>
+            <div className="employee-profile-detail">
+              <div className="employee-profile-detail-label">Assigned zones</div>
+              <div className="employee-profile-detail-value">{person.allowedZones.length ? person.allowedZones.join(" · ") : "No zones assigned"}</div>
             </div>
           </div>
 
-          <div style={{ position: "relative", width: "100%", height: "260px" }}>
-            <div style={{ 
-              position: "absolute", 
-              top: "16px", 
-              left: "24px", 
-              right: "24px", 
-              zIndex: 10, 
-              display: "flex", 
-              justifyContent: "space-between", 
-              alignItems: "flex-start" 
-            }}>
+          <div className="employee-profile-summary-grid" aria-label="Employee activity totals">
+            <article className="employee-profile-summary-card"><span>Permissions</span><strong>{profilePermissions.length}</strong></article>
+            <article className="employee-profile-summary-card"><span>Alert triggers</span><strong>{alertTriggerCount}</strong></article>
+            <article className="employee-profile-summary-card"><span>Movement logs</span><strong>{movementLogCount}</strong></article>
+          </div>
+
+          <div className="employee-profile-hours-chart">
+            <div className="employee-profile-chart-summary">
               <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                  <div style={{ fontSize: "32px", fontWeight: 800, color: textColor, lineHeight: 1 }}>
+                  <div className="employee-profile-summary-number" style={{ color: textColor }}>
                     {displayedHours}
                   </div>
-                  <div style={{ fontSize: "12px", fontWeight: 700, color: "#ea580c" }}>
+                  <div className="employee-profile-summary-trend">
                     ↑ 12% {trendUnit}
                   </div>
                 </div>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: mutedColor, letterSpacing: "1px" }}>
+                <div className="employee-profile-summary-label" style={{ color: mutedColor }}>
                   TOTAL HOURS
                 </div>
               </div>
             </div>
             
-            <div style={{ height: "100%", width: "100%", position: "absolute", top: 0, left: 0 }}>
+            <div className="employee-profile-hours-chart-canvas">
               <Line data={chartData} options={chartOptions} />
             </div>
           </div>
 
-          <div>
+          <div className="employee-profile-work-pattern">
             <WorkPatternChart timeRange={timeRange} sessions={sessions} />
           </div>
+
+          <div className="employee-profile-record-grid">
+            <section className="employee-profile-record-section" aria-labelledby="employee-profile-permissions-title">
+              <h3 id="employee-profile-permissions-title">Employee permissions</h3>
+              {profilePermissions.length ? <ul className="employee-profile-record-list">
+                {profilePermissions.slice(0, 6).map((permission) => <li key={permission.id}>
+                  <div className="employee-profile-record-heading"><strong>{permission.zones.length ? permission.zones.join(" · ") : permission.assignment}</strong><span data-state={permission.state}>{permission.state.replaceAll("_", " ")}</span></div>
+                  <small>{formatProfileDate(permission.validFrom)} – {permission.validTo ? formatProfileDate(permission.validTo) : "No expiry"}</small>
+                  {permission.reason ? <p>{permission.reason}</p> : null}
+                </li>)}
+              </ul> : <p className="employee-profile-empty">No individual permission records.</p>}
+            </section>
+
+            <section className="employee-profile-record-section" aria-labelledby="employee-profile-alert-triggers-title">
+              <h3 id="employee-profile-alert-triggers-title">Alert triggers</h3>
+              {profileAlerts.length ? <ul className="employee-profile-record-list">
+                {profileAlerts.slice(0, 8).map((alert) => <li key={alert.id}>
+                  <div className="employee-profile-record-heading"><strong>{alert.title}</strong><span data-state={alert.review?.decision ?? alert.status}>{alertReviewLabel(alert)}</span></div>
+                  <small>{formatProfileDate(alert.createdAt || `${alert.date} ${alert.time}`)} · {alert.severity}</small>
+                </li>)}
+              </ul> : <p className="employee-profile-empty">{historyLoading ? "Loading alert history…" : "No alert triggers recorded."}</p>}
+            </section>
+
+            <section className="employee-profile-record-section employee-profile-movement-section" aria-labelledby="employee-profile-movements-title">
+              <h3 id="employee-profile-movements-title">Movement logs</h3>
+              {movementLogs.length ? <div className="employee-profile-movement-table-wrap">
+                <table className="employee-profile-movement-table">
+                  <caption className="sr-only">Movement history for {person.name}</caption>
+                  <thead><tr><th scope="col">Date &amp; time</th><th scope="col">Direction</th><th scope="col">Checkpoint</th><th scope="col">Result</th><th scope="col">Scan</th><th scope="col">Details</th></tr></thead>
+                  <tbody>{movementLogs.slice(0, 8).map((movement) => {
+                    const timestamp = movement.createdAt || `${movement.date} ${movement.time}`;
+                    const details = movement.reason?.trim() || movement.denialCode?.replaceAll("_", " ") || (movement.result === "approved" ? "Access permitted" : "Access denied");
+                    const scanType = movement.manualReviewedAt ? "Manual review" : movement.scanType === "manual" ? "Manual scan" : movement.scanType === "auto" ? "Automatic" : "Not recorded";
+                    return <tr key={movement.id}>
+                      <td><time dateTime={movement.createdAt || undefined}>{formatProfileDate(timestamp)}</time></td>
+                      <td>{movement.direction === "entry" ? "Entry" : "Exit"}</td>
+                      <td>{movement.checkpoint || "Not recorded"}</td>
+                      <td><span className="employee-profile-movement-result" data-result={movement.result}>{movement.result === "approved" ? "Allowed" : "Denied"}</span></td>
+                      <td>{scanType}</td>
+                      <td>{details}</td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+              </div> : <p className="employee-profile-empty">{historyLoading ? "Loading movement logs…" : "No movement logs recorded."}</p>}
+            </section>
+          </div>
+          {historyError ? <p className="employee-profile-history-error" role="status">{historyError}</p> : null}
         </div>
       </div>
     </div>,

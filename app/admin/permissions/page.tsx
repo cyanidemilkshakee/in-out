@@ -1,78 +1,66 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
-  BellRing,
-  CalendarClock,
   Check,
-  ChevronRight,
-  KeyRound,
-  Package,
-  Search,
-  ShieldBan,
-  UsersRound,
+  Clock3,
+  Plus,
+  ShieldCheck,
   X,
 } from "lucide-react";
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import type { AccessPermission, PermissionRequest } from "../../../lib/types";
+import { formatFacilityZones } from "../../../lib/facilityZones";
+import { DEFAULT_MANUAL_REVIEW_MINUTES } from "../../../lib/manualReviewDuration";
+import { AccessDirectory } from "../../../frontend/components/admin/permissions/AccessDirectory";
+import { ManualReviewCard } from "../../../frontend/components/admin/permissions/ManualReviewCard";
+import { RequestDialog, type RequestContext } from "../../../frontend/components/admin/permissions/RequestDialog";
+import { formatRequestDate, permissionDisplayState, permissionWindowLabels, requestApprovalLabel, REQUEST_LABELS } from "../../../frontend/components/admin/permissions/requestPresentation";
+import requestStyles from "../../../frontend/components/admin/permissions/Requests.module.css";
 
-type DirectoryTab = "employee" | "visitor" | "hardware";
+type DirectoryTab = "people" | "hardware";
 
-const TAB_LABELS: Array<{ id: DirectoryTab; label: string }> = [
-  { id: "employee", label: "People" },
-  { id: "visitor", label: "Visitors" },
-  { id: "hardware", label: "Hardware" },
-];
-
-const VALID_FOR_OPTIONS = [
-  { minutes: 15, label: "15 minutes" },
-  { minutes: 30, label: "30 minutes" },
-  { minutes: 60, label: "1 hour" },
-  { minutes: 120, label: "2 hours" },
-  { minutes: 240, label: "4 hours" },
-];
-
-function permissionAction(permission: AccessPermission) {
-  if (permission.state === "pending_approval") return "Review request";
-  if (permission.subjectType === "hardware") {
-    return permission.state === "active" ? "Restrict hardware" : "Allow hardware";
-  }
-  if (permission.subjectType === "employee") {
-    return permission.state === "active" ? "Deny entry" : "Restore access";
-  }
-  return permission.state === "active" ? "Remove permission" : "Assign permission";
-}
-
-function formatLocalInput(date: Date) {
-  const shifted = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
-  return shifted.toISOString().slice(0, 16);
+function isOneTimeManualReviewRecord(permission: AccessPermission) {
+  const isUnregisteredPlaceholder = permission.subjectName.trim().toLowerCase() === "unregistered barcode";
+  const isOneTimeReview = permission.subjectType === "visitor" && permission.assignment === "One visit" &&
+    (permission.updatedBy === "manual-review" || permission.reason?.startsWith("Manual approval covers one entry"));
+  return isUnregisteredPlaceholder || isOneTimeReview;
 }
 
 export default function PermissionManagerPage() {
   const {
     permissions,
     permissionRequests,
-    notifications,
+    people,
+    hardwareAssets,
+    checkpoints,
+    isLoading,
+    error,
   } = useDataState();
   const {
-    updateAccessPermission,
     decidePermissionRequest,
-    markNotificationRead,
+    releaseEntryRestriction,
+    refresh,
   } = useDataActions();
-  const [tab, setTab] = useState<DirectoryTab>("employee");
+  const [tab, setTab] = useState<DirectoryTab>("people");
   const [search, setSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("all");
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [selectedSubjectId, setSelectedSubjectId] = useState("");
-  const [zones, setZones] = useState("Main Entrance");
-  const [validFrom, setValidFrom] = useState("");
-  const [validTo, setValidTo] = useState("");
-  const [formError, setFormError] = useState("");
   const [feedback, setFeedback] = useState("");
   const [actionError, setActionError] = useState("");
   const [busy, setBusy] = useState(false);
   const [decisionNotes, setDecisionNotes] = useState<Record<string, string>>({});
+  const [invalidDecisionNotes, setInvalidDecisionNotes] = useState<Record<string, boolean>>({});
   const [validForMinutes, setValidForMinutes] = useState<Record<string, number>>({});
+  const [requestContext, setRequestContext] = useState<RequestContext | null>(null);
+  const [selectedRequestId, setSelectedRequestId] = useState("");
+  const [requestFocusVersion, setRequestFocusVersion] = useState(0);
+  const [highlightSubjectId, setHighlightSubjectId] = useState("");
+  const query = useSearchParams();
+  const handledQueryRef = useRef("");
+  const focusedVersionRef = useRef(-1);
+  const focusedSubjectRef = useRef("");
+  const decisionNoteRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
 
   async function runAction(action: () => Promise<void>) {
     if (busy) return;
@@ -91,305 +79,254 @@ export default function PermissionManagerPage() {
     () => permissionRequests.filter((request) => request.status === "pending"),
     [permissionRequests]
   );
-  const unreadNotifications = useMemo(
-    () => notifications.filter((notification) => !notification.read),
-    [notifications]
+  const manualReviewRequests = useMemo(() => pendingRequests
+    .filter((request) => request.type === "manual_override")
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)), [pendingRequests]);
+  const otherPendingRequests = useMemo(() => pendingRequests
+    .filter((request) => request.type !== "manual_override")
+    .sort((left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt)), [pendingRequests]);
+
+  function focusRequest(requestId: string) {
+    setSelectedRequestId(requestId);
+    setRequestFocusVersion((value) => value + 1);
+  }
+
+  useEffect(() => {
+    const queryKey = query.toString();
+    if (isLoading || error || !queryKey || handledQueryRef.current === queryKey) return;
+    handledQueryRef.current = queryKey;
+    const requestId = query.get("request");
+    const subjectId = query.get("subject");
+    const requestedType = query.get("requestType");
+    if (requestedType && requestedType !== "manual_override" && Object.hasOwn(REQUEST_LABELS, requestedType)) {
+      setRequestContext({ type: requestedType as PermissionRequest["type"], subjectId: subjectId ?? undefined });
+    }
+    if (subjectId) {
+      setHighlightSubjectId(subjectId);
+      const permission = permissions.find((item) => item.subjectId === subjectId);
+      setTab(permission?.subjectType === "hardware" || hardwareAssets.some((item) => item.id === subjectId) ? "hardware" : "people");
+      setSearch(""); setStateFilter("all");
+    }
+    const request = permissionRequests.find((item) => requestId ? item.id === requestId : item.subjectId === subjectId && item.status === "pending");
+    if (request?.status === "pending") focusRequest(request.id);
+    else if (request) setFeedback(`${request.subjectName}: this permission request has already been decided.`);
+    else if (requestId) setFeedback("This permission request is no longer pending.");
+  }, [query, isLoading, error, permissions, permissionRequests, hardwareAssets]);
+
+  useEffect(() => {
+    if (!selectedRequestId || requestContext || focusedVersionRef.current === requestFocusVersion) return;
+    const frame = window.requestAnimationFrame(() => {
+      const card = document.getElementById(selectedRequestId);
+      card?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+      card?.focus({ preventScroll: true });
+      if (card) focusedVersionRef.current = requestFocusVersion;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [selectedRequestId, pendingRequests, requestContext, requestFocusVersion]);
+  const managedPermissions = useMemo(
+    () => permissions.filter((permission) => !isOneTimeManualReviewRecord(permission)),
+    [permissions]
   );
   const directoryRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return permissions.filter((permission) => {
-      const typeMatches = permission.subjectType === tab;
-      const stateMatches = stateFilter === "all" || permission.state === stateFilter;
+    return managedPermissions.filter((permission) => {
+      const typeMatches = tab === "people"
+        ? permission.subjectType === "employee" || permission.subjectType === "visitor"
+        : permission.subjectType === "hardware";
+      const stateMatches = stateFilter === "all" || permissionDisplayState(permission) === stateFilter;
       const searchMatches =
         !needle ||
-        [permission.subjectName, permission.assignment, ...permission.zones]
+        [permission.subjectName, permission.assignment, people.find((person) => person.id === permission.subjectId)?.barcode, hardwareAssets.find((asset) => asset.id === permission.subjectId)?.barcode, hardwareAssets.find((asset) => asset.id === permission.subjectId)?.assignedEmployeeName, ...permission.zones, formatFacilityZones(permission.zones)]
           .join(" ")
           .toLowerCase()
           .includes(needle);
       return typeMatches && stateMatches && searchMatches;
+    }).sort((left, right) => left.subjectName.localeCompare(right.subjectName));
+  }, [managedPermissions, search, stateFilter, tab, people, hardwareAssets]);
+  useEffect(() => {
+    if (!highlightSubjectId || selectedRequestId || requestContext || focusedSubjectRef.current === highlightSubjectId) return;
+    const frame = window.requestAnimationFrame(() => {
+      const card = document.getElementById(`permission-${highlightSubjectId}`);
+      if (!card) return;
+      card.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "center" });
+      card.focus({ preventScroll: true });
+      focusedSubjectRef.current = highlightSubjectId;
     });
-  }, [permissions, search, stateFilter, tab]);
-
-  const metrics = useMemo(
-    () => [
-      { label: "Active permissions", value: permissions.filter((item) => item.state === "active").length, icon: UsersRound },
-      { label: "Pending approval", value: pendingRequests.length, icon: CalendarClock },
-      { label: "Restricted", value: permissions.filter((item) => item.state === "restricted" || item.state === "revoked").length, icon: ShieldBan },
-      { label: "Unread requests", value: unreadNotifications.length, icon: BellRing },
-    ],
-    [pendingRequests.length, permissions, unreadNotifications.length]
-  );
-
-  async function runQuickAction(permission: AccessPermission) {
-    if (permission.state === "pending_approval") {
-      const request = pendingRequests.find((item) => item.subjectId === permission.subjectId);
-      if (request) document.getElementById(request.id)?.scrollIntoView({ behavior: "smooth", block: "center" });
-      return;
-    }
-
-    const restore = permission.state !== "active";
-    const nextState = restore ? "active" : permission.subjectType === "visitor" ? "revoked" : "restricted";
-    const reason = restore
-      ? "Access restored by Permission Manager"
-      : permission.subjectType === "hardware"
-        ? "Hardware restricted by Permission Manager"
-        : permission.subjectType === "employee"
-          ? "Employee denied entry by Permission Manager"
-          : "Visitor permission removed by Permission Manager";
-    await updateAccessPermission({
-      subjectId: permission.subjectId,
-      state: nextState,
-      reason,
-    });
-    setFeedback(`${permission.subjectName}: ${restore ? "access restored" : "access restricted"}.`);
-  }
-
+    return () => window.cancelAnimationFrame(frame);
+  }, [highlightSubjectId, selectedRequestId, requestContext, directoryRows]);
   async function decide(request: PermissionRequest, decision: "approved" | "denied") {
+    if (busy) return;
     const reason = decisionNotes[request.id]?.trim();
     if (decision === "denied" && !reason) {
-      setActionError("Add a decision note before denying this permission.");
+      setInvalidDecisionNotes((current) => ({ ...current, [request.id]: true }));
+      decisionNoteRefs.current[request.id]?.focus();
       return;
     }
-    await decidePermissionRequest(
-      request.id,
-      decision,
-      reason ?? "",
-      decision === "approved" ? (validForMinutes[request.id] ?? 60) : undefined
-    );
-    setDecisionNotes((current) => {
-      const next = { ...current };
-      delete next[request.id];
-      return next;
+    await runAction(async () => {
+      await decidePermissionRequest(
+        request.id,
+        decision,
+        reason ?? "",
+        decision === "approved" && request.type === "manual_override" ? (validForMinutes[request.id] ?? DEFAULT_MANUAL_REVIEW_MINUTES) : undefined
+      );
+      setDecisionNotes((current) => {
+        const next = { ...current };
+        delete next[request.id];
+        return next;
+      });
+      setInvalidDecisionNotes((current) => {
+        const next = { ...current };
+        delete next[request.id];
+        return next;
+      });
+      setValidForMinutes((current) => {
+        const next = { ...current };
+        delete next[request.id];
+        return next;
+      });
+      setSelectedRequestId("");
+      setFeedback(`${request.subjectName}: permission ${decision === "approved" ? "approved" : "denied"}.`);
     });
-    setValidForMinutes((current) => {
-      const next = { ...current };
-      delete next[request.id];
-      return next;
-    });
-    const relatedNotification = notifications.find(
-      (notification) => notification.relatedId === request.id && !notification.read
-    );
-    setFeedback(`${request.subjectName}: request ${decision === "approved" ? "allowed" : "denied"}.`);
-    if (relatedNotification) {
-      try { await markNotificationRead(relatedNotification.id); }
-      catch { setActionError("The decision was saved, but its notification could not be marked read."); }
-    }
-  }
-
-  function openAssignDialog() {
-    const firstPermission = permissions.find((permission) => permission.subjectType === tab) ?? permissions[0];
-    const now = new Date();
-    setSelectedSubjectId(firstPermission?.subjectId ?? "");
-    setZones(firstPermission?.zones.join(", ") ?? "Main Entrance");
-    setValidFrom(formatLocalInput(now));
-    setValidTo(formatLocalInput(new Date(now.getTime() + 8 * 60 * 60 * 1000)));
-    setFormError("");
-    setAssignOpen(true);
-  }
-
-  async function submitAssignment() {
-    if (!selectedSubjectId) {
-      setFormError("Choose a subject.");
-      return;
-    }
-    if (!validFrom || !validTo || validFrom > validTo) {
-      setFormError("Start date must be on or before end date.");
-      return;
-    }
-    if (validFrom < "2016-01-01T00:00") {
-      setFormError("Dates before Jan 1, 2016 are not supported.");
-      return;
-    }
-    const permission = permissions.find((item) => item.subjectId === selectedSubjectId);
-    await updateAccessPermission({
-      subjectId: selectedSubjectId,
-      state: "active",
-      zones: zones.split(",").map((zone) => zone.trim()).filter(Boolean),
-      validFrom,
-      validTo,
-      reason: "Permission assigned manually by Permission Manager",
-    });
-    setAssignOpen(false);
-    setFeedback(`${permission?.subjectName ?? "Subject"}: permission assigned.`);
   }
 
   return (
-    <div className="permission-page">
-      {actionError ? <p className="permission-form-error" role="alert">{actionError}</p> : null}
-      <header className="permission-header">
+    <div className={requestStyles.page}>
+      {actionError ? <p className={requestStyles.pageError} role="alert">{actionError}</p> : null}
+      {error ? (
+        <div className={requestStyles.pageError} role="alert">
+          <span>Permission data could not be loaded: {error}</span>
+          <button className={requestStyles.contextLink} type="button" disabled={isLoading} onClick={() => void refresh()}>
+            {isLoading ? "Retrying…" : "Retry"}
+          </button>
+        </div>
+      ) : null}
+      <header className={requestStyles.pageHeader}>
         <div>
           <h1>Permission Manager</h1>
-          <p>Manage entry permissions, visitor approvals, hardware custody, and access decisions.</p>
         </div>
-        <button className="permission-primary" type="button" onClick={openAssignDialog}>
-          <KeyRound size={17} />
-          Assign permission
-        </button>
+        <button className={requestStyles.newPermission} type="button" onClick={() => setRequestContext({})}><Plus size={17} />New permission</button>
       </header>
 
-      <section className="permission-metrics" aria-label="Permission summary">
-        {metrics.map(({ label, value, icon: Icon }) => (
-          <div key={label}>
-            <Icon size={22} strokeWidth={1.5} />
-            <span>
-              <small>{label}</small>
-              <strong>{value}</strong>
-            </span>
-          </div>
-        ))}
-      </section>
-
       {feedback ? (
-        <div className="permission-feedback" role="status">
+        <div className={requestStyles.feedback} role="status">
           <Check size={16} />
-          {feedback}
+          <span>{feedback}</span>
           <button type="button" aria-label="Dismiss status" onClick={() => setFeedback("")}><X size={15} /></button>
         </div>
       ) : null}
 
-      <div className="permission-layout">
-        <section className="permission-directory" aria-labelledby="directory-title">
-          <div className="permission-section-heading">
-            <h2 id="directory-title">Access directory</h2>
-            <span>{directoryRows.length} records</span>
-          </div>
-          <div className="permission-tabs" role="tablist" aria-label="Permission subject type">
-            {TAB_LABELS.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                role="tab"
-                aria-selected={tab === item.id}
-                className={tab === item.id ? "is-active" : ""}
-                onClick={() => setTab(item.id)}
-              >
-                {item.label}
-              </button>
-            ))}
-          </div>
-          <div className="permission-filters">
-            <label>
-              <Search size={16} />
-              <input
-                type="search"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-                placeholder={`Search ${TAB_LABELS.find((item) => item.id === tab)?.label.toLowerCase()}`}
+      <div className={requestStyles.managerLayout}>
+        <AccessDirectory rows={directoryRows} hardwareAssets={hardwareAssets} tab={tab} onTabChange={setTab}
+          search={search} onSearchChange={setSearch} stateFilter={stateFilter} onStateFilterChange={setStateFilter}
+          highlightedSubjectId={highlightSubjectId} busy={busy} isLoading={isLoading} error={error} total={managedPermissions.length}
+          onReviewRequest={(permission) => {
+            const request = pendingRequests.find((item) => item.subjectId === permission.subjectId);
+            if (request) focusRequest(request.id);
+            else setFeedback("This subject has no pending request to review.");
+          }}
+          onManageAccess={(permission) => setRequestContext({ subjectId: permission.subjectId, type: "zone_access" })}
+          onReassign={(permission) => setRequestContext({ subjectId: permission.subjectId, type: "hardware_custody" })}
+          onReleaseRestriction={(permission, reason) => { void runAction(async () => {
+            if (!permission.entryRestriction?.active) return;
+            await releaseEntryRestriction(permission.entryRestriction.triggerAlertId, reason);
+            setFeedback(`${permission.subjectName}: entry restriction lifted. Their entry zones and valid window still apply.`);
+          }); }} />
+        <div className={requestStyles.queueColumn}>
+          <section className={requestStyles.queuePanel} aria-labelledby="manual-review-title">
+            <div className={requestStyles.queueHeading}>
+              <div className={requestStyles.sectionTitle}><span className={requestStyles.reviewIcon} aria-hidden="true"><Clock3 size={20} strokeWidth={1.7} /></span><div><h2 id="manual-review-title">Manual reviews</h2><p>Terminal exceptions awaiting a decision.</p></div></div>
+              <span className={requestStyles.queueCount}>{manualReviewRequests.length} pending</span>
+            </div>
+            <div className={requestStyles.reviewList}>
+              {isLoading && pendingRequests.length === 0 ? (
+                <div className={requestStyles.queueEmpty} role="status">Loading manual reviews…</div>
+              ) : error && pendingRequests.length === 0 ? (
+                <div className={requestStyles.queueEmpty}>Manual reviews are unavailable. Use Retry above.</div>
+              ) : manualReviewRequests.length ? manualReviewRequests.map((request) => (
+              <ManualReviewCard
+                key={request.id}
+                id={request.id}
+                tabIndex={-1}
+                className={`${requestStyles.requestCard} ${selectedRequestId === request.id ? requestStyles.selected : ""}`}
+                request={request}
+                checkpointName={request.checkpoint || checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId}
+                decisionNote={decisionNotes[request.id] ?? ""}
+                noteInvalid={Boolean(invalidDecisionNotes[request.id])}
+                noteInputRef={(node) => { decisionNoteRefs.current[request.id] = node; }}
+                onNoteChange={(value) => {
+                  setDecisionNotes((current) => ({ ...current, [request.id]: value }));
+                  if (value.trim()) {
+                    setInvalidDecisionNotes((current) => current[request.id] ? { ...current, [request.id]: false } : current);
+                  }
+                }}
+                validForMinutes={validForMinutes[request.id] ?? DEFAULT_MANUAL_REVIEW_MINUTES}
+                onDurationChange={(minutes) => setValidForMinutes((current) => ({ ...current, [request.id]: minutes }))}
+                disabled={busy}
+                onDecision={(decision) => { void decide(request, decision); }}
               />
-            </label>
-            <select value={stateFilter} onChange={(event) => setStateFilter(event.target.value)} aria-label="Access state">
-              <option value="all">All access states</option>
-              <option value="active">Active</option>
-              <option value="pending_approval">Pending approval</option>
-              <option value="restricted">Restricted</option>
-              <option value="revoked">Revoked</option>
-              <option value="expired">Expired</option>
-            </select>
-          </div>
-          <div className="admin-table-wrap permission-table-wrap">
-            <table className="permission-table">
-              <thead>
-                <tr>
-                  <th>Subject</th>
-                  <th>Assignment</th>
-                  <th>Access state</th>
-                  <th>Zones</th>
-                  <th>Valid window</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {directoryRows.map((permission) => (
-                  <tr key={permission.id}>
-                    <td>
-                      <span className="permission-subject-icon">
-                        {permission.subjectType === "hardware" ? <Package size={16} /> : permission.subjectName.split(" ").map((part) => part[0]).join("").slice(0, 2)}
-                      </span>
-                      <span><strong>{permission.subjectName}</strong><small>{permission.subjectType}</small></span>
-                    </td>
-                    <td>{permission.assignment}</td>
-                    <td><span className="permission-state" data-state={permission.state}>{permission.state.replaceAll("_", " ")}</span></td>
-                    <td>{permission.zones.join(" / ")}</td>
-                    <td><span>{permission.validFrom}</span><small>{permission.validTo}</small></td>
-                    <td>
-                      <button type="button" disabled={busy} className="permission-row-action" onClick={() => void runAction(() => runQuickAction(permission))}>
-                        {permissionAction(permission)} <ChevronRight size={15} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+              )) : (
+                <div className={requestStyles.queueEmpty}><span className={requestStyles.emptyIcon}><ShieldCheck size={28} strokeWidth={1.4} /></span><strong>All caught up</strong><span>New terminal manual reviews will appear here.</span></div>
+              )}
+            </div>
+          </section>
 
-        <aside className="permission-decisions" aria-labelledby="pending-title">
-          <div className="permission-section-heading">
-            <h2 id="pending-title">Pending permissions</h2>
-            <span>{pendingRequests.length}</span>
-          </div>
-          <div className="permission-request-list">
-            {pendingRequests.length ? pendingRequests.map((request) => (
-              <article id={request.id} key={request.id}>
-                <h3>{request.subjectName}</h3>
+          {otherPendingRequests.length > 0 && (
+            <section className={requestStyles.queuePanel} aria-labelledby="other-pending-title">
+              <div className={requestStyles.queueHeading}>
+                <h2 id="other-pending-title">Other pending permissions</h2>
+                <span className={requestStyles.queueCount}>{otherPendingRequests.length} pending</span>
+              </div>
+              <div className={requestStyles.reviewList}>
+                {otherPendingRequests.map((request) => (
+              <article id={request.id} key={request.id} tabIndex={-1} className={`${requestStyles.otherRequest} ${selectedRequestId === request.id ? requestStyles.selected : ""}`}>
+                <span className={requestStyles.badge} data-type={request.type}>{REQUEST_LABELS[request.type]}</span>
+                <h3>{request.subjectName}{request.barcode ? ` · ${request.barcode}` : ""}</h3>
+                <p className={requestStyles.requestMeta}>{request.purpose}<br />Requested by {request.requester} · {formatRequestDate(request.createdAt)}</p>
                 <dl>
-                  <div><dt>Access</dt><dd>{request.requestedZones.join(" / ")}</dd></div>
+                  <div><dt>Checkpoint</dt><dd>{checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId || "Not specified"}</dd></div>
+                  {request.type !== "hardware_custody" && <div><dt>Requested zones</dt><dd>{formatFacilityZones(request.requestedZones) || "None"}</dd></div>}
                   {request.direction ? <div><dt>Movement</dt><dd>{request.direction === "entry" ? "Entry" : "Exit"}</dd></div> : null}
+                  {request.eventId && <div><dt>Denied scan</dt><dd><a href={`/admin/logs?eventId=${encodeURIComponent(request.eventId)}`}>{request.eventId}</a></dd></div>}
+                  {request.type !== "hardware_custody" && <div><dt>Requested window</dt><dd>{permissionWindowLabels(request.validFrom, request.validTo).start}<br />{permissionWindowLabels(request.validFrom, request.validTo).end}</dd></div>}
                 </dl>
+                {request.type === "hardware_custody" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Custodian change</strong><span>{request.previousCarrierName || hardwareAssets.find((asset) => asset.id === (request.hardwareId || request.subjectId))?.assignedEmployeeName || "Unassigned"} → {request.carrierName || request.carrierId || "No employee selected"}</span><span>Reassigns custody until the next reassignment. Zone access stays separate.</span></div>}
+                {request.type === "zone_access" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Current → proposed access</strong><span>{formatFacilityZones(request.previousZones ?? permissions.find((item) => item.subjectId === request.subjectId)?.zones ?? people.find((item) => item.id === request.subjectId)?.allowedZones ?? hardwareAssets.find((item) => item.id === request.subjectId)?.allowedZones ?? []) || "No current zones"} → {formatFacilityZones(request.requestedZones) || "None"}</span><span>Previous window: {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).start} / {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).end}</span><span>Replaces the complete zone set and valid window.</span></div>}
                 {request.operatorNote ? <p className="permission-request-note">{request.operatorNote}</p> : null}
+                <>
                 <label className="permission-decision-note">
-                  <span>Decision note <em>Required to deny</em></span>
-                  <textarea
+                  <span>Operator note</span>
+                  <textarea className="admin-surface"
+                    ref={(node) => { decisionNoteRefs.current[request.id] = node; }}
+                    aria-invalid={invalidDecisionNotes[request.id] || undefined}
                     value={decisionNotes[request.id] ?? ""}
                     disabled={busy}
                     maxLength={1000}
                     placeholder="Add a note if you deny this permission."
-                    onChange={(event) => setDecisionNotes((current) => ({ ...current, [request.id]: event.target.value }))}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      setDecisionNotes((current) => ({ ...current, [request.id]: value }));
+                      if (value.trim()) {
+                        setInvalidDecisionNotes((current) => current[request.id] ? { ...current, [request.id]: false } : current);
+                      }
+                    }}
                   />
                 </label>
                 <div className="request-decision-controls">
-                  <label className="permission-valid-for">
-                    <span>Valid for</span>
-                    <select
-                      value={validForMinutes[request.id] ?? 60}
-                      disabled={busy}
-                      onChange={(event) => setValidForMinutes((current) => ({ ...current, [request.id]: Number(event.target.value) }))}
-                    >
-                      {VALID_FOR_OPTIONS.map((option) => <option key={option.minutes} value={option.minutes}>{option.label}</option>)}
-                    </select>
-                  </label>
                   <div className="request-actions">
-                    <button type="button" disabled={busy} onClick={() => void runAction(() => decide(request, "approved"))}>Allow</button>
-                    <button type="button" disabled={busy || !decisionNotes[request.id]?.trim()} onClick={() => void runAction(() => decide(request, "denied"))}>Deny</button>
+                    <button type="button" className="permission-approve-button" disabled={busy} onClick={() => void decide(request, "approved")}>{requestApprovalLabel(request)}</button>
+                    <button type="button" className="permission-deny-button" disabled={busy} onClick={() => void decide(request, "denied")}>Deny</button>
                   </div>
                 </div>
+                </>
               </article>
-            )) : (
-              <div className="permission-empty"><Check size={20} /><strong>Queue clear</strong><span>No permission requests need review.</span></div>
-            )}
-          </div>
-        </aside>
-
+                ))}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
 
-      {assignOpen ? (
-        <div className="permission-dialog-backdrop" role="presentation">
-          <section className="permission-dialog" role="dialog" aria-modal="true" aria-labelledby="assign-title">
-            <header><div><h2 id="assign-title">Assign permission</h2><p>Grant a scoped, time-bound access permission.</p></div><button type="button" aria-label="Close" onClick={() => setAssignOpen(false)}><X size={18} /></button></header>
-            <label><span>Subject</span><select value={selectedSubjectId} onChange={(event) => { setSelectedSubjectId(event.target.value); const permission = permissions.find((item) => item.subjectId === event.target.value); if (permission) setZones(permission.zones.join(", ")); }}>
-              {permissions.map((permission) => <option key={permission.id} value={permission.subjectId}>{permission.subjectName} / {permission.subjectType}</option>)}
-            </select></label>
-            <label><span>Allowed zones</span><input value={zones} onChange={(event) => setZones(event.target.value)} placeholder="Main Entrance, IT Lab" /></label>
-            <div className="permission-date-grid">
-              <label><span>Valid from</span><input type="datetime-local" min="2016-01-01T00:00" value={validFrom} onChange={(event) => setValidFrom(event.target.value)} /></label>
-              <label><span>Valid to</span><input type="datetime-local" min={validFrom || "2016-01-01T00:00"} value={validTo} onChange={(event) => setValidTo(event.target.value)} /></label>
-            </div>
-            <small>Facility time: UTC+05:30. Start date must not be after end date.</small>
-            {formError ? <p className="permission-form-error">{formError}</p> : null}
-            <footer><button type="button" onClick={() => setAssignOpen(false)}>Cancel</button><button type="button" disabled={busy} onClick={() => void runAction(submitAssignment)}>Assign permission</button></footer>
-          </section>
-        </div>
-      ) : null}
+      {requestContext && <RequestDialog mode="grant" context={requestContext} onClose={() => setRequestContext(null)} onReview={(requestId) => { setRequestContext(null); focusRequest(requestId); }} onSubmitted={(request) => { setRequestContext(null); setFeedback(`${request.subjectName}: ${REQUEST_LABELS[request.type].toLowerCase()} granted.`); setHighlightSubjectId(request.subjectId); setTab(request.type === "hardware_custody" || hardwareAssets.some((asset) => asset.id === request.subjectId) ? "hardware" : "people"); setSearch(""); setStateFilter("all"); void refresh(); }} />}
     </div>
   );
 }

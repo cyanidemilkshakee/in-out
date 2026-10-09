@@ -1,13 +1,12 @@
 import { useState } from "react";
 import type { CreateEmployeeInput } from "../../../../lib/types";
+import { FACILITY_ZONES } from "../../../../lib/facilityZones";
 import { CreationDialog } from "./CreationDialog";
 
 const initialEmployee: CreateEmployeeInput = {
   name: "",
   barcode: "",
-  department: "",
-  accessLevel: "Employee",
-  allowedZone: "All Zones",
+  allowedZones: ["public", "secure"],
 };
 
 export function EmployeeCreator({
@@ -55,25 +54,10 @@ export function EmployeeCreator({
           <input value={form.barcode} onChange={(event) => update("barcode", event.target.value)} placeholder="Employee barcode" required />
         </label>
         <label className="creation-dialog-span-two">
-          <span>Department</span>
-          <input value={form.department} onChange={(event) => update("department", event.target.value)} placeholder="Department" required />
-        </label>
-        <label>
-          <span>Access level</span>
-          <select value={form.accessLevel} onChange={(event) => update("accessLevel", event.target.value)}>
-            <option>Employee</option>
-            <option>IT Admin</option>
-            <option>Security</option>
-          </select>
-        </label>
-        <label>
-          <span>Allowed zone</span>
-          <select value={form.allowedZone} onChange={(event) => update("allowedZone", event.target.value)}>
-            <option>All Zones</option>
-            <option>Main Entrance</option>
-            <option>IT Lab</option>
-            <option>Server Room</option>
-            <option>Warehouse</option>
+          <span>Allowed zones</span>
+          <select value={form.allowedZones?.length === 2 ? "both" : form.allowedZones?.[0] ?? "public"} onChange={(event) => update("allowedZones", event.target.value === "both" ? ["public", "secure"] : [event.target.value])}>
+            <option value="both">Both zones</option>
+            {FACILITY_ZONES.map((zone) => <option key={zone.id} value={zone.id}>{zone.name}</option>)}
           </select>
         </label>
       </div>

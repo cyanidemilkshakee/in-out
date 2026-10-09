@@ -4,9 +4,10 @@ Audit event endpoints.
 GET /v1/audit-events — paginated list of audit events with optional category filter
 """
 
+from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -24,14 +25,29 @@ async def list_audit_events(
     limit: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT),
     offset: int = Query(0, ge=0),
     category: Optional[str] = Query(None, description="Filter by data->>'category'"),
+    startAt: Optional[str] = Query(None),
+    endAt: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
     """
     Return a paginated list of audit events ordered newest-first.
     Optional ?category= filters on the JSONB data->>'category' field.
     """
-    q = select(AuditEvent).order_by(AuditEvent.created_at.desc())
+    q = select(AuditEvent)
     count_q = select(func.count()).select_from(AuditEvent)
+
+    for value, is_start in ((startAt, True), (endAt, False)):
+        if not value:
+            continue
+        try:
+            bound = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            if bound.tzinfo is None:
+                bound = bound.replace(tzinfo=timezone.utc)
+        except ValueError as error:
+            raise HTTPException(422, "Date filter must be ISO 8601") from error
+        condition = AuditEvent.created_at >= bound if is_start else AuditEvent.created_at <= bound
+        q = q.where(condition)
+        count_q = count_q.where(condition)
 
     if category:
         q = q.where(AuditEvent.data["category"].astext == category)
@@ -40,7 +56,7 @@ async def list_audit_events(
     total_res = await db.execute(count_q)
     total = total_res.scalar_one()
 
-    rows_res = await db.execute(q.limit(limit).offset(offset))
+    rows_res = await db.execute(q.order_by(AuditEvent.created_at.desc(), AuditEvent.id).limit(limit).offset(offset))
     events = rows_res.scalars().all()
 
     return {

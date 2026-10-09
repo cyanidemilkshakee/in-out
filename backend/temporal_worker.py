@@ -13,7 +13,6 @@ from temporalio.worker import Worker
 
 from config import settings
 from workflows.activities import (
-    notify_admins_of_override,
     approve_override,
     deny_override,
     auto_deny_override,
@@ -47,7 +46,6 @@ async def run_worker() -> None:
             AlertRuleCronWorkflow,
         ],
         activities=[
-            notify_admins_of_override,
             approve_override,
             deny_override,
             auto_deny_override,

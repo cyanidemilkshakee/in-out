@@ -1,6 +1,8 @@
+import { Fragment } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import type {
   MovementEvent,
+  Person,
   ResultStatus,
   SortDirection,
   VisibleColumn,
@@ -16,24 +18,29 @@ function ResultPill({ value }: { value: ResultStatus }) {
 
 export function MovementTable({
   events,
-  selectedId,
+  people,
   visibleColumns,
   sortKey,
   sortDirection,
   density,
-  onSort,
-  onSelect
+  layout = "default",
+  onSort
 }: {
   events: MovementEvent[];
-  selectedId?: string;
+  people: Person[];
   visibleColumns: Record<VisibleColumn, boolean>;
   sortKey: VisibleColumn;
   sortDirection: SortDirection;
   density: "comfortable" | "compact";
+  layout?: "default" | "logs";
   onSort: (column: VisibleColumn) => void;
-  onSelect: (id: string) => void;
 }) {
   const visibleColumnCount = Math.max(1, Object.values(visibleColumns).filter(Boolean).length);
+  const peopleById = new Map(people.map((person) => [person.id, person] as const));
+  const columnOrder: VisibleColumn[] = layout === "logs"
+    ? ["date", "time", "name", "type", "result", "checkpoint", "scanType", "direction", "active", "barcode"]
+    : ["date", "time", "createdAt", "name", "active", "type", "direction", "checkpoint", "result", "barcode", "scanType", "eventId"];
+
   const sortHeader = (column: VisibleColumn, label: string) => {
     const isSorted = sortKey === column;
     return (
@@ -53,22 +60,68 @@ export function MovementTable({
     );
   };
 
+  const renderHeader = (column: VisibleColumn) => {
+    if (!visibleColumns[column]) return null;
+    if (column === "active") return <th key={column} className="column-active">Status</th>;
+    const labels: Record<Exclude<VisibleColumn, "active">, string> = {
+      date: "Date",
+      time: "Time",
+      createdAt: "Created At",
+      name: "Name",
+      type: "Type",
+      direction: "Direction",
+      checkpoint: "Checkpoint Name",
+      result: "Result",
+      barcode: layout === "logs" ? "Barcode ID" : "Barcode",
+      scanType: "Scan Type",
+      eventId: "Event ID",
+    };
+    return <Fragment key={column}>{sortHeader(column, labels[column])}</Fragment>;
+  };
+
+  const renderStatus = (event: MovementEvent) => {
+    const person = peopleById.get(event.subjectId);
+    if (!person || person.type !== event.subjectType) return "—";
+    const label = person.type === "employee"
+      ? person.status === "active" ? "Active" : "Inactive"
+      : person.status === "pre_approved" ? "Pre-approved"
+        : person.status === "expired" ? "Expired"
+          : person.status.replaceAll("_", " ");
+    const isPositive = person.type === "employee"
+      ? person.status === "active"
+      : person.status === "pre_approved";
+    return (
+      <span className={`registry-presence employee-status-label ${isPositive ? "is-inside" : "is-outside"}`}>
+        {label}
+      </span>
+    );
+  };
+
+  const renderCell = (column: VisibleColumn, event: MovementEvent) => {
+    if (!visibleColumns[column]) return null;
+    switch (column) {
+      case "date": return <td key={column} className="column-date" data-label="Date">{event.date}</td>;
+      case "time": return <td key={column} className="column-time" data-label="Time">{event.time}</td>;
+      case "createdAt": return <td key={column} className="column-createdAt" data-label="Created At">{event.createdAt}</td>;
+      case "name": return <td key={column} className="column-name" data-label="Name">{event.subjectName}</td>;
+      case "active": return <td key={column} className="column-active" data-label="Status">{renderStatus(event)}</td>;
+      case "type": return <td key={column} className="column-type cell-capitalize" data-label="Type">{event.subjectType}</td>;
+      case "result": return <td key={column} className="column-result" data-label="Result"><ResultPill value={event.result} /></td>;
+      case "checkpoint": return <td key={column} className="column-checkpoint truncate" data-label="Checkpoint Name">{event.checkpoint}</td>;
+      case "scanType": return <td key={column} className="column-scanType cell-capitalize" data-label="Scan Type">{event.scanType}</td>;
+      case "direction": return <td key={column} className="column-direction" data-label="Direction"><span className={`direction direction-${event.direction}`}>{event.direction}</span></td>;
+      case "barcode": return <td key={column} className="column-barcode cell-barcode" data-label="Barcode ID">{event.barcode}</td>;
+      case "eventId": return <td key={column} className="column-eventId" data-label="Event ID">{event.id}</td>;
+      default: return null;
+    }
+  };
+
   return (
     <div className="admin-table-wrap table-wrap">
-      <table className={`data-table movement-table resizable density-${density}`}>
+      <table className={`data-table movement-table resizable density-${density}${layout === "logs" ? " movement-table--logs" : ""}`}>
         <thead>
           <tr>
-            {visibleColumns.date ? sortHeader("date", "Date") : null}
-            {visibleColumns.time ? sortHeader("time", "Time") : null}
-            {visibleColumns.createdAt ? sortHeader("createdAt", "Created At") : null}
-            {visibleColumns.name ? sortHeader("name", "Name") : null}
-            {visibleColumns.type ? sortHeader("type", "Type") : null}
-            {visibleColumns.direction ? sortHeader("direction", "Direction") : null}
-            {visibleColumns.checkpoint ? sortHeader("checkpoint", "Checkpoint Name") : null}
-            {visibleColumns.result ? sortHeader("result", "Result") : null}
-            {visibleColumns.barcode ? sortHeader("barcode", "Barcode") : null}
-            {visibleColumns.scanType ? sortHeader("scanType", "Scan Type") : null}
-            {visibleColumns.eventId ? sortHeader("eventId", "Event ID") : null}
+            {columnOrder.map(renderHeader)}
           </tr>
         </thead>
         <tbody>
@@ -83,43 +136,8 @@ export function MovementTable({
             </tr>
           ) : null}
           {events.map((event) => (
-            <tr
-              key={event.id}
-              className={selectedId === event.id ? "selected" : ""}
-              aria-selected={selectedId === event.id}
-              onClick={() => onSelect(event.id)}
-            >
-              {visibleColumns.date ? <td className="column-date" data-label="Date">{event.date}</td> : null}
-              {visibleColumns.time ? <td className="column-time" data-label="Time">{event.time}</td> : null}
-              {visibleColumns.createdAt ? <td className="column-createdAt" data-label="Created At">{event.createdAt}</td> : null}
-              {visibleColumns.name ? <td className="column-name" data-label="Name">{event.subjectName}</td> : null}
-              {visibleColumns.type ? <td className="column-type cell-capitalize" data-label="Type">{event.subjectType}</td> : null}
-              {visibleColumns.direction ? (
-                <td className="column-direction" data-label="Direction">
-                  <span className={`direction direction-${event.direction}`}>{event.direction}</span>
-                </td>
-              ) : null}
-              {visibleColumns.checkpoint ? <td data-label="Checkpoint" className="column-checkpoint truncate">{event.checkpoint}</td> : null}
-              {visibleColumns.result ? (
-                <td className="column-result" data-label="Result">
-                  <ResultPill value={event.result} />
-                </td>
-              ) : null}
-              {visibleColumns.barcode ? <td className="column-barcode cell-barcode" data-label="Barcode">{event.barcode}</td> : null}
-              {visibleColumns.scanType ? <td className="column-scanType cell-capitalize" data-label="Scan type">{event.scanType}</td> : null}
-              {visibleColumns.eventId ? (
-                <td className="column-eventId" data-label="Event ID">
-                  <button
-                    type="button"
-                    className="event-id-button"
-                    title={event.id}
-                    aria-label={`Open event ${event.id}`}
-                    onClick={(click) => { click.stopPropagation(); onSelect(event.id); }}
-                  >
-                    {event.id}
-                  </button>
-                </td>
-              ) : null}
+            <tr key={event.id}>
+              {columnOrder.map((column) => renderCell(column, event))}
             </tr>
           ))}
         </tbody>

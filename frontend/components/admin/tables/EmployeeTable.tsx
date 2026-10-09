@@ -1,25 +1,31 @@
 import { Fragment, Suspense, lazy, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from 'lucide-react';
 import { ActivityBar } from './ActivityBar';
-import type { MovementEvent, Person } from '../../../../lib/types';
+import type { AccessPermission, Alert, MovementEvent, Person } from '../../../../lib/types';
 import type { PersonSessionIndex } from '../../../../lib/analyticsUtils';
 import { eventTimestamp } from '../../../../lib/dateRanges';
+import { formatFacilityZones } from '../../../../lib/facilityZones';
+import { EmployeeStatusLabel } from '../EmployeeStatusLabel';
 
 // Lazy-load the chart-heavy profile card — keeps chart.js out of the initial bundle
 const EmployeeProfileCard = lazy(() =>
   import('../EmployeeProfileCard').then((m) => ({ default: m.EmployeeProfileCard }))
 );
 
-type EmployeeSortKey = "name" | "createdAt" | "barcode" | "accessLevel" | "department" | "latestScan" | "inside";
+type EmployeeSortKey = "name" | "createdAt" | "barcode" | "status" | "latestScan" | "inside";
 
 export function EmployeeTable({
   people: rows,
   movements,
   sessionsByPerson,
+  permissions,
+  alerts,
 }: {
   people: Person[];
   movements: MovementEvent[];
   sessionsByPerson: PersonSessionIndex;
+  permissions: AccessPermission[];
+  alerts: Alert[];
 }) {
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [sortKey, setSortKey] = useState<EmployeeSortKey>("name");
@@ -77,15 +83,15 @@ export function EmployeeTable({
 
   return (
       <Fragment>
-      <div className="admin-table-wrap table-wrap table-wrap-condensed registry-table-wrap">
-        <table className="data-table data-table-condensed employee-table registry-table registry-table--employees">
+      <div className="admin-table-wrap table-wrap">
+        <table className="data-table employee-table registry-table registry-table--employees">
           <thead>
             <tr>
               {sortHeader("name", "Name")}
+              {sortHeader("status", "Status")}
               {sortHeader("createdAt", "Created At")}
               {sortHeader("barcode", "Barcode")}
-              {sortHeader("accessLevel", "Access", "access")}
-              {sortHeader("department", "Department")}
+              <th className="column-zones">Zones</th>
               {sortHeader("latestScan", "Latest Scan", "latest-scan")}
               {sortHeader("inside", "Type", "type")}
               <th className="column-activity">Activity</th>
@@ -97,14 +103,18 @@ export function EmployeeTable({
               return (
                 <tr key={person.id}>
                   <td className="column-name" data-label="Name">{person.name}</td>
+                  <td className="column-status" data-label="Status">
+                    <EmployeeStatusLabel status={person.status} />
+                  </td>
                   <td className="column-createdAt" data-label="Created At">
                     {person.createdAt
                       ? new Date(person.createdAt).toLocaleString("en-IN")
                       : "Not recorded"}
                   </td>
                   <td className="column-barcode" data-label="Barcode">{person.barcode}</td>
-                  <td className="column-access" data-label="Access">{person.accessLevel}</td>
-                  <td className="column-department" data-label="Department">{person.department ?? "-"}</td>
+                  <td className="column-zones" data-label="Zones">
+                    {formatFacilityZones(person.allowedZones) || "No zones assigned"}
+                  </td>
                   <td className="column-latest-scan mono" data-label="Latest scan">
                     {latestScan
                       ? new Date(eventTimestamp(latestScan)).toLocaleString("en-IN", {
@@ -144,6 +154,9 @@ export function EmployeeTable({
           <EmployeeProfileCard
             person={selectedPerson}
             sessions={sessionsByPerson.get(selectedPerson.id) ?? []}
+            permissions={permissions}
+            alerts={alerts}
+            movements={movements}
             onClose={() => setSelectedPerson(null)}
           />
         </Suspense>

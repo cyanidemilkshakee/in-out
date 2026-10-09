@@ -19,6 +19,7 @@ export type DenialCode =
   | "hardware_restricted"
   | "custody_mismatch"
   | "zone_not_permitted"
+  | "cross_building_access"
   | "already_inside"
   | "no_active_entry"
   | "asset_not_expected_out"
@@ -29,6 +30,7 @@ export type VisibleColumn =
   | "time"
   | "createdAt"
   | "name"
+  | "active"
   | "type"
   | "direction"
   | "checkpoint"
@@ -44,10 +46,8 @@ export type Person = {
   name: string;
   type: Exclude<SubjectType, "hardware">;
   barcode: string;
-  department?: string;
   company?: string;
-  phone: string;
-  accessLevel: string;
+  phone?: string;
   allowedZones: string[];
   status:
     | "active"
@@ -62,6 +62,7 @@ export type Person = {
   validTo?: string;
   inside: boolean;
   createdAt?: string;
+  entryRestriction?: EntryRestriction;
 };
 
 export type HardwareAsset = {
@@ -76,15 +77,27 @@ export type HardwareAsset = {
   status: "active" | "restricted" | "maintenance";
   inside: boolean;
   createdAt?: string;
+  entryRestriction?: EntryRestriction;
 };
 
 export type SubjectRecord = Person | HardwareAsset;
+
+export type EntryRestriction = {
+  subjectId: string;
+  active: boolean;
+  triggeredAt: string;
+  triggerAlertId: string;
+  releasedAt?: string;
+  releasedBy?: string;
+  releaseReason?: string;
+};
 
 export type Checkpoint = {
   id: string;
   name: string;
   mode: "auto" | "manual" | "entry" | "exit";
   zone: string;
+  buildingId?: string;
   online: boolean;
   createdAt?: string;
 };
@@ -122,6 +135,13 @@ export type MovementEvent = {
   hardwareIds: string[];
   createdAt?: string;
   capturedOfflineAt?: string;
+  source?: "paper_register";
+  paperReference?: string;
+  loggedAt?: string;
+  historicalVisitId?: string;
+  manualReviewedAt?: string;
+  overrideRequestId?: string;
+  manualApprovalRequestId?: string;
 };
 
 export type Alert = {
@@ -135,6 +155,7 @@ export type Alert = {
   checkpoint: string;
   date: string;
   time: string;
+  subjectType?: SubjectType;
   category?:
     | "access_violation"
     | "presence_anomaly"
@@ -144,6 +165,44 @@ export type Alert = {
   explanation?: string;
   sourceEventId?: string;
   createdAt?: string;
+  subjectId?: string;
+  review?: AlertReview;
+  warningCount?: number;
+  warningResetAt?: string;
+  warningResetBy?: string;
+  warningResetReason?: string;
+  warningReset?: { resetAt: string; resetBy: string; reason: string };
+  entryRestriction?: EntryRestriction;
+};
+
+export type AlertReview = {
+  decision: "confirmed" | "excused";
+  reason: string;
+  reviewedAt: string;
+  reviewedBy: string;
+};
+
+export type AlertWarningSummary = {
+  subjectId: string;
+  subjectName: string;
+  subjectType: "employee" | "hardware";
+  barcode: string;
+  count: number;
+  resetAt?: string;
+  resetBy?: string;
+  resetReason?: string;
+  entryRestriction?: EntryRestriction;
+};
+
+export type AlertRuleAssignment = {
+  subjectId: string;
+  subjectName: string;
+  subjectType: "employee" | "hardware";
+  barcode: string;
+  ruleIds: string[];
+  irregularitySkipDates: string[];
+  source: "default" | "custom";
+  revision: number;
 };
 
 export type AlertEvaluationResult = {
@@ -172,11 +231,12 @@ export type AccessPermission = {
   reason?: string;
   updatedAt: string;
   updatedBy: string;
+  entryRestriction?: EntryRestriction;
 };
 
 export type PermissionRequest = {
   id: string;
-  type: "visitor" | "hardware_custody" | "manual_override";
+  type: "visitor" | "hardware_custody" | "manual_override" | "zone_access";
   subjectId: string;
   subjectName: string;
   requester: string;
@@ -191,25 +251,27 @@ export type PermissionRequest = {
   carrierId?: string;
   carrierName?: string;
   checkpointId?: string;
+  checkpoint?: string;
   direction?: Direction;
   eventId?: string;
   operatorNote?: string;
   decisionReason?: string;
-  terminalAcknowledgementRequired?: boolean;
-  acknowledgedAt?: string;
-  acknowledgedBy?: string;
+  notificationDismissedAt?: string;
+  notificationDismissedBy?: string;
+  decidedAt?: string;
+  consumedAt?: string;
+  consumedMovementId?: string;
+  consumedBy?: string;
+  previousCarrierId?: string;
+  previousCarrierName?: string;
+  previousZones?: string[];
+  previousValidFrom?: string;
+  previousValidTo?: string;
 };
 
-export type PermissionNotification = {
-  id: string;
-  title: string;
-  message: string;
-  category: "approval_request" | "permission_change" | "rule_trigger";
-  priority: "high" | "normal";
-  relatedId: string;
-  href: string;
-  createdAt: string;
-  read: boolean;
+export type PermissionRequestInput = Omit<PermissionRequest, "id" | "status" | "createdAt"> & {
+  newVisitor?: { name: string; host: string; company?: string };
+  permanentAccess?: boolean;
 };
 
 export type AlertRule = {
@@ -224,6 +286,7 @@ export type AlertRule = {
     | "no_break"
     | "irregularity";
   recentTriggers: number;
+  eligibleSubjectTypes?: Array<"employee" | "hardware">;
 };
 
 export type AuditEvent = {
@@ -256,6 +319,7 @@ export type ScanDecision = {
   event: MovementEvent;
   subject?: SubjectRecord;
   carriedHardware: HardwareAsset[];
+  entryRestrictions?: EntryRestriction[];
 };
 
 export type MovementNotes = Record<string, string[]>;
@@ -281,18 +345,19 @@ export type AppDataSnapshot = {
   movementNotes: MovementNotes;
   permissions: AccessPermission[];
   permissionRequests: PermissionRequest[];
-  notifications: PermissionNotification[];
   alertRules: AlertRule[];
+  alertWarnings: AlertWarningSummary[];
+  alertRuleAssignments: AlertRuleAssignment[];
   auditEvents: AuditEvent[];
   adminAvailability?: { status: "available" | "offline"; availableAt: string | null };
+  terminalAssignment?: { operatorSubject: string; checkpointId: string | null };
 };
 
 export type CreateEmployeeInput = {
   name: string;
   barcode: string;
-  department: string;
-  accessLevel: string;
-  allowedZone: string;
+  allowedZone?: string;
+  allowedZones?: string[];
 };
 
 export type CreateHardwareAssetInput = {
@@ -322,27 +387,28 @@ export type BarcodeManualReviewInput = {
   operatorNote: string;
 };
 
+export type CreateVisitorInput = {
+  name: string;
+  barcode: string;
+  host: string;
+  validFrom: string;
+  validTo: string;
+  checkpointId: string;
+  allowedZones?: string[];
+  company?: string;
+  purpose?: string;
+};
+
+export type CreateVisitorResult = {
+  visitor: Person;
+  request: PermissionRequest;
+};
+
 export type RecordScanResult = {
   decision: ScanDecision;
   updatedPeople: Person[];
   updatedHardwareAssets: HardwareAsset[];
-};
-
-export type UpdateAccessPermissionInput = {
-  subjectId: string;
-  state: AccessPermission["state"];
-  zones?: string[];
-  validFrom?: string;
-  validTo?: string;
-  reason: string;
-};
-
-export type AccessPermissionMutationResult = {
-  permission: AccessPermission;
-  person?: Person;
-  hardwareAsset?: HardwareAsset;
-  auditEvent: AuditEvent;
-  notification: PermissionNotification;
+  manualApprovalRequest?: PermissionRequest;
 };
 
 export type PermissionDecisionMutationResult = {
@@ -353,12 +419,12 @@ export type PermissionDecisionMutationResult = {
   hardwareAsset?: HardwareAsset;
   hardwareAssets?: HardwareAsset[];
   auditEvent?: AuditEvent;
-  notification?: PermissionNotification;
 };
 
 export type MovementQuery = {
   page: number;
   pageSize: number;
+  subject_id?: string;
   eventId?: string;
   search?: string;
   checkpoint?: string;
@@ -368,6 +434,7 @@ export type MovementQuery = {
   subjectGroup?: "people" | "hardware";
   startAt?: string;
   endAt?: string;
+  includeChart?: boolean;
   sortKey?: VisibleColumn;
   sortDirection?: SortDirection;
 };
@@ -382,10 +449,47 @@ export type MovementPage = {
   checkpoints: string[];
 };
 
+export type AuditEventQuery = {
+  limit: number;
+  offset: number;
+  category?: AuditEvent["category"];
+  startAt?: string;
+  endAt?: string;
+};
+
+export type AuditEventPage = {
+  items: AuditEvent[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
+export type AlertQuery = {
+  limit: number;
+  offset: number;
+  status?: Alert["status"] | "active";
+  subjectId?: string;
+  search?: string;
+  startAt?: string;
+  endAt?: string;
+};
+
+export type AlertPage = {
+  items: Alert[];
+  total: number;
+  limit: number;
+  offset: number;
+  warnings?: AlertWarningSummary[];
+};
+
 export interface DataService {
   getSnapshot(scope?: DataScope): Promise<AppDataSnapshot>;
+  queryOpenAlertCount(): Promise<number>;
   queryMovements(query: MovementQuery): Promise<MovementPage>;
+  queryAlerts(query: AlertQuery): Promise<AlertPage>;
+  queryAuditEvents(query: AuditEventQuery): Promise<AuditEventPage>;
   createEmployee(input: CreateEmployeeInput): Promise<Person>;
+  createVisitor(input: CreateVisitorInput): Promise<CreateVisitorResult>;
   createHardwareAsset(input: CreateHardwareAssetInput): Promise<HardwareAsset>;
   updatePerson(personId: string, patch: Partial<Omit<Person, "id">>): Promise<Person>;
   updateHardwareAsset(
@@ -393,19 +497,19 @@ export interface DataService {
     patch: Partial<Omit<HardwareAsset, "id">>
   ): Promise<HardwareAsset>;
   acknowledgeAlert(alertId: string): Promise<Alert>;
-  updateAccessPermission(
-    input: UpdateAccessPermissionInput
-  ): Promise<AccessPermissionMutationResult>;
+  reviewAlert(alertId: string, decision: AlertReview["decision"], reason?: string): Promise<{ alert: Alert }>;
+  resetAlertWarnings(subjectId: string, reason: string): Promise<unknown>;
+  setAlertRuleAssignments(subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision?: number): Promise<AlertRuleAssignment>;
   submitPermissionRequest(request: Omit<PermissionRequest, 'id' | 'status' | 'createdAt'>): Promise<PermissionRequest>;
+  grantPermission(input: PermissionRequestInput): Promise<PermissionDecisionMutationResult>;
+  releaseEntryRestriction(alertId: string, reason: string): Promise<{ entryRestriction: EntryRestriction }>;
   decidePermissionRequest(
     requestId: string,
     decision: "approved" | "denied",
     reason: string,
     validForMinutes?: number
   ): Promise<PermissionDecisionMutationResult>;
-  acknowledgePermissionRequest(requestId: string): Promise<PermissionRequest>;
-  updateAlertRule(ruleId: string, enabled: boolean): Promise<AlertRule>;
-  markNotificationRead(notificationId: string): Promise<PermissionNotification>;
+  dismissPermissionNotification(requestId: string): Promise<PermissionRequest>;
   recordScan(input: RecordScanInput, idempotencyKey?: string): Promise<RecordScanResult>;
   evaluateAlertRules(): Promise<AlertEvaluationResult>;
   requestBarcodeManualReview(input: BarcodeManualReviewInput): Promise<PermissionRequest>;

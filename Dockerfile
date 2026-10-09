@@ -65,4 +65,7 @@ ENV HOSTNAME="0.0.0.0"
 
 # server.js is created by next build from the standalone output
 # https://nextjs.org/docs/pages/api-reference/next-config-js/output
-CMD ["sh", "-c", "echo \"Starting app on http://localhost:${PUBLIC_PORT:-3000}\" && node server.js"]
+# Session chunks plus OAuth state/PKCE/nonce cookies can exceed Node's default
+# 16 KiB total during reauthentication. Kong bounds each large header at 32 KiB;
+# leave room for that Cookie header and the remaining forwarded request headers.
+CMD ["sh", "-c", "echo \"Starting app on http://localhost:${PUBLIC_PORT:-3000}\" && exec node --max-http-header-size=65536 server.js"]

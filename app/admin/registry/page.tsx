@@ -1,7 +1,8 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useDeferredValue, useMemo, useState } from "react";
+import { Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AdminPageFrame } from "../../../frontend/components/admin/tables/AdminPageFrame";
 import { EmployeeTable } from "../../../frontend/components/admin/tables/EmployeeTable";
 import { EmployeeCreator } from "../../../frontend/components/admin/tables/EmployeeCreator";
@@ -25,12 +26,6 @@ const HardwareTable = dynamic(
       (module) => module.HardwareTable
     )
 );
-const PermissionHistoryTable = dynamic(
-  () =>
-    import("../../../frontend/components/admin/registry/RegistryLogTables").then(
-      (module) => module.PermissionHistoryTable
-    )
-);
 const MetricTrendChart = dynamic(
   () =>
     import("../../../frontend/components/analytics/MetricTrendChart").then(
@@ -39,7 +34,7 @@ const MetricTrendChart = dynamic(
   { ssr: false }
 );
 
-type RegistryTab = "employees" | "visitors" | "hardware" | "permissions";
+type RegistryTab = "employees" | "visitors" | "hardware";
 type RegistryChartProps = {
   title: string;
   valueLabel: string;
@@ -52,7 +47,6 @@ const REGISTRY_TABS: Array<{ id: RegistryTab; label: string }> = [
   { id: "employees", label: "Employees" },
   { id: "visitors", label: "Visitors" },
   { id: "hardware", label: "Hardware" },
-  { id: "permissions", label: "Permissions" },
 ];
 
 function csvCell(value: unknown) {
@@ -78,18 +72,29 @@ function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
   URL.revokeObjectURL(url);
 }
 
-export default function RegistryPage() {
+function RegistryWorkspace() {
   const {
     people: staff,
     hardwareAssets: assets,
     movements,
     permissions,
-    auditEvents,
+    alerts,
   } = useDataState();
   const { createEmployee, createHardwareAsset } = useDataActions();
+  const searchParams = useSearchParams();
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<RegistryTab>("employees");
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "permissions" || tab === "alerts") {
+      const query = new URLSearchParams(searchParams.toString());
+      router.replace(`/admin/logs?${query.toString()}`);
+      return;
+    }
+    if (tab === "employees" || tab === "visitors" || tab === "hardware") setActiveTab(tab);
+  }, [router, searchParams]);
   const deferredSearch = useDeferredValue(search);
   const sessionsByPerson = useMemo(
     () => getPersonSessionIndex(movements),
@@ -119,10 +124,11 @@ export default function RegistryPage() {
     const needle = deferredSearch.trim().toLowerCase();
     return allVisitors.filter(
       (person) =>
-        (!needle || person.name.toLowerCase().includes(needle) || person.barcode.toLowerCase().includes(needle))
+        (!needle || [person.name, person.barcode, person.host, person.company].some((value) => value?.toLowerCase().includes(needle)))
     );
   }, [allVisitors, deferredSearch]);
   const preApprovedCount = useMemo(() => allVisitors.reduce((count, person) => count + (person.status === "pre_approved" ? 1 : 0), 0), [allVisitors]);
+  const pendingVisitorCount = useMemo(() => allVisitors.filter((person) => person.status === "pending_approval").length, [allVisitors]);
 
   // Filter Hardware
   const filteredAssets = useMemo(() => {
@@ -133,51 +139,6 @@ export default function RegistryPage() {
     );
   }, [assets, deferredSearch]);
   const restrictedCount = useMemo(() => assets.reduce((count, asset) => count + (asset.status === "restricted" ? 1 : 0), 0), [assets]);
-
-  const permissionLogs = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    const subjectById = new Map(
-      [...staff, ...assets].map((subject) => [subject.id, {
-        name: subject.name,
-        barcode: subject.barcode,
-      }])
-    );
-    for (const permission of permissions) {
-      if (!subjectById.has(permission.subjectId)) {
-        subjectById.set(permission.subjectId, {
-          name: permission.subjectName,
-          barcode: "",
-        });
-      }
-    }
-
-    return auditEvents
-      .filter((event) => event.category === "permission")
-      .map((event) => {
-        const subject = subjectById.get(event.subjectId);
-        return {
-          ...event,
-          subjectName: event.subjectName || subject?.name || "Unregistered barcode",
-          barcode: event.barcode || subject?.barcode || "",
-        };
-      })
-      .filter((event) =>
-        (!needle ||
-          event.subjectName.toLowerCase().includes(needle) ||
-          event.barcode.toLowerCase().includes(needle) ||
-          event.action.toLowerCase().includes(needle) ||
-          event.actor.toLowerCase().includes(needle) ||
-          event.reason.toLowerCase().includes(needle) ||
-          event.decision?.toLowerCase().includes(needle))
-      )
-      .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-  }, [assets, auditEvents, deferredSearch, permissions, staff]);
-  const grantedPermissionCount = useMemo(
-    () => auditEvents.reduce((count, event) => count + (event.category === "permission" && event.decision === "granted" ? 1 : 0), 0),
-    [auditEvents]
-  );
-
-  let frameDescription = "Browse employee identities, access records, and checkpoint activity.";
   let frameMetric = `${insideEmployees}/${allEmployees.length} on-site`;
   let chartProps: RegistryChartProps = {
     title: "Working hours",
@@ -188,17 +149,11 @@ export default function RegistryPage() {
   };
 
   if (activeTab === "visitors") {
-    frameDescription = "Browse temporary visitor identities and their current access status.";
-    frameMetric = `${preApprovedCount} pre-approved`;
+    frameMetric = `${pendingVisitorCount} pending · ${preApprovedCount} pre-approved`;
     chartProps = { title: "Visitor movements", valueLabel: "VISITOR MOVEMENTS", color: "#db2777", unit: "", aggregation: "sum" };
   } else if (activeTab === "hardware") {
-    frameDescription = "Browse registered hardware, custody status, and checkpoint movement.";
     frameMetric = `${restrictedCount} restricted`;
     chartProps = { title: "Hardware scans", valueLabel: "HARDWARE SCANS", color: "#8b5cf6", unit: "", aggregation: "sum" };
-  } else if (activeTab === "permissions") {
-    frameDescription = "Browse completed access decisions and the review notes behind them.";
-    frameMetric = `${grantedPermissionCount} allowed`;
-    chartProps = { title: "Permission decisions", valueLabel: "RECORDED DECISIONS", color: "#10b981", unit: "", aggregation: "sum" };
   }
 
   const metricPoints = useMemo<MetricTrendPoint[]>(() => {
@@ -224,19 +179,14 @@ export default function RegistryPage() {
             : [];
         });
     }
-    return auditEvents
-      .filter((event) => event.category === "permission")
-      .map((event) => ({ timestamp: event.createdAt, value: 1 }));
-  }, [activeTab, auditEvents, movements, sessionsByPerson]);
+    return [];
+  }, [activeTab, movements, sessionsByPerson]);
 
   function handleExport() {
-    const rows: Array<Record<string, unknown>> =
-      activeTab === "employees"
+    const rows: Array<Record<string, unknown>> = activeTab === "employees"
         ? employees.map((person) => ({
             name: person.name,
             barcode: person.barcode,
-            department: person.department,
-            accessLevel: person.accessLevel,
             allowedZones: person.allowedZones.join("; "),
             status: person.status,
             inside: person.inside,
@@ -254,35 +204,22 @@ export default function RegistryPage() {
               status: person.status,
               inside: person.inside,
             }))
-          : activeTab === "hardware"
-            ? filteredAssets.map((asset) => ({
-                name: asset.name,
-                barcode: asset.barcode,
-                owner: asset.owner,
-                category: asset.category,
-                allowedZones: asset.allowedZones.join("; "),
-                status: asset.status,
-                inside: asset.inside,
-                createdAt: asset.createdAt,
-              }))
-            : permissionLogs.map((event) => ({
-                  date: event.date,
-                  time: event.time,
-                  subject: event.subjectName,
-                  barcode: event.barcode,
-                  action: event.action,
-                  decision: event.decision,
-                  actor: event.actor,
-                  role: event.role,
-                  reason: event.reason,
-                }));
+          : filteredAssets.map((asset) => ({
+              name: asset.name,
+              barcode: asset.barcode,
+              owner: asset.owner,
+              category: asset.category,
+              allowedZones: asset.allowedZones.join("; "),
+              status: asset.status,
+              inside: asset.inside,
+              createdAt: asset.createdAt,
+            }));
     downloadCsv(`inout-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
   }
 
   return (
     <AdminPageFrame
       title="Registry"
-      description={frameDescription}
       metric={frameMetric}
       preTitle={
         <div className="registry-segmented-shell">
@@ -328,8 +265,7 @@ export default function RegistryPage() {
               disabled={
                 (activeTab === "employees" && employees.length === 0) ||
                 (activeTab === "visitors" && visitors.length === 0) ||
-                (activeTab === "hardware" && filteredAssets.length === 0) ||
-                (activeTab === "permissions" && permissionLogs.length === 0)
+                (activeTab === "hardware" && filteredAssets.length === 0)
               }
             >
               <Download />
@@ -339,6 +275,7 @@ export default function RegistryPage() {
               <span className="sr-only">Search</span>
               <input
                 type="search"
+                maxLength={200}
                 placeholder={`Search ${REGISTRY_TABS.find((tab) => tab.id === activeTab)?.label.toLowerCase()}...`}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -351,13 +288,18 @@ export default function RegistryPage() {
               people={employees}
               movements={movements}
               sessionsByPerson={sessionsByPerson}
+              permissions={permissions}
+              alerts={alerts}
             />
           )}
           {activeTab === "visitors" && <PeopleTable title="Visitors" people={visitors} />}
           {activeTab === "hardware" && <HardwareTable assets={filteredAssets} />}
-          {activeTab === "permissions" && <PermissionHistoryTable events={permissionLogs} />}
         </div>
       </section>
     </AdminPageFrame>
   );
+}
+
+export default function RegistryPage() {
+  return <Suspense fallback={<p role="status">Loading registry…</p>}><RegistryWorkspace /></Suspense>;
 }

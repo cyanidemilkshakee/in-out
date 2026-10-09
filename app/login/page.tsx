@@ -1,13 +1,24 @@
-import { signIn } from "../../auth"
-import { keycloakEnabled } from "../../auth"
+import { cookies } from "next/headers"
+import { redirect } from "next/navigation"
+import { auth, keycloakEnabled, signIn } from "../../auth"
+import type { AppSession } from "../../lib/keycloakSession"
+import {
+  DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES,
+  isActiveUserManagementStepUp,
+  signStepUpIntent,
+  USER_MANAGEMENT_STEP_UP_COOKIE,
+  USER_MANAGEMENT_STEP_UP_LOCK_COOKIE,
+  userManagementStepUpLockMaxAge,
+} from "../../lib/userManagementStepUp"
 import styles from "./login.module.css"
 
 export default async function LoginPage(props: {
-  searchParams: Promise<{ from?: string; error?: string }>
+  searchParams: Promise<{ from?: string; error?: string; stepUp?: string }>
 }) {
   const searchParams = await props.searchParams
   const from = searchParams?.from;
   const redirectTo = from?.startsWith("/") && !from.startsWith("//") ? from : "/admin"
+  const stepUpLogin = searchParams?.stepUp === "1" && redirectTo === "/admin/users"
   const errorCode = searchParams?.error
 
   const errorMessages: Record<string, string> = {
@@ -36,7 +47,6 @@ export default async function LoginPage(props: {
             </svg>
           </div>
           <h1>IN / OUT</h1>
-          <p>Sign in to access the management system</p>
         </div>
 
         {errorMessage && (
@@ -58,7 +68,30 @@ export default async function LoginPage(props: {
           <form
             action={async () => {
               "use server"
-              await signIn("keycloak", { redirectTo })
+              if (stepUpLogin) {
+                const session = await auth() as AppSession | null
+                if (session?.access_token && Array.isArray(session.roles) && session.roles.includes("admin")) {
+                  const secret = process.env.AUTH_SECRET
+                  if (!secret) redirect("/login?from=%2Fadmin%2Fusers&stepUp=1&error=Configuration")
+                  const now = Date.now()
+                  const cookieStore = await cookies()
+                  const baseExpiresAt = !cookieStore.has(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE) && isActiveUserManagementStepUp(session, now)
+                    ? session.stepUpExpiresAt
+                    : undefined
+                  const authUrl = process.env.AUTH_URL || process.env.NEXTAUTH_URL
+                  let secure = process.env.NODE_ENV === "production"
+                  try { if (authUrl) secure = new URL(authUrl).protocol === "https:" } catch { /* Keep the production default. */ }
+                  cookieStore.set(USER_MANAGEMENT_STEP_UP_COOKIE, await signStepUpIntent(now, secret, DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES, baseExpiresAt), {
+                    httpOnly: true, sameSite: "lax", secure, maxAge: 10 * 60, path: "/",
+                  })
+                  cookieStore.set(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE, "1", {
+                    httpOnly: true, sameSite: "lax", secure, maxAge: userManagementStepUpLockMaxAge(session, now), path: "/",
+                  })
+                }
+                await signIn("keycloak", { redirectTo }, { prompt: "login", max_age: "0" })
+              } else {
+                await signIn("keycloak", { redirectTo })
+              }
             }}
           >
             <button type="submit" className={`${styles.button} ${styles.buttonSecondary}`}>

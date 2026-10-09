@@ -16,15 +16,16 @@ from database import get_db
 from schemas import BrowserScanPayload, ManualReviewPayload
 from terminal_scans import record_scan
 from redis_client import publish_presence_update
-from dashboard_cache import invalidate_dashboard_cache
-from sqlalchemy import and_, or_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database import get_read_db
 from models import AdminAccount, Checkpoint, HardwareAsset, Subject, PermissionRequestModel, Movement
 from temporal_worker import get_temporal_client, TASK_QUEUE
 from workflows.permission_override import PermissionOverrideWorkflow
 from permission_decisions import review_source, pending_manual_review
+from access_validation import validate_zones
+from terminal_assignments import assigned_checkpoint, browser_identity, require_checkpoint
+from critical_entry_restrictions import entry_restrictions_for_subjects
 
 logger = logging.getLogger(__name__)
 
@@ -35,20 +36,23 @@ router = APIRouter(prefix="/v1/terminal", tags=["terminal"])
 async def scan(payload: BrowserScanPayload,
     idempotency_key: uuid.UUID = Header(alias="Idempotency-Key"),
     db: AsyncSession = Depends(get_db), operator: dict = Depends(verify_terminal_access_request)):
-    result = await record_scan(db, idempotency_key, payload, "browser:" + operator["sub"])
+    identity = browser_identity(operator)
+    await require_checkpoint(db, identity, payload.checkpoint_id)
+    result = await record_scan(db, idempotency_key, payload, identity)
     await db.commit()
     if db.info.get("scan_replayed"):
         return result
-    await invalidate_dashboard_cache()
     try:
         event = result["decision"]["event"]
         await publish_presence_update(json.dumps({
-            "type": "scan",
+            "type": "manual_review_consumed" if result.get("manualApprovalRequest") else "scan",
             "subject_id": result.get("subject_id"),
             "state": ("inside" if event["direction"] == "entry" else "outside") if result["allowed"] else None,
             "movement": event,
+            "alerts": db.info.get("scan_alerts", []),
             "people": result.get("updatedPeople", []),
             "hardwareAssets": result.get("updatedHardwareAssets", []),
+            "request": result.get("manualApprovalRequest"),
         }))
     except Exception:
         logger.exception("Presence publication failed after scan commit")
@@ -62,7 +66,8 @@ async def create_manual_review(
     _operator: dict = Depends(verify_terminal_access_request),
 ) -> dict[str, Any]:
     """Place an unregistered barcode in the Permission Manager queue."""
-    checkpoint = await db.get(Checkpoint, payload.checkpoint_id)
+    checkpoint_id = await require_checkpoint(db, browser_identity(_operator), payload.checkpoint_id)
+    checkpoint = await db.get(Checkpoint, checkpoint_id)
     if not checkpoint:
         raise HTTPException(status_code=422, detail="Checkpoint not registered")
     now = datetime.now(timezone.utc)
@@ -82,7 +87,7 @@ async def create_manual_review(
         "barcode": barcode,
         "requester": _operator.get("sub", "Terminal Operator"),
         "purpose": "Barcode was denied and requires manual permission review.",
-        "requestedZones": [checkpoint.data.get("zone", checkpoint.id)],
+        "requestedZones": validate_zones([checkpoint.data.get("zone", checkpoint.id)]),
         "validFrom": now.isoformat(),
         "validTo": (now + timedelta(hours=1)).isoformat(),
         "status": "pending",
@@ -125,7 +130,8 @@ async def create_manual_review(
 
 @router.get("/bundle")
 async def get_terminal_bundle(
-    db: AsyncSession = Depends(get_read_db),
+    db: AsyncSession = Depends(get_db),
+    operator: dict = Depends(verify_terminal_access_request),
 ) -> dict[str, Any]:
     """
     Return the data a terminal needs at bootstrap. People and their presence
@@ -134,41 +140,42 @@ async def get_terminal_bundle(
     queue configuration.
     """
 
+    checkpoint_id = await assigned_checkpoint(db, browser_identity(operator))
+
     async def fetch_hardware_assets() -> list[dict[str, Any]]:
         hw_res = await db.execute(
             select(HardwareAsset, Subject)
             .join(Subject, Subject.id == HardwareAsset.subject_id)
         )
         hw_rows = hw_res.all()
+        restrictions = await entry_restrictions_for_subjects(db, [subject.id for _, subject in hw_rows])
         assets: list[dict[str, Any]] = []
         for hw, subject in hw_rows:
             entry = dict(hw.data or {})
             entry.update(id=subject.id, kind=subject.kind, barcode=subject.barcode)
+            entry["entryRestriction"] = restrictions.get(subject.id)
             assets.append(entry)
         return assets
 
     async def fetch_checkpoints() -> list[dict[str, Any]]:
-        result = await db.execute(select(Checkpoint).order_by(Checkpoint.id))
+        result = await db.execute(select(Checkpoint).where(Checkpoint.id == checkpoint_id))
         return [{**c.data, "id": c.id} for c in result.scalars().all()]
 
     hardware_assets = await fetch_hardware_assets()
     checkpoints = await fetch_checkpoints()
     review_result = await db.execute(
         select(PermissionRequestModel)
+        .where(PermissionRequestModel.data["checkpointId"].astext == checkpoint_id)
         .where(PermissionRequestModel.data["type"].astext == "manual_override")
-        .where(or_(
-            PermissionRequestModel.data["status"].astext == "pending",
-            and_(
-                PermissionRequestModel.data["terminalAcknowledgementRequired"].as_boolean().is_(True),
-                PermissionRequestModel.data["acknowledgedAt"].astext.is_(None),
-            ),
-        ))
+        # Dismissal hides only the notification; recent decision history stays
+        # available to Terminal Activity after a refresh or sign-in.
         .order_by(PermissionRequestModel.created_at.desc())
         .limit(20)
     )
     permission_requests = [request.data for request in review_result.scalars().all()]
     movement_result = await db.execute(
         select(Movement)
+        .where(Movement.checkpoint_id == checkpoint_id)
         .order_by(Movement.occurred_at.desc(), Movement.id)
         .limit(20)
     )
@@ -198,6 +205,7 @@ async def get_terminal_bundle(
     return {
         "hardwareAssets": hardware_assets,
         "checkpoints": checkpoints,
+        "terminalAssignment": {"operatorSubject": operator["sub"], "checkpointId": checkpoint_id},
         "movements":   movements,
         "permissionRequests": permission_requests,
         "adminAvailability": {

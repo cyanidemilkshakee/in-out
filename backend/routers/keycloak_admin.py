@@ -7,18 +7,24 @@ master-admin password and deliberately has no delete-user endpoint.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Any, Literal
-import math
 import time
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
 from auth import verify_admin_request
 from config import settings
+from database import get_db
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from models import TerminalCheckpointAssignment
+from terminal_assignments import publish_checkpoint_assignment, set_checkpoint_assignment
+from user_management_step_up import require_user_management_step_up
 
 router = APIRouter(prefix="/v1/keycloak", tags=["keycloak"])
 _bearer = HTTPBearer(auto_error=False)
@@ -35,6 +41,7 @@ class UserCreateRequest(BaseModel):
     temporary_password: bool = Field(True, alias="temporaryPassword")
     roles: list[Literal["admin", "operator"]] = Field(default_factory=list)
     enabled: bool = True
+    checkpoint_id: Literal["cp-main", "server-room"] | None = Field(None, alias="checkpointId")
 
     @field_validator("email")
     @classmethod
@@ -50,6 +57,7 @@ class UserUpdateRequest(BaseModel):
     last_name: str | None = Field(None, alias="lastName", max_length=100)
     email: str | None = Field(None, max_length=320)
     enabled: bool | None = None
+    checkpoint_id: Literal["cp-main", "server-room"] | None = Field(None, alias="checkpointId")
 
     @field_validator("email")
     @classmethod
@@ -72,14 +80,12 @@ class PasswordResetRequest(BaseModel):
 
 async def _admin_context(
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    step_up: Annotated[str | None, Header(alias="X-InOut-Step-Up")] = None,
 ) -> str:
     if credentials is None:
         raise HTTPException(status_code=401, detail="Bearer token required")
     claims = await verify_admin_request(credentials)
-    auth_time = claims.get("auth_time")
-    if (isinstance(auth_time, bool) or not isinstance(auth_time, (int, float)) or
-        not math.isfinite(auth_time) or not -30 <= time.time() - auth_time <= settings.KEYCLOAK_STEP_UP_MAX_AGE_SECONDS):
-        raise HTTPException(status_code=401, detail="Step-up authentication required before managing users")
+    require_user_management_step_up(credentials.credentials, claims, step_up, now=time.time())
     return credentials.credentials
 
 
@@ -128,7 +134,7 @@ async def _request(token: str, method: str, path: str, payload: Any = None) -> h
     return response
 
 
-def _user_summary(user: dict[str, Any], roles: list[str] | None = None) -> dict[str, Any]:
+def _user_summary(user: dict[str, Any], roles: list[str] | None = None, checkpoint_id: str | None = None) -> dict[str, Any]:
     return {
         "id": user.get("id"),
         "username": user.get("username", ""),
@@ -138,6 +144,7 @@ def _user_summary(user: dict[str, Any], roles: list[str] | None = None) -> dict[
         "enabled": bool(user.get("enabled", False)),
         "emailVerified": bool(user.get("emailVerified", False)),
         "createdTimestamp": user.get("createdTimestamp"),
+        "checkpointId": checkpoint_id,
         **({"roles": roles} if roles is not None else {}),
     }
 
@@ -171,22 +178,51 @@ async def list_users(
     first: int = Query(0, ge=0),
     max_results: int = Query(50, alias="max", ge=1, le=100),
     token: str = Depends(_admin_context),
+    db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     query = f"users?briefRepresentation=true&first={first}&max={max_results}"
     if search.strip():
         query += f"&search={quote(search.strip(), safe='')}"
     users = (await _request(token, "GET", query)).json()
-    return {"items": [_user_summary(user) for user in users if isinstance(user, dict)], "first": first, "max": max_results}
+    users = [user for user in users if isinstance(user, dict)]
+    identities = ["browser:" + user["id"] for user in users if isinstance(user.get("id"), str)]
+    assignments = (await db.execute(select(TerminalCheckpointAssignment)
+        .where(TerminalCheckpointAssignment.terminal_identity.in_(identities)))).scalars().all()
+    checkpoints = {assignment.terminal_identity: assignment.checkpoint_id for assignment in assignments}
+    role_limit = asyncio.Semaphore(8)
+
+    async def user_roles(user_id: str) -> tuple[str, list[str]]:
+        async with role_limit:
+            return user_id, await _user_roles(token, user_id)
+
+    user_ids = [user["id"] for user in users if isinstance(user.get("id"), str)]
+    roles_by_user = dict(await asyncio.gather(*(user_roles(user_id) for user_id in user_ids)))
+    return {
+        "items": [
+            _user_summary(
+                user,
+                roles_by_user.get(user.get("id", ""), []),
+                checkpoints.get("browser:" + user.get("id", "")),
+            )
+            for user in users
+        ],
+        "first": first,
+        "max": max_results,
+    }
 
 
 @router.get("/users/{user_id}")
-async def get_user(user_id: str, token: str = Depends(_admin_context)) -> dict[str, Any]:
+async def get_user(user_id: str, token: str = Depends(_admin_context), db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     user = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
-    return _user_summary(user, await _user_roles(token, user_id))
+    assignment = await db.get(TerminalCheckpointAssignment, "browser:" + user_id)
+    return _user_summary(user, await _user_roles(token, user_id), assignment.checkpoint_id if assignment else None)
 
 
 @router.post("/users", status_code=201)
-async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_context)) -> dict[str, Any]:
+async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_context),
+    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
+    if "operator" in payload.roles and not payload.checkpoint_id:
+        raise HTTPException(422, "Assign a checkpoint when creating an operator account")
     response = await _request(token, "POST", "users", {
         "username": payload.username,
         "firstName": payload.first_name,
@@ -202,13 +238,18 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
     await _request(token, "PUT", f"users/{quote(user_id, safe='')}/reset-password", {
         "type": "password", "value": payload.password, "temporary": payload.temporary_password,
     })
+    if payload.checkpoint_id:
+        await set_checkpoint_assignment(db, "browser:" + user_id, payload.checkpoint_id, actor["sub"])
+        await db.commit()
+        await publish_checkpoint_assignment("browser:" + user_id)
     roles = await _replace_roles(token, user_id, payload.roles)
     user = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
-    return _user_summary(user, roles)
+    return _user_summary(user, roles, payload.checkpoint_id)
 
 
 @router.patch("/users/{user_id}")
-async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Depends(_admin_context)) -> dict[str, Any]:
+async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Depends(_admin_context),
+    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
     current = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
     updates = payload.model_dump(exclude_none=True)
     body = {
@@ -220,7 +261,13 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
         "emailVerified": current.get("emailVerified", False) if updates.get("email", current.get("email", "")) == current.get("email", "") else False,
     }
     await _request(token, "PUT", f"users/{quote(user_id, safe='')}", body)
-    return _user_summary((await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json(), await _user_roles(token, user_id))
+    if "checkpoint_id" in payload.model_fields_set:
+        await set_checkpoint_assignment(db, "browser:" + user_id, payload.checkpoint_id, actor["sub"])
+        await db.commit()
+        await publish_checkpoint_assignment("browser:" + user_id)
+    assignment = await db.get(TerminalCheckpointAssignment, "browser:" + user_id, populate_existing=True)
+    return _user_summary((await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json(),
+        await _user_roles(token, user_id), assignment.checkpoint_id if assignment else None)
 
 
 @router.put("/users/{user_id}/roles")

@@ -1,0 +1,15 @@
+.countdown {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  color: var(--ui-text-warning, #946200);
+  font-size: 12px;
+  font-weight: var(--weight-bold, 700);
+  line-height: 1.4;
+  font-variant-numeric: tabular-nums;
+}
+
+.countdown[data-expired="true"] {
+  color: var(--ui-text-danger, #b42318);
+}

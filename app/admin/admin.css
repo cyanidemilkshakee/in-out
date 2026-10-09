@@ -1,6 +1,6 @@
 .role-admin {
   --mobile-admin-nav-height: 0px;
-  font-size: 16px;
+  font-size: var(--type-16);
   min-height: 100vh;
 }
 
@@ -13,15 +13,11 @@
   color: var(--admin-text) !important;
 }
 
-
 .role-admin .admin-console {
   display: block;
   min-height: 100vh;
   padding: var(--admin-page-padding-block) var(--admin-page-padding-inline);
 }
-
-
-
 
 .role-admin .admin-rail-brand {
   gap: 1px;
@@ -34,25 +30,19 @@
   text-decoration: none;
 }
 
-
 .role-admin .admin-rail-brand span {
   color: #52605d;
 }
 
-
-
-
-
-
 .role-admin .tab {
   min-height: 42px;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: rgba(231, 238, 236, 0.58);
-  color: #52605d;
+  color: var(--ui-text-secondary);
   font-family: inherit;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   letter-spacing: 0;
   padding: 0 16px;
 }
@@ -60,32 +50,26 @@
 .role-admin .tab.active {
   background: var(--admin-surface-strong);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
-
 
 .role-admin .select-control,
 .role-admin .search-control {
   min-height: 36px;
   min-width: 0;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: transparent;
   box-shadow: none;
   padding: 0 12px;
   transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, color 140ms ease;
 }
 
-.role-admin .select-control:hover,
-.role-admin .search-control:hover {
-  border-color: rgba(71, 84, 103, 0.4);
-}
-
 .role-admin .select-control select,
 .role-admin .search-control input {
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   font-family: inherit;
-  font-size: 16px;
+  font-size: var(--type-16);
 }
 
 .role-admin .search-control input {
@@ -97,7 +81,6 @@
   outline: 0;
   box-shadow: 0 0 0 3px rgba(11, 99, 229, 0.34);
 }
-
 
 .role-admin .metric {
   position: relative;
@@ -117,9 +100,9 @@
 }
 
 .role-admin .metric span {
-  color: #52605d;
-  font-size: 15px;
-  font-weight: 700;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   letter-spacing: 0;
   text-transform: none;
   margin-bottom: 6px;
@@ -127,9 +110,9 @@
 
 .role-admin .metric strong {
   display: block;
-  color: var(--admin-text);
-  font-size: 38px;
-  font-weight: 500;
+  color: var(--ui-text-primary);
+  font-size: var(--type-36);
+  font-weight: var(--weight-medium);
   margin: 0 0 7px;
   font-variant-numeric: tabular-nums;
 }
@@ -143,8 +126,7 @@
 }
 
 .role-admin .admin-panel,
-.role-admin .admin-table-wrap,
-.role-admin .identity-table-scroll {
+.role-admin .admin-table-wrap {
   width: 100%;
   min-width: 0;
 }
@@ -158,44 +140,10 @@
   box-shadow: none !important;
 }
 
-.role-admin .drawer-header {
-  min-height: 0;
-  border-bottom-color: var(--admin-line);
-  padding: 14px 0;
-  align-items: center;
-}
-
-.role-admin .drawer-header .icon-button {
-  background: transparent;
-  box-shadow: none;
-  min-height: 32px;
-  width: 32px;
-  padding: 0;
-}
-
-.role-admin .drawer-header h2,
-.role-admin .drawer-section h3 {
-  color: var(--admin-text);
-  font-size: 21px;
-  font-weight: 600;
-  letter-spacing: 0;
-  text-rendering: geometricPrecision;
-  line-height: 1.2;
-}
-
-.role-admin .drawer-header h2 {
-  display: flex;
-  align-items: center;
-  height: 32px;
-  margin: 0;
-}
-
 .role-admin .inline-note,
-.role-admin .pagination,
-.role-admin .detail-list dt,
-.role-admin .detail-grid dt {
-  color: var(--admin-muted);
-  font-size: 14px;
+.role-admin .pagination {
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
   line-height: 1.35;
 }
 
@@ -205,22 +153,18 @@
   --admin-button-color: var(--admin-text);
   min-height: 48px;
   border: 1px solid var(--admin-button-border);
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: var(--admin-button-background);
   box-shadow: none;
-  color: var(--admin-button-color);
+  color: var(--ui-text-primary);
   font-family: inherit;
-  font-size: 16px;
+  font-size: var(--type-16);
   transition: background 140ms ease, border-color 140ms ease, box-shadow 140ms ease, color 140ms ease;
 }
 
 .role-admin .admin-button--icon {
   width: 48px;
   padding: 0;
-}
-
-.role-admin .admin-button:hover:not(:disabled) {
-  border: 1px solid rgba(71, 84, 103, 0.4);
 }
 
 .role-admin .admin-button:focus-visible {
@@ -237,7 +181,7 @@
 }
 
 .role-admin .compact-button {
-  border-radius: 12px;
+  border-radius: var(--radius);
 }
 
 .role-admin .registry-search-control {
@@ -246,17 +190,32 @@
 
 .role-admin .registry-presence,
 .role-admin .employee-presence {
-  font-weight: 700;
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .registry-presence.is-inside,
 .role-admin .employee-presence.is-inside {
-  color: var(--green);
+  color: var(--ui-text-positive);
 }
 
 .role-admin .registry-presence.is-outside,
 .role-admin .employee-presence.is-outside {
-  color: var(--red);
+  color: var(--ui-text-danger);
+}
+
+.role-admin .employee-status-label {
+  display: inline-flex;
+  align-items: center;
+  border-radius: var(--radius);
+  background: var(--green-soft);
+  padding: 2px 7px;
+  font-size: var(--type-15);
+  line-height: 1.25;
+  white-space: nowrap;
+}
+
+.role-admin .employee-status-label.is-outside {
+  background: var(--red-soft);
 }
 
 .role-admin .employee-profile-button {
@@ -276,31 +235,31 @@
   border-collapse: separate;
   border-spacing: 0;
   font-family: inherit;
-  font-size: 15px;
+  font-size: var(--type-15);
+  text-align: left;
 }
 
 .role-admin .data-table th {
   position: sticky;
   top: 0;
   z-index: 1;
-  border-bottom-color: var(--admin-line);
   background: rgba(221, 230, 228, 0.72);
-  color: #52605d;
-  font-size: 14px;
-  font-weight: 700;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   letter-spacing: 0;
-  box-shadow: inset 0 -1px 0 rgba(24, 32, 31, 0.14);
+  text-transform: none;
 }
 
 .role-admin .data-table th,
 .role-admin .data-table td {
-  border-right-color: rgba(176, 190, 186, 0.42);
   padding: 8px 12px;
+  vertical-align: middle;
+  white-space: normal;
 }
 
 .role-admin .data-table tbody tr {
-  border-bottom-color: rgba(176, 190, 186, 0.4);
-  transition: background 140ms ease, box-shadow 140ms ease;
+  transition: background 140ms ease;
 }
 
 .role-admin .data-table tbody tr:hover td {
@@ -309,62 +268,25 @@
 
 .role-admin .data-table tbody tr.selected td {
   background: rgba(11, 99, 229, 0.1);
-  box-shadow: inset 0 1px 0 rgba(11, 99, 229, 0.22), inset 0 -1px 0 rgba(11, 99, 229, 0.22);
 }
 
-.role-admin .data-table td:nth-child(4),
-.role-admin .data-table td:nth-child(5) {
-  font-variant-numeric: tabular-nums;
-}
-
-.role-admin .data-table-condensed th,
-.role-admin .data-table-condensed td {
-  padding: 5px 10px;
-}
-
-.role-admin .data-table-condensed .secondary-button.compact-button {
+.role-admin .data-table .secondary-button.compact-button {
   min-height: 34px;
-  border-radius: 10px;
+  border-radius: var(--radius);
   padding: 0 12px;
-  font-size: 14px;
+  font-size: var(--type-15);
 }
 
 .role-admin .pill {
   min-height: 24px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   font-family: inherit;
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .direction {
-  font-size: 14px;
-}
-
-.role-admin .detail-drawer {
-  align-self: start;
-  padding-top: 0;
-}
-
-.role-admin .drawer-section,
-.role-admin .detail-list {
-  border-top: 1px solid rgba(24, 32, 31, 0.1) !important;
-  border-bottom-color: var(--admin-line);
-  padding-right: 0;
-  padding-left: 0;
-}
-
-.role-admin .drawer-section h3 {
-  text-transform: none;
-}
-
-.role-admin .detail-list dd,
-.role-admin .detail-grid dd {
-  font-size: 16px;
-}
-
-.role-admin .detail-list dd {
-  line-height: 1.35;
+  font-size: var(--type-15);
 }
 
 .role-admin .dashboard-overview {
@@ -379,12 +301,6 @@
   min-width: 0;
   height: 218px;
 }
-
-.drawer-header,
-.drawer-section {
-  border-color: rgba(24, 32, 31, 0.16) !important;
-}
-
 
 .role-admin .admin-page-frame {
   display: grid;
@@ -405,7 +321,6 @@
   align-content: end;
   gap: 10px;
   min-height: 140px;
-  min-width: 0;
   overflow: hidden;
   border-right: 1px solid rgba(24, 32, 31, 0.16);
   background: transparent;
@@ -413,36 +328,36 @@
 }
 
 .role-admin .admin-hero-copy span {
-  color: #52605d;
-  font-size: 12px;
-  font-weight: 900;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-black);
   text-transform: uppercase;
 }
 
 .role-admin .admin-hero-copy h1 {
   max-width: 560px;
   margin: 0 0 clamp(12px, 1.25vw, 18px);
-  color: var(--admin-text);
-  font-size: clamp(30px, 4vw, 54px);
+  color: var(--ui-text-primary);
+  font-size: var(--type-48);
   line-height: 0.96;
 }
 
 .role-admin .admin-hero-copy p {
   max-width: 610px;
   margin: 0;
-  color: var(--admin-muted);
-  font-size: 17px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-16);
   line-height: 1.45;
 }
 
 .role-admin .admin-hero-copy strong {
   width: max-content;
   max-width: 100%;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--admin-lime);
   padding: 10px 14px;
-  color: var(--admin-accent-ink);
-  font-size: 15px;
+  color: var(--ui-text-inverse);
+  font-size: var(--type-15);
 }
 
 .role-admin .temporary-id-form {
@@ -450,55 +365,8 @@
 }
 
 .role-admin :is(.admin-button, .select-control, .search-control) {
-  border-radius: 8px;
+  border-radius: var(--radius);
   box-shadow: none;
-}
-
-.role-admin .data-table th,
-.role-admin .data-table td {
-  white-space: normal;
-}
-
-.role-admin .event-id-button {
-  display: inline-block;
-  border: 0;
-  padding: 2px 0;
-  background: transparent;
-  color: inherit;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.5;
-  white-space: nowrap;
-  word-break: normal;
-  overflow-wrap: normal;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-  cursor: pointer;
-  user-select: text;
-}
-
-.role-admin .event-id-button:focus-visible,
-.role-admin .detail-identifier code:focus-visible {
-  outline: 2px solid var(--admin-text);
-  outline-offset: 3px;
-}
-
-.role-admin .detail-grid > .detail-identifier {
-  grid-column: 1 / -1;
-  min-width: 0;
-}
-
-.role-admin .detail-identifier code {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
-  padding-block: 3px;
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  white-space: nowrap;
-  word-break: normal;
-  overflow-wrap: normal;
-  user-select: all;
 }
 
 .role-admin .table-wrap {
@@ -509,17 +377,17 @@
 .role-admin .pagination button {
   min-height: 34px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
   padding: 0 12px;
-  color: var(--admin-text);
-  font-weight: 800;
+  color: var(--ui-text-primary);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
   transition: border-color 140ms ease, color 140ms ease;
 }
 
 .role-admin .pagination button:disabled {
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   cursor: not-allowed;
 }
 
@@ -530,7 +398,7 @@
 html[data-admin-theme="dark"] .role-admin .pagination button:hover:not(:disabled) {
   border-color: #fff;
   background: transparent;
-  color: #fff;
+  color: var(--ui-text-inverse);
 }
 
 html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
@@ -538,15 +406,19 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
   outline-offset: 2px;
 }
 
-
 .role-admin .log-workspace {
-  grid-template-columns: minmax(0, 1fr) minmax(280px, 330px);
+  grid-template-columns: minmax(0, 1fr);
   padding: 0;
   margin-top: -22px;
 }
 
 .role-admin .log-workspace .workspace-main {
   padding: 0;
+}
+
+.role-admin .log-workspace .movement-table--logs {
+  min-width: 1260px;
+  table-layout: auto;
 }
 
 .role-admin .filter-bar {
@@ -560,9 +432,9 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
 }
 
 .role-admin .temporary-id-form label span {
-  color: var(--admin-muted);
-  font-size: 12px;
-  font-weight: 850;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   text-transform: uppercase;
 }
 
@@ -570,26 +442,26 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
   display: inline-flex;
   min-height: 24px;
   align-items: center;
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 0 9px;
-  font-size: 12px;
-  font-weight: 850;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   text-transform: capitalize;
 }
 
 .role-admin .severity-critical {
   background: var(--red-soft);
-  color: var(--red);
+  color: var(--ui-text-danger);
 }
 
 .role-admin .severity-high {
   background: var(--amber-soft);
-  color: var(--amber);
+  color: var(--ui-text-warning);
 }
 
 .role-admin .severity-medium {
   background: var(--blue-soft);
-  color: var(--blue);
+  color: var(--ui-text-info);
 }
 
 .role-admin .temporary-id-form {
@@ -598,7 +470,7 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
   gap: 10px;
   align-items: flex-end;
   width: 100%;
-  border-radius: 18px;
+  border-radius: var(--radius);
   background: rgba(245, 248, 247, 0.68);
   padding: 12px;
 }
@@ -617,12 +489,12 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
 }
 
 .role-admin .temporary-id-form > div strong {
-  font-size: 14px;
+  font-size: var(--type-15);
 }
 
 .role-admin .temporary-id-form > div span {
-  color: var(--admin-muted);
-  font-size: 12px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
 .role-admin .temporary-id-form label {
@@ -635,10 +507,10 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
   width: 100%;
   min-width: 0;
   border: 0;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: rgba(255, 255, 255, 0.78);
   box-shadow: inset 0 0 0 1px rgba(176, 190, 186, 0.44);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   padding: 10px 11px;
   outline: 0;
 }
@@ -652,7 +524,7 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
   color: inherit;
   padding: 0;
   font: inherit;
-  font-weight: 850;
+  font-weight: var(--weight-extrabold);
 }
 
 @media (max-width: 1199px) {
@@ -668,7 +540,7 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
 
 @media (max-width: 767px) {
   body {
-    font-size: 14px;
+    font-size: var(--type-15);
   }
 
   .split-workspace {
@@ -676,22 +548,8 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
     padding: 0 14px 14px;
   }
 
-  .drawer-actions {
-    flex-wrap: wrap;
-  }
-}
-
-@media (max-width: 767px) {
-
   .metric {
     min-height: 94px;
-  }
-}
-
-@media (max-width: 1199px) {
-
-  .role-admin .dashboard-analytics {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 }
 
@@ -701,19 +559,9 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
     padding: 18px;
   }
 
-  .role-admin .dashboard-analytics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .role-admin .admin-model-hero,
 .role-admin .temporary-id-form {
     grid-template-columns: 1fr;
-  }
-
-  .role-admin .admin-hero-copy {
-    border-right: 0;
-    border-bottom: 1px solid rgba(24, 32, 31, 0.16);
-    padding-right: 0;
   }
 }
 
@@ -723,32 +571,23 @@ html[data-admin-theme="dark"] .role-admin .pagination button:focus-visible {
     padding: 14px;
   }
 
-  .role-admin :is(.admin-button, .select-control select, .search-control input, .detail-list dd, .detail-grid dd) {
-    font-size: 15px;
+  .role-admin :is(.admin-button, .select-control select, .search-control input) {
+    font-size: var(--type-15);
   }
 
   .role-admin .metric strong {
-    font-size: 24px;
+    font-size: var(--type-24);
   }
-}
-
-@media (max-width: 767px) {
 
   .role-admin .split-workspace {
     padding: 0 0 14px;
   }
 
-  .role-admin .workspace-main,
-.role-admin .detail-drawer {
-    border-radius: 18px;
+  .role-admin .workspace-main {
+    border-radius: var(--radius);
   }
 
   .role-admin .dashboard-analytics {
-    grid-template-columns: 1fr;
-  }
-
-  .role-admin .admin-page-frame {
-    padding: 14px;
   }
 
   .role-admin .admin-hero-copy {
@@ -765,8 +604,7 @@ button,
     color 80ms linear;
 }
 
-.role-admin .workspace-main,
-.role-admin .detail-drawer {
+.role-admin .workspace-main {
   content-visibility: auto;
   contain-intrinsic-size: auto 520px;
 }
@@ -790,7 +628,7 @@ button,
 }
 .scrolled-main-content::-webkit-scrollbar-thumb {
   background-color: #cbd5e1;
-  border-radius: 7px;
+  border-radius: var(--radius);
   border: 3px solid var(--bg);
 }
 .scrolled-main-content::-webkit-scrollbar-thumb:hover {
@@ -809,9 +647,9 @@ button,
   border: 1px solid transparent;
   border-radius: var(--radius);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   padding: 0 13px;
-  font-weight: 750;
+  font-weight: var(--weight-bold);
 }
 
 .temporary-create-trigger:hover,
@@ -828,7 +666,7 @@ button,
   width: min(380px, 88vw);
   gap: 12px;
   border: 1px solid var(--admin-line) !important;
-  border-radius: 8px !important;
+  border-radius: var(--radius) !important;
   background: var(--admin-surface-strong) !important;
   padding: 16px !important;
   box-shadow: 0 18px 45px rgba(0, 0, 0, 0.16);
@@ -842,17 +680,14 @@ button,
   gap: 10px;
 }
 
-
 .role-admin .profile-workspace {
   display: grid;
   grid-template-rows: auto auto auto;
-  width: 80%;
   min-height: 100vh;
   margin: 0 auto;
   padding: 0 32px;
-  box-sizing: border-box;
   background: var(--admin-bg);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   font-family: var(--admin-font);
 }
 
@@ -883,7 +718,7 @@ button,
   height: 88px;
   border-radius: 50%;
   background: var(--admin-avatar-bg);
-  color: var(--admin-avatar-ink);
+  color: var(--ui-text-inverse);
   overflow: hidden;
 }
 
@@ -910,7 +745,7 @@ button,
   border: 2px solid var(--admin-bg);
   border-radius: 50%;
   background: var(--admin-text);
-  color: var(--admin-bg);
+  color: var(--ui-text-inverse);
 }
 
 .role-admin .profile-avatar-edit-icon svg {
@@ -936,8 +771,8 @@ button,
 
 .role-admin .profile-picture-error {
   margin-top: 2px;
-  color: var(--red);
-  font-size: 12px;
+  color: var(--ui-text-danger);
+  font-size: var(--type-15);
 }
 
 .role-admin .profile-identity-info {
@@ -948,15 +783,15 @@ button,
 
 .role-admin .profile-identity-info h1 {
   margin: 0;
-  color: var(--admin-text);
-  font-size: clamp(34px, 4vw, 46px);
+  color: var(--ui-text-primary);
+  font-size: var(--type-48);
   line-height: 1.08;
 }
 
 .role-admin .profile-identity-info p {
   margin: 0;
-  color: var(--admin-muted);
-  font-size: 16px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-16);
   line-height: 1.35;
 }
 
@@ -967,9 +802,9 @@ button,
 }
 
 .role-admin .profile-identity-info .profile-nickname {
-  color: var(--admin-text);
-  font-size: 17px;
-  font-weight: 750;
+  color: var(--ui-text-primary);
+  font-size: var(--type-16);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .profile-email-display {
@@ -1012,20 +847,20 @@ button,
   width: 18px;
   height: 18px;
   margin-top: 3px;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .settings-section-title h2 {
   margin: 0 0 4px;
-  color: var(--admin-text);
-  font-size: 16px;
-  font-weight: 850;
+  color: var(--ui-text-primary);
+  font-size: var(--type-16);
+  font-weight: var(--weight-extrabold);
 }
 
 .role-admin .settings-section-title p {
   margin: 0;
-  color: var(--admin-muted);
-  font-size: 13px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
 .role-admin .security-section-title {
@@ -1048,14 +883,14 @@ button,
 }
 
 .role-admin .settings-toggle strong {
-  color: var(--admin-text);
-  font-size: 14px;
-  font-weight: 750;
+  color: var(--ui-text-primary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .settings-toggle small {
-  color: var(--admin-muted);
-  font-size: 12px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
 .role-admin .settings-toggle input[type="checkbox"] {
@@ -1064,7 +899,7 @@ button,
   flex-shrink: 0;
   width: 44px;
   height: 24px;
-  border-radius: 999px;
+  border-radius: var(--radius);
   border: 1px solid #aab4af;
   background: #d7ddda;
   cursor: pointer;
@@ -1111,9 +946,9 @@ button,
 }
 
 .role-admin .profile-field span {
-  color: var(--admin-muted);
-  font-size: 11px;
-  font-weight: 900;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-black);
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -1123,12 +958,12 @@ button,
   width: 100%;
   min-height: 42px;
   border: 1px solid var(--admin-line);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   font-family: inherit;
-  font-size: 14px;
-  font-weight: 750;
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   padding: 0 10px;
   outline: 0;
 }
@@ -1155,54 +990,26 @@ button,
 .role-admin .profile-save-action .primary-button {
   border-color: #18201f;
   background: #18201f;
-  color: #f3f6f4;
+  color: var(--ui-text-inverse);
   padding: 0 18px;
 }
 
 .role-admin .profile-save-action .primary-button:hover {
   border-color: #303a37;
   background: #303a37;
-  color: #fff;
+  color: var(--ui-text-inverse);
 }
 
 html[data-admin-theme="dark"] .role-admin .profile-save-action .primary-button {
   border-color: var(--admin-lime);
   background: var(--admin-lime);
-  color: var(--admin-accent-ink);
+  color: var(--ui-text-inverse);
 }
 
 html[data-admin-theme="dark"] .role-admin .profile-save-action .primary-button:hover {
   border-color: #fff;
   background: #fff;
-  color: var(--admin-accent-ink);
-}
-
-html[data-admin-theme="dark"] .role-admin {
-  --bg: #0f1413;
-  --surface: #141b1a;
-  --surface-soft: #17201e;
-  --surface-muted: #202b29;
-  --text: #eef7f2;
-  --muted: #aab8b3;
-  --border: #2f3d39;
-  --border-strong: #52615d;
-  --admin-bg: #0f1413;
-  --admin-surface: #141b1a;
-  --admin-surface-strong: #17201e;
-  --admin-panel: #141b1a;
-  --admin-line: rgba(196, 211, 204, 0.24);
-  --admin-border: #2f3d39;
-  --admin-line-strong: #52615d;
-  --admin-text: #eef7f2;
-  --admin-muted: #aab8b3;
-  --admin-lime: #e7ece9;
-  --admin-lime-soft: rgba(231, 236, 233, 0.14);
-  --admin-accent-ink: #0f1413;
-  --admin-avatar-bg: #e7ece9;
-  --admin-avatar-ink: #0f1413;
-  --admin-shadow: none;
-  background: var(--admin-bg);
-  color: var(--admin-text);
+  color: var(--ui-text-inverse);
 }
 
 html[data-admin-theme="dark"] body,
@@ -1216,7 +1023,7 @@ html[data-admin-theme="dark"] .role-admin .nav-rail-link {
 
 html[data-admin-theme="dark"] .role-admin .profile-avatar-large {
   background: var(--admin-avatar-bg);
-  color: var(--admin-avatar-ink);
+  color: var(--ui-text-inverse);
 }
 
 .role-admin .admin-scroll-surface {
@@ -1234,7 +1041,7 @@ html[data-admin-theme="dark"] .role-admin .profile-avatar-large {
 
 .role-admin .admin-scroll-surface::-webkit-scrollbar-thumb {
   border: 2px solid var(--admin-bg);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: #aab4af;
 }
 
@@ -1299,13 +1106,13 @@ html[data-admin-theme="dark"] .role-admin .settings-toggle input[type="checkbox"
 .role-admin .temporary-create-trigger {
   min-height: 48px;
   border-color: transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   padding: 0 13px;
   font-family: inherit;
-  font-size: 16px;
-  font-weight: 750;
+  font-size: var(--type-16);
+  font-weight: var(--weight-bold);
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
 }
@@ -1313,7 +1120,7 @@ html[data-admin-theme="dark"] .role-admin .settings-toggle input[type="checkbox"
 .role-admin .temporary-create-trigger:hover {
   border-color: rgba(71, 84, 103, 0.4);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   transform: translateY(-1px);
 }
 
@@ -1333,7 +1140,7 @@ html[data-admin-theme="dark"] .role-admin .settings-toggle input[type="checkbox"
   gap: 16px;
   border-color: #d7ddda !important;
   background: #fff !important;
-  color: #0f1413;
+  color: var(--ui-text-primary);
   padding: 20px !important;
   max-height: min(720px, calc(100vh - 48px));
   overflow: auto;
@@ -1343,26 +1150,26 @@ html[data-admin-theme="dark"] .role-admin .settings-toggle input[type="checkbox"
   justify-content: center;
   border-color: #0f1413;
   background: #0f1413;
-  color: #fff;
-  font-weight: 800;
+  color: var(--ui-text-inverse);
+  font-weight: var(--weight-extrabold);
 }
 
 .role-admin .temporary-id-card .primary-button:hover:not(:disabled) {
   border-color: #303a37;
   background: #303a37;
-  color: #fff;
+  color: var(--ui-text-inverse);
 }
 
 html[data-admin-theme="dark"] .role-admin .temporary-create-trigger {
   border-color: transparent;
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .temporary-create-trigger:hover {
   border-color: rgba(71, 84, 103, 0.4);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .temporary-id-overlay,
@@ -1374,7 +1181,7 @@ html[data-admin-theme="dark"] .role-admin.temporary-id-overlay {
 html[data-admin-theme="dark"] .role-admin .temporary-id-card {
   border-color: #3a4542 !important;
   background: #0f1413 !important;
-  color: #f3f6f4;
+  color: var(--ui-text-inverse);
   box-shadow: 0 24px 80px rgba(0, 0, 0, 0.55);
 }
 
@@ -1385,7 +1192,7 @@ html[data-admin-theme="dark"] .role-admin .temporary-id-card-header {
 html[data-admin-theme="dark"] .role-admin .temporary-id-card .compact-button {
   border-color: transparent;
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 .role-admin .temporary-id-card input,
@@ -1393,7 +1200,7 @@ html[data-admin-theme="dark"] .role-admin .temporary-id-card .compact-button {
   border: 1px solid transparent;
   background: #dedede;
   box-shadow: none;
-  color: #0f1413;
+  color: var(--ui-text-primary);
   caret-color: #0f1413;
   padding: 10px 12px;
   transition: border-color 120ms ease, box-shadow 120ms ease;
@@ -1409,7 +1216,7 @@ html[data-admin-theme="dark"] .role-admin .temporary-id-card .compact-button {
 
 .role-admin .temporary-id-card input::placeholder,
 .role-admin .temporary-id-card textarea::placeholder {
-  color: #66716c;
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .temporary-id-card input:hover:not(:focus),
@@ -1429,13 +1236,13 @@ html[data-admin-theme="dark"] .role-admin .temporary-id-card textarea {
   border-color: transparent;
   background: #1c1c1c;
   box-shadow: none;
-  color: #f3f6f4;
+  color: var(--ui-text-inverse);
   caret-color: #f3f6f4;
 }
 
 html[data-admin-theme="dark"] .role-admin .temporary-id-card input::placeholder,
 html[data-admin-theme="dark"] .role-admin .temporary-id-card textarea::placeholder {
-  color: #7f918b;
+  color: var(--ui-text-secondary);
 }
 
 html[data-admin-theme="dark"] .role-admin .temporary-id-card input:focus,
@@ -1463,33 +1270,33 @@ html[data-admin-theme="dark"] .role-admin .temporary-id-card textarea:hover:not(
   width: 40px;
   min-height: 40px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .temporary-id-card-header .compact-button:hover {
   border-color: var(--admin-text);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .temporary-id-card-header .compact-button:hover {
   border-color: #f3f6f4;
   background: transparent;
-  color: #f3f6f4;
+  color: var(--ui-text-inverse);
 }
 
 html[data-admin-theme="dark"] .role-admin .temporary-id-card .primary-button {
   border-color: #f3f6f4;
   background: #f3f6f4;
-  color: #0f1413;
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .temporary-id-card .primary-button:hover:not(:disabled) {
   border-color: #d7ddda;
   background: #d7ddda;
-  color: #0f1413;
+  color: var(--ui-text-primary);
 }
 
 .role-admin .temporary-id-card input[type="datetime-local"] {
@@ -1507,9 +1314,9 @@ html[data-admin-theme="dark"] .role-admin .temporary-id-card input[type="datetim
 
 .role-admin .temporary-id-form-error {
   margin: 0;
-  color: var(--red);
-  font-size: 14px;
-  font-weight: 700;
+  color: var(--ui-text-danger);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .profile-grid {
@@ -1522,7 +1329,7 @@ html[data-admin-theme="dark"] .role-admin .temporary-id-card input[type="datetim
 .role-admin .top-main-content,
 .role-admin .scrolled-main-content {
   background: var(--admin-bg);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table th,
@@ -1533,23 +1340,21 @@ html[data-admin-theme="dark"] .role-admin .settings-section,
 html[data-admin-theme="dark"] .role-admin .metric-widget-box,
 html[data-admin-theme="dark"] .role-admin .alert-widget-box {
   background: transparent;
-  border-color: var(--admin-line);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table th {
   background: var(--admin-panel);
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table td {
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table tbody tr,
 html[data-admin-theme="dark"] .role-admin .data-table tbody tr:hover {
   background: transparent;
-  transition: box-shadow 140ms ease;
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table tr:hover td {
@@ -1558,56 +1363,35 @@ html[data-admin-theme="dark"] .role-admin .data-table tr:hover td {
 
 html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected td {
   background: rgba(46, 46, 46, 0.86);
-  color: var(--admin-text);
-  box-shadow: inset 0 1px 0 rgba(238, 247, 242, 0.12), inset 0 -1px 0 rgba(238, 247, 242, 0.12);
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected .direction-entry {
-  color: #70e28d;
+  color: var(--ui-text-positive);
 }
 
 html[data-admin-theme="dark"] .role-admin .data-table tbody tr.selected .direction-exit {
-  color: #66a8ff;
+  color: var(--ui-text-accent);
 }
 
-html[data-admin-theme="dark"] .role-admin .detail-drawer,
-html[data-admin-theme="dark"] .role-admin .drawer-header,
-html[data-admin-theme="dark"] .role-admin .drawer-section,
-html[data-admin-theme="dark"] .role-admin .detail-list {
-  background: var(--admin-bg);
-  color: var(--admin-text);
-  border-color: var(--admin-line);
-}
-
-html[data-admin-theme="dark"] .role-admin .drawer-header h2,
-html[data-admin-theme="dark"] .role-admin .detail-grid dd,
-html[data-admin-theme="dark"] .role-admin .detail-list dd {
-  color: var(--admin-text);
-}
-
-html[data-admin-theme="dark"] .role-admin .detail-grid dt,
-html[data-admin-theme="dark"] .role-admin .detail-list dt {
-  color: var(--admin-muted);
-}
-
-html[data-admin-theme="dark"] .role-admin .severity-critical {
+.role-admin .severity-critical {
   background: rgba(217, 45, 32, 0.16);
-  color: #ff8a80;
+  color: var(--ui-text-danger);
 }
 
 html[data-admin-theme="dark"] .role-admin .severity-high {
   background: rgba(247, 144, 9, 0.18);
-  color: #fdb022;
+  color: var(--ui-text-danger);
 }
 
 html[data-admin-theme="dark"] .role-admin .severity-medium {
   background: rgba(11, 99, 229, 0.18);
-  color: #66a8ff;
+  color: var(--ui-text-accent);
 }
 
 html[data-admin-theme="dark"] .role-admin .result-approved {
   background: rgba(15, 143, 46, 0.18);
-  color: #70e28d;
+  color: var(--ui-text-positive);
   box-shadow: inset 0 0 0 1px rgba(112, 226, 141, 0.22);
 }
 
@@ -1615,7 +1399,7 @@ html[data-admin-theme="dark"] .role-admin .result-denied,
 html[data-admin-theme="dark"] .role-admin .result-expired,
 html[data-admin-theme="dark"] .role-admin .result-restricted {
   background: rgba(217, 45, 32, 0.16);
-  color: #ff8a80;
+  color: var(--ui-text-danger);
   box-shadow: inset 0 0 0 1px rgba(255, 138, 128, 0.24);
 }
 
@@ -1628,7 +1412,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   gap: 6px;
   padding: 6px;
   border: 1px solid transparent;
-  border-radius: 20px;
+  border-radius: var(--radius);
   background: transparent;
   transform: translateX(-50%);
   transition: border-color 0.2s ease;
@@ -1641,14 +1425,14 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 
 .role-admin .dashboard-time-range-button {
   border: 1px solid transparent;
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: transparent;
   box-shadow: none;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   padding: 8px 16px;
   font: inherit;
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--type-16);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
   transition: border-color 0.2s ease, color 0.2s ease;
 }
@@ -1656,13 +1440,13 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 .role-admin .dashboard-time-range-button:hover:not(.is-active) {
   border-color: var(--admin-line);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 .role-admin .dashboard-time-range-button.is-active {
   background: #e8f1ff;
-  color: #1a1f1e;
-  font-weight: 650;
+  color: var(--ui-text-primary);
+  font-weight: var(--weight-semibold);
 }
 
 .role-admin .dashboard-time-range-button:focus-visible {
@@ -1672,11 +1456,11 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 
 @media (max-width: 1199px) {
   .role-admin .profile-workspace {
-    width: 100%;
     padding-inline: 16px;
   }
 
-  .role-admin .profile-grid {
+  .role-admin .profile-grid,
+.role-admin .profile-form-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1684,10 +1468,6 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     padding-right: 0;
     padding-left: 0;
     border-right: 0;
-  }
-
-  .role-admin .profile-form-grid {
-    grid-template-columns: 1fr;
   }
 
 }
@@ -1703,9 +1483,9 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   height: 100%;
   align-items: center;
   justify-content: center;
-  color: var(--admin-muted);
-  font-size: 14px;
-  font-weight: 700;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -1716,20 +1496,10 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 
 .role-admin .dashboard-log-section > h2 {
   margin: 0 0 24px;
-  color: var(--admin-text);
-  font-size: 20px;
-  font-weight: 700;
+  color: var(--ui-text-primary);
+  font-size: var(--type-20);
+  font-weight: var(--weight-bold);
   letter-spacing: 0;
-}
-
-@media (max-width: 1199px) {
-  .role-admin .dashboard-kpi-grid {
-    gap: 8px !important;
-  }
-
-  .role-admin .dashboard-kpi-card {
-    width: 170px !important;
-  }
 }
 
 @media (max-width: 1199px) {
@@ -1788,12 +1558,8 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .dashboard-donut-quality,
-.role-admin .dashboard-donut-auto {
-    justify-self: center !important;
-    margin: 10px auto 42px !important;
-  }
-
-  .role-admin .dashboard-donut-approved,
+.role-admin .dashboard-donut-auto,
+.role-admin .dashboard-donut-approved,
 .role-admin .dashboard-donut-denied {
     justify-self: center !important;
     margin: 10px auto 42px !important;
@@ -1819,14 +1585,6 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     margin-bottom: 8px !important;
   }
 
-  .role-admin .dashboard-donut-center > div > div:first-child {
-    font-size: 11px !important;
-  }
-
-  .role-admin .dashboard-donut-center > div > div:nth-child(2) {
-    font-size: 13px !important;
-  }
-
   .role-admin .dashboard-alert-widget {
     position: static !important;
     grid-column: 3 / -1 !important;
@@ -1839,7 +1597,6 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     margin: 0 !important;
     padding: 18px 12px 10px !important;
     overflow: visible;
-    transform: none;
   }
 
   .role-admin .alert-list-container {
@@ -1858,14 +1615,10 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .admin-navigation-rail {
-    position: fixed !important;
-    inset: auto 0 0 0 !important;
     display: flex !important;
-    width: 100% !important;
     height: var(--mobile-admin-nav-height);
     flex-direction: row !important;
     align-items: center !important;
-    gap: 4px;
     padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) !important;
     overflow: hidden !important;
     border-top: 1px solid var(--admin-line);
@@ -1897,13 +1650,12 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     position: relative !important;
     display: flex !important;
     width: auto !important;
-    min-width: 0;
     min-height: 44px;
     flex: 1 1 0;
     align-items: center !important;
     justify-content: center !important;
     padding: 0 !important;
-    border-radius: 8px !important;
+    border-radius: var(--radius) !important;
   }
 
   .role-admin .admin-navigation-rail .nav-rail-link[aria-current="page"] {
@@ -1915,7 +1667,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     width: 44px !important;
     height: 44px;
     flex: 0 0 44px !important;
-    border-radius: 10px;
+    border-radius: var(--radius);
     transition: background-color 140ms ease;
   }
 
@@ -1934,7 +1686,6 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   .role-admin .admin-rail-profile {
     position: static !important;
     inset: auto !important;
-    width: auto !important;
     min-width: 0 !important;
     flex: 1 1 0 !important;
     padding: 0 !important;
@@ -1960,14 +1711,8 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .admin-scroll-surface {
-    width: 100% !important;
-    height: calc(100dvh - var(--mobile-admin-nav-height)) !important;
     padding: 0;
-    overflow-x: hidden;
   }
-}
-
-@media (max-width: 767px) {
   body:has(nextjs-portal) .role-admin .admin-rail-items {
     box-sizing: border-box;
     padding-left: 48px;
@@ -1991,7 +1736,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     gap: 9px !important;
     padding: 12px !important;
     overflow: hidden;
-    border-radius: 8px !important;
+    border-radius: var(--radius) !important;
   }
 
   .role-admin .dashboard-kpi-grid {
@@ -2002,17 +1747,17 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .dashboard-kpi-card > div:first-child span {
-    font-size: 11px !important;
+    font-size: var(--type-15) !important;
   }
 
   .role-admin .dashboard-kpi-card > div:nth-child(2) {
-    font-size: 26px !important;
+    font-size: var(--type-24) !important;
   }
 
   .role-admin .dashboard-kpi-card > div:last-child {
     min-width: 0;
     gap: 4px !important;
-    font-size: 11px !important;
+    font-size: var(--type-15) !important;
   }
 
   .role-admin .dashboard-donut {
@@ -2034,7 +1779,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .dashboard-alert-widget .alert-widget-header span {
-    font-size: 16px !important;
+    font-size: var(--type-16) !important;
   }
 
   .role-admin .dashboard-alert-widget {
@@ -2048,7 +1793,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 
   .role-admin .dashboard-log-section > h2 {
     margin-bottom: 16px;
-    font-size: 18px;
+    font-size: var(--type-18);
   }
 
   .role-admin .dashboard-log-section .table-wrap {
@@ -2072,7 +1817,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   .role-admin .dashboard-log-section .sort-button {
     gap: 5px;
     padding: 0;
-    font-size: 13px;
+    font-size: var(--type-15);
   }
 }
 
@@ -2093,8 +1838,18 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     grid-row: auto !important;
   }
 
-  .role-admin .dashboard-alert-widget {
+  .role-admin .dashboard-donut-quality,
+  .role-admin .dashboard-donut-auto {
+    order: 4;
+  }
+
+  .role-admin .dashboard-donut-approved,
+  .role-admin .dashboard-donut-denied {
     order: 5;
+  }
+
+  .role-admin .dashboard-alert-widget {
+    order: 6;
   }
 
   .role-admin .dashboard-donut-quality,
@@ -2105,26 +1860,13 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     grid-row: auto !important;
   }
 
-  .role-admin .dashboard-breakdown {
-    width: min(100%, 280px) !important;
-    max-width: 280px !important;
-  }
-
-  .role-admin .dashboard-donut {
-    width: min(100%, 145px) !important;
-    max-width: 145px !important;
-  }
-
   .role-admin .dashboard-kpi-card {
     padding: 10px !important;
   }
 
   .role-admin .dashboard-kpi-card > div:nth-child(2) {
-    font-size: 24px !important;
+    font-size: var(--type-24) !important;
   }
-}
-
-@media (max-width: 767px) {
   .role-admin .dashboard-kpi-card > div:last-child span:last-child {
     display: none;
   }
@@ -2135,11 +1877,9 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 }
 
-
 .role-admin .admin-hero-visual {
   display: flex;
   width: 100%;
-  min-width: 0;
   align-self: stretch;
   align-items: stretch;
   padding: 12px 0 2px 16px;
@@ -2154,31 +1894,27 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .admin-model-hero {
-    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
   }
 
   .role-admin .admin-hero-copy {
     min-height: 0;
     align-content: start;
-    border-right: 0;
-    border-bottom: 1px solid var(--admin-line);
     padding: 12px 0 22px;
   }
 
   .role-admin .admin-hero-copy h1 {
-    font-size: clamp(30px, 8vw, 44px);
+    font-size: var(--type-48);
     line-height: 1.05;
   }
 
   .role-admin .admin-hero-copy p {
     max-width: 68ch;
-    font-size: 15px;
+    font-size: var(--type-15);
   }
 
   .role-admin .admin-hero-visual {
     min-height: 0;
-    padding: 16px 0 0;
   }
 
   .role-admin .metric-trend-chart {
@@ -2227,17 +1963,6 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     overscroll-behavior-inline: contain;
   }
 
-  .role-admin .detail-drawer {
-    width: 100%;
-    margin-top: 8px;
-    padding-top: 8px;
-    border-top: 1px solid var(--admin-line) !important;
-  }
-
-  .role-admin .detail-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .role-admin .pagination {
     width: 100%;
     justify-content: space-between;
@@ -2254,7 +1979,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .profile-identity-info h1 {
-    font-size: clamp(32px, 9vw, 42px);
+    font-size: var(--type-36);
   }
 
   .role-admin .settings-section {
@@ -2268,8 +1993,6 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 
 @media (max-width: 767px) {
   .role-admin .admin-page-frame {
-    gap: 14px;
-    padding: 16px 12px 28px;
   }
 
   .role-admin .admin-hero-copy {
@@ -2278,7 +2001,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .admin-hero-copy h1 {
-    font-size: clamp(28px, 10vw, 36px);
+    font-size: var(--type-36);
   }
 
   .role-admin .admin-hero-metric {
@@ -2289,80 +2012,9 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     height: 154px;
   }
 
-  .role-admin .filter-bar {
-    gap: 8px;
-  }
-
   .role-admin .filter-bar .select-control select,
 .role-admin .filter-bar .search-control input {
-    font-size: 16px;
-  }
-
-  .role-admin .table-wrap {
-    overflow: visible;
-    border: 0;
-  }
-
-  .role-admin .data-table,
-.role-admin .data-table tbody {
-    display: block;
-    width: 100%;
-  }
-
-  .role-admin .data-table tbody {
-    gap: 12px;
-  }
-
-  .role-admin .data-table tbody tr {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    overflow: hidden;
-    border: 1px solid var(--admin-line);
-    border-radius: 8px;
-    background: transparent;
-  }
-
-  .role-admin .data-table tbody td {
-    display: grid;
-    min-width: 0;
-    min-height: 66px;
-    align-content: center;
-    gap: 5px;
-    border-right: 0;
-    border-bottom: 1px solid var(--admin-line);
-    padding: 11px 12px;
-    overflow: visible;
-    overflow-wrap: anywhere;
-    text-overflow: initial;
-    white-space: normal;
-  }
-
-  .role-admin .data-table tbody td:nth-child(odd) {
-    border-right: 1px solid var(--admin-line);
-  }
-
-  .role-admin .data-table tbody td::before {
-    color: var(--admin-muted);
-    font-family: var(--admin-font);
-    font-size: 10px;
-    font-weight: 850;
-    letter-spacing: 0.06em;
-    line-height: 1.2;
-    text-transform: uppercase;
-  }
-
-  .role-admin .data-table tbody td:not([data-label])::before {
-    display: none;
-  }
-
-  .role-admin .data-table .empty-table-cell {
-    grid-column: 1 / -1;
-    border-right: 0;
-  }
-
-  .role-admin .data-table td[data-label="Profile"] .secondary-button {
-    width: 100%;
-    justify-content: center;
+    font-size: var(--type-16);
   }
 
   .role-admin .dashboard-breakdown {
@@ -2390,12 +2042,12 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 
   .role-admin .temporary-id-card input {
     min-height: 46px;
-    font-size: 16px;
+    font-size: var(--type-16);
   }
 
   .role-admin .temporary-id-form textarea {
     min-height: 86px;
-    font-size: 16px;
+    font-size: var(--type-16);
   }
 
   .role-admin .profile-workspace {
@@ -2404,7 +2056,6 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 
   .role-admin .security-section-title {
     display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
   }
 
@@ -2420,11 +2071,9 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     margin-inline: 0;
   }
 
-  .role-admin .movement-table .column-date,
-.role-admin .movement-table .column-scanType,
-.role-admin .movement-table .column-eventId,
-.role-admin .employee-table .column-barcode,
-.role-admin .employee-table .column-access {
+  .role-admin .movement-table:not(.movement-table--logs) .column-date,
+  .role-admin .movement-table:not(.movement-table--logs) .column-scanType,
+  .role-admin .movement-table:not(.movement-table--logs) .column-eventId {
     display: none;
   }
 }
@@ -2439,11 +2088,8 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 
   .role-admin .data-table {
     display: table;
-    width: 100%;
-    min-width: 0;
-    table-layout: fixed;
     border-collapse: collapse;
-    font-size: 12px;
+    font-size: var(--type-15);
   }
 
   .role-admin .data-table thead {
@@ -2462,21 +2108,16 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .data-table thead tr,
-.role-admin .data-table tbody tr {
+  .role-admin .data-table tbody tr {
     display: table-row;
-    border: 0;
-    border-bottom: 1px solid var(--admin-line);
-    border-radius: 0;
     background: transparent;
   }
 
   .role-admin .data-table th,
-.role-admin .data-table tbody td {
+  .role-admin .data-table tbody td {
     display: table-cell;
     min-width: 0;
     min-height: 0;
-    border-right: 1px solid var(--admin-line);
-    border-bottom: 0;
     padding: 10px 6px;
     overflow: hidden;
     overflow-wrap: normal;
@@ -2486,24 +2127,16 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     white-space: normal;
   }
 
-  .role-admin .data-table th {
-    font-size: 13px;
-  }
-
-  .role-admin .data-table tbody td {
-    font-size: 12px;
+  .role-admin .data-table th,
+.role-admin .data-table tbody td {
+    font-size: var(--type-15);
   }
 
   .role-admin .employee-table .column-barcode,
-.role-admin .people-table .column-barcode,
-.role-admin .hardware-table .column-barcode {
+  .role-admin .people-table .column-barcode,
+  .role-admin .hardware-table .column-barcode {
     overflow-wrap: anywhere;
-    font-size: 11px;
-  }
-
-  .role-admin .data-table th:last-child,
-.role-admin .data-table td:last-child {
-    border-right: 0;
+    font-size: var(--type-15);
   }
 
   .role-admin .data-table tbody td::before {
@@ -2514,7 +2147,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   .role-admin .data-table .sort-button {
     min-height: 40px;
     gap: 4px;
-    font-size: 13px;
+    font-size: var(--type-15);
   }
 
   .role-admin .data-table .sort-button svg {
@@ -2523,20 +2156,12 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     flex: 0 0 15px;
   }
 
-  .role-admin .movement-table .column-date,
-.role-admin .movement-table .column-type,
-.role-admin .movement-table .column-checkpoint,
-.role-admin .movement-table .column-barcode,
-.role-admin .movement-table .column-scanType,
-.role-admin .movement-table .column-eventId,
-.role-admin .employee-table .column-barcode,
-.role-admin .employee-table .column-access,
-.role-admin .employee-table .column-department,
-.role-admin .employee-table .column-latest-scan,
-.role-admin .employee-table .column-activity,
-.role-admin .people-table .column-company,
-.role-admin .hardware-table .column-owner,
-.role-admin .hardware-table .column-category {
+  .role-admin .movement-table:not(.movement-table--logs) .column-date,
+  .role-admin .movement-table:not(.movement-table--logs) .column-type,
+  .role-admin .movement-table:not(.movement-table--logs) .column-checkpoint,
+  .role-admin .movement-table:not(.movement-table--logs) .column-barcode,
+  .role-admin .movement-table:not(.movement-table--logs) .column-scanType,
+  .role-admin .movement-table:not(.movement-table--logs) .column-eventId {
     display: none;
   }
 
@@ -2549,32 +2174,8 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .movement-table .column-direction,
-.role-admin .movement-table .column-result {
+  .role-admin .movement-table .column-result {
     width: 22%;
-  }
-
-  .role-admin .employee-table .column-name,
-.role-admin .people-table .column-name,
-.role-admin .hardware-table .column-name {
-    width: 30%;
-  }
-
-  .role-admin .employee-table .column-barcode,
-.role-admin .people-table .column-barcode,
-.role-admin .hardware-table .column-barcode {
-    width: 28%;
-  }
-
-  .role-admin .employee-table .column-type,
-.role-admin .people-table .column-status,
-.role-admin .people-table .column-inside,
-.role-admin .hardware-table .column-status,
-.role-admin .hardware-table .column-inside {
-    width: 21%;
-  }
-
-  .role-admin .employee-table .column-profile {
-    width: 21%;
   }
 
   .role-admin .data-table .column-profile .secondary-button {
@@ -2582,13 +2183,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     min-height: 38px;
     justify-content: center;
     padding: 5px;
-    font-size: 12px;
-  }
-}
-
-@media (max-width: 767px) {
-  .role-admin .filter-bar {
-    grid-template-columns: minmax(0, 1fr);
+    font-size: var(--type-15);
   }
 
   .role-admin .filter-bar .search-control,
@@ -2596,12 +2191,8 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
     grid-column: 1;
   }
 
-  .role-admin .detail-grid {
-    grid-template-columns: 1fr;
-  }
-
   .role-admin .pagination span {
-    font-size: 12px;
+    font-size: var(--type-15);
     text-align: center;
   }
 
@@ -2611,7 +2202,7 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   }
 
   .role-admin .profile-identity-info h1 {
-    font-size: 30px;
+    font-size: var(--type-28);
   }
 
   .role-admin .settings-section-title {
@@ -2667,16 +2258,16 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 }
 
 .role-admin .creation-dialog-heading strong {
-  color: #0f1413;
-  font-size: 18px;
-  font-weight: 850;
+  color: var(--ui-text-primary);
+  font-size: var(--type-18);
+  font-weight: var(--weight-extrabold);
   line-height: 1.2;
 }
 
 .role-admin .creation-dialog-heading span {
-  color: #66716c;
-  font-size: 13px;
-  font-weight: 500;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-medium);
   line-height: 1.4;
   text-transform: none;
 }
@@ -2702,9 +2293,9 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
 }
 
 .role-admin .creation-dialog-card label > span {
-  color: #66716c;
-  font-size: 11px;
-  font-weight: 850;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   letter-spacing: 0.02em;
   line-height: 1.2;
   text-transform: uppercase;
@@ -2717,13 +2308,13 @@ html[data-admin-theme="dark"] .role-admin .result-restricted {
   min-width: 0;
   min-height: 44px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: #dedede;
   box-shadow: none;
-  color: #0f1413;
+  color: var(--ui-text-primary);
   caret-color: #0f1413;
   font-family: inherit;
-  font-size: 15px;
+  font-size: var(--type-15);
   padding: 10px 12px;
   outline: 0;
   transition: border-color 120ms ease, box-shadow 120ms ease;
@@ -2756,12 +2347,12 @@ html[data-admin-theme="dark"] .role-admin .creation-dialog-card .creation-dialog
 }
 
 html[data-admin-theme="dark"] .role-admin .creation-dialog-heading strong {
-  color: #f3f6f4;
+  color: var(--ui-text-inverse);
 }
 
 html[data-admin-theme="dark"] .role-admin .creation-dialog-heading span,
 html[data-admin-theme="dark"] .role-admin .creation-dialog-card label > span {
-  color: #aab8b3;
+  color: var(--ui-text-secondary);
 }
 
 html[data-admin-theme="dark"] .role-admin .creation-dialog-card input,
@@ -2769,7 +2360,7 @@ html[data-admin-theme="dark"] .role-admin .creation-dialog-card select,
 html[data-admin-theme="dark"] .role-admin .creation-dialog-card textarea {
   border-color: transparent;
   background: #1c1c1c;
-  color: #f3f6f4;
+  color: var(--ui-text-inverse);
   caret-color: #f3f6f4;
   color-scheme: dark;
 }
@@ -2807,25 +2398,25 @@ html[data-admin-theme="dark"] .role-admin .creation-dialog-card textarea:focus {
   }
 
   .role-admin .creation-dialog-heading strong {
-    font-size: 17px;
+    font-size: var(--type-16);
   }
 
   .role-admin .creation-dialog-heading span {
-    font-size: 12px;
+    font-size: var(--type-15);
   }
 
 }
 
 html[data-admin-theme="dark"] select option {
   background-color: #000000;
-  color: #ffffff;
+  color: var(--ui-text-inverse);
 }
 
 .role-admin .pill-segmented-group {
   display: inline-flex;
   background-color: #e6e8eb;
   border: 1px solid #c0c6cc;
-  border-radius: 999px;
+  border-radius: var(--radius);
   padding: 4px;
   gap: 2px;
   margin-bottom: 16px;
@@ -2835,22 +2426,22 @@ html[data-admin-theme="dark"] select option {
   background: transparent;
   border: none;
   padding: 8px 18px;
-  border-radius: 999px;
-  color: #4a6676;
-  font-weight: 600;
-  font-size: 14px;
+  border-radius: var(--radius);
+  color: var(--ui-text-info);
+  font-weight: var(--weight-semibold);
+  font-size: var(--type-15);
   cursor: pointer;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 .role-admin .pill-segmented-button:hover:not(.active) {
   background-color: rgba(0, 0, 0, 0.04);
-  color: #2b3a42;
+  color: var(--ui-text-primary);
 }
 
 .role-admin .pill-segmented-button.active {
   background-color: #e4efff;
-  color: #000000;
+  color: var(--ui-text-primary);
 }
 
 html[data-admin-theme="dark"] .role-admin .pill-segmented-group {
@@ -2859,17 +2450,17 @@ html[data-admin-theme="dark"] .role-admin .pill-segmented-group {
 }
 
 html[data-admin-theme="dark"] .role-admin .pill-segmented-button {
-  color: #a0aab2;
+  color: var(--ui-text-secondary);
 }
 
 html[data-admin-theme="dark"] .role-admin .pill-segmented-button:hover:not(.active) {
   background-color: rgba(255, 255, 255, 0.06);
-  color: #d1d5db;
+  color: var(--ui-text-secondary);
 }
 
 html[data-admin-theme="dark"] .role-admin .pill-segmented-button.active {
   background-color: #2d3748;
-  color: #ffffff;
+  color: var(--ui-text-inverse);
 }
 
 .role-admin .dashboard-breakdown-cluster {
@@ -2885,32 +2476,29 @@ html[data-admin-theme="dark"] .role-admin .pill-segmented-button.active {
   flex-direction: column;
   gap: 8px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: transparent;
   box-shadow: none;
   padding: 4px;
   transition: border-color 0.2s ease;
 }
 
-.role-admin .vertical-pill-segmented-group:hover {
-  border-color: #c0c6cc;
-}
-
 .role-admin .icon-filter-button {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 7px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   padding: 10px 8px;
   cursor: pointer;
   transition: border-color 0.2s ease, color 0.2s ease;
 }
 
-.role-admin .icon-filter-button:hover:not(.active) {
-  border-color: rgba(82, 96, 93, 0.3);
+.role-admin .dashboard-subject-filter-label {
+  display: none;
 }
 
 .role-admin .icon-filter-button.active {
@@ -2922,10 +2510,6 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group {
   border-color: transparent;
 }
 
-html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
-  border-color: #333333;
-}
-
 .role-admin .dashboard-calendar-segment {
   display: inline-flex !important;
   align-items: center;
@@ -2933,26 +2517,19 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   white-space: nowrap;
 }
 
-.role-admin .calendar-timezone-note,
 .role-admin .calendar-range-error {
   display: block;
-  font-size: 11px;
   line-height: 1.45;
-}
-
-.role-admin .calendar-timezone-note {
-  color: var(--admin-muted);
-}
-
-.role-admin .calendar-range-error {
-  font-weight: 700;
+  font-weight: var(--weight-bold);
+  font-size: var(--type-15);
+  color: var(--ui-text-danger);
 }
 
 .role-admin .permission-page {
   min-height: 100%;
   padding: 28px 34px 48px;
   background: var(--admin-bg);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 .role-admin .permission-header {
@@ -2965,41 +2542,47 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 
 .role-admin .permission-header h1 {
   margin: 0 0 5px;
-  font-size: clamp(28px, 3vw, 38px);
+  font-size: var(--type-36);
   letter-spacing: -0.04em;
 }
 
 .role-admin .permission-header p {
   max-width: 720px;
   margin: 0;
-  color: var(--admin-muted);
-  font-size: 14px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
 .role-admin .permission-primary,
-.role-admin .report-primary,
-.role-admin .report-trigger {
+.role-admin .report-primary {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   border: 1px solid var(--admin-text);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: var(--admin-text);
-  color: var(--admin-bg);
+  color: var(--ui-text-inverse);
   padding: 10px 14px;
   font: inherit;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
 }
 
 .role-admin .permission-metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0;
   margin-bottom: 22px;
-  border-block: 1px solid var(--admin-border);
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius);
+  background: transparent;
+  transition: border-color 150ms ease;
+}
+
+.role-admin .permission-metrics:hover {
+  border-color: var(--ui-border-hover);
 }
 
 .role-admin .permission-metrics > div {
@@ -3021,15 +2604,15 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 }
 
 .role-admin .permission-metrics small {
-  color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 800;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .role-admin .permission-metrics strong {
-  font-size: 25px;
+  font-size: var(--type-24);
   letter-spacing: -0.03em;
 }
 
@@ -3039,12 +2622,17 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 8px;
   margin: 0 0 14px;
   border: 1px solid rgba(18, 183, 106, 0.3);
-  border-radius: 8px;
-  background: rgba(18, 183, 106, 0.08);
-  color: #087443;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ui-text-positive);
   padding: 9px 12px;
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
+  transition: border-color 150ms ease;
+}
+
+.role-admin .permission-feedback:hover {
+  border-color: var(--ui-border-hover);
 }
 
 .role-admin .permission-feedback button {
@@ -3056,29 +2644,10 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   cursor: pointer;
 }
 
-.role-admin .permission-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
-  gap: 14px;
-  align-items: start;
-}
-
-.role-admin .permission-directory {
-  grid-row: auto;
-}
-
-.role-admin .permission-decisions {
-  grid-column: 2;
-  grid-row: auto;
-}
-
-.role-admin .permission-directory,
-.role-admin .permission-decisions,
 .role-admin .permission-rules {
-  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--admin-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--admin-panel);
 }
 
@@ -3092,14 +2661,14 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 
 .role-admin .permission-section-heading h2 {
   margin: 0;
-  font-size: 18px;
+  font-size: var(--type-18);
   letter-spacing: -0.025em;
 }
 
 .role-admin .permission-section-heading > span {
-  color: var(--admin-muted);
-  font-size: 11px;
-  font-weight: 700;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .permission-tabs {
@@ -3113,17 +2682,17 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   position: relative;
   border: 0;
   background: transparent;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   padding: 8px 2px 10px;
   font: inherit;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--type-15);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
 }
 
 .role-admin .permission-tabs button.is-active {
-  color: var(--admin-text);
-  font-weight: 800;
+  color: var(--ui-text-primary);
+  font-weight: var(--weight-extrabold);
 }
 
 .role-admin .permission-tabs button.is-active::after {
@@ -3136,137 +2705,34 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   content: "";
 }
 
-.role-admin .permission-filters {
-  display: flex;
-  gap: 10px;
-  padding: 14px 16px;
-}
-
-.role-admin .permission-filters label {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  gap: 8px;
-  min-width: 180px;
-  border: 1px solid var(--admin-border);
-  border-radius: 8px;
-  padding: 0 10px;
-}
-
-.role-admin .permission-filters input,
-.role-admin .permission-filters select,
-.role-admin .permission-dialog input,
-.role-admin .permission-dialog select {
-  min-height: 38px;
-  border: 1px solid var(--admin-border);
-  border-radius: 8px;
-  background: var(--admin-surface-strong);
-  color: var(--admin-text);
-  padding: 0 10px;
-  font: inherit;
-  font-size: 13px;
-}
-
-.role-admin .permission-filters label input {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  padding: 0;
-  outline: 0;
-}
-
-.role-admin .permission-table-wrap {
-  overflow-x: auto;
-  border-top: 1px solid var(--admin-border);
-}
-
-.role-admin .permission-table {
-  width: 100%;
-  min-width: 840px;
-  border-collapse: collapse;
-  font-size: 12px;
-}
-
-.role-admin .permission-table th,
-.role-admin .permission-table td {
-  border-bottom: 1px solid var(--admin-border);
-  padding: 11px 14px;
-  text-align: left;
-  vertical-align: middle;
-}
-
-.role-admin .permission-table th {
-  color: var(--admin-muted);
-  font-size: 9px;
-  font-weight: 850;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.role-admin .permission-table tr:last-child td {
-  border-bottom: 0;
-}
-
-.role-admin .permission-table td:first-child {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.role-admin .permission-table td > span:not(.permission-state) {
-  display: grid;
-  gap: 2px;
-}
-
-.role-admin .permission-table small {
-  display: block;
-  color: var(--admin-muted);
-  font-size: 10px;
-  line-height: 1.35;
-}
-
-.role-admin .permission-subject-icon {
-  display: grid !important;
-  place-items: center;
-  flex: 0 0 32px;
-  width: 32px;
-  height: 32px;
-  border: 1px solid rgba(18, 183, 106, 0.22);
-  border-radius: 50%;
-  background: rgba(18, 183, 106, 0.08);
-  color: #087443;
-  font-size: 11px;
-  font-weight: 850;
-}
-
 .role-admin .permission-state {
   display: inline-flex;
   border: 1px solid currentColor;
-  border-radius: 5px;
+  border-radius: var(--radius);
   padding: 3px 6px;
-  color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 800;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   text-transform: capitalize;
 }
 
 .role-admin .permission-state[data-state="active"] {
   border-color: rgba(18, 183, 106, 0.25);
   background: rgba(18, 183, 106, 0.08);
-  color: #087443;
+  color: var(--ui-text-positive);
 }
 
 .role-admin .permission-state[data-state="restricted"],
 .role-admin .permission-state[data-state="revoked"] {
   border-color: rgba(240, 68, 56, 0.25);
   background: rgba(240, 68, 56, 0.08);
-  color: #b42318;
+  color: var(--ui-text-danger);
 }
 
 .role-admin .permission-state[data-state="pending_approval"] {
   border-color: rgba(247, 144, 9, 0.3);
   background: rgba(247, 144, 9, 0.09);
-  color: #b54708;
+  color: var(--ui-text-danger);
 }
 
 .role-admin .permission-row-action {
@@ -3275,11 +2741,11 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 3px;
   border: 0;
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   padding: 3px;
   font: inherit;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -3290,28 +2756,28 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   padding: 0 14px 14px;
 }
 
-.role-admin .permission-request-list article {
+.role-admin .permission-request-list article:not(.pending-decision-card) {
   border: 1px solid var(--admin-border);
-  border-radius: 9px;
+  border-radius: var(--radius);
   padding: 13px;
 }
 
 .role-admin .permission-request-list h3 {
   margin: 0 0 2px;
-  font-size: 14px;
+  font-size: var(--type-15);
 }
 
 .role-admin .permission-request-list p {
   margin: 0 0 10px;
-  color: var(--admin-muted);
-  font-size: 11px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
 .role-admin .permission-request-list dl {
   display: grid;
   gap: 5px;
   margin: 0 0 10px;
-  font-size: 10px;
+  font-size: var(--type-15);
 }
 
 .role-admin .permission-request-list dl div {
@@ -3321,7 +2787,7 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 }
 
 .role-admin .permission-request-list dt {
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .permission-request-list dd {
@@ -3341,43 +2807,22 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   align-items: flex-end;
 }
 
-.role-admin .permission-valid-for {
-  display: grid;
-  gap: 5px;
-}
-
-.role-admin .permission-valid-for > span {
-  color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 800;
-}
-
-.role-admin .permission-valid-for select {
-  min-height: 31px;
-  width: 100%;
-  border: 1px solid var(--admin-border);
-  border-radius: 6px;
-  padding: 0 8px;
-  background: var(--admin-surface-strong);
-  color: var(--admin-text);
-  font: inherit;
-  font-size: 11px;
-}
-
 .role-admin .permission-decision-note {
   display: grid;
-  gap: 5px;
+  grid-template-columns: max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
   margin: 0 0 12px;
 }
 
 .role-admin .permission-decision-note > span {
-  color: var(--admin-muted);
-  font-size: 11px;
-  font-weight: 750;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .permission-decision-note em {
-  color: #d92d20;
+  color: var(--ui-text-danger);
   font-style: normal;
 }
 
@@ -3385,12 +2830,12 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   min-height: 72px;
   resize: vertical;
   border: 1px solid var(--admin-border);
-  border-radius: 7px;
+  border-radius: var(--radius);
   padding: 8px 9px;
   background: var(--admin-surface-strong);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--type-15);
   line-height: 1.4;
 }
 
@@ -3399,22 +2844,28 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   outline-offset: 2px;
 }
 
-.role-admin .request-actions button {
+.role-admin .permission-approve-button,
+.role-admin .permission-deny-button {
   min-height: 31px;
   border: 1px solid #12b76a;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: #12b76a;
-  color: #fff;
+  color: var(--ui-text-inverse);
   font: inherit;
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
 }
 
-.role-admin .request-actions button:last-child {
+.role-admin .permission-deny-button {
   border-color: #f04438;
   background: transparent;
-  color: #f04438;
+  color: var(--ui-text-danger);
+}
+
+.role-admin .permission-approve-button:disabled,
+.role-admin .permission-deny-button:disabled {
+  cursor: wait;
 }
 
 .role-admin .permission-empty {
@@ -3422,115 +2873,49 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   justify-items: center;
   gap: 4px;
   padding: 30px 16px;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   text-align: center;
-  font-size: 12px;
+  font-size: var(--type-15);
 }
 
 .role-admin .permission-rules {
   grid-column: 1;
 }
 
-.role-admin .permission-switch {
-  position: relative;
-  width: 34px;
-  height: 19px;
-}
-
-.role-admin .permission-switch input {
-  position: absolute;
-  opacity: 0;
-}
-
-.role-admin .permission-switch > span {
-  position: absolute;
-  inset: 0;
-  border-radius: 999px;
-  background: #a9b0ae;
-  cursor: pointer;
-}
-
-.role-admin .permission-switch > span::after {
-  position: absolute;
-  top: 3px;
-  left: 3px;
-  width: 13px;
-  height: 13px;
-  border-radius: 50%;
-  background: #fff;
-  content: "";
-  transition: transform 160ms ease;
-}
-
-.role-admin .permission-switch input:checked + span {
-  background: #12b76a;
-}
-
-.role-admin .permission-switch input:checked + span::after {
-  transform: translateX(15px);
-}
-
-.role-admin .rule-severity {
-  text-transform: capitalize;
-}
-
-.role-admin .rule-severity::before {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  margin-right: 6px;
-  border-radius: 50%;
-  background: #f04438;
-  content: "";
-}
-
-.role-admin .rule-severity[data-severity="high"]::before {
-  background: #f79009;
-}
-
-.role-admin .rule-severity[data-severity="medium"]::before {
-  background: #0b63e5;
-}
-
 .role-admin .alerts-command-stack {
   display: grid;
-  gap: 0;
   min-width: 0;
-}
-
-.role-admin .alerts-filter-bar {
-  margin-bottom: 18px;
-  border-bottom: 1px solid var(--admin-border);
-  padding: 4px 0 18px;
 }
 
 .role-admin .alert-run-control {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
 }
 
 .role-admin .alert-run-control > span {
-  color: var(--admin-muted);
-  font-size: 13px;
-  font-weight: 650;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-semibold);
 }
 
 .role-admin .alerts-command-grid {
   display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(460px, 0.9fr);
-  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: start;
-  min-width: 0;
 }
 
 .role-admin .alert-activity-section,
 .role-admin .alert-rules-section {
-  min-width: 0;
   overflow: hidden;
   border: 1px solid var(--admin-border);
-  border-radius: 12px;
-  background: var(--admin-panel);
+  border-radius: var(--radius);
+  background: transparent;
+  transition: border-color 150ms ease;
+}
+
+.role-admin .alert-activity-section:hover,
+.role-admin .alert-rules-section:hover {
+  border-color: var(--ui-border-hover);
 }
 
 .role-admin .alerts-command-grid .alert-rules-section {
@@ -3541,8 +2926,11 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 
 .role-admin .alert-activity-section .permission-section-heading,
 .role-admin .alert-rules-section .permission-section-heading {
-  min-height: 82px;
-  padding: 18px 20px;
+  min-height: 0;
+}
+.role-admin .alert-activity-section > .permission-section-heading h2,
+.role-admin .alert-rules-section > .permission-section-heading h2{
+  font-size: var(--type-20);
 }
 
 .role-admin .alert-activity-section .permission-section-heading > div,
@@ -3551,86 +2939,38 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 5px;
 }
 
-.role-admin .alert-activity-section .permission-section-heading h2,
-.role-admin .alert-rules-section .permission-section-heading h2 {
-  font-size: 20px;
-}
-
-.role-admin .alert-activity-section .permission-section-heading p,
-.role-admin .alert-rules-section .permission-section-heading p {
-  margin: 0;
-  color: var(--admin-muted);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
 .role-admin .alert-activity-section .permission-section-heading > span,
 .role-admin .alert-rules-section .permission-section-heading > span {
-  font-size: 13px;
-}
-
-.role-admin .alert-rules-savebar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-top: 1px solid var(--admin-border);
-  border-bottom: 1px solid var(--admin-border);
-  padding: 10px 20px;
-  color: var(--admin-muted);
-  font-size: 12px;
-}
-
-.role-admin .alert-rules-savebar button {
-  border: 1px solid var(--admin-text);
-  border-radius: 7px;
-  background: var(--admin-text);
-  color: var(--admin-bg);
-  padding: 7px 10px;
-  font: inherit;
-  font-weight: 800;
-  cursor: pointer;
-}
-
-.role-admin .alert-rules-savebar button:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+  font-size: var(--type-15);
 }
 
 .role-admin .alert-activity-list {
-  border-top: 1px solid var(--admin-border);
+  display: grid;
 }
 
 .role-admin .alert-activity-list article {
   display: grid;
   grid-template-columns: 82px 14px minmax(0, 1fr) max-content;
-  gap: 14px;
   align-items: start;
   min-height: 112px;
-  border-bottom: 1px solid var(--admin-border);
-  padding: 18px 20px;
-}
-
-.role-admin .alert-activity-list article:last-child {
-  border-bottom: 0;
+  background: transparent;
+  transition: border-color 150ms ease;
 }
 
 .role-admin .alert-activity-list time,
-.role-admin .alert-activity-copy,
-.role-admin .alert-activity-actions {
+.role-admin .alert-activity-copy {
   display: grid;
-  gap: 4px;
 }
 
-.role-admin .alert-activity-list time strong {
-  font-size: 14px;
+.role-admin .alert-activity-list time {
+  gap: 4px;
 }
 
 .role-admin .alert-activity-list time small,
 .role-admin .alert-activity-copy > small,
 .role-admin .alert-activity-copy em {
-  color: var(--admin-muted);
-  font-size: 12px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
   font-style: normal;
   line-height: 1.45;
 }
@@ -3677,74 +3017,102 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 8px;
 }
 
-.role-admin .alert-activity-title-row > strong {
-  font-size: 16px;
-  line-height: 1.3;
+.role-admin .alert-warning-label {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  min-height: 30px;
+  padding: 4px 11px;
+  border: 1px solid #fecdca;
+  border-radius: var(--radius);
+  background: #fef3f2;
+  color: var(--ui-text-danger);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+/* Registry alert history uses the same severity language as Command Center. */
+
+html[data-admin-theme="dark"] .role-admin .alert-warning-label {
+  border-color: rgba(255, 138, 128, .35);
+  background: rgba(217, 45, 32, .16);
+  color: var(--ui-text-warning);
+}
+
+.role-admin .alert-activity-warning-subject {
+  margin-top: 2px;
+  color: var(--ui-text-primary);
+}
+
+.role-admin .alert-activity-subject-row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+
+.role-admin .alert-activity-barcode {
+  min-width: 0;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .role-admin .alert-activity-section .severity {
   min-height: 28px;
   padding-inline: 10px;
-  font-size: 14px;
+  font-size: var(--type-15);
 }
 
 .role-admin .alert-activity-copy p {
-  margin: 3px 0 0;
-  color: var(--admin-text);
-  font-size: 14px;
-  line-height: 1.45;
+  color: var(--ui-text-primary);
 }
 
-.role-admin .alert-activity-actions {
-  align-items: center;
-  grid-template-columns: max-content;
-  justify-content: flex-end;
-  gap: 8px;
+.role-admin .alert-activity-description {
+  margin: 4px 0 6px;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
 }
 
 .role-admin .alert-activity-actions button {
   border: 1px solid var(--admin-border);
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--admin-bg);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   min-height: 36px;
   padding: 8px 11px;
   font: inherit;
-  font-size: 13px;
-  font-weight: 800;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
 }
 
 .role-admin .alert-activity-actions button:last-child {
   border-color: var(--admin-text);
   background: var(--admin-text);
-  color: var(--admin-bg);
+  color: var(--ui-text-inverse);
 }
 
 .role-admin .alert-activity-empty {
   display: grid;
   justify-items: center;
-  gap: 5px;
-  padding: 38px 20px;
-  color: var(--admin-muted);
-  font-size: 14px;
+  color: var(--ui-text-secondary);
   text-align: center;
 }
 
 .role-admin .alert-rule-list {
   display: grid;
-  border-top: 1px solid var(--admin-border);
 }
 
 .role-admin .alert-rule-card {
   display: grid;
-  gap: 14px;
-  border-bottom: 1px solid var(--admin-border);
-  padding: 17px 20px;
-}
-
-.role-admin .alert-rule-card:last-child {
-  border-bottom: 0;
+  background: transparent;
+  transition: border-color 150ms ease;
 }
 
 .role-admin .alert-rule-card header {
@@ -3761,168 +3129,125 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 }
 
 .role-admin .alert-rule-card header strong {
-  font-size: 13px;
+  font-size: var(--type-18);
+  font-weight: var(--weight-bold);
   line-height: 1.35;
 }
 
 .role-admin .alert-rule-card header small {
-  color: var(--admin-muted);
-  font-size: 12px;
-  line-height: 1.45;
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .alert-rule-card footer {
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
-  gap: 8px 14px;
-  color: var(--admin-muted);
-  font-size: 13px;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
   line-height: 1.4;
 }
 
-.role-admin .alert-rule-card footer > span:last-child {
-  grid-column: auto;
-  justify-self: end;
-}
-
 .role-admin .alert-rule-trigger {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-}
-
-.role-admin .alert-rule-trigger strong {
-  color: var(--admin-text);
-  font-size: 13px;
-}
-
-.role-admin .alert-rule-trigger small {
-  font-size: 12px;
-}
-
-.role-admin .alert-rule-card .rule-severity {
-  font-size: 13px;
-  font-weight: 750;
-}
-
-.role-admin .alert-rule-card .permission-switch {
+  display: inline-flex;
   flex: 0 0 auto;
-  margin-top: 1px;
+  align-items: baseline;
+  width: max-content;
+  max-width: 100%;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.role-admin .alert-support-stack { display: grid; min-width: 0; }
+.role-admin .alert-support-stack .alert-rules-section { position: static; }
+
+.role-admin .alert-activity-section--open { width: 100%; max-width: none; justify-self: start; }
+.role-admin .alert-activity-marker { grid-column: 4; display: flex; justify-content: flex-end; }
+.role-admin .alert-review-state,
+.role-admin .alert-rule-status { border: 1px solid var(--admin-border); border-radius: var(--radius); padding: 4px 8px; color: var(--ui-text-secondary); font-size: var(--type-15); font-weight: var(--weight-bold); white-space: nowrap; }
+.role-admin .alert-review-state[data-state="confirmed"],
+.role-admin .alert-rule-status[data-enabled="true"] { color: var(--ui-text-positive); }
+.role-admin .alert-review-controls { grid-column: 3 / span 2; display: grid; min-width: 0; }
+.role-admin .alert-review-controls input{ width: 100%; min-width: 0; border: 1px solid var(--admin-border); border-radius: var(--radius); background: transparent; color: var(--ui-text-primary); font: inherit; padding-block: 0; transition: border-color 150ms ease; }
+.role-admin .alert-review-controls input:focus-visible{ outline: 2px solid var(--green); outline-offset: 2px; }
+.role-admin .alert-review-controls input[aria-invalid="true"]{ border-color: #d92d20; outline-color: #d92d20; background: rgba(217, 45, 32, .04); }
+.role-admin .alert-review-controls .alert-activity-actions { display: flex; flex-wrap: wrap; justify-content: flex-start; align-items: center; }
+.role-admin .alert-review-controls .alert-activity-actions button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; width: auto; border-color: var(--admin-border); background: var(--admin-bg); color: var(--ui-text-primary); }
+.role-admin .alert-review-controls .alert-activity-actions .alert-accept-button { border-color: var(--admin-text); background: var(--admin-text); color: var(--ui-text-inverse); }
+.role-admin .alert-activity-copy p,
+.role-admin .alert-action-error { overflow-wrap: anywhere; white-space: pre-wrap; }
+.role-admin .alert-action-error { margin: 0; color: var(--ui-text-danger); font-size: var(--type-15); line-height: 1.45; }
+
+.role-admin .alert-section-empty { display: grid; gap: 6px; margin: 0; padding: 20px 0; color: var(--ui-text-secondary); font-size: var(--type-15); line-height: 1.5; }
+.role-admin .alert-rule-list > .alert-section-empty { padding: 20px; }
+
+.role-admin .alert-page-error button { justify-self: start; border: 1px solid var(--admin-border); border-radius: var(--radius); background: var(--admin-bg); color: var(--ui-text-primary); padding: 7px 10px; font: inherit; font-size: var(--type-15); cursor: pointer; }
+.role-admin .alert-page-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; color: var(--ui-text-danger); font-size: var(--type-15); }
+.role-admin .alert-review-controls button:disabled{ opacity: .55; cursor: not-allowed; }
+
+@media (max-width: 1199px) {
+  .role-admin .alert-activity-marker { grid-column: 3; grid-row: 2; }
+  .role-admin .alert-review-controls { grid-column: 3; grid-row: 3; }
+}
+
+@media (max-width: 767px) {
+  .role-admin .alert-activity-marker { grid-column: 2; grid-row: 3; }
+  .role-admin .alert-review-controls { grid-column: 2; grid-row: 4; }
+
+  .role-admin .alert-review-controls .alert-activity-actions button { flex: 1 1 145px; }
+
 }
 
 .role-admin .permission-page {
-  font-size: 18px;
+  font-size: var(--type-18);
 }
 
 .role-admin .permission-page .permission-header h1 {
-  font-size: clamp(30px, calc(3vw + 2px), 40px);
+  font-size: var(--type-36);
 }
 
 .role-admin .permission-page .permission-header p {
-  font-size: 16px;
+  font-size: var(--type-16);
 }
 
-.role-admin .permission-page .permission-primary {
-  font-size: 15px;
-}
-
+.role-admin .permission-page .permission-primary,
 .role-admin .permission-page .permission-metrics small {
-  font-size: 12px;
+  font-size: var(--type-15);
 }
 
 .role-admin .permission-page .permission-metrics strong {
-  font-size: 27px;
+  font-size: var(--type-28);
 }
 
 .role-admin .permission-page .permission-feedback {
-  font-size: 15px;
+  font-size: var(--type-15);
 }
 
 .role-admin .permission-page .permission-section-heading h2 {
-  font-size: 20px;
+  font-size: var(--type-20);
 }
 
-.role-admin .permission-page .permission-section-heading > span {
-  font-size: 13px;
-}
-
-.role-admin .permission-page .permission-tabs button {
-  font-size: 15px;
-}
-
-.role-admin .permission-page .permission-filters input,
-.role-admin .permission-page .permission-filters select,
-.role-admin .permission-page .permission-dialog input,
-.role-admin .permission-page .permission-dialog select {
-  font-size: 15px;
-}
-
-.role-admin .permission-page .permission-table {
-  font-size: 14px;
-}
-
-.role-admin .permission-page .permission-table th {
-  font-size: 11px;
-}
-
-.role-admin .permission-page .permission-table small {
-  font-size: 12px;
-}
-
-.role-admin .permission-page .permission-subject-icon {
-  font-size: 13px;
-}
-
-.role-admin .permission-page .permission-state {
-  font-size: 12px;
-}
-
+.role-admin .permission-page .permission-section-heading > span,
+.role-admin .permission-page .permission-tabs button,
+.role-admin .permission-page .permission-state,
 .role-admin .permission-page .permission-row-action {
-  font-size: 13px;
+  font-size: var(--type-15);
 }
 
 .role-admin .permission-page .permission-request-list h3 {
-  font-size: 16px;
+  font-size: var(--type-16);
 }
 
-.role-admin .permission-page .permission-request-list p {
-  font-size: 13px;
-}
-
-.role-admin .permission-page .permission-request-list dl {
-  font-size: 12px;
-}
-
-.role-admin .permission-page .request-actions button {
-  font-size: 13px;
-}
-
-.role-admin .permission-page .permission-empty {
-  font-size: 14px;
-}
-
-.role-admin .permission-page .permission-dialog h2 {
-  font-size: 22px;
-}
-
-.role-admin .permission-page .permission-dialog header p {
-  font-size: 14px;
-}
-
-.role-admin .permission-page .permission-dialog > label,
-.role-admin .permission-page .permission-date-grid label {
-  font-size: 13px;
-}
-
+.role-admin .permission-page .permission-request-list p,
+.role-admin .permission-page .permission-request-list dl,
+.role-admin .permission-page .request-actions button,
+.role-admin .permission-page .permission-empty,
 .role-admin .permission-page .permission-form-error {
-  font-size: 14px;
+  font-size: var(--type-15);
 }
 
-.role-admin .permission-page .permission-dialog footer button {
-  font-size: 14px;
-}
-
-.role-admin .permission-dialog-backdrop,
 .role-admin .report-dialog-backdrop {
   position: fixed;
   z-index: 200;
@@ -3933,17 +3258,15 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   background: rgba(0, 0, 0, 0.45);
 }
 
-.role-admin .permission-dialog,
 .role-admin .report-dialog {
   width: min(100%, 540px);
   border: 1px solid var(--admin-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--admin-bg);
   box-shadow: 0 22px 70px rgba(0, 0, 0, 0.25);
   padding: 20px;
 }
 
-.role-admin .permission-dialog header,
 .role-admin .report-dialog header {
   display: flex;
   align-items: flex-start;
@@ -3952,60 +3275,31 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   margin-bottom: 18px;
 }
 
-.role-admin .permission-dialog h2,
 .role-admin .report-dialog h2 {
   margin: 0 0 4px;
-  font-size: 20px;
+  font-size: var(--type-20);
 }
 
-.role-admin .permission-dialog header p,
 .role-admin .report-dialog header p {
   margin: 0;
-  color: var(--admin-muted);
-  font-size: 12px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
-.role-admin .permission-dialog header button,
 .role-admin .report-dialog header button {
   display: grid;
   border: 0;
   background: transparent;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   cursor: pointer;
 }
 
-.role-admin .permission-dialog > label,
-.role-admin .permission-date-grid label {
-  display: grid;
-  gap: 6px;
-  margin-bottom: 13px;
-  color: var(--admin-muted);
-  font-size: 11px;
-  font-weight: 800;
-}
-
-.role-admin .permission-date-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-
-.role-admin .permission-dialog input,
-.role-admin .permission-dialog select {
-  width: 100%;
-}
-
-.role-admin .permission-dialog > small {
-  color: var(--admin-muted);
-}
-
 .role-admin .permission-form-error {
-  color: #d92d20;
-  font-size: 12px;
-  font-weight: 750;
+  color: var(--ui-text-danger);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
-.role-admin .permission-dialog footer,
 .role-admin .report-dialog footer {
   display: flex;
   justify-content: flex-end;
@@ -4013,36 +3307,38 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   margin-top: 18px;
 }
 
-.role-admin .permission-dialog footer button,
 .role-admin .report-secondary {
   border: 1px solid var(--admin-border);
-  border-radius: 8px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   padding: 9px 13px;
   font: inherit;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
-}
-
-.role-admin .permission-dialog footer button:last-child {
-  border-color: var(--admin-text);
-  background: var(--admin-text);
-  color: var(--admin-bg);
 }
 
 .role-admin .report-trigger {
   flex: 0 0 auto;
-  min-height: 38px;
-  padding: 8px 11px;
-  white-space: nowrap;
+  display: grid;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  min-height: 40px;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ui-text-primary);
+  padding: 0;
+  transition: border-color 150ms ease, color 150ms ease;
 }
 
 .role-admin .report-source-list {
   display: grid;
   border: 1px solid var(--admin-border);
-  border-radius: 9px;
+  border-radius: var(--radius);
 }
 
 .role-admin .report-source-list label {
@@ -4072,8 +3368,8 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 
 .role-admin .report-source-list small,
 .role-admin .report-date-row small {
-  color: var(--admin-muted);
-  font-size: 10px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
 .role-admin .report-date-row {
@@ -4083,9 +3379,9 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 16px;
   margin-top: 12px;
   border: 1px solid var(--admin-border);
-  border-radius: 9px;
+  border-radius: var(--radius);
   padding: 10px 13px;
-  font-size: 12px;
+  font-size: var(--type-15);
 }
 
 .role-admin .report-preview {
@@ -4093,22 +3389,30 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 2px;
   margin-top: 12px;
   border: 1px solid rgba(18, 183, 106, 0.25);
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: rgba(18, 183, 106, 0.07);
   padding: 13px;
 }
 
 .role-admin .report-preview span,
 .role-admin .report-preview small {
-  color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 800;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   text-transform: uppercase;
 }
 
 .role-admin .report-preview strong {
-  color: #087443;
-  font-size: 22px;
+  color: var(--ui-text-positive);
+  font-size: var(--type-20);
+}
+
+.role-admin .report-error {
+  margin: 12px 0 0;
+  color: var(--ui-text-danger);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
+  overflow-wrap: anywhere;
 }
 
 .role-admin .report-primary:disabled {
@@ -4121,6 +3425,104 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   display: inline-block;
 }
 
+.role-admin .log-time-range-dropdown {
+  position: relative;
+  flex: 0 1 210px;
+  min-width: 175px;
+  max-width: 100%;
+}
+
+.role-admin .log-time-range-trigger {
+  display: flex;
+  width: 100%;
+  min-height: 38px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius);
+  background: var(--admin-panel);
+  color: var(--ui-text-primary);
+  padding: 0 12px;
+  font: inherit;
+  font-size: var(--type-15);
+  font-weight: var(--weight-semibold);
+  text-align: left;
+  cursor: pointer;
+}
+
+.role-admin .log-time-range-trigger:hover,
+.role-admin .log-time-range-trigger[aria-expanded="true"] {
+  border-color: var(--admin-text);
+}
+
+.role-admin .log-time-range-trigger:focus-visible,
+.role-admin .log-time-range-options button:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+.role-admin .log-time-range-trigger span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.role-admin .log-time-range-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 0;
+  z-index: 1100;
+  display: grid;
+  width: min(390px, calc(100vw - 32px));
+  gap: 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius);
+  background: var(--admin-bg);
+  color: var(--ui-text-primary);
+  padding: 12px;
+  box-shadow: 0 18px 50px rgba(14, 20, 19, 0.18);
+}
+
+.role-admin .log-time-range-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.role-admin .log-time-range-options button {
+  min-height: 36px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius);
+  background: var(--admin-panel);
+  color: var(--ui-text-primary);
+  padding: 6px 8px;
+  font: inherit;
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
+  cursor: pointer;
+}
+
+.role-admin .log-time-range-options button[aria-pressed="true"] {
+  border-color: var(--admin-text);
+  background: var(--admin-text);
+  color: var(--ui-text-inverse);
+}
+
+.role-admin .calendar-picker-inline {
+  display: grid;
+  width: 100%;
+  gap: 12px;
+}
+
+@media (max-width: 767px) {
+  .role-admin .filter-bar > .log-time-range-dropdown {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
 .role-admin .calendar-popover {
   position: absolute;
   top: calc(100% + 10px);
@@ -4130,9 +3532,9 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   width: min(340px, calc(100vw - 32px));
   gap: 16px;
   border: 1px solid var(--admin-border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: var(--admin-bg) !important;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   padding: 16px;
   box-shadow: 0 18px 50px rgba(14, 20, 19, 0.18);
   transform: translateX(-50%);
@@ -4151,22 +3553,11 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 3px;
 }
 
-.role-admin .calendar-popover-heading small,
-.role-admin .calendar-timezone-note,
-.role-admin .calendar-range-error {
-  color: var(--admin-muted);
-  font-size: 11px;
-}
-
-.role-admin .calendar-range-error {
-  color: var(--red);
-}
-
 .role-admin .calendar-popover-heading button {
   display: grid;
   border: 0;
   background: transparent;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   cursor: pointer;
 }
 
@@ -4179,38 +3570,38 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 .role-admin .calendar-date-fields label {
   display: grid;
   gap: 6px;
-  color: var(--admin-muted);
-  font-size: 11px;
-  font-weight: 800;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
 }
 
 .role-admin .calendar-date-fields input {
   width: 100%;
   min-height: 38px;
   border: 1px solid var(--admin-border);
-  border-radius: 7px;
+  border-radius: var(--radius);
   background: var(--admin-panel);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   padding: 7px 8px;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--type-15);
 }
 
 .role-admin .calendar-clear-button,
 .role-admin .calendar-apply-button {
   min-height: 36px;
-  border-radius: 7px;
+  border-radius: var(--radius);
   padding: 7px 10px;
   font: inherit;
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
 }
 
 .role-admin .calendar-clear-button {
   border: 1px solid var(--admin-border);
   background: transparent;
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 .role-admin .calendar-apply-button {
@@ -4219,35 +3610,18 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 6px;
   border: 1px solid var(--admin-text);
   background: var(--admin-text);
-  color: var(--admin-bg);
+  color: var(--ui-text-inverse);
 }
 
 @media (max-width: 1199px) {
   .role-admin .alerts-command-grid {
     grid-template-columns: 1fr;
   }
-
-  .role-admin .alerts-command-grid .alert-rules-section {
-    position: static;
-  }
-}
-
-@media (max-width: 1199px) {
   .role-admin .permission-page {
     padding-inline: 22px;
   }
 
-  .role-admin .permission-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .role-admin .permission-directory,
-.role-admin .permission-decisions {
-    grid-row: auto;
-  }
-
-  .role-admin .permission-decisions,
-.role-admin .permission-rules {
+  .role-admin .permission-rules {
     grid-column: 1;
   }
 
@@ -4259,39 +3633,16 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
     grid-template-columns: 72px 12px minmax(0, 1fr);
   }
 
-  .role-admin .alert-activity-actions {
-    grid-column: 3;
-    justify-items: start;
-    justify-content: start;
-  }
 }
 
 @media (max-width: 767px) {
-  .role-admin .alerts-filter-bar {
-    margin-bottom: 14px;
-  }
-
   .role-admin .alert-activity-section .permission-section-heading,
 .role-admin .alert-rules-section .permission-section-heading {
     min-height: 0;
     align-items: flex-start;
-    padding: 16px;
   }
 
   .role-admin .permission-page {
-    padding: 20px 14px 36px;
-  }
-
-  .role-admin .permission-header {
-    flex-direction: column;
-  }
-
-  .role-admin .permission-primary {
-    width: 100%;
-  }
-
-  .role-admin .permission-metrics {
-    grid-template-columns: repeat(2, 1fr);
   }
 
   .role-admin .permission-metrics > div:nth-child(2) {
@@ -4302,29 +3653,13 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
     border-bottom: 1px solid var(--admin-border);
   }
 
-  .role-admin .permission-filters,
-.role-admin .permission-request-list {
+  .role-admin .permission-request-list {
     grid-template-columns: 1fr;
     flex-direction: column;
   }
 
-  .role-admin .permission-filters label,
-.role-admin .permission-filters select {
-    width: 100%;
-  }
-
-  .role-admin .permission-date-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .role-admin .report-trigger {
-    width: 100%;
-  }
-
   .role-admin .alert-activity-list article {
     grid-template-columns: 12px minmax(0, 1fr);
-    gap: 10px 12px;
-    padding: 16px;
   }
 
   .role-admin .alert-activity-list time {
@@ -4339,27 +3674,14 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
     grid-row: 1 / span 3;
   }
 
-  .role-admin .alert-activity-copy,
-.role-admin .alert-activity-actions {
+  .role-admin .alert-activity-copy {
     grid-column: 2;
   }
 
   .role-admin .alert-activity-actions {
-    grid-template-columns: max-content;
+    justify-self: end;
   }
 
-  .role-admin .alert-rule-card {
-    padding: 16px;
-  }
-
-  .role-admin .alert-rule-card footer {
-    grid-template-columns: 1fr;
-  }
-
-  .role-admin .alert-rule-card footer > span:last-child {
-    grid-column: auto;
-    justify-self: start;
-  }
 }
 
 .role-admin .registry-segmented-shell {
@@ -4409,78 +3731,69 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   margin-left: auto;
 }
 
-.role-admin .registry-table-wrap {
-  border-top: 0;
-}
-
 .role-admin .registry-table {
   min-width: 920px;
 }
 
 .role-admin .registry-table--employees {
+  min-width: 1000px;
+}
+
+.role-admin .registry-table--people,
+.role-admin .registry-table--hardware {
   min-width: 1160px;
 }
 
+.role-admin .employee-table .column-activity {
+  width: 340px;
+  min-width: 340px;
+}
 .role-admin .registry-table--permissions {
-  min-width: 1040px;
+  width: 100%;
+  min-width: 960px;
+  table-layout: fixed;
 }
+.role-admin .registry-table .column-host { min-width: 130px; }
+.role-admin .registry-table .column-validTo { min-width: 175px; }
+.role-admin .registry-table .column-requests { min-width: 150px; }
+.role-admin .registry-table--permissions .column-type { width: 14%; }
+.role-admin .registry-table--permissions .column-subject { width: 18%; }
+.role-admin .registry-table--permissions .column-checkpoint { width: 12%; }
+.role-admin .registry-table--permissions .column-access { width: 18%; }
+.role-admin .registry-table--permissions .column-status { width: 9%; }
+.role-admin .registry-table--permissions .column-decidedAt { width: 14%; }
+.role-admin .registry-table--permissions .column-notes { width: 15%; }
 
-.role-admin .registry-table th,
-.role-admin .registry-table td {
-  vertical-align: middle;
-}
-
-.role-admin .registry-table th {
-  height: 46px;
-}
-
-.role-admin .registry-table td {
-  min-height: 58px;
-}
-
-.role-admin .registry-record {
-  display: grid;
-  min-width: 0;
-  gap: 2px;
-}
-
-.role-admin .registry-record strong {
-  color: var(--admin-text);
-  font-size: 13px;
+.role-admin .registry-table--permissions .column-type,
+.role-admin .registry-table--permissions .column-subject,
+.role-admin .registry-table--permissions .column-notes {
   line-height: 1.35;
 }
 
-.role-admin .registry-record small {
-  color: var(--admin-muted);
-  font-size: 11px;
-  line-height: 1.35;
-  text-transform: capitalize;
+.role-admin .registry-table--permissions .registry-permission-cell__primary,
+.role-admin .registry-table--permissions .registry-permission-cell__secondary,
+.role-admin .registry-table--permissions .registry-permission-cell__truncate,
+.role-admin .registry-table--permissions .registry-permission-cell__note {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.role-admin .registry-decision {
-  display: inline-flex;
-  min-height: 24px;
-  align-items: center;
-  border-radius: 999px;
-  padding: 0 9px;
-  font-size: 12px;
-  font-weight: 850;
-  text-transform: capitalize;
+.role-admin .registry-table--permissions .registry-permission-cell__primary {
+  color: var(--ui-text-primary);
+  font-weight: var(--weight-bold);
 }
 
-.role-admin .registry-decision-granted {
-  background: var(--green-soft);
-  color: var(--green);
+.role-admin .registry-table--permissions .registry-permission-cell__primary--manual-review {
+  font-weight: var(--weight-regular);
 }
 
-.role-admin .registry-decision-denied {
-  background: var(--red-soft);
-  color: var(--red);
-}
-
-.role-admin .registry-decision-recorded {
-  background: var(--blue-soft);
-  color: var(--blue);
+.role-admin .registry-table--permissions .registry-permission-cell__secondary,
+.role-admin .registry-table--permissions .registry-permission-cell__note + .registry-permission-cell__note {
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
 @media (max-width: 767px) {
@@ -4506,12 +3819,7 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   border-style: solid !important;
   border-color: transparent !important;
   border-width: 1px !important;
-  border-radius: 12px !important;
-}
-
-.role-admin .metric-widget-box:hover,
-.role-admin .alert-widget-box:hover {
-  border-color: rgba(184, 190, 188, 0.78) !important;
+  border-radius: var(--radius) !important;
 }
 
 .role-admin .dashboard-alert-widget {
@@ -4564,9 +3872,9 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 
 .role-admin .alert-widget-header h2 {
   margin: 0;
-  color: var(--admin-text);
-  font-size: 18px;
-  font-weight: 750;
+  color: var(--ui-text-primary);
+  font-size: var(--type-18);
+  font-weight: var(--weight-bold);
   line-height: 1.1;
 }
 
@@ -4574,7 +3882,7 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   position: absolute;
   left: 100%;
   margin-left: 4px;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   opacity: 0;
   pointer-events: none;
   transform: translateX(-5px);
@@ -4583,7 +3891,7 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 
 .role-admin .dashboard-alert-widget:hover .alert-widget-title-chevron,
 .role-admin .dashboard-alert-widget:focus-within .alert-widget-title-chevron {
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   opacity: 1;
   transform: translateX(0);
 }
@@ -4627,9 +3935,9 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 
 .role-admin .alert-item-title {
   overflow: hidden;
-  color: var(--admin-text);
-  font-size: 14px;
-  font-weight: 750;
+  color: var(--ui-text-primary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -4641,7 +3949,7 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   gap: 12px;
   align-items: center;
   justify-content: center;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .alert-widget-empty div {
@@ -4650,13 +3958,13 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 }
 
 .role-admin .alert-widget-empty strong {
-  color: var(--admin-text);
-  font-size: 16px;
+  color: var(--ui-text-primary);
+  font-size: var(--type-16);
 }
 
 .role-admin .alert-widget-empty span:last-child {
   margin-top: 2px;
-  font-size: 14px;
+  font-size: var(--type-15);
 }
 
 .role-admin .pending-decision-card {
@@ -4667,8 +3975,12 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   margin-bottom: 10px;
   padding: 9px 8px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius);
   transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.role-admin .dashboard-alert-widget .pending-decision-card {
+  border-radius: 10px;
 }
 
 .role-admin .pending-decision-card:hover,
@@ -4682,12 +3994,17 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   height: 28px;
   align-items: center;
   justify-content: center;
-  border-radius: 10px;
+  border-radius: var(--radius);
   background: rgba(11, 99, 229, 0.1);
-  color: #0b63e5;
+  color: var(--ui-text-info);
+}
+
+.role-admin .dashboard-alert-widget .pending-decision-icon {
+  border-radius: 10px;
 }
 
 .role-admin .pending-decision-controls {
+  flex-wrap: wrap;
   display: flex;
   gap: 8px;
   align-items: flex-end;
@@ -4698,20 +4015,24 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 .role-admin .pending-decision-controls > label {
   display: grid;
   gap: 3px;
-  color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 750;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .pending-decision-controls select {
   min-height: 28px;
   border: 1px solid var(--admin-border);
-  border-radius: 6px;
+  border-radius: var(--radius);
   padding: 0 7px;
   background: var(--admin-surface-strong);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--type-15);
+}
+
+.role-admin .dashboard-alert-widget .pending-decision-controls select {
+  border-radius: 6px;
 }
 
 .role-admin .pending-decision-actions {
@@ -4727,11 +4048,11 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   justify-content: center;
   gap: 4px;
   border: 1px solid transparent;
-  border-radius: 8px;
+  border-radius: var(--radius);
   padding: 0 8px;
   font: inherit;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
 }
 
@@ -4743,49 +4064,76 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 .role-admin .pending-decision-approve {
   border-color: rgba(18, 183, 106, 0.45) !important;
   background: rgba(18, 183, 106, 0.12);
-  color: #12b76a;
+  color: var(--ui-text-positive);
 }
 
 .role-admin .pending-decision-deny {
   border-color: rgba(240, 68, 56, 0.45) !important;
   background: rgba(240, 68, 56, 0.1);
-  color: #f04438;
+  color: var(--ui-text-danger);
 }
 
 .role-admin .pending-decision-note {
   display: grid;
   gap: 4px;
-  margin-top: 8px;
 }
 
 .role-admin .pending-decision-note > span {
-  color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 750;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .pending-decision-note em {
-  color: #d92d20;
+  color: var(--ui-text-danger);
   font-style: normal;
+  font-weight: var(--weight-extrabold);
 }
 
 .role-admin .pending-decision-note textarea {
   min-height: 58px;
   resize: vertical;
   border: 1px solid var(--admin-border);
-  border-radius: 7px;
+  border-radius: var(--radius);
   padding: 7px 8px;
   background: var(--admin-surface-strong);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   font: inherit;
-  font-size: 11px;
+  font-size: var(--type-15);
+}
+
+.role-admin .dashboard-alert-widget .pending-decision-note textarea,
+.role-admin .dashboard-alert-widget .pending-decision-note-single-line input {
+  border-radius: 7px;
+}
+
+.role-admin .pending-decision-note-single-line input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  min-height: 32px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius);
+  padding: 0 8px;
+  background: var(--admin-surface-strong);
+  color: var(--ui-text-primary);
+  font: inherit;
+  font-size: var(--type-15);
+}
+
+.role-admin .pending-decision-valid-for {
+  display: grid;
+  gap: 3px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .pending-decision-error {
   margin: 0 14px 8px;
-  color: #d92d20;
-  font-size: 11px;
-  font-weight: 700;
+  color: var(--ui-text-danger);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 @media (max-width: 1199px) {
@@ -4818,7 +4166,7 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
   border-radius: 50%;
   background: var(--admin-bg);
   box-shadow: none;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   padding: 0;
   cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, color 0.2s ease, transform 0.2s ease;
@@ -4827,7 +4175,7 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 .role-admin .admin-theme-toggle:hover {
   border-color: var(--admin-line);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   transform: scale(1.05);
 }
 
@@ -4838,12 +4186,12 @@ html[data-admin-theme="dark"] .role-admin .vertical-pill-segmented-group:hover {
 
 html[data-admin-theme="dark"] .role-admin .admin-theme-toggle {
   background: var(--admin-bg);
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
 }
 
 html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   border-color: var(--admin-lime);
-  color: var(--admin-lime);
+  color: var(--ui-text-accent);
 }
 
 .role-admin .dashboard-time-range-selector > .calendar-picker-container {
@@ -4863,9 +4211,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
     left: auto !important;
     transform: none !important;
   }
-}
-
-@media (max-width: 1199px) {
   .role-admin .admin-theme-toggle {
     right: 12px;
     bottom: calc(var(--mobile-admin-nav-height) + 12px);
@@ -4878,39 +4223,33 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
     box-shadow: 0 6px 18px rgba(24, 32, 31, 0.12);
   }
 
-  .role-admin .log-workspace {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
 
 @media (max-width: 767px) {
   .role-admin .registry-workspace .table-wrap,
-.role-admin .log-workspace .table-wrap {
+  .role-admin .log-workspace .table-wrap {
     display: block;
     width: 100%;
     max-width: 100%;
     overflow-x: auto !important;
     overflow-y: hidden;
     overscroll-behavior-inline: contain;
+    -webkit-overflow-scrolling: touch;
     scrollbar-width: thin;
     touch-action: pan-x pan-y;
   }
 
   .role-admin .registry-workspace .data-table,
-.role-admin .log-workspace .movement-table {
+  .role-admin .log-workspace .movement-table {
     display: table !important;
-    width: 100%;
-    min-width: 980px !important;
+    width: max-content !important;
+    min-width: max-content !important;
     table-layout: auto !important;
     border-collapse: separate;
   }
 
-  .role-admin .log-workspace .movement-table {
-    min-width: 1120px !important;
-  }
-
   .role-admin .registry-workspace .data-table thead,
-.role-admin .log-workspace .movement-table thead {
+  .role-admin .log-workspace .movement-table thead {
     position: static;
     display: table-header-group;
     width: auto;
@@ -4921,42 +4260,40 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   }
 
   .role-admin .registry-workspace .data-table tbody,
-.role-admin .log-workspace .movement-table tbody {
+  .role-admin .log-workspace .movement-table tbody {
     display: table-row-group;
   }
 
   .role-admin .registry-workspace .data-table tr,
-.role-admin .log-workspace .movement-table tr {
+  .role-admin .log-workspace .movement-table tr {
     display: table-row;
   }
 
   .role-admin .registry-workspace .data-table th,
-.role-admin .registry-workspace .data-table td,
-.role-admin .log-workspace .movement-table th,
-.role-admin .log-workspace .movement-table td,
-.role-admin .registry-workspace .data-table [class*="column-"],
-.role-admin .log-workspace .movement-table [class*="column-"] {
+  .role-admin .registry-workspace .data-table td,
+  .role-admin .log-workspace .movement-table th,
+  .role-admin .log-workspace .movement-table td,
+  .role-admin .registry-workspace .data-table [class*="column-"],
+  .role-admin .log-workspace .movement-table [class*="column-"] {
     display: table-cell !important;
     width: auto !important;
-    min-width: max-content;
+    min-width: max-content !important;
+    max-width: none !important;
+    overflow: visible !important;
+    text-overflow: clip !important;
     white-space: nowrap !important;
   }
 
   .role-admin .registry-workspace .data-table td::before,
-.role-admin .log-workspace .movement-table td::before {
+  .role-admin .log-workspace .movement-table td::before {
     display: none !important;
     content: none !important;
   }
-}
-
-@media (max-width: 767px) {
   .role-admin .admin-theme-toggle {
     right: 10px;
     bottom: calc(var(--mobile-admin-nav-height) + 10px);
   }
 }
-
-
 
 .role-admin .admin-navigation-rail {
   position: absolute;
@@ -5031,7 +4368,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   position: relative;
   width: 100%;
   padding: 8px 12px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   background: transparent;
   transition:
     background-color 150ms ease,
@@ -5125,7 +4462,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   margin: 0 0 10px;
   padding: 14px;
   border: 1px solid var(--admin-line);
-  border-radius: 16px;
+  border-radius: var(--radius);
   background: var(--admin-surface-strong);
   box-shadow: 0 18px 34px rgba(15, 20, 19, 0.16);
   white-space: normal;
@@ -5142,23 +4479,23 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
 .role-admin .admin-account-menu-heading {
   color: var(--admin-text);
-  font-size: 14px;
+  font-size: var(--type-15);
   font-weight: 800;
 }
 
 .role-admin .admin-signout-dialog label {
   justify-content: space-between;
-  color: var(--admin-muted);
-  font-size: 13px;
-  font-weight: 700;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .admin-signout-dialog select {
   min-height: 34px;
   border: 1px solid var(--admin-line);
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: var(--admin-bg);
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   font: inherit;
   padding: 0 8px;
 }
@@ -5180,7 +4517,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   gap: 14px;
   padding: 24px;
   border: 1px solid var(--admin-line);
-  border-radius: 18px;
+  border-radius: var(--radius);
   background: var(--admin-surface-strong);
   box-shadow: 0 24px 70px rgba(0, 0, 0, 0.28);
 }
@@ -5188,18 +4525,16 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 .role-admin .admin-signout-dialog p,
 .role-admin .admin-signout-dialog small {
   margin: 0;
-  color: var(--admin-muted);
-  font-size: 12px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
 }
 
 .role-admin .admin-account-signout {
-  min-height: 34px;
   border: 1px solid var(--admin-line);
-  border-radius: 9px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--admin-text);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--type-15);
   font-weight: 700;
   cursor: pointer;
   padding: 0 10px;
@@ -5216,11 +4551,18 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 .role-admin .admin-account-menu-links a,
 .role-admin .admin-account-signout {
   min-height: 34px;
-  border-radius: 8px;
+  border-radius: var(--radius);
   color: var(--admin-text);
   text-decoration: none;
   padding: 0 8px;
 }
+
+.role-admin .admin-account-menu-links a.admin-user-management-link { justify-content: space-between; gap: 12px; }
+.role-admin .admin-user-management-label,
+.role-admin .admin-user-stepup-status { display: inline-flex; align-items: center; gap: 7px; }
+.role-admin .admin-user-stepup-status { margin-left: auto; color: var(--ui-text-danger); font-size: var(--type-15); font-variant-numeric: tabular-nums; font-weight: var(--weight-bold); white-space: nowrap; }
+.role-admin .admin-user-stepup-status[data-unlocked="true"] { color: var(--ui-text-positive); }
+.role-admin .admin-user-stepup-status time { min-width: 38px; text-align: right; }
 
 .role-admin .admin-account-menu-links a:hover,
 .role-admin .admin-account-menu-links a:focus-visible,
@@ -5240,7 +4582,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   min-height: 42px;
   border-color: #b42318;
   background: #b42318;
-  color: #fff;
+  color: var(--ui-text-on-danger);
   justify-content: center;
 }
 
@@ -5248,142 +4590,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 .role-admin .admin-signout-dialog .admin-account-signout:focus-visible {
   border-color: #8d1a12;
   background: #8d1a12;
-}
-
-.role-admin .identity-workspace {
-  width: min(1440px, 100%);
-  margin: 0 auto;
-  padding: 44px clamp(18px, 4vw, 56px) 72px;
-}
-
-.role-admin .identity-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
-.role-admin .identity-header h1 {
-  margin: 0;
-  color: var(--admin-text);
-}
-
-.role-admin .identity-header h1 { font-size: clamp(30px, 4vw, 46px); }
-.role-admin .identity-header p { max-width: 620px; color: var(--admin-muted); line-height: 1.5; }
-.role-admin .identity-header > svg { color: var(--admin-muted); width: 42px; height: 42px; }
-.role-admin .identity-step-up-timer {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 1px 7px;
-  min-width: 160px;
-  padding: 9px 12px;
-  border: 1px solid var(--admin-line);
-  border-radius: 12px;
-  background: var(--admin-surface-strong);
-  color: var(--admin-muted);
-  font-size: 12px;
-}
-.role-admin .identity-step-up-timer svg { grid-row: span 2; width: 18px; color: var(--green); }
-.role-admin .identity-step-up-timer strong { color: var(--admin-text); font-size: 18px; line-height: 1; }
-.role-admin .identity-status { min-height: 20px; margin: 0 0 16px; color: var(--admin-muted); font-size: 14px; }
-
-.role-admin .identity-form { display: grid; gap: 12px; }
-.role-admin .identity-form > label,
-.role-admin .identity-two-column label { display: grid; gap: 5px; color: var(--admin-muted); font-size: 12px; font-weight: 700; }
-.role-admin .identity-form input,
-.role-admin .identity-search input {
-  min-width: 0;
-  min-height: 38px;
-  border: 1px solid var(--admin-line);
-  border-radius: 9px;
-  background: var(--admin-bg);
-  color: var(--admin-text);
-  font: inherit;
-  padding: 0 10px;
-}
-.role-admin .identity-two-column { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-.role-admin .identity-role-options { display: flex; flex-wrap: wrap; gap: 8px; }
-.role-admin .identity-role-options label,
-.role-admin .identity-check { display: flex; align-items: center; gap: 6px; color: var(--admin-text); font-size: 13px; }
-.role-admin .identity-check svg { color: var(--admin-muted); }
-
-.role-admin .identity-search { display: flex; gap: 8px; }
-.role-admin .identity-search input { flex: 1; }
-.role-admin .identity-search button { min-height: 38px; border: 1px solid var(--admin-line); border-radius: 9px; background: transparent; color: var(--admin-text); font: inherit; font-weight: 700; cursor: pointer; padding: 0 10px; }
-.role-admin .identity-workspace-flat { max-width: 1280px; }
-.role-admin .identity-header-flat { align-items: flex-end; padding-bottom: 26px; border-bottom: 1px solid var(--admin-line); }
-.role-admin .identity-header-actions { display: flex; align-items: center; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
-.role-admin .identity-header-actions .primary-button { min-height: 42px; white-space: nowrap; }
-.role-admin .identity-create-pane,
-.role-admin .identity-directory-workspace,
-.role-admin .identity-editor-workspace { padding: 24px 0; border-bottom: 1px solid var(--admin-line); }
-.role-admin .identity-section-heading,
-.role-admin .identity-directory-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
-.role-admin .identity-section-heading h2,
-.role-admin .identity-directory-toolbar h2 { margin: 2px 0 0; color: var(--admin-text); font-size: 23px; }
-.role-admin .identity-section-heading p { margin: 5px 0 0; color: var(--admin-muted); font-size: 13px; }
-.role-admin .identity-create-form { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; align-items: flex-end; }
-.role-admin .identity-create-form > label,
-.role-admin .identity-create-roles { display: grid; gap: 5px; color: var(--admin-muted); font-size: 12px; font-weight: 700; }
-.role-admin .identity-create-form input,
-.role-admin .identity-security-actions input { min-width: 0; min-height: 40px; border: 1px solid var(--admin-line); border-radius: 8px; background: var(--admin-bg); color: var(--admin-text); font: inherit; padding: 0 10px; }
-.role-admin .identity-create-roles { grid-column: 1 / span 2; }
-.role-admin .identity-create-form .identity-check { grid-column: 3 / span 2; min-height: 40px; align-self: end; }
-.role-admin .identity-create-form .primary-button { min-height: 40px; }
-.role-admin .identity-role-options input,
-.role-admin .identity-check input { inline-size: 16px; block-size: 16px; margin: 0; accent-color: var(--green); }
-.role-admin .identity-lock-button { display: inline-flex; align-items: center; gap: 7px; min-height: 42px; }
-.role-admin .identity-locked { display: grid; grid-template-columns: auto minmax(0, 520px); gap: 18px; align-items: start; padding: 72px 0; border-bottom: 1px solid var(--admin-line); }
-.role-admin .identity-locked > svg { width: 30px; height: 30px; color: var(--admin-muted); }
-.role-admin .identity-locked h1 { margin: 4px 0 8px; color: var(--admin-text); font-size: clamp(28px, 4vw, 42px); }
-.role-admin .identity-locked p { color: var(--admin-muted); line-height: 1.55; }
-.role-admin .identity-locked .primary-button { margin-top: 12px; }
-.role-admin .identity-directory-toolbar { align-items: center; }
-.role-admin .identity-directory-toolbar .identity-search { min-width: min(430px, 100%); }
-.role-admin .identity-search > svg { flex: 0 0 auto; align-self: center; width: 18px; color: var(--admin-muted); }
-.role-admin .identity-table-scroll { overflow-x: auto; }
-.role-admin .identity-user-table { width: 100%; min-width: 660px; border-collapse: collapse; text-align: left; }
-.role-admin .identity-user-table th { padding: 10px 12px; border-bottom: 1px solid var(--admin-line); color: var(--admin-muted); font-size: 11px; font-weight: 850; letter-spacing: .07em; text-transform: uppercase; }
-.role-admin .identity-user-table td { padding: 14px 12px; border-bottom: 1px solid var(--admin-line); color: var(--admin-text); font-size: 14px; }
-.role-admin .identity-user-table tr.selected td { background: var(--admin-panel); }
-.role-admin .identity-user-table td:first-child { padding-left: 0; }
-.role-admin .identity-user-table th:first-child { padding-left: 0; }
-.role-admin .identity-user-table td button { border: 0; background: none; color: var(--admin-text); cursor: pointer; font: inherit; font-weight: 800; padding: 0; text-align: left; }
-.role-admin .identity-user-table td button:hover,
-.role-admin .identity-user-table td button:focus-visible { color: var(--green); outline: 0; text-decoration: underline; text-underline-offset: 3px; }
-.role-admin .identity-user-table small { display: block; margin-top: 3px; color: var(--admin-muted); font-size: 12px; }
-.role-admin .identity-status-pill { display: inline-flex; border-radius: 999px; padding: 4px 8px; font-size: 12px; font-weight: 750; }
-.role-admin .identity-status-pill.is-active { background: var(--green-soft); color: var(--green); }
-.role-admin .identity-status-pill.is-disabled { background: var(--red-soft); color: var(--red); }
-.role-admin .identity-editor-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, .65fr); gap: 32px; }
-.role-admin .identity-user-fields { max-width: 600px; }
-.role-admin .identity-security-actions { display: grid; align-content: start; gap: 12px; padding-left: 28px; border-left: 1px solid var(--admin-line); }
-.role-admin .identity-security-actions > div { display: grid; grid-template-columns: auto 1fr; column-gap: 9px; }
-.role-admin .identity-security-actions > div svg { grid-row: span 2; width: 18px; color: var(--admin-muted); }
-.role-admin .identity-security-actions h3 { margin: 0; color: var(--admin-text); font-size: 15px; }
-.role-admin .identity-security-actions p { margin: 3px 0 0; color: var(--admin-muted); font-size: 12px; }
-.role-admin .identity-security-actions > label { display: grid; gap: 5px; color: var(--admin-muted); font-size: 12px; font-weight: 700; }
-.role-admin .identity-security-actions > button { justify-self: start; }
-
-@media (max-width: 767px) {
-  .role-admin .identity-workspace { padding: 26px 16px calc(var(--mobile-admin-nav-height) + 28px); }
-  .role-admin .identity-two-column { grid-template-columns: 1fr; }
-  .role-admin .identity-header-flat,
-  .role-admin .identity-section-heading,
-  .role-admin .identity-directory-toolbar { align-items: stretch; flex-direction: column; }
-  .role-admin .identity-header-actions { justify-content: start; }
-  .role-admin .identity-create-form { grid-template-columns: 1fr; }
-  .role-admin .identity-create-roles { grid-column: auto; }
-  .role-admin .identity-create-form .identity-check { grid-column: auto; align-self: auto; }
-  .role-admin .identity-directory-toolbar .identity-search { min-width: 0; width: 100%; }
-  .role-admin .identity-editor-grid { grid-template-columns: 1fr; gap: 24px; }
-  .role-admin .identity-security-actions { padding: 24px 0 0; border-top: 1px solid var(--admin-line); border-left: 0; }
-  .role-admin .identity-locked { grid-template-columns: 1fr; padding: 48px 0; }
-}
-
-.role-admin .log-workspace:not(.has-detail-drawer) {
-  grid-template-columns: minmax(0, 1fr);
 }
 
 .role-admin .dashboard-kpi-grid {
@@ -5409,20 +4615,20 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .dashboard-kpi-label span {
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   letter-spacing: 0.5px;
   text-transform: uppercase;
 }
 
 .role-admin .dashboard-kpi-value {
-  color: var(--admin-text);
-  font-size: 32px;
-  font-weight: 800;
+  color: var(--ui-text-primary);
+  font-size: var(--type-28);
+  font-weight: var(--weight-extrabold);
   line-height: 1;
 }
 
@@ -5432,26 +4638,26 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   align-items: center;
   gap: 6px;
   margin-top: -6px;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--type-15);
+  font-weight: var(--weight-semibold);
 }
 
 .role-admin .dashboard-kpi-comparison.is-positive {
-  color: #16803c;
+  color: var(--ui-text-positive);
 }
 
 .role-admin .dashboard-kpi-comparison.is-negative {
-  color: #d92d20;
+  color: var(--ui-text-danger);
 }
 
 .role-admin .dashboard-kpi-comparison.is-neutral {
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .dashboard-kpi-comparison-label {
   overflow: hidden;
-  color: var(--admin-muted);
-  font-weight: 500;
+  color: var(--ui-text-secondary);
+  font-weight: var(--weight-medium);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -5487,9 +4693,9 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
 .role-admin .metric-trend-title {
   margin-bottom: 6px;
-  color: var(--admin-muted);
-  font-size: 13px;
-  font-weight: 750;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .metric-trend-value-row {
@@ -5499,21 +4705,21 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 }
 
 .role-admin .metric-trend-value-row strong {
-  color: var(--admin-text);
-  font-size: 34px;
+  color: var(--ui-text-primary);
+  font-size: var(--type-36);
   line-height: 1;
 }
 
 .role-admin .metric-trend-value-row span {
-  font-size: 13px;
-  font-weight: 750;
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .metric-trend-label {
   margin-top: 6px;
-  color: var(--admin-muted);
-  font-size: 11px;
-  font-weight: 800;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   letter-spacing: 1px;
 }
 
@@ -5525,25 +4731,26 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 .role-admin .chart-range-button {
   min-height: 30px;
   border: 1px solid var(--admin-line);
-  border-radius: 999px;
+  border-radius: var(--radius);
   background: transparent;
-  color: var(--admin-muted);
+  color: var(--ui-text-secondary);
   padding: 0 12px;
   font: inherit;
-  font-size: 11px;
-  font-weight: 850;
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   cursor: pointer;
 }
 
 .role-admin .chart-range-button:hover,
 .role-admin .chart-range-button.is-active {
   border-color: var(--chart-accent, var(--admin-text));
-  color: var(--chart-accent, var(--admin-text));
+  color: var(--ui-text-primary);
 }
 
 .role-admin .employee-activity {
   display: flex;
-  min-width: 320px;
+  width: 100%;
+  min-width: 0;
   flex-direction: column;
   gap: 4px;
 }
@@ -5553,7 +4760,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   width: 100%;
   height: 6px;
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: var(--radius);
   background: color-mix(in srgb, var(--admin-text) 7%, transparent);
 }
 
@@ -5561,7 +4768,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   position: absolute;
   top: 0;
   height: 100%;
-  border-radius: 6px;
+  border-radius: var(--radius);
 }
 
 .role-admin .employee-activity-segment.is-work {
@@ -5575,39 +4782,9 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 .role-admin .employee-activity-labels {
   display: flex;
   justify-content: space-between;
-  color: var(--admin-muted);
-  font-size: 11px;
-  font-weight: 500;
-}
-
-.role-admin .drawer-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.role-admin .drawer-note-list {
-  display: grid;
-  gap: 8px;
-  margin: 0 0 12px;
-  padding-left: 20px;
-  color: var(--admin-text);
-}
-
-.role-admin .drawer-note-composer {
-  display: grid;
-  gap: 8px;
-}
-
-.role-admin .drawer-note-composer textarea {
-  width: 100%;
-  resize: vertical;
-  border: 1px solid var(--admin-line);
-  border-radius: 10px;
-  background: var(--admin-panel);
-  color: var(--admin-text);
-  padding: 10px 12px;
-  font: inherit;
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+  font-weight: var(--weight-extrabold);
 }
 
 @media (max-width: 767px) {
@@ -5654,7 +4831,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
 .role-admin .dashboard-donut-quality,
 .role-admin .dashboard-donut-approved {
-  margin-left: 0;
 }
 
 .role-admin .dashboard-log-section {
@@ -5729,7 +4905,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   align-self: end;
   justify-self: end;
   margin-right: -22px;
-  margin-bottom: 16px;
 }
 
 .role-admin .dashboard-donut-title {
@@ -5737,9 +4912,9 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   left: 50%;
   z-index: 1;
   width: max-content;
-  color: var(--admin-text);
-  font-size: 16px;
-  font-weight: 700;
+  color: var(--ui-text-primary);
+  font-size: var(--type-16);
+  font-weight: var(--weight-bold);
   letter-spacing: 1px;
   text-align: center;
   text-transform: uppercase;
@@ -5771,7 +4946,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 }
 
 .role-admin .dashboard-donut-stat-group {
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
   text-align: center;
 }
 
@@ -5784,29 +4959,26 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  font-size: 14px;
-  font-weight: 750;
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   text-transform: uppercase;
 }
 
 .role-admin .dashboard-donut-stat-label.is-approved,
 .role-admin .dashboard-donut-stat-dot.is-approved {
-  color: #12b76a;
+  color: var(--ui-text-positive);
 }
 
 .role-admin .dashboard-donut-stat-label.is-denied,
 .role-admin .dashboard-donut-stat-dot.is-denied {
-  color: #f04438;
+  color: var(--ui-text-danger);
 }
 
 .role-admin .dashboard-donut-stat-label.is-blue,
-.role-admin .dashboard-donut-stat-dot.is-blue {
-  color: #0b63e5;
-}
-
+.role-admin .dashboard-donut-stat-dot.is-blue,
 .role-admin .dashboard-donut-stat-label.is-muted,
 .role-admin .dashboard-donut-stat-dot.is-muted {
-  color: #667085;
+  color: var(--ui-text-info);
 }
 
 .role-admin .dashboard-donut-stat-dot {
@@ -5834,8 +5006,8 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 }
 
 .role-admin .dashboard-donut-stat-value {
-  font-size: 16px;
-  font-weight: 800;
+  font-size: var(--type-16);
+  font-weight: var(--weight-extrabold);
   line-height: 1;
 }
 
@@ -5843,7 +5015,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   grid-column: 2;
   grid-row: 1 / -1;
   align-self: center;
-  justify-self: center;
   width: 100%;
   height: auto;
   aspect-ratio: 1 / 1;
@@ -5855,9 +5026,9 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   position: absolute;
   top: calc(100% + 40px);
   left: 50%;
-  color: var(--admin-text);
-  font-size: 25px;
-  font-weight: 700;
+  color: var(--ui-text-primary);
+  font-size: var(--type-24);
+  font-weight: var(--weight-bold);
   letter-spacing: 1px;
   text-transform: uppercase;
   transform: translateX(-50%);
@@ -5883,9 +5054,9 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
 .role-admin .dashboard-scroll-label {
   margin-right: -3px;
-  color: var(--admin-muted);
-  font-size: 10px;
-  font-weight: 800;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-extrabold);
   letter-spacing: 3px;
   text-align: center;
   text-transform: uppercase;
@@ -5900,14 +5071,14 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   box-sizing: border-box;
   padding-top: 4px;
   border: 2px solid rgba(253, 176, 34, 0.4);
-  border-radius: 9px;
+  border-radius: var(--radius);
   box-shadow: 0 0 8px rgba(253, 176, 34, 0.2);
 }
 
 .role-admin .dashboard-scroll-wheel {
   width: 3px;
   height: 5px;
-  border-radius: 1.5px;
+  border-radius: var(--radius);
   background: #d7ddda;
   box-shadow: 0 0 4px 1px rgba(253, 176, 34, 0.8);
 }
@@ -5916,7 +5087,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   .role-admin .dashboard-donut-title {
     top: auto !important;
     bottom: -34px !important;
-    font-size: 16px !important;
+    font-size: var(--type-16) !important;
     letter-spacing: 0 !important;
   }
 
@@ -5924,24 +5095,26 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
     top: auto !important;
     bottom: -42px;
     width: 100%;
-    font-size: 18px !important;
+    font-size: var(--type-18) !important;
     text-align: center;
   }
 }
 
-@media (max-width: 1199px) {
-  .role-admin .dashboard-analytics {
-    padding: 50px 16px 24px;
+@media (min-width: 768px) and (max-width: 1199px) {
+  .role-admin .dashboard-donut-title {
+    font-size: 14px !important;
   }
 
-  .role-admin .dashboard-donut-quality,
-  .role-admin .dashboard-donut-approved {
-    margin-left: 0;
+  .role-admin .dashboard-donut-center .dashboard-donut-stat-label {
+    font-size: 13px !important;
   }
 
-  .role-admin .dashboard-donut-auto,
-  .role-admin .dashboard-donut-denied {
-    margin-right: 0;
+  .role-admin .dashboard-donut-center .dashboard-donut-stat-value {
+    font-size: 15px !important;
+  }
+
+  .role-admin .dashboard-breakdown-title {
+    font-size: 16px !important;
   }
 }
 
@@ -5963,7 +5136,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
 .role-admin .trend-chart-summary-list {
   display: flex;
-  gap: 48px;
 }
 
 .role-admin .trend-chart-summary {
@@ -5979,22 +5151,22 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 }
 
 .role-admin .trend-chart-value {
-  color: var(--admin-text);
-  font-size: 32px;
-  font-weight: 800;
+  color: var(--ui-text-primary);
+  font-size: var(--type-28);
+  font-weight: var(--weight-extrabold);
   line-height: 1;
 }
 
 .role-admin .trend-chart-change {
-  color: #0b63e5;
-  font-size: 12px;
-  font-weight: 700;
+  color: var(--ui-text-info);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
 }
 
 .role-admin .trend-chart-unit {
-  color: var(--admin-muted);
-  font-size: 11px;
-  font-weight: 700;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
   letter-spacing: 1px;
 }
 
@@ -6020,7 +5192,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 }
 
 .role-admin .metric-trend-change {
-  color: var(--admin-text);
+  color: var(--ui-text-primary);
 }
 
 .role-admin .chart-range-button.accent-blue { --chart-accent: #0b63e5; }
@@ -6031,20 +5203,16 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 .role-admin .chart-range-button.accent-red { --chart-accent: #ef4444; }
 .role-admin .chart-range-button.accent-green { --chart-accent: #10b981; }
 
-.role-admin .metric-trend-change.accent-blue { color: #0b63e5; }
-.role-admin .metric-trend-change.accent-alert-red { color: #ff3b30; }
-.role-admin .metric-trend-change.accent-orange { color: #ea580c; }
-.role-admin .metric-trend-change.accent-pink { color: #db2777; }
-.role-admin .metric-trend-change.accent-violet { color: #8b5cf6; }
-.role-admin .metric-trend-change.accent-red { color: #ef4444; }
-.role-admin .metric-trend-change.accent-green { color: #10b981; }
-
-.role-admin .movement-table tbody tr {
-  cursor: pointer;
-}
+.role-admin .metric-trend-change.accent-blue { color: var(--ui-text-info); }
+.role-admin .metric-trend-change.accent-alert-red,
+.role-admin .metric-trend-change.accent-orange,
+.role-admin .metric-trend-change.accent-pink { color: var(--ui-text-danger); }
+.role-admin .metric-trend-change.accent-violet { color: var(--ui-text-accent); }
+.role-admin .metric-trend-change.accent-red { color: var(--ui-text-danger); }
+.role-admin .metric-trend-change.accent-green { color: var(--ui-text-positive); }
 
 .role-admin .movement-table .sort-icon-muted {
-  color: var(--muted);
+  color: var(--ui-text-secondary);
 }
 
 .role-admin .movement-table .cell-capitalize {
@@ -6053,7 +5221,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
 .role-admin .movement-table .cell-barcode {
   font-family: monospace;
-  font-size: 0.9em;
+  font-size: var(--type-15);
 }
 
 .role-admin {
@@ -6098,8 +5266,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
 .role-admin .admin-page-frame,
 .role-admin .permission-page,
-.role-admin .profile-workspace,
-.role-admin .identity-workspace {
+.role-admin .profile-workspace {
   width: 100%;
   min-width: 0;
   max-width: none;
@@ -6128,10 +5295,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   line-height: 1.25;
 }
 
-.role-admin .admin-hero-description {
-  line-height: 1.5;
-}
-
 .role-admin .admin-hero-pretitle {
   margin-bottom: clamp(22px, 2vw, 30px);
 }
@@ -6152,8 +5315,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   margin-left: auto;
 }
 
-.role-admin .admin-table-wrap,
-.role-admin .identity-table-scroll {
+.role-admin .admin-table-wrap {
   width: 100%;
   max-width: 100%;
   min-width: 0;
@@ -6164,15 +5326,8 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   scrollbar-width: thin;
 }
 
-.role-admin .data-table,
-.role-admin .permission-table,
-.role-admin .identity-user-table {
+.role-admin .data-table {
   max-width: none;
-}
-
-.role-admin .permission-table,
-.role-admin .identity-user-table {
-  min-width: max-content;
 }
 
 .role-admin .profile-workspace {
@@ -6180,17 +5335,10 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   padding-inline: clamp(16px, 4vw, 48px);
 }
 
-.role-admin .identity-workspace {
-  padding-inline: clamp(16px, 4vw, 56px);
-}
-
 .role-admin .permission-page {
   padding-inline: clamp(16px, 3vw, 34px);
 }
 
-.role-admin .permission-layout,
-.role-admin .permission-directory,
-.role-admin .permission-decisions,
 .role-admin .permission-rules,
 .role-admin .alerts-command-grid,
 .role-admin .alert-activity-section,
@@ -6212,7 +5360,8 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 }
 
 @media (max-width: 1199px) {
-  .role-admin .admin-model-hero {
+  .role-admin .admin-model-hero,
+.role-admin .alerts-command-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
@@ -6224,10 +5373,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
   .role-admin .admin-hero-visual {
     padding: 16px 0 0;
-  }
-
-  .role-admin .alerts-command-grid {
-    grid-template-columns: minmax(0, 1fr);
   }
 
   .role-admin .alerts-command-grid .alert-rules-section {
@@ -6267,30 +5412,22 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
     height: calc(100dvh - var(--mobile-admin-nav-height)) !important;
     min-height: 0;
     flex: 1 1 auto;
-    overflow-x: hidden !important;
+    overflow-x: auto !important;
     overflow-y: auto;
     padding-bottom: 8px;
-  }
-
-  .role-admin .admin-page-frame {
-    gap: 18px;
-    padding: 20px 16px calc(32px + var(--mobile-admin-nav-height));
   }
 
   .role-admin .permission-page {
     padding: 24px 16px calc(36px + var(--mobile-admin-nav-height));
   }
 
-  .role-admin .profile-workspace,
-  .role-admin .identity-workspace {
+  .role-admin .profile-workspace {
     width: 100%;
     padding-bottom: calc(72px + var(--mobile-admin-nav-height));
   }
 
   .role-admin .filter-bar {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 10px;
     align-items: stretch;
     padding-block: 12px 16px;
   }
@@ -6302,44 +5439,23 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
     margin-left: 0 !important;
   }
 
-  .role-admin .permission-header,
-  .role-admin .identity-header,
-  .role-admin .identity-header-flat {
+  .role-admin .permission-header {
     align-items: stretch;
     flex-direction: column;
   }
 
-  .role-admin .permission-primary,
-  .role-admin .identity-header-actions,
-  .role-admin .identity-header-actions .primary-button {
+  .role-admin .permission-primary {
     width: 100%;
   }
 
-  .role-admin .permission-layout,
-  .role-admin .identity-editor-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .role-admin .permission-request-list {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .role-admin .identity-security-actions {
-    padding: 24px 0 0;
-    border-top: 1px solid var(--admin-line);
-    border-left: 0;
-  }
-
-  .role-admin .profile-form-grid {
+.role-admin .permission-request-list,
+.role-admin .profile-form-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
   .role-admin .dashboard-log-section {
     padding-inline: clamp(12px, 4vw, 24px);
   }
-}
-
-@media (max-width: 767px) {
   .role-admin .admin-page-frame {
     gap: 14px;
     padding: 16px 12px calc(28px + var(--mobile-admin-nav-height));
@@ -6358,8 +5474,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
     grid-column: 1;
   }
 
-  .role-admin .admin-table-wrap,
-  .role-admin .identity-table-scroll {
+  .role-admin .admin-table-wrap {
     overflow-x: auto !important;
   }
 
@@ -6370,51 +5485,23 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   }
 
   .role-admin .data-table th,
-  .role-admin .data-table td,
-  .role-admin .permission-table th,
-  .role-admin .permission-table td,
-  .role-admin .identity-user-table th,
-  .role-admin .identity-user-table td {
+.role-admin .data-table td {
     white-space: nowrap;
-  }
-
-  .role-admin .registry-workspace .data-table {
-    min-width: 760px !important;
-  }
-
-  .role-admin .log-workspace .movement-table {
-    min-width: 980px !important;
-  }
-
-  .role-admin .permission-table {
-    min-width: 720px;
-  }
-
-  .role-admin .identity-user-table {
-    min-width: 620px;
   }
 
   .role-admin .dashboard-breakdown-cluster .dashboard-breakdown {
     width: min(100%, 280px) !important;
     max-width: 280px !important;
-    justify-self: center !important;
   }
 
   .role-admin .alert-activity-list article {
     min-width: 0;
   }
 
-  .role-admin .permission-metrics {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .role-admin .permission-metrics > div {
     min-width: 0;
     padding-inline: 12px;
   }
-}
-
-@media (max-width: 767px) {
   .role-admin .permission-metrics {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -6429,8 +5516,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   }
 
   .role-admin .alert-activity-actions,
-  .role-admin .alert-rules-savebar,
-  .role-admin .request-decision-controls {
+.role-admin .request-decision-controls {
     align-items: stretch;
     grid-template-columns: minmax(0, 1fr);
     flex-direction: column;
@@ -6446,8 +5532,8 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 .role-admin .pending-decision-request-note {
   display: block;
   margin-top: 5px;
-  color: var(--admin-muted);
-  font-size: 11px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
   line-height: 1.4;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -6455,6 +5541,39 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
 .role-admin .pending-decision-note {
   margin-top: 8px;
+}
+
+.role-admin .pending-decision-barcode-title {
+  overflow: visible;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.role-admin .pending-decision-context {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+}
+
+.role-admin .pending-decision-context > span:first-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.role-admin .pending-decision-context-checkpoint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.role-admin :is(.pending-decision-note, .permission-decision-note) :is(input, textarea)[aria-invalid="true"] {
+  border-color: #d92d20;
+}
+
+.role-admin :is(.pending-decision-note, .permission-decision-note) :is(input, textarea)[aria-invalid="true"]:focus {
+  outline-color: #d92d20;
 }
 
 .role-admin .pending-decision-actions button:hover:not(:disabled),
@@ -6470,15 +5589,17 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   border: 0;
   border-radius: 0;
   background: transparent;
-  color: var(--admin-muted);
-  font-size: 12px;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.role-admin .request-actions button:hover:not(:disabled),
-.role-admin .request-actions button:focus-visible {
+.role-admin .permission-approve-button:hover:not(:disabled),
+.role-admin .permission-deny-button:hover:not(:disabled),
+.role-admin .permission-approve-button:focus-visible,
+.role-admin .permission-deny-button:focus-visible {
   border-color: var(--admin-text);
   outline: 0;
 }
@@ -6524,7 +5645,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
     align-items: center;
     justify-content: center;
     padding: 7px 10px;
-    font-size: 15px;
+    font-size: var(--type-15);
     letter-spacing: 0;
     line-height: 1.1;
     text-align: center;
@@ -6563,34 +5684,61 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   .role-admin .dashboard-time-range-button {
     min-height: 40px;
     padding-inline: 8px;
-    font-size: 12px;
+    font-size: var(--type-15);
   }
-}
-
-@media (max-width: 767px) {
   .role-admin .dashboard-breakdown-cluster {
     grid-column: 1 / -1;
     grid-row: auto;
-    grid-template-columns: minmax(0, 1fr) !important;
-    grid-template-rows: auto auto;
+    grid-template-columns: minmax(0, 1fr) 52px !important;
+    grid-template-rows: auto;
     justify-content: stretch;
-    gap: 12px;
+    gap: 0;
   }
 
   .role-admin .dashboard-breakdown-cluster .dashboard-breakdown {
     grid-column: 1 !important;
     grid-row: 1 !important;
+    width: 100% !important;
+    max-width: 310px !important;
     justify-self: center !important;
     margin: 0 !important;
   }
 
   .role-admin .dashboard-breakdown-cluster .vertical-pill-segmented-group {
     position: static;
-    grid-column: 1;
-    grid-row: 2;
-    flex-direction: row;
+    grid-column: 2;
+    grid-row: 1;
+    box-sizing: border-box;
+    width: 44px;
+    min-width: 0;
+    flex-direction: column;
     justify-self: center;
-    align-self: start;
+    align-self: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+
+  .role-admin .dashboard-breakdown-cluster .icon-filter-button {
+    box-sizing: border-box;
+    width: 44px;
+    min-width: 0;
+    min-height: 44px;
+    flex: 0 0 44px;
+    gap: 0;
+    padding: 0;
+    border-radius: var(--radius);
+  }
+
+  .role-admin .dashboard-breakdown-cluster .icon-filter-button.active {
+    border-color: var(--admin-line-strong);
+    background: var(--admin-surface-strong);
+  }
+
+  .role-admin .dashboard-subject-filter-label {
+    display: none;
   }
 }
 
@@ -6604,5 +5752,482 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
   .role-admin .dashboard-overview .dashboard-log-section {
     margin-left: 16px;
+  }
+}
+
+.employee-profile-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+.employee-profile-dialog {
+  display: flex;
+  width: min(1440px, calc(100vw - 32px));
+  max-width: 1440px;
+  max-height: calc(100dvh - 32px);
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--profile-border);
+  border-radius: var(--radius);
+  background: var(--admin-bg);
+  box-shadow: var(--profile-shadow);
+  color: var(--ui-text-primary);
+  font-family: var(--admin-font, 'Urbanist', sans-serif);
+}
+
+.employee-profile-header {
+  display: flex;
+  min-height: 68px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--profile-border);
+}
+
+.employee-profile-header h2 {
+  min-width: 0;
+  margin: 0;
+  font-size: var(--type-20);
+  font-weight: var(--weight-bold);
+  line-height: 1.25;
+}
+
+.employee-profile-header-actions,
+.employee-profile-range-controls {
+  display: flex;
+  align-items: center;
+}
+
+.employee-profile-header-actions {
+  flex: 0 0 auto;
+  gap: 16px;
+}
+
+.employee-profile-range-controls {
+  gap: 8px;
+}
+
+.employee-profile-range-button {
+  min-width: 44px;
+  min-height: 36px;
+  border: 1px solid var(--admin-muted);
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--ui-text-secondary);
+  padding: 6px 14px;
+  font-size: 14px;
+  font-weight: var(--weight-extrabold);
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.employee-profile-range-button[aria-pressed="true"] {
+  border-color: var(--admin-text);
+  background: var(--admin-surface-strong);
+  color: var(--ui-text-primary);
+}
+
+.employee-profile-range-button:focus-visible,
+.employee-profile-close:focus-visible {
+  outline: 2px solid var(--admin-text);
+  outline-offset: 2px;
+}
+
+.employee-profile-close {
+  display: grid;
+  width: 40px;
+  min-width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid transparent !important;
+  border-radius: var(--radius) !important;
+  background: transparent !important;
+  color: var(--ui-text-primary) !important;
+  padding: 0 !important;
+}
+
+.employee-profile-close:hover {
+  border-color: var(--profile-border) !important;
+  background: var(--admin-surface-strong) !important;
+}
+
+.employee-profile-content {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+  scrollbar-color: #aab4af var(--admin-bg);
+  scrollbar-width: thin;
+}
+
+.employee-profile-content::-webkit-scrollbar {
+  width: 10px;
+}
+
+.employee-profile-content::-webkit-scrollbar-track {
+  background: var(--admin-bg);
+}
+
+.employee-profile-content::-webkit-scrollbar-thumb {
+  border: 2px solid var(--admin-bg);
+  border-radius: var(--radius);
+  background: #aab4af;
+}
+
+.employee-profile-details {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 20px 28px;
+}
+
+.employee-profile-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.employee-profile-summary-card,
+.employee-profile-record-section {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: transparent;
+  transition: border-color 150ms ease;
+}
+
+.employee-profile-summary-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px 14px;
+}
+
+.employee-profile-summary-card:hover,
+.employee-profile-record-section:hover {
+  border-color: var(--profile-border);
+}
+
+.employee-profile-summary-card span {
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-semibold);
+}
+
+.employee-profile-summary-card strong {
+  color: var(--ui-text-primary);
+  font-size: var(--type-24);
+  font-weight: var(--weight-extrabold);
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+.employee-profile-record-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.employee-profile-record-section {
+  display: grid;
+  align-content: start;
+  gap: 10px;
+  padding: 14px;
+}
+
+.employee-profile-record-section h3 {
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: var(--type-18);
+  font-weight: var(--weight-bold);
+}
+
+.employee-profile-movement-section {
+  grid-column: 1 / -1;
+}
+
+.employee-profile-movement-table-wrap {
+  width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.employee-profile-movement-table {
+  width: 100%;
+  min-width: 780px;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--ui-text-primary);
+  font-size: var(--type-14);
+  text-align: left;
+}
+
+.employee-profile-movement-table th {
+  padding: 10px 14px 10px 0;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-12);
+  font-weight: var(--weight-bold);
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.employee-profile-movement-table td {
+  min-width: 0;
+  padding: 12px 14px 12px 0;
+  line-height: 1.45;
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+
+.employee-profile-movement-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--admin-surface-strong) 42%, transparent);
+}
+
+.employee-profile-movement-result {
+  color: var(--ui-text-danger);
+  font-weight: var(--weight-bold);
+}
+
+.employee-profile-movement-result[data-result="approved"] {
+  color: var(--ui-text-positive);
+}
+
+.employee-profile-record-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.employee-profile-record-list li {
+  display: grid;
+  min-width: 0;
+  gap: 5px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--admin-line);
+}
+
+.employee-profile-record-list li:last-child {
+  border-bottom: 0;
+}
+
+.employee-profile-record-heading {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.employee-profile-record-heading strong {
+  min-width: 0;
+  color: var(--ui-text-primary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-bold);
+  overflow-wrap: anywhere;
+}
+
+.employee-profile-record-heading span {
+  flex: 0 0 auto;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  font-weight: var(--weight-semibold);
+  text-transform: capitalize;
+}
+
+.employee-profile-record-heading span[data-state="active"],
+.employee-profile-record-heading span[data-state="confirmed"] {
+  color: var(--ui-text-positive);
+}
+
+.employee-profile-record-heading span[data-state="excused"],
+.employee-profile-record-heading span[data-state="resolved"],
+.employee-profile-record-heading span[data-state="denied"],
+.employee-profile-record-heading span[data-state="restricted"] {
+  color: var(--ui-text-danger);
+}
+
+.employee-profile-record-list small,
+.employee-profile-empty,
+.employee-profile-record-list li > p {
+  margin: 0;
+  color: var(--ui-text-secondary);
+  font-size: var(--type-15);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.employee-profile-history-error {
+  margin: 0;
+  color: var(--ui-text-danger);
+  font-size: var(--type-15);
+}
+
+.employee-profile-detail {
+  min-width: 0;
+}
+
+.employee-profile-detail-label {
+  margin-bottom: 4px;
+  color: var(--admin-muted);
+  font-size: 14px;
+  font-weight: var(--weight-medium);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+.employee-profile-detail-value {
+  overflow-wrap: anywhere;
+  font-size: var(--type-16);
+  font-weight: var(--weight-bold);
+  line-height: 1.35;
+}
+
+.employee-profile-summary-number {
+  font-size: var(--type-28);
+  font-weight: var(--weight-extrabold);
+  line-height: 1;
+}
+
+.employee-profile-summary-trend,
+.employee-profile-summary-label,
+.employee-profile-work-pattern {
+  font-size: 14px;
+}
+
+.employee-profile-summary-trend,
+.employee-profile-summary-label {
+  font-weight: var(--weight-bold);
+}
+
+.employee-profile-summary-trend {
+  color: var(--ui-text-warning);
+}
+
+.employee-profile-summary-label {
+  letter-spacing: 1px;
+}
+
+.employee-profile-work-pattern-title {
+  font-size: var(--type-20);
+}
+
+.employee-profile-hours-chart {
+  position: relative;
+  width: 100%;
+  height: 260px;
+  min-height: 260px;
+  flex: 0 0 260px;
+}
+
+.employee-profile-chart-summary {
+  position: absolute;
+  top: 16px;
+  right: 24px;
+  left: 24px;
+  z-index: 10;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.employee-profile-hours-chart-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.employee-profile-work-pattern {
+  width: 100%;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+
+.employee-profile-hour-label {
+  display: flex;
+  align-items: center;
+}
+
+@media (max-width: 600px) {
+  .employee-profile-hour-label:not([data-major="true"]) {
+    display: none;
+  }
+
+  .employee-profile-overlay {
+    align-items: flex-start;
+    padding: 12px;
+  }
+
+  .employee-profile-dialog {
+    width: 100%;
+    max-height: calc(100dvh - 24px);
+    border-radius: var(--radius);
+  }
+
+  .employee-profile-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px 14px;
+  }
+
+  .employee-profile-header-actions {
+    width: 100%;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .employee-profile-range-controls {
+    gap: 6px;
+  }
+
+  .employee-profile-range-button {
+    min-height: 40px;
+    padding-inline: 12px;
+  }
+
+  .employee-profile-content {
+    gap: 20px;
+    padding: 18px 14px;
+  }
+
+  .employee-profile-details {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .employee-profile-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .employee-profile-record-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .employee-profile-hours-chart {
+    height: 230px;
+    min-height: 230px;
+    flex-basis: 230px;
+  }
+
+  .employee-profile-chart-summary {
+    top: 14px;
+    right: 16px;
+    left: 16px;
   }
 }

@@ -36,26 +36,26 @@ export function WorkPatternChart({
     return filtered;
   }, [sessions, timeRange]);
 
-  const startAxis = 6;
-  const endAxis = 22;
+  const startAxis = 0;
+  const endAxis = 24;
   const totalAxisHours = endAxis - startAxis;
+  const axisTicks = Array.from({ length: totalAxisHours + 1 }, (_, hour) => hour);
 
   return (
-    <div style={{
+    <div className="employee-profile-work-pattern" style={{
       width: "100%",
-      fontSize: "12px",
       fontFamily: "var(--admin-font)",
-      color: "var(--admin-text)"
+      color: "var(--ui-text-primary)"
     }}>
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", paddingBottom: "16px" }}>
         <div>
-          <h2 style={{ fontSize: "20px", fontWeight: 700, margin: "0 0 4px 0", color: "var(--admin-text)" }}>Work Pattern</h2>
+          <h2 className="employee-profile-work-pattern-title" style={{ fontWeight: "var(--weight-bold)", margin: "0 0 4px 0", color: "var(--ui-text-primary)" }}>Work Pattern</h2>
         </div>
       </div>
 
       {/* Chart Grid */}
-      <div style={{ display: "flex", width: "100%", maxHeight: "300px", overflowY: "auto", overflowX: "hidden" }}>
+      <div style={{ display: "flex", width: "100%", minWidth: 0, overflowX: "hidden" }}>
         {/* Left Axis - Dates */}
         <div style={{ width: "100px", flexShrink: 0, paddingRight: "12px", position: "relative" }}>
           {/* Header empty space - absolute positioned to stay at top when scrolling */}
@@ -67,16 +67,16 @@ export function WorkPatternChart({
               display: "flex",
               alignItems: "center",
               justifyContent: "space-between",
-              color: "var(--admin-text)"
+              color: "var(--ui-text-primary)"
             }}>
-              <span style={{ fontWeight: 600 }}>{day.dateStr}</span>
-              <span style={{ color: "var(--admin-muted)", fontSize: "10px" }}>{day.percentage}%</span>
+              <span style={{ fontWeight: "var(--weight-semibold)" }}>{day.dateStr}</span>
+              <span style={{ color: "var(--admin-muted)" }}>{day.percentage}%</span>
             </div>
           ))}
         </div>
 
         {/* Right Axis - Timelines */}
-        <div style={{ flexGrow: 1, position: "relative" }}>
+        <div style={{ flex: "1 1 auto", minWidth: 0, position: "relative" }}>
           {/* Header Time Axis - sticky to stay at top */}
           <div style={{
             height: "30px",
@@ -86,21 +86,18 @@ export function WorkPatternChart({
             background: "var(--admin-bg)",
             zIndex: 5,
           }}>
-            {Array.from({ length: totalAxisHours + 1 }).map((_, i) => (
-              <div key={i} style={{
+            {axisTicks.map((hour) => (
+              <div key={hour} className="employee-profile-hour-label" data-hour={hour} data-major={hour % 6 === 0} style={{
                 position: "absolute",
-                left: `${(i / totalAxisHours) * 100}%`,
+                left: `${(hour / totalAxisHours) * 100}%`,
                 top: 0,
                 bottom: 0,
-                display: "flex",
-                alignItems: "center",
-                transform: "translateX(-50%)",
+                transform: hour === startAxis ? "none" : hour === endAxis ? "translateX(-100%)" : "translateX(-50%)",
                 paddingTop: "6px",
-                color: "var(--admin-muted)",
-                fontSize: "11px",
-                fontWeight: 600
+                color: "var(--ui-text-secondary)",
+                fontWeight: "var(--weight-semibold)"
               }}>
-                {(startAxis + i).toString().padStart(2, '0')}
+                {hour.toString().padStart(2, '0')}
               </div>
             ))}
           </div>
@@ -108,10 +105,10 @@ export function WorkPatternChart({
           {/* Timeline Rows */}
           <div style={{ position: "relative" }}>
             {/* Background Grid Lines */}
-            {Array.from({ length: totalAxisHours + 1 }).map((_, i) => (
-              <div key={`grid-${i}`} style={{
+            {axisTicks.map((hour) => (
+              <div key={`grid-${hour}`} style={{
                 position: "absolute",
-                left: `${(i / totalAxisHours) * 100}%`,
+                left: `${(hour / totalAxisHours) * 100}%`,
                 top: 0,
                 bottom: 0,
                 borderLeft: "1px dashed var(--admin-line)",
@@ -126,18 +123,21 @@ export function WorkPatternChart({
                 position: "relative",
               }}>
                 {day.sessions.map((session, j) => {
-                  const left = ((session.start - startAxis) / totalAxisHours) * 100;
-                  const width = ((session.end - session.start) / totalAxisHours) * 100;
-                  
+                  const clippedStart = Math.max(startAxis, Math.min(endAxis, session.start));
+                  const clippedEnd = Math.max(startAxis, Math.min(endAxis, session.end));
+                  if (clippedEnd <= clippedStart) return null;
+                  const left = ((clippedStart - startAxis) / totalAxisHours) * 100;
+                  const width = ((clippedEnd - clippedStart) / totalAxisHours) * 100;
+
                   return (
                     <div key={j} style={{
                       position: "absolute",
-                      left: `${Math.max(0, left)}%`,
-                      width: `${Math.min(100 - left, width)}%`,
+                      left: `${left}%`,
+                      width: `${width}%`,
                       top: "4px",
                       bottom: "4px",
                       background: session.type === "work" ? "#ea580c" : "var(--admin-line)",
-                      borderRadius: "2px",
+                      borderRadius: "var(--radius)",
                       zIndex: session.zIndex,
                       opacity: 0.9
                     }} />
@@ -154,15 +154,15 @@ export function WorkPatternChart({
         display: "flex",
         gap: "24px",
         padding: "16px 0 0 0",
-        color: "var(--admin-muted)",
-        fontWeight: 600
+        color: "var(--ui-text-secondary)",
+        fontWeight: "var(--weight-semibold)"
       }}>
         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <div style={{ width: "12px", height: "12px", background: "#ea580c", borderRadius: "2px" }} />
+          <div style={{ width: "12px", height: "12px", background: "#ea580c", borderRadius: "var(--radius)" }} />
           Work session
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-          <div style={{ width: "12px", height: "12px", background: "var(--admin-line)", borderRadius: "2px" }} />
+          <div style={{ width: "12px", height: "12px", background: "var(--admin-line)", borderRadius: "var(--radius)" }} />
           Break (between sessions)
         </div>
       </div>

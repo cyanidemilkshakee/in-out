@@ -67,15 +67,16 @@ export function dashboardRangeBounds(
   endDate = "",
   now = new Date()
 ) {
-  const end = startOfFacilityDay(now) + DAY_IN_MS - 1;
+  const dayEnd = startOfFacilityDay(now) + DAY_IN_MS - 1;
+  const end = now.getTime();
   if (range === "Custom") {
     return {
       start: parseDateInput(startDate) ?? Number.NEGATIVE_INFINITY,
-      end: parseDateInput(endDate, true) ?? Number.POSITIVE_INFINITY,
+      end: Math.min(parseDateInput(endDate, true) ?? end, end),
     };
   }
   if (range === "All Time") {
-    return { start: Number.NEGATIVE_INFINITY, end: Number.POSITIVE_INFINITY };
+    return { start: Number.NEGATIVE_INFINITY, end };
   }
   const days =
     range === "Today"
@@ -85,7 +86,7 @@ export function dashboardRangeBounds(
         : range === "This Month"
           ? 30
           : 365;
-  return { start: end - days * DAY_IN_MS + 1, end };
+  return { start: dayEnd - days * DAY_IN_MS + 1, end };
 }
 
 export function compactRangeBounds(

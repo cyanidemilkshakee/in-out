@@ -10,6 +10,7 @@ import {
 import { Moon, Sun } from "lucide-react";
 import { AppChrome } from "../../frontend/components/AppChrome";
 import { AdminNavRail } from "../../frontend/components/admin/AdminNavRail";
+import { AdminLiveProvider } from "../../frontend/components/admin/AdminLiveProvider";
 import "./admin.css";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
@@ -53,6 +54,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       return;
     }
     const target = event.target;
+    if (target instanceof HTMLElement && target.closest("dialog[open]")) return;
     if (
       target instanceof HTMLInputElement ||
       target instanceof HTMLTextAreaElement ||
@@ -105,6 +107,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
 
   return (
     <AppChrome role="admin">
+    <AdminLiveProvider>
       <main className="admin-console admin-shell-layout">
         <AdminNavRail scrollTint={scrollTint} />
         <div
@@ -130,6 +133,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
           )}
         </button>
       </main>
+    </AdminLiveProvider>
     </AppChrome>
   );
 }

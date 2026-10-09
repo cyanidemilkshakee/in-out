@@ -1,0 +1,129 @@
+.panel {
+  container-type: inline-size;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--admin-border);
+  border-radius: 14px;
+  background: var(--admin-panel);
+  color: var(--ui-text-primary);
+}
+
+.header, .sectionHeading, .warningOverview, .warningCount, .historyLink, .holdBadge, .button {
+  display: flex;
+  align-items: center;
+}
+
+.header { justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; padding: 20px 24px; }
+.header h2 { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.35; letter-spacing: -.025em; }
+.historyLink { min-height: 44px; gap: 5px; color: var(--ui-text-secondary); font-size: 15px; font-weight: 600; text-decoration: none; white-space: nowrap; }
+.historyLink:hover { color: var(--ui-text-primary); text-decoration: underline; text-underline-offset: 4px; }
+.selector { padding: 18px 24px; border-block: 1px solid var(--admin-border); background: color-mix(in srgb, var(--admin-bg) 45%, transparent); }
+.employeeField { display: grid; min-width: 0; gap: 9px; font-size: 15px; font-weight: 600; color: var(--ui-text-secondary); }
+.employeeField select, .resetControls input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 11px 13px;
+  border: 1px solid var(--admin-border);
+  border-radius: 9px;
+  background: var(--admin-bg);
+  color: var(--ui-text-primary);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+.sections { display: grid; gap: 0; padding: 0 24px; }
+.rules, .warnings { display: grid; min-width: 0; gap: 16px; padding-block: 24px; }
+.rules { border-bottom: 1px solid var(--admin-border); }
+.employeeControlsGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 20px; margin-top: 12px; }
+.employeeControlsGrid > .warnings { padding-block: 0; }
+.sectionHeading { min-height: 44px; justify-content: space-between; gap: 12px; }
+.sectionHeading h3 { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.4; }
+.ruleList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.rule { display: flex; min-width: 0; min-height: 58px; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid var(--admin-border); border-radius: 10px; background: color-mix(in srgb, var(--admin-bg) 40%, transparent); cursor: pointer; transition: background-color 150ms ease, border-color 150ms ease; }
+.rule[data-checked="true"] { border-color: color-mix(in srgb, var(--ui-text-positive) 30%, var(--admin-border)); background: color-mix(in srgb, var(--ui-text-positive) 5%, var(--admin-bg)); }
+.rule:hover:not([data-disabled="true"]) { border-color: var(--ui-border-hover); }
+.rule > input { flex: 0 0 20px; width: 20px; height: 20px; margin: 0; accent-color: var(--green); cursor: inherit; }
+.rule > span { display: grid; min-width: 0; gap: 4px; }
+.rule strong { font-size: 16px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.rule small { color: var(--ui-text-secondary); font-size: 14px; line-height: 1.4; }
+.skipDates { display: grid; align-content: start; gap: 12px; padding: 0; }
+.skipDates h4 { margin: 0; color: var(--ui-text-primary); font-size: 18px; font-weight: 650; line-height: 1.4; }
+.skipDates p { margin: 3px 0 0; color: var(--ui-text-secondary); font-size: 14px; line-height: 1.5; }
+.skipDateControls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.skipDateFooter { display: flex; justify-content: flex-end; }
+.dateField input { box-sizing: border-box; min-height: 44px; padding: 9px 12px; border: 1px solid var(--admin-border); border-radius: 9px; background: var(--admin-bg); color: var(--ui-text-primary); font: inherit; font-size: 15px; }
+.dateField input:hover { border-color: var(--ui-border-hover); }
+.skipDateList { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.skipDateList li { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 3px 5px 3px 10px; border: 1px solid var(--admin-border); border-radius: 8px; color: var(--ui-text-primary); font-size: 14px; font-weight: 550; }
+.skipDateList button { display: grid; width: 26px; height: 26px; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ui-text-secondary); cursor: pointer; }
+.skipDateList button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-text-primary) 7%, var(--admin-bg)); color: var(--ui-text-primary); }
+.skipSchedule { display: grid; gap: 14px; min-width: 0; padding: 16px; border: 1px solid transparent; border-radius: 10px; background: transparent; transition: border-color 150ms ease; }
+.skipSchedule:hover { border-color: var(--ui-border-hover); }
+.skipScheduleHeading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
+.skipScheduleHeading h3 { margin: 0; color: var(--ui-text-primary); font-size: 17px; font-weight: 700; line-height: 1.4; }
+.skipScheduleHeading > span { color: var(--ui-text-secondary); font-size: 13px; font-weight: 600; white-space: nowrap; }
+.skipScheduleList { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.skipScheduleList li { display: grid; grid-template-columns: minmax(130px, .35fr) minmax(0, 1fr); align-items: start; gap: 10px 18px; padding: 12px 0; border-bottom: 1px solid var(--admin-border); }
+.skipScheduleList li:first-child { padding-top: 0; }
+.skipScheduleList li:last-child { padding-bottom: 0; border-bottom: 0; }
+.skipScheduleList strong { min-width: 0; color: var(--ui-text-primary); font-size: 15px; font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
+.skipScheduleDates { display: flex; flex-wrap: wrap; gap: 6px; }
+.skipScheduleDates time { padding: 4px 8px; border-radius: 7px; background: color-mix(in srgb, var(--ui-text-info) 7%, var(--admin-bg)); color: var(--ui-text-primary); font-size: 13px; font-weight: 550; line-height: 1.4; white-space: nowrap; }
+.skipScheduleEmpty { margin: 0; color: var(--ui-text-secondary); font-size: 14px; line-height: 1.5; }
+.visuallyHidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.warningOverview { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 16px; }
+.warningCount { min-width: 0; flex-wrap: nowrap; gap: 14px; }
+.warningCount strong { flex-shrink: 0; font-size: 44px; font-weight: 700; line-height: 1; letter-spacing: -.04em; font-variant-numeric: tabular-nums; }
+.warningCount > span { font-size: 18px; font-weight: 600; line-height: 1.4; white-space: nowrap; }
+.holdBadge { grid-column: 1 / -1; justify-self: start; gap: 7px; padding: 7px 10px; border-radius: 8px; color: var(--ui-text-danger); background: color-mix(in srgb, var(--ui-text-danger) 8%, transparent); font-size: 14px; font-weight: 600; }
+.holdBadge svg { flex-shrink: 0; }
+.warningList { display: grid; max-height: 240px; overflow-y: auto; margin: 0; padding: 0; list-style: none; scrollbar-width: thin; }
+.warningList li { display: flex; align-items: center; justify-content: space-between; min-width: 0; flex-wrap: wrap; gap: 8px 18px; padding-block: 14px; border-bottom: 1px solid var(--admin-border); }
+.warningList li:last-child { border-bottom: 0; padding-bottom: 0; }
+.warningList li:first-child { padding-top: 0; }
+.warningList li > div { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
+.warningList strong { font-size: 16px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.warningList time, .lastReset { color: var(--ui-text-secondary); font-size: 14px; line-height: 1.5; }
+.severity { padding: 3px 8px; border-radius: 6px; color: var(--ui-text-info); background: color-mix(in srgb, var(--ui-text-info) 8%, transparent); font-size: 13px; font-weight: 600; text-transform: capitalize; }
+.severity[data-severity="high"] { color: var(--ui-text-warning); background: color-mix(in srgb, var(--ui-text-warning) 8%, transparent); }
+.severity[data-severity="critical"] { color: var(--ui-text-danger); background: color-mix(in srgb, var(--ui-text-danger) 8%, transparent); }
+.resetPanel { display: grid; gap: 12px; padding-top: 16px; border-top: 1px solid var(--admin-border); }
+.warningEmpty { margin: 0; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.5; }
+.resetControls { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.resetControls input { font-weight: 400; }
+.resetControls input::placeholder { color: var(--ui-text-secondary); opacity: 1; }
+.resetControls input[aria-invalid="true"] { border-color: var(--ui-text-danger); outline-color: var(--ui-text-danger); background: color-mix(in srgb, var(--ui-text-danger) 4%, var(--admin-bg)); }
+.button { justify-content: center; gap: 7px; min-height: 44px; padding: 10px 13px; border: 1px solid var(--admin-border); border-radius: 9px; background: var(--admin-bg); color: var(--ui-text-primary); font: inherit; font-size: 15px; font-weight: 600; line-height: 1.4; cursor: pointer; transition: border-color 150ms ease, background-color 150ms ease; }
+.button svg { flex-shrink: 0; }
+.button:hover:not(:disabled) { border-color: var(--ui-border-hover); background: color-mix(in srgb, var(--ui-text-primary) 5%, var(--admin-bg)); }
+.saveButton:not(:disabled) { border-color: var(--ui-text-primary); background: var(--ui-text-primary); color: var(--ui-text-inverse); }
+.saveButton:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-text-primary) 90%, var(--admin-bg)); }
+.saveButton:disabled { border-color: transparent; background: transparent; }
+.resetButton { min-height: 48px; }
+.lastReset { margin: 0; }
+.empty { margin: 0; padding: 24px; color: var(--ui-text-secondary); font-size: 16px; line-height: 1.5; }
+.rules > .empty, .warnings > .empty { padding: 0; }
+.rules > .employeeControlsGrid > .empty { padding: 0; }
+.errorPanel { display: grid; gap: 12px; justify-items: start; }
+.error { margin: 0; color: var(--ui-text-danger); font-size: 15px; line-height: 1.5; overflow-wrap: anywhere; }
+.panel :is(input, select, button, a):focus-visible { outline: 2px solid var(--ui-text-info); outline-offset: 3px; }
+.resetControls input[aria-invalid="true"]:focus-visible { outline-color: var(--ui-text-danger); }
+.panel :is(input, select, button):disabled, .rule[data-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.loadingIcon { animation: rotate 1s linear infinite; }
+@keyframes rotate { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .loadingIcon { animation: none; } }
+@container (max-width: 580px) { .ruleList, .employeeControlsGrid { grid-template-columns: minmax(0, 1fr); } }
+@container (max-width: 420px) {
+  .header { padding: 16px; gap: 4px 16px; }
+  .header h2 { font-size: 20px; }
+  .selector { padding: 16px; }
+  .sections { padding-inline: 16px; }
+  .rules, .warnings { padding-block: 20px; }
+  .resetControls { grid-template-columns: minmax(0, 1fr); }
+  .skipScheduleList li { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .warningCount strong { font-size: 38px; }
+  .empty { padding: 20px 16px; }
+}

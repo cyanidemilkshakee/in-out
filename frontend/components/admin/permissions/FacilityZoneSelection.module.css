@@ -1,0 +1,8 @@
+.selection { min-width: 0; margin: 0; padding: 0; border: 0; font-size: var(--type-15); }
+.selection legend { padding: 0; margin-bottom: 8px; font-weight: var(--weight-semibold); }
+.selection[aria-invalid="true"] { padding: 10px 12px; }
+.choices { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.choice { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; cursor: pointer; }
+.selection .choices .choice input[type="checkbox"] { width: 18px; height: 18px; min-height: 18px; margin: 0; padding: 0; accent-color: var(--admin-text, #182336); cursor: pointer; }
+.choice input:focus-visible { outline: 2px solid #647bd2; outline-offset: 3px; }
+.selection:disabled .choice, .selection:disabled input { cursor: wait; opacity: .7; }

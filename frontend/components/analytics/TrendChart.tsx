@@ -155,8 +155,8 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
           bodyColor: tooltipBody,
           borderColor: tooltipBorder,
           borderWidth: 1,
-          titleFont: { ...chartFont, size: 13, weight: 700 as const },
-          bodyFont: { ...chartFont, size: 12 },
+          titleFont: { ...chartFont, size: 15, weight: 700 as const },
+          bodyFont: { ...chartFont, size: 15 },
           padding: 10,
           cornerRadius: 8,
           displayColors: false,
@@ -170,7 +170,7 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
           },
           ticks: {
             color: tickColor,
-            font: { ...chartFont, size: 10, weight: 600 as const },
+            font: { ...chartFont, size: 15, weight: 600 as const },
             padding: 8,
           },
           border: {
@@ -187,7 +187,7 @@ export function TrendChart({ events = [], timeRange = "1D", onTimeRangeChange }:
           },
           ticks: {
             color: tickColor,
-            font: { ...chartFont, size: 10, weight: 600 as const },
+            font: { ...chartFont, size: 15, weight: 600 as const },
             maxTicksLimit: 4,
           },
           border: {

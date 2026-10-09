@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import verify_admin_request
 from database import get_db
 from models import AdminAccount
+from redis_client import publish_data_changed
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
@@ -84,6 +85,7 @@ async def update_admin_profile(payload: ProfileUpdateRequest, db: AsyncSession =
             value = _review_note_policy(value)
         setattr(account, key, value)
     await db.commit()
+    await publish_data_changed()
     return _serialize_account(account)
 
 
@@ -101,4 +103,5 @@ async def update_admin_availability(payload: AvailabilityUpdateRequest, db: Asyn
     account = await _identity_profile(db, admin)
     account.offline_until = offline_until
     await db.commit()
+    await publish_data_changed()
     return {"offline_until": account.offline_until.isoformat() if account.offline_until else None}

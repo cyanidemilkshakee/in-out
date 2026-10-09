@@ -4,5 +4,5 @@ import { ScopedDataProvider } from "../../../frontend/components/ScopedDataProvi
 export const dynamic = "force-dynamic";
 
 export default function LogsDataLayout({ children }: { children: ReactNode }) {
-  return <ScopedDataProvider scope="logs">{children}</ScopedDataProvider>;
+  return <ScopedDataProvider scope="registry">{children}</ScopedDataProvider>;
 }

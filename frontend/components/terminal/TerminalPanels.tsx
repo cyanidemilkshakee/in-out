@@ -1,9 +1,12 @@
 "use client";
 
 import { useMemo, type ReactNode } from "react";
-import { ArrowDownLeft, ArrowRight, ArrowUpRight, Check, Clock3, X } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, Check, Clock3, Loader2, X } from "lucide-react";
 import type { MovementEvent, PermissionRequest } from "../../../lib/types";
 import styles from "./SecurityTerminal.module.css";
+import { formatRequestDate } from "../admin/permissions/requestPresentation";
+import { useDateTimeNow } from "../../hooks/useDateTimeNow";
+import { ManualReviewCountdown } from "../ManualReviewCountdown";
 
 export function formatTerminalTime(timestamp?: string, fallback?: string) {
   const date = timestamp ? new Date(timestamp) : null;
@@ -23,9 +26,12 @@ function Status({ status, children }: { status: string; children: ReactNode }) {
 export function TerminalActivity({ movements, requests }: { movements: MovementEvent[]; requests: PermissionRequest[] }) {
   const pending = requests.filter((request) => request.status === "pending").length;
   const recent = movements.slice(0, 8);
-  const manualApprovals = useMemo(() => [...requests].sort((a, b) =>
+  const manualApprovals = useMemo(() => requests.filter((request) => !request.notificationDismissedAt).sort((a, b) =>
     Number(b.status === "pending") - Number(a.status === "pending") || b.createdAt.localeCompare(a.createdAt)
   ).slice(0, 8), [requests]);
+  const now = useDateTimeNow(manualApprovals.some((request) =>
+    request.type === "manual_override" && request.status === "approved" && !request.consumedAt && Boolean(request.validTo)
+  ));
 
   return (
     <section className={styles.activity} aria-label="Checkpoint activity">
@@ -62,14 +68,22 @@ export function TerminalActivity({ movements, requests }: { movements: MovementE
             <caption className={styles.srOnly}>Manual approvals at the selected checkpoint</caption>
             <thead><tr><th scope="col">Person or asset</th><th scope="col">Movement</th><th scope="col">Status</th><th scope="col">Time</th></tr></thead>
             <tbody>
-              {manualApprovals.map((request) => (
-                <tr key={request.id}>
+              {manualApprovals.map((request) => {
+                const manualApproval = request.type === "manual_override";
+                const expired = manualApproval && request.status === "approved" && !request.consumedAt &&
+                  Boolean(request.validTo) && Date.parse(request.validTo!) <= now.getTime();
+                const label = request.status === "pending" ? "Waiting" : request.status === "denied" ? "Denied" :
+                  !manualApproval ? "Approved" : request.consumedAt ? "Used" : expired ? "Expired" : "Rescan";
+                return <tr key={request.id}>
                   <td><strong>{request.subjectName || "Unregistered barcode"}</strong><small>{request.operatorNote || "No note"}</small></td>
                   <td><span className={styles.direction} data-direction={request.direction}>{request.direction === "exit" ? <ArrowUpRight /> : <ArrowDownLeft />}{request.direction === "exit" ? "Exit" : "Entry"}</span></td>
-                  <td><Status status={request.status}>{request.status === "pending" ? "Waiting" : request.status === "approved" ? "Approved" : "Denied"}</Status></td>
+                  <td className={styles.reviewStatus}>
+                    <Status status={expired ? "denied" : request.status}>{label}</Status>
+                    {manualApproval && request.status === "pending" ? <ManualReviewCountdown createdAt={request.createdAt} /> : null}
+                  </td>
                   <td className={styles.time}>{formatTerminalTime(request.createdAt)}</td>
-                </tr>
-              ))}
+                </tr>;
+              })}
             </tbody>
           </table>
         </div> : <div className={styles.emptyActivity}>No manual approvals at this checkpoint.</div>}
@@ -78,49 +92,76 @@ export function TerminalActivity({ movements, requests }: { movements: MovementE
   );
 }
 
-export function PendingPermissions({
+export function TerminalNotifications({
   requests,
-  onAcknowledge,
-  acknowledgingId,
+  onDismiss,
+  dismissingId,
+  dismissError,
 }: {
   requests: PermissionRequest[];
-  onAcknowledge: (requestId: string) => Promise<void>;
-  acknowledgingId: string | null;
+  onDismiss: (requestId: string) => Promise<void>;
+  dismissingId: string | null;
+  dismissError: string;
 }) {
   const visibleRequests = useMemo(() => requests
-    .filter((request) => request.status === "pending" || (request.terminalAcknowledgementRequired && !request.acknowledgedAt))
-    .sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending") || b.createdAt.localeCompare(a.createdAt))
-    .slice(0, 3), [requests]);
+    .filter((request) => request.status === "pending" || !request.notificationDismissedAt)
+    .sort((a, b) => Number(b.status === "pending") - Number(a.status === "pending") ||
+      (b.decidedAt ?? b.createdAt).localeCompare(a.decidedAt ?? a.createdAt)), [requests]);
+  const now = useDateTimeNow(visibleRequests.some((request) =>
+    request.type === "manual_override" && request.status === "approved" && !request.consumedAt && Boolean(request.validTo)
+  ));
 
   return (
-    <aside className={styles.pendingPanel} aria-labelledby="pending-permissions-title">
+    <aside className={styles.pendingPanel} aria-labelledby="permission-notifications-title">
       <header className={styles.pendingPanelHeader}>
-        <h2 id="pending-permissions-title">Pending permissions</h2>
-        <ArrowRight aria-hidden="true" />
+        <h2 id="permission-notifications-title">Permission notifications</h2>
       </header>
-      {visibleRequests.length ? <ul className={styles.pendingList}>
+      {dismissError && <p className={styles.notificationError} role="alert">{dismissError}</p>}
+      {visibleRequests.length ? <ul className={`${styles.pendingList} ${styles.notificationList}`} aria-live="polite" aria-relevant="additions text">
         {visibleRequests.map((request) => {
           const hasDecision = request.status === "approved" || request.status === "denied";
-          const note = request.status === "denied" ? request.decisionReason : request.decisionReason || request.operatorNote;
+          const direction = request.direction === "exit" ? "Exit" : "Entry";
+          const approvalExpired = request.status === "approved" && !request.consumedAt &&
+            Boolean(request.validTo) && Date.parse(request.validTo) <= now.getTime();
+          const approvalReady = request.type === "manual_override" && request.status === "approved" && !request.consumedAt && !approvalExpired;
+          const note = approvalReady
+            ? `Rescan at this checkpoint before ${formatRequestDate(request.validTo)}. This approval allows one ${direction.toLowerCase()}.`
+            : approvalExpired
+              ? `Approval expired at ${formatRequestDate(request.validTo)}. Request a new review.`
+              : request.consumedAt
+                ? `Approval used at ${formatTerminalTime(request.consumedAt)}.`
+                : hasDecision ? request.decisionReason || (request.status === "approved" ? "Permission approved." : "Permission denied.") : request.operatorNote;
+          const timestamp = hasDecision ? request.decidedAt ?? request.createdAt : request.createdAt;
+          const dismissing = dismissingId === request.id;
+          const statusLabel = request.status === "approved"
+            ? request.consumedAt ? "Used" : approvalExpired ? "Expired" : approvalReady ? "Rescan" : "Approved"
+            : request.status === "denied" ? `${direction} denied` : "Awaiting decision";
           return <li key={request.id}>
             <div className={styles.pendingIdentityGroup}>
-              <span className={styles.pendingStatusIcon} data-status={request.status} aria-hidden="true">
-                {request.status === "approved" ? <Check /> : request.status === "denied" ? <X /> : <Clock3 />}
+              <span className={styles.pendingStatusIcon} data-status={approvalExpired ? "denied" : request.status} aria-hidden="true">
+                {approvalExpired || request.status === "denied" ? <X /> : request.status === "approved" ? <Check /> : <Clock3 />}
               </span>
               <div className={styles.pendingIdentity}>
+                <div className={styles.notificationMeta}>
+                  <Status status={approvalExpired ? "denied" : request.status}>{statusLabel}</Status>
+                  <time dateTime={timestamp}>{formatTerminalTime(timestamp)}</time>
+                </div>
                 <strong>{request.subjectName || "Unregistered barcode"}<span>{request.barcode}</span></strong>
                 {note ? <span className={styles.pendingNote}>{note}</span> : null}
+                {request.type === "manual_override" && request.status === "pending" ? <ManualReviewCountdown createdAt={request.createdAt} /> : null}
               </div>
             </div>
-            {hasDecision && <div className={styles.pendingResolution}>
-              <Status status={request.status}>{request.status === "approved" ? "Approved" : "Denied"}</Status>
-              <button type="button" disabled={acknowledgingId === request.id} onClick={() => void onAcknowledge(request.id)}>{acknowledgingId === request.id ? "Saving…" : "Ack"}</button>
-            </div>}
+            {hasDecision && <button className={styles.notificationDismiss} type="button" disabled={dismissingId !== null}
+              aria-label={`Dismiss ${request.status === "approved" ? "approval" : "denial"} notification for ${request.barcode || request.subjectName || "unregistered barcode"}`}
+              aria-busy={dismissing} title={dismissing ? "Dismissing notification…" : "Dismiss notification"}
+              onClick={() => void onDismiss(request.id)}>
+              {dismissing ? <Loader2 className={styles.spin} aria-hidden="true" /> : <X aria-hidden="true" />}
+            </button>}
           </li>;
         })}
       </ul> : <div className={styles.pendingEmpty}>
-        <strong>No pending permissions</strong>
-        <p>All permission requests are up to date.</p>
+        <strong>No permission updates</strong>
+        <p>Pending requests and new decisions appear here.</p>
       </div>}
     </aside>
   );

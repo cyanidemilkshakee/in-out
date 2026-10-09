@@ -6,6 +6,18 @@ import type { AppSession } from "../../../lib/keycloakSession";
 
 const LOGOUT_INTENT_COOKIE = "inout_logout_intent";
 
+function publicAppUrl(request: NextRequest) {
+  // request.url may contain the Next.js container bind address when traffic
+  // came through the local reverse proxy. AUTH_URL is the browser-facing URL.
+  const appUrl = new URL(process.env.AUTH_URL || process.env.NEXTAUTH_URL || request.url);
+  if (appUrl.hostname === "0.0.0.0" || appUrl.hostname === "::") appUrl.hostname = "localhost";
+  return appUrl;
+}
+
+function publicLoginUrl(request: NextRequest) {
+  return new URL("/login", publicAppUrl(request));
+}
+
 function verifiedOfflineUntil(value: string | undefined): string | null {
   const secret = process.env.AUTH_SECRET;
   if (!value || !secret) return null;
@@ -33,7 +45,7 @@ export async function GET(request: NextRequest) {
     }
   }
   await signOut({ redirect: false });
-  const response = NextResponse.redirect(new URL("/login", request.url));
+  const response = NextResponse.redirect(publicLoginUrl(request), 303);
   response.cookies.delete(LOGOUT_INTENT_COOKIE);
   return response;
 }

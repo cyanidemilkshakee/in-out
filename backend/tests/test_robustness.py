@@ -46,7 +46,9 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
             calls.append((method, path, payload))
             return httpx.Response(200, json=[] if path.endswith("role-mappings/realm") else user)
         with patch("routers.keycloak_admin._request", side_effect=identity):
-            await keycloak_admin.update_user("user", keycloak_admin.UserUpdateRequest(email="new@example.org"), "token")
+            db = AsyncMock()
+            db.get.return_value = None
+            await keycloak_admin.update_user("user", keycloak_admin.UserUpdateRequest(email="new@example.org"), "token", db, {"sub": "admin"})
         self.assertFalse(next(payload for method, _, payload in calls if method == "PUT")["emailVerified"])
 
     async def test_password_whitespace_is_preserved_and_roles_update_only_differences(self):

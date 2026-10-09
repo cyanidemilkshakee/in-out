@@ -2,7 +2,6 @@
 Movement log endpoints.
 
 GET  /v1/movements                     — paginated, filterable movement history (enriched)
-POST /v1/movements/save                — upsert a movement (auth-protected)
 POST /v1/movements/sync                — mark queued movements as synced (auth-protected)
 POST /v1/movements/conflicts/resolve   — mark conflicted movements as synced (auth-protected)
 GET  /v1/movements/{id}/notes          — list notes for a movement
@@ -15,12 +14,14 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, func, and_, literal, or_
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_admin_request
+from facility_zones import CHECKPOINT_IDS, canonical_checkpoint_id
 from database import get_db, get_read_db
 from models import Checkpoint, Movement, MovementNote
+from movement_logic import _current_date, _current_time
+from redis_client import publish_data_changed
 router = APIRouter(prefix="/v1/movements", tags=["movements"])
 
 _MAX_LIMIT = 200
@@ -30,22 +31,6 @@ _DEFAULT_LIMIT = 50
 # ---------------------------------------------------------------------------
 # Request schemas
 # ---------------------------------------------------------------------------
-
-class MovementSaveRequest(BaseModel):
-    model_config = {"extra": "allow"}
-
-    id: str
-    subject_id: str
-    checkpoint_id: str
-    occurred_at: Optional[str] = None
-    denial_code: Optional[str] = None
-    result: str
-    direction: str
-    scan_type: str
-    subject_type: str
-    sync_state: Optional[str] = "queued"
-    data: Optional[dict[str, Any]] = None
-
 
 class SyncRequest(BaseModel):
     eventIds: Optional[list[str]] = None
@@ -84,6 +69,7 @@ def _movement_filters(
         )
         filters.append(searchable.like(pattern, escape="\\"))
     if checkpoint:
+        checkpoint = canonical_checkpoint_id(checkpoint)
         filters.append(or_(Movement.checkpoint_id == checkpoint, Movement.data["checkpoint"].astext == checkpoint))
     if scan_type_ui:
         filters.append(Movement.scan_type == scan_type_ui)
@@ -272,7 +258,7 @@ async def movement_analytics(
     sample_result = await db.execute(
         select(Movement).where(*where).order_by(Movement.occurred_at.desc(), Movement.id).limit(500)
     )
-    checkpoint_result = await db.execute(select(Checkpoint).order_by(Checkpoint.id))
+    checkpoint_result = await db.execute(select(Checkpoint).where(Checkpoint.id.in_(CHECKPOINT_IDS)).order_by(Checkpoint.id))
     summary = summary_result.mappings().one()
     return {
         "summary": {key: int(value or 0) for key, value in summary.items()},
@@ -286,76 +272,6 @@ async def movement_analytics(
             for movement in sample_result.scalars().all()
         ],
         "checkpoints": [checkpoint.data.get("name", checkpoint.id) for checkpoint in checkpoint_result.scalars().all()],
-    }
-
-
-# ---------------------------------------------------------------------------
-# POST /v1/movements/save  (must come before /{id} routes)
-# ---------------------------------------------------------------------------
-
-@router.post("/save")
-async def save_movement(
-    payload: MovementSaveRequest,
-    db: AsyncSession = Depends(get_db),
-    _admin: dict = Depends(verify_admin_request),
-) -> dict[str, Any]:
-    """Upsert a movement record. INSERT ... ON CONFLICT (id) DO UPDATE SET ..."""
-    occurred_at: datetime
-    if payload.occurred_at:
-        try:
-            occurred_at = datetime.fromisoformat(payload.occurred_at.replace("Z", "+00:00"))
-        except ValueError:
-            raise HTTPException(status_code=422, detail="occurred_at must be a valid ISO 8601 timestamp")
-    else:
-        occurred_at = datetime.now(timezone.utc)
-
-    stmt = pg_insert(Movement).values(
-        id=payload.id,
-        subject_id=payload.subject_id,
-        checkpoint_id=payload.checkpoint_id,
-        occurred_at=occurred_at,
-        denial_code=payload.denial_code,
-        result=payload.result,
-        direction=payload.direction,
-        scan_type=payload.scan_type,
-        subject_type=payload.subject_type,
-        sync_state=payload.sync_state or "queued",
-        data=payload.data or {},
-    ).on_conflict_do_update(
-        index_elements=["id"],
-        set_={
-            "subject_id":    payload.subject_id,
-            "checkpoint_id": payload.checkpoint_id,
-            "occurred_at":   occurred_at,
-            "denial_code":   payload.denial_code,
-            "result":        payload.result,
-            "direction":     payload.direction,
-            "scan_type":     payload.scan_type,
-            "subject_type":  payload.subject_type,
-            "sync_state":    payload.sync_state or "queued",
-            "data":          payload.data or {},
-        },
-    ).returning(Movement)
-
-    result = await db.execute(stmt)
-    await db.commit()
-    row = result.fetchone()
-    if not row:
-        raise HTTPException(status_code=500, detail="Upsert failed")
-
-    m = row[0]
-    return {
-        "id":           m.id,
-        "subject_id":   m.subject_id,
-        "checkpoint_id": m.checkpoint_id,
-        "occurred_at":  m.occurred_at.isoformat() if m.occurred_at else None,
-        "denial_code":  m.denial_code,
-        "result":       m.result,
-        "direction":    m.direction,
-        "scan_type":    m.scan_type,
-        "subject_type": m.subject_type,
-        "sync_state":   m.sync_state,
-        "data":         m.data,
     }
 
 
@@ -385,6 +301,8 @@ async def sync_movements(
     stmt = stmt.values(sync_state="synced").returning(Movement)
     result = await db.execute(stmt)
     await db.commit()
+
+    await publish_data_changed()
 
     return [
         {**m.data, "id": m.id, "syncState": m.sync_state} for (m,) in result.fetchall()
@@ -417,6 +335,8 @@ async def resolve_conflicts(
     )
     result = await db.execute(stmt)
     await db.commit()
+
+    await publish_data_changed()
 
     return [
         {**m.data, "id": m.id, "syncState": m.sync_state} for (m,) in result.fetchall()
@@ -461,6 +381,7 @@ async def add_movement_note(
     note = MovementNote(event_id=movement_id, note=payload.note, created_at=datetime.now(timezone.utc))
     db.add(note)
     await db.commit()
+    await publish_data_changed()
 
     result = await db.execute(
         select(MovementNote.note)

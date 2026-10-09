@@ -10,6 +10,14 @@ from fastapi import HTTPException
 
 
 class AccessPolicyTests(unittest.TestCase):
+    def test_checkpoint_display_name_cannot_grant_zone_access(self):
+        person = {"id": "p", "name": "Alice", "type": "employee", "barcode": "p", "inside": False,
+            "status": "active", "allowedZones": ["public"]}
+        event = evaluate_scan(barcode="p", checkpoint={"id": "secure-door", "zone": "secure", "name": "public", "mode": "entry"},
+            people=[person], hardware=[], selected_hardware_ids=[], online=True, event_count=0, scan_type="auto")["event"]
+        self.assertEqual(event["result"], "denied")
+        self.assertEqual(event["denialCode"], "zone_not_permitted")
+
     def setUp(self):
         self.person = {"id": "p", "name": "Visitor", "type": "visitor", "barcode": "v", "inside": True,
             "status": "pending_approval", "allowedZones": [],
@@ -44,7 +52,7 @@ class AccessPolicyTests(unittest.TestCase):
             self.assertEqual(self.scan(person)["result"], "denied")
 
     def test_access_windows_and_zones_reject_invalid_input(self):
-        self.assertEqual(validate_zones([" Office ", "Office"]), ["Office"])
+        self.assertEqual(validate_zones([" Main Entrance ", "public"]), ["public"])
         validate_window("2026-09-17T12:00", "2026-09-17T07:00Z")
         for start, end in (("nonsense", ""), ("2026-09-18T00:00Z", "2026-09-17T00:00Z")):
             with self.assertRaises(HTTPException):

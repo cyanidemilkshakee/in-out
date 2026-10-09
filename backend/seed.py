@@ -2,11 +2,12 @@ import argparse
 import asyncio
 import json
 import os
-import uuid
 from datetime import datetime, timezone
 
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
+from facility_zones import CHECKPOINTS, normalize_facility_document, normalize_zones
+from subject_metadata import current_subject_metadata
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:1003/inout"
@@ -17,20 +18,11 @@ async def seed_reference_data(engine) -> None:
     """Production-safe reference data required for the app to operate."""
     print("→ Seeding reference data...")
     async with engine.begin() as conn:
-        await conn.execute(
-            text(
-                """
-                INSERT INTO checkpoints (id, data) VALUES
-                  (:id1, :data1),
-                  (:id2, :data2)
-                ON CONFLICT (id) DO NOTHING
-                """
-            ),
-            [
-                {"id1": "main-gate",   "data1": '{"name": "Main Entrance", "zone": "public"}',
-                 "id2": "server-room", "data2": '{"name": "Server Room",   "zone": "secure"}'},
-            ],
-        )
+        for checkpoint in CHECKPOINTS:
+            await conn.execute(text("""
+                INSERT INTO checkpoints (id, data) VALUES (:id, CAST(:data AS jsonb))
+                ON CONFLICT (id) DO UPDATE SET data = checkpoints.data || EXCLUDED.data
+                """), {"id": checkpoint["id"], "data": json.dumps(checkpoint)})
         await conn.execute(
             text(
                 """
@@ -47,18 +39,6 @@ async def seed_reference_data(engine) -> None:
                 "data2": '{"id":"rule-irregularity","name":"Irregularity","description":"Alert when an active employee has no approved entry by the end of the day.","category":"presence_anomaly","severity":"medium","enabled":true,"scope":"Employee attendance","conditionKey":"irregularity","recentTriggers":0}',
             },
         )
-        # Older local databases used the display name as the cp-main zone.
-        # Keep the checkpoint id and label stable, but repair its zone to the
-        # canonical identifier used by seeded permissions and registry data.
-        await conn.execute(
-            text(
-                """
-                UPDATE checkpoints
-                SET data = jsonb_set(data, '{zone}', '"public"'::jsonb, true)
-                WHERE id = 'cp-main' AND data->>'zone' = 'Main Entrance'
-                """
-            )
-        )
 
 
 async def seed_demo_data(engine) -> None:
@@ -66,41 +46,10 @@ async def seed_demo_data(engine) -> None:
     print("→ Seeding demo data...")
     await seed_reference_data(engine)
 
-    subject_id = str(uuid.uuid4())
-    perm_id = str(uuid.uuid4())
-
     async with engine.begin() as conn:
-        await conn.execute(
-            text(
-                "INSERT INTO subjects (id, kind, barcode) VALUES (:id, :kind, :barcode) "
-                "ON CONFLICT (id) DO NOTHING"
-            ),
-            {"id": subject_id, "kind": "employee", "barcode": "DEMO-BARCODE-123"},
-        )
-        await conn.execute(
-            text(
-                "INSERT INTO people (subject_id, data) VALUES (:sid, :data) "
-                "ON CONFLICT (subject_id) DO NOTHING"
-            ),
-            {
-                "sid": subject_id,
-                "data": '{"name":"Demo Employee","status":"active",'
-                         '"allowedZones":["public","secure"],"inside":false}',
-            },
-        )
-        await conn.execute(
-            text(
-                "INSERT INTO presence_state (subject_id, state) VALUES (:sid, :state) "
-                "ON CONFLICT (subject_id) DO NOTHING"
-            ),
-            {"sid": subject_id, "state": "outside"},
-        )
-        await conn.execute(
-            text(
-                "INSERT INTO access_permissions (id, subject_id, data) VALUES (:id, :sid, :data)"
-            ),
-            {"id": perm_id, "sid": subject_id, "data": '{"zones": ["public", "secure"], "type": "permanent"}'},
-        )
+        await _seed_registered_subject(conn, subject_id="seed-demo-employee", kind="employee",
+            barcode="DEMO-BARCODE-123", permission_id="seed-demo-permission",
+            data={"name": "Demo Employee", "status": "active", "allowedZones": ["public", "secure"], "inside": False})
 
 
 async def _seed_registered_subject(
@@ -142,7 +91,7 @@ async def _seed_registered_subject(
         actual_barcode = barcode
 
     subject_data = {
-        **data,
+        **current_subject_metadata(kind, normalize_facility_document(data, strict_zones=True)),
         "id": actual_id,
         "barcode": actual_barcode,
         "type": kind,
@@ -183,7 +132,7 @@ async def _seed_registered_subject(
                     "subjectType": kind,
                     "assignment": kind.title(),
                     "state": "active",
-                    "zones": subject_data.get("allowedZones") or [],
+                    "zones": normalize_zones(subject_data.get("allowedZones") or []),
                     "validFrom": subject_data.get("validFrom") or "",
                     "validTo": subject_data.get("validTo") or "",
                     "source": "seed",
@@ -203,14 +152,12 @@ async def seed_additional_data(engine) -> None:
             "id": "seed-employee-001",
             "barcode": "SEED-EMP-001",
             "name": "Anika Rao",
-            "department": "Operations",
             "phone": "+91 90000 00001",
         },
         {
             "id": "seed-employee-002",
             "barcode": "SEED-EMP-002",
             "name": "Vikram Shah",
-            "department": "Security",
             "phone": "+91 90000 00002",
         },
     ]
@@ -227,9 +174,7 @@ async def seed_additional_data(engine) -> None:
                     data={
                         "name": employee["name"],
                         "status": "active",
-                        "department": employee["department"],
                         "phone": employee["phone"],
-                        "accessLevel": "Standard",
                         "allowedZones": ["public", "secure"],
                         "inside": False,
                         "validFrom": now,

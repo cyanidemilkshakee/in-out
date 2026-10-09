@@ -37,6 +37,7 @@ DenialCode = Literal[
     "hardware_restricted",
     "custody_mismatch",
     "zone_not_permitted",
+    "cross_building_access",
     "already_inside",
     "no_active_entry",
     "asset_not_expected_out",
@@ -49,10 +50,8 @@ class Person(TypedDict, total=False):
     name: str
     type: Literal["employee", "visitor"]
     barcode: str
-    department: str
     company: str
     phone: str
-    accessLevel: str
     allowedZones: list[str]
     status: Literal["active", "inactive", "pre_approved", "pending_approval", "restricted", "expired"]
     host: str
@@ -82,6 +81,7 @@ class Checkpoint(TypedDict, total=False):
     name: str
     mode: Literal["auto", "manual", "entry", "exit"]
     zone: str
+    buildingId: str
     online: bool
     createdAt: str
 
@@ -113,7 +113,7 @@ class ScanDecision(TypedDict):
 
 
 # ---------------------------------------------------------------------------
-# IST helpers (Asia/Kolkata = UTC+05:30)
+# Local-time helpers (Asia/Kolkata = UTC+05:30)
 # ---------------------------------------------------------------------------
 
 _IST = timezone(timedelta(hours=5, minutes=30))
@@ -151,7 +151,7 @@ def _zone_allowed(subject: Any, checkpoint: Checkpoint) -> bool:
     allowed: list[str] = subject.get("allowedZones", [])
     if "All Zones" in allowed:
         return True
-    return checkpoint.get("zone", "") in allowed or checkpoint.get("name", "") in allowed
+    return bool(checkpoint.get("zone")) and checkpoint["zone"] in allowed
 
 
 def _direction_for(checkpoint: Checkpoint, subject: Any | None) -> Direction:
