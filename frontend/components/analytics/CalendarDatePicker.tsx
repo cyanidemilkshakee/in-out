@@ -10,6 +10,8 @@ export interface CalendarDatePickerProps {
   className?: string;
   variant?: "icon" | "segment" | "inline";
   active?: boolean;
+  applyOnChange?: boolean;
+  onValidityChange?: (valid: boolean) => void;
 }
 
 export function CalendarDatePicker({
@@ -19,6 +21,8 @@ export function CalendarDatePicker({
   className = "",
   variant = "icon",
   active = false,
+  applyOnChange = false,
+  onValidityChange,
 }: CalendarDatePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [draftStart, setDraftStart] = useState(startDate);
@@ -79,11 +83,23 @@ export function CalendarDatePicker({
     if (!isInline) setIsOpen(false);
   }
 
+  function changeDate(start: string, end: string) {
+    setDraftStart(start);
+    setDraftEnd(end);
+    if (!applyOnChange) { setError(""); return; }
+    const errors = validateHistoricalDateRange(start, end);
+    const message = errors.start || errors.end || "";
+    setError(message);
+    onValidityChange?.(!message);
+    if (!message) onRangeChange(start, end);
+  }
+
   function clearRange() {
     onRangeChange("", "");
     setDraftStart("");
     setDraftEnd("");
     setError("");
+    onValidityChange?.(true);
     if (!isInline) setIsOpen(false);
   }
 
@@ -99,7 +115,8 @@ export function CalendarDatePicker({
               value={draftStart}
               max={startMaximum}
               aria-describedby={error ? errorId : undefined}
-              onChange={(event) => { setDraftStart(event.target.value); setError(""); }}
+              aria-invalid={Boolean(error) || undefined}
+              onChange={(event) => changeDate(event.target.value, draftEnd)}
             />
           </label>
           <label>
@@ -111,17 +128,18 @@ export function CalendarDatePicker({
               min={parseFacilityDate(draftStart) !== undefined ? draftStart : undefined}
               max={maximumDate}
               aria-describedby={error ? errorId : undefined}
-              onChange={(event) => { setDraftEnd(event.target.value); setError(""); }}
+              aria-invalid={Boolean(error) || undefined}
+              onChange={(event) => changeDate(draftStart, event.target.value)}
             />
           </label>
         </div>
         {error && <small id={errorId} role="alert" className="calendar-range-error">{error}</small>}
-        <div className="calendar-popover-actions">
+        {!applyOnChange && <div className="calendar-popover-actions">
           <button type="button" className="calendar-clear-button" onClick={clearRange}>Clear</button>
           <button type="button" className="calendar-apply-button" onClick={applyRange}>
             <Check size={15} />Apply range
           </button>
-        </div>
+        </div>}
       </div>
     );
   }

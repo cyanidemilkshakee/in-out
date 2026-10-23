@@ -7,10 +7,34 @@
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
-  "resetPasswordAllowed": false,
+  "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
+  "passwordPolicy": "length(12) and maxLength(128) and notUsername and notEmail",
   "accessTokenLifespan": 300,
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "attributes": {
+    "adminEventsExpiration": "2592000"
+  },
+  "enabledEventTypes": [
+    "LOGIN",
+    "LOGIN_ERROR",
+    "LOGOUT",
+    "CODE_TO_TOKEN",
+    "CODE_TO_TOKEN_ERROR",
+    "REFRESH_TOKEN_ERROR",
+    "UPDATE_PASSWORD",
+    "UPDATE_PASSWORD_ERROR",
+    "RESET_PASSWORD",
+    "RESET_PASSWORD_ERROR",
+    "UPDATE_TOTP",
+    "UPDATE_TOTP_ERROR",
+    "REMOVE_TOTP",
+    "REMOVE_TOTP_ERROR"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
   "clients": [
     {
       "clientId": "inout-frontend",
@@ -19,23 +43,20 @@
       "clientAuthenticatorType": "client-secret",
       "secret": "${KEYCLOAK_CLIENT_SECRET}",
       "redirectUris": [
-        "${INOUT_APP_URL}/api/auth/callback/keycloak",
-        "http://localhost:3001/api/auth/callback/keycloak",
-        "http://localhost:3000/api/auth/callback/keycloak"
+        "${INOUT_APP_URL}/api/auth/callback/keycloak"
       ],
       "webOrigins": [
-        "${INOUT_APP_URL}",
-        "http://localhost:3001",
-        "http://localhost:3000"
+        "${INOUT_APP_URL}"
       ],
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "publicClient": false,
       "protocol": "openid-connect",
+      "fullScopeAllowed": false,
       "attributes": {
-        "post.logout.redirect.uris": "${INOUT_APP_URL}/login##${INOUT_APP_URL}/logout/complete##http://localhost:3001/login##http://localhost:3001/logout/complete##http://localhost:3000/login##http://localhost:3000/logout/complete",
+        "post.logout.redirect.uris": "${INOUT_APP_URL}/login##${INOUT_APP_URL}/logout/complete",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
@@ -82,6 +103,7 @@
       "serviceAccountsEnabled": false,
       "publicClient": true,
       "protocol": "openid-connect",
+      "fullScopeAllowed": false,
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
@@ -111,6 +133,16 @@
           }
         }
       ]
+    }
+  ],
+  "scopeMappings": [
+    {
+      "client": "inout-frontend",
+      "roles": ["admin", "operator"]
+    },
+    {
+      "client": "inout-postman",
+      "roles": ["admin", "operator"]
     }
   ],
   "roles": {

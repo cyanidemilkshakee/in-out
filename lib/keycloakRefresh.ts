@@ -1,8 +1,8 @@
 import "server-only"
 
-import { invalidSession, refreshKeycloakToken, type RoleToken } from "./keycloakSession"
+import { invalidSession, refreshKeycloakToken, type RoleToken, type KeycloakRefreshConfig } from "./keycloakSession"
 
-type RefreshConfig = { issuer?: string; clientId?: string; clientSecret?: string }
+type RefreshConfig = KeycloakRefreshConfig
 type RefreshedFields = Pick<RoleToken, "access_token" | "refresh_token" | "expires_at" | "roles" | "auth_time" | "error">
 type RefreshEntry = {
   expiresAt: number
@@ -37,7 +37,7 @@ function refreshedFields(token: RoleToken): RefreshedFields {
 
 function pruneRefreshes(now: number): void {
   for (const [key, entry] of refreshes) {
-    if (entry.expiresAt <= now) refreshes.delete(key)
+    if (entry.settled && entry.expiresAt <= now) refreshes.delete(key)
   }
 
   if (refreshes.size <= MAX_REFRESH_RESULTS) return
@@ -64,7 +64,7 @@ export async function refreshKeycloakTokenSingleFlight(
   pruneRefreshes(now)
   const key = await refreshCacheKey(token.refresh_token, config)
   const cached = refreshes.get(key)
-  if (cached && cached.expiresAt > now) {
+  if (cached && (!cached.settled || cached.expiresAt > now)) {
     return { ...token, ...await cached.promise }
   }
 

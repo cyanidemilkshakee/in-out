@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
 
 from temporalio.exceptions import WorkflowAlreadyStartedError
 
@@ -20,6 +21,7 @@ async def bootstrap_schedules() -> None:
             id="alert-rule-cron",
             task_queue=TASK_QUEUE,
             cron_schedule="*/5 * * * *",
+            rpc_timeout=timedelta(seconds=5),
         )
         logger.info("AlertRuleCronWorkflow scheduled")
     except WorkflowAlreadyStartedError:

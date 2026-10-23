@@ -1,0 +1,146 @@
+# Fresh identity-provider compatibility test. No host ports or existing data.
+# docker compose -p inout-keycloak-test -f keycloak/compose.test.yaml run --build --rm tests
+# docker compose -p inout-keycloak-test -f keycloak/compose.test.yaml down --volumes
+services:
+  postgres:
+    image: inout-postgres:17
+    build: {context: ../infrastructure/postgres}
+    environment:
+      POSTGRES_DB: inout
+      POSTGRES_USER: inout
+      POSTGRES_PASSWORD: isolated-keycloak-administrator-0000000000000
+    tmpfs:
+      - /var/lib/postgresql/data:uid=70,gid=70,mode=0700
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U inout -d inout"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  provision:
+    build: {context: ../backend}
+    environment:
+      PROVISION_HOST: postgres
+      POSTGRES_PASSWORD: isolated-keycloak-administrator-0000000000000
+      APP_DB_PASSWORD: isolated-keycloak-app-0000000000000000000000
+      MIGRATION_DB_PASSWORD: isolated-keycloak-migration-000000000000000
+      KEYCLOAK_DB_PASSWORD: isolated-keycloak-identity-0000000000000000
+      TEMPORAL_DB_PASSWORD: isolated-keycloak-workflow-0000000000000000
+    volumes:
+      - ../infrastructure/postgres:/maintenance:ro
+    command: [python, /maintenance/provision_database.py, --apply]
+    depends_on:
+      postgres: {condition: service_healthy}
+
+  keycloak:
+    image: inout-keycloak:${KEYCLOAK_TEST_VERSION:-26.8.0}
+    build:
+      context: .
+      args:
+        KEYCLOAK_VERSION: ${KEYCLOAK_TEST_VERSION:-26.8.0}
+    mem_limit: 1g
+    command: start --optimized --http-enabled=true --import-realm
+    environment:
+      # Keep this tiny fixture from sizing its heap against all Docker memory.
+      JAVA_OPTS_KC_HEAP: "-Xms128m -Xmx512m"
+      KC_BOOTSTRAP_ADMIN_USERNAME: fixture-master
+      KC_BOOTSTRAP_ADMIN_PASSWORD: isolated-keycloak-test-master-password
+      KC_DB: postgres
+      KC_DB_SCHEMA: keycloak
+      KC_DB_URL: jdbc:postgresql://postgres:5432/inout
+      KC_DB_USERNAME: inout_keycloak
+      KC_DB_PASSWORD: isolated-keycloak-identity-0000000000000000
+      KC_HTTP_PORT: "1105"
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: http://auth.fixture:8005
+      KC_HOSTNAME_ADMIN: http://admin.auth.fixture:8006
+      KC_PROXY_HEADERS: xforwarded
+      KEYCLOAK_CLIENT_SECRET: isolated-keycloak-test-client-secret
+      INOUT_APP_URL: http://app.fixture:3000
+    volumes:
+      - ./realm-inout.json:/opt/keycloak/data/import/inout-realm.json:ro
+    healthcheck:
+      test: [CMD-SHELL, "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"]
+      interval: 5s
+      timeout: 5s
+      # First import creates the full schema and can exceed five minutes on a
+      # busy local Docker host. Keep readiness strict while allowing that work.
+      retries: 100
+      start_period: 120s
+      start_interval: 1s
+    depends_on:
+      provision:
+        condition: service_completed_successfully
+
+  redis:
+    image: inout-redis:7
+    build: {context: ../infrastructure/redis}
+    user: redis
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    environment:
+      REDIS_QUOTA_PASSWORD: isolated-keycloak-quota-0000000000000000000
+      REDIS_EVENTS_PASSWORD: isolated-keycloak-events-000000000000000000
+      REDIS_GATEWAY_PASSWORD: isolated-keycloak-gateway-00000000000000000
+    entrypoint: [sh, /usr/local/bin/inout-start-redis.sh]
+    volumes:
+      - ../infrastructure/redis/start-redis.sh:/usr/local/bin/inout-start-redis.sh:ro
+    tmpfs: ['/run/inout-redis:uid=999,gid=1000,mode=0700']
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_GATEWAY_PASSWORD redis-cli --user inout-gateway ping | grep -q PONG']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  kong:
+    image: inout-kong:${KONG_VERSION:-3.9.3}
+    build:
+      context: ../gateway
+      args:
+        KONG_VERSION: ${KONG_VERSION:-3.9.3}
+    environment:
+      KONG_DATABASE: "off"
+      KONG_NGINX_WORKER_PROCESSES: "1"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      KONG_TRUSTED_IPS: ""
+      KONG_PROXY_LISTEN: "0.0.0.0:8005, 0.0.0.0:8006"
+      KONG_ADMIN_LISTEN: "off"
+      KONG_STATUS_LISTEN: "127.0.0.1:8100"
+      KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity,inout-ingress-limit
+      KONG_NGINX_MAIN_ENV: INOUT_GATEWAY_REDIS_PASSWORD
+      INOUT_GATEWAY_REDIS_PASSWORD: isolated-keycloak-gateway-00000000000000000
+      KONG_PROXY_ACCESS_LOG: "off"
+    volumes:
+      - ../gateway/kong.yml:/etc/kong/kong.yml:ro
+      - ../gateway/plugins/inout-terminal-identity:/usr/local/share/lua/5.1/kong/plugins/inout-terminal-identity:ro
+      - ../gateway/plugins/inout-rate-identity:/usr/local/share/lua/5.1/kong/plugins/inout-rate-identity:ro
+      - ../gateway/plugins/inout-ingress-limit:/usr/local/share/lua/5.1/kong/plugins/inout-ingress-limit:ro
+    networks:
+      default:
+        aliases: [auth.fixture, admin.auth.fixture]
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: [CMD, kong, health]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  tests:
+    build:
+      context: ../backend
+    command: [python, /tests/check_keycloak.py]
+    volumes:
+      - ./tests:/tests:ro
+    depends_on:
+      kong:
+        condition: service_healthy
+
+networks:
+  default:
+    internal: true

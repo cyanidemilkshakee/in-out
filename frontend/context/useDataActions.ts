@@ -9,10 +9,14 @@ import type {
   CreateVisitorInput,
   HardwareAsset,
   MovementQuery,
+  DashboardAnalyticsQuery,
+  EmployeeActivityQuery,
+  EmployeeActivitySummaryQuery,
   Person,
   PermissionRequest,
   PermissionRequestInput,
   RecordScanInput,
+  TerminalVisitor,
 } from "../../lib/types";
 import type { DataActions, DataActionDependencies } from "./dataTypes";
 import { mergeById } from "./dataHelpers";
@@ -22,27 +26,49 @@ import { applyPresenceUpdate } from "./presenceUpdates";
 import { refreshOpenAlertCount } from "./activityEvents";
 
 export function useDataActions({ service, setState, refresh }: DataActionDependencies): DataActions {
+  // Always use a fresh authenticated no-store bundle, never IndexedDB policy.
+  const loadTerminalReplayPolicy = useCallback<DataActions["loadTerminalReplayPolicy"]>(
+    async () => (await service.getSnapshot("terminal")).terminalReplayPolicy, [service]);
+  const queryRegistryPage = useCallback<DataActions["queryRegistryPage"]>((query, signal) => service.queryRegistryPage(query, signal), [service]);
+  const queryRegistrySubjects = useCallback<DataActions["queryRegistrySubjects"]>((query, signal) => service.queryRegistrySubjects(query, signal), [service]);
+  const querySubjectProfile = useCallback<DataActions["querySubjectProfile"]>((subjectId, signal) => service.querySubjectProfile(subjectId, signal), [service]);
+  const queryDashboardAnalytics = useCallback(
+    (query: DashboardAnalyticsQuery, signal?: AbortSignal) => service.queryDashboardAnalytics(query, signal), [service]
+  );
+  const queryEmployeeActivity = useCallback(
+    (query: EmployeeActivityQuery, signal?: AbortSignal) => service.queryEmployeeActivity(query, signal), [service]
+  );
+  const queryEmployeeActivitySummary = useCallback(
+    (query: EmployeeActivitySummaryQuery, signal?: AbortSignal) => service.queryEmployeeActivitySummary(query, signal), [service]
+  );
   const queryMovements = useCallback(
-    (query: MovementQuery) => service.queryMovements(query),
+    (query: MovementQuery, signal?: AbortSignal) => service.queryMovements(query, signal),
     [service]
   );
 
   const createEmployee = useCallback(
     async (input: CreateEmployeeInput) => {
       const employee = await service.createEmployee(input);
-      setState((current) => ({ ...current, people: [employee, ...current.people] }));
+      setState((current) => ({ ...current, people: mergeById(current.people, [employee]) }));
+      // Refresh this page's scoped snapshot. Other admin scopes are refreshed
+      // by the backend live event or when their route is opened.
+      // Re-merge in case a read replica has not caught up with the write yet.
+      await refresh();
+      setState((current) => ({ ...current, people: mergeById(current.people, [employee]) }));
       return employee;
     },
-    [service, setState]
+    [service, setState, refresh]
   );
 
   const createHardwareAsset = useCallback(
     async (input: CreateHardwareAssetInput) => {
       const asset = await service.createHardwareAsset(input);
-      setState((current) => ({ ...current, hardwareAssets: [asset, ...current.hardwareAssets] }));
+      setState((current) => ({ ...current, hardwareAssets: mergeById(current.hardwareAssets, [asset]) }));
+      await refresh();
+      setState((current) => ({ ...current, hardwareAssets: mergeById(current.hardwareAssets, [asset]) }));
       return asset;
     },
-    [service, setState]
+    [service, setState, refresh]
   );
 
   const updatePerson = useCallback(
@@ -63,19 +89,6 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       setState((current) => ({
         ...current,
         hardwareAssets: current.hardwareAssets.map((asset) => asset.id === updated.id ? updated : asset),
-      }));
-      return updated;
-    },
-    [service, setState]
-  );
-
-  const acknowledgeAlert = useCallback(
-    async (alertId: string) => {
-      const updated = await service.acknowledgeAlert(alertId);
-      refreshOpenAlertCount();
-      setState((current) => ({
-        ...current,
-        alerts: current.alerts.map((alert) => alert.id === updated.id ? updated : alert),
       }));
       return updated;
     },
@@ -161,26 +174,57 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   );
 
   const queryAlerts = useCallback(
-    (query: AlertQuery) => service.queryAlerts(query),
+    (query: AlertQuery, signal?: AbortSignal) => service.queryAlerts(query, signal),
+    [service]
+  );
+
+  const queryAlertRuleAssignments = useCallback(
+    (subjectId: string, signal?: AbortSignal) => service.queryAlertRuleAssignments(subjectId, signal),
     [service]
   );
 
   const queryAuditEvents = useCallback(
-    (query: AuditEventQuery) => service.queryAuditEvents(query),
+    (query: AuditEventQuery, signal?: AbortSignal) => service.queryAuditEvents(query, signal),
     [service]
   );
 
   const createVisitor = useCallback(
     async (input: CreateVisitorInput) => {
       const result = await service.createVisitor(input);
+      const terminalVisitor: TerminalVisitor = {
+        id: result.visitor.id,
+        name: result.visitor.name,
+        barcode: result.visitor.barcode,
+        host: result.visitor.host ?? input.host,
+        company: result.visitor.company ?? input.company,
+        allowedZones: input.allowedZones ?? result.request.requestedZones ?? result.visitor.allowedZones ?? [],
+        validFrom: result.visitor.validFrom ?? input.validFrom,
+        validTo: result.visitor.validTo ?? input.validTo,
+        createdAt: result.visitor.createdAt ?? result.request.createdAt,
+        status: "pending",
+      };
       setState((current) => ({
         ...current,
         people: mergeById(current.people, [result.visitor]),
         permissionRequests: mergePermissionRequests(current.permissionRequests, [result.request]),
+        terminalVisitors: current.terminalAssignment?.checkpointId === input.checkpointId &&
+          !current.terminalVisitors.some((visitor) => visitor.id === terminalVisitor.id)
+          ? [terminalVisitor, ...current.terminalVisitors]
+          : current.terminalVisitors,
+      }));
+      await refresh();
+      setState((current) => ({
+        ...current,
+        people: mergeById(current.people, [result.visitor]),
+        permissionRequests: mergePermissionRequests(current.permissionRequests, [result.request]),
+        terminalVisitors: current.terminalAssignment?.checkpointId === input.checkpointId &&
+          !current.terminalVisitors.some((visitor) => visitor.id === terminalVisitor.id)
+          ? [terminalVisitor, ...current.terminalVisitors]
+          : current.terminalVisitors,
       }));
       return result;
     },
-    [service, setState]
+    [service, setState, refresh]
   );
 
   const dismissPermissionNotification = useCallback(
@@ -202,6 +246,9 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   const recordScan = useCallback(
     async (input: RecordScanInput, idempotencyKey?: string) => {
       const result = await service.recordScan(input, idempotencyKey);
+      // Retry receipts contain historical subjects and events. Applying them
+      // can undo a newer exit/transfer after the event leaves the retained list.
+      if (result.replayed || result.decision.replayed) return result;
       setState((current) => {
         return {
           ...applyPresenceUpdate(current, {
@@ -228,27 +275,23 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     [service, setState]
   );
 
-  const addMovementNote = useCallback(
-    async (eventId: string, note: string) => {
-      const notes = await service.addMovementNote(eventId, note);
-      setState((current) => ({ ...current, movementNotes: { ...current.movementNotes, [eventId]: notes } }));
-      return notes;
-    },
-    [service, setState]
-  );
-
   return useMemo(
     () => ({
+      loadTerminalReplayPolicy,
+      queryRegistryPage, queryRegistrySubjects, querySubjectProfile,
       refresh,
       queryMovements,
+      queryDashboardAnalytics,
+      queryEmployeeActivity,
+      queryEmployeeActivitySummary,
       queryAlerts,
+      queryAlertRuleAssignments,
       queryAuditEvents,
       createEmployee,
       createVisitor,
       createHardwareAsset,
       updatePerson,
       updateHardwareAsset,
-      acknowledgeAlert,
       reviewAlert,
       resetAlertWarnings,
       setAlertRuleAssignments,
@@ -260,10 +303,10 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       evaluateAlertRules,
       recordScan,
       requestBarcodeManualReview,
-      addMovementNote,
     }),
     [
-      addMovementNote,
+      loadTerminalReplayPolicy,
+      queryRegistryPage, queryRegistrySubjects, querySubjectProfile,
       createEmployee,
       createVisitor,
       createHardwareAsset,
@@ -271,7 +314,11 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       decidePermissionRequest,
       evaluateAlertRules,
       queryMovements,
+      queryDashboardAnalytics,
+      queryEmployeeActivity,
+      queryEmployeeActivitySummary,
       queryAlerts,
+      queryAlertRuleAssignments,
       queryAuditEvents,
       recordScan,
       requestBarcodeManualReview,
@@ -279,7 +326,6 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       submitPermissionRequest,
       grantPermission,
       releaseEntryRestriction,
-      acknowledgeAlert,
       reviewAlert,
       resetAlertWarnings,
       setAlertRuleAssignments,

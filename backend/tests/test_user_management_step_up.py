@@ -14,7 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from config import settings
 from routers import keycloak_admin
-from user_management_step_up import require_user_management_step_up, STEP_UP_PROOF_DOMAIN
+from user_management_step_up import verified_user_management_window, STEP_UP_PROOF_DOMAIN
 
 NOW = 1_800_000_000
 TOKEN = "test-only-access-token"
@@ -33,45 +33,45 @@ def proof_for(payload, *, secret=SECRET, raw=None):
 
 def payload_for(*, duration=5, auth_time=NOW - 1, issued_at=NOW, token=TOKEN, **changes):
     return {"issuedAt": issued_at, "authTime": auth_time, "expiresAt": auth_time + duration * 60,
-        "durationMinutes": duration, "tokenHash": hashlib.sha256(token.encode("utf-8")).hexdigest(), **changes}
+        "durationMinutes": duration, "tokenHash": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+        "windowId": "b6054cab-bd97-4b4e-845b-a86dcf7a3910", **changes}
 
 
 class StepUpSettingsFixture:
     def setUp(self):
         secret = patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET)
-        age = patch.object(settings, "KEYCLOAK_STEP_UP_MAX_AGE_SECONDS", 300)
         secret.start()
-        age.start()
         self.addCleanup(secret.stop)
-        self.addCleanup(age.stop)
 
 
 class UserManagementStepUpTests(StepUpSettingsFixture, unittest.TestCase):
     def assert_rejected(self, proof, claims=None, *, token=TOKEN, now=NOW):
         with self.assertRaises(HTTPException) as error:
-            require_user_management_step_up(token, {"auth_time": NOW - 1} if claims is None else claims, proof, now=now)
+            verified_user_management_window(token, {"auth_time": NOW - 1} if claims is None else claims, proof, now=now)
         self.assertEqual(error.exception.status_code, 401)
 
     def test_all_six_signed_durations_remain_valid_until_their_original_login_window_ends(self):
         for duration in (5, 10, 15, 20, 30, 60):
             with self.subTest(duration=duration):
                 auth_time = NOW - duration * 60 + 1
-                proof = proof_for(payload_for(duration=duration, auth_time=auth_time))
-                self.assertIsNone(require_user_management_step_up(TOKEN, {"auth_time": auth_time}, proof, now=NOW))
+                payload = payload_for(duration=duration, auth_time=auth_time)
+                proof = proof_for(payload)
+                self.assertEqual(verified_user_management_window(TOKEN, {"auth_time": auth_time}, proof, now=NOW), payload)
                 self.assert_rejected(proof, {"auth_time": auth_time}, now=NOW + 1)
 
     def test_exact_expiry_boundary_and_refresh_do_not_extend_the_selected_window(self):
         payload = payload_for(duration=20, auth_time=NOW - 1200)
         proof = proof_for(payload)
-        self.assertIsNone(require_user_management_step_up(TOKEN, {}, proof, now=NOW - 0.001))
+        self.assertEqual(verified_user_management_window(TOKEN, {}, proof, now=NOW - 0.001), payload)
         self.assert_rejected(proof, {}, now=NOW)
         self.assert_rejected(proof, {}, now=NOW + 0.001)
         # A new proof for a refreshed access token still has the original login
         # authTime and expiresAt, so it cannot restart the selected duration.
         renewed = proof_for({**payload, "issuedAt": NOW, "tokenHash": hashlib.sha256(b"refreshed-token").hexdigest()})
         self.assert_rejected(renewed, {}, token="refreshed-token")
-        extended = proof_for({**payload, "expiresAt": NOW + 1200})
-        self.assertIsNone(require_user_management_step_up(TOKEN, {}, extended, now=NOW))
+        extended_payload = {**payload, "expiresAt": NOW + 1200}
+        extended = proof_for(extended_payload)
+        self.assertEqual(verified_user_management_window(TOKEN, {}, extended, now=NOW), extended_payload)
         self.assert_rejected(extended, {}, now=NOW + 1200)
 
     def test_proof_signature_and_exact_bearer_token_binding_are_required(self):
@@ -87,7 +87,7 @@ class UserManagementStepUpTests(StepUpSettingsFixture, unittest.TestCase):
         self.assert_rejected(proof, token=" " + TOKEN)
 
     def test_invalid_provided_proof_never_uses_the_fresh_direct_bearer_fallback(self):
-        self.assertIsNone(require_user_management_step_up(TOKEN, {"auth_time": NOW}, None, now=NOW))
+        self.assert_rejected(None, {"auth_time": NOW})
         for malformed in ("", "no-dot", "a.b.c", ".", "*.!", "x" * 2049, 42):
             with self.subTest(proof=malformed):
                 self.assert_rejected(malformed)
@@ -97,10 +97,10 @@ class UserManagementStepUpTests(StepUpSettingsFixture, unittest.TestCase):
             with self.subTest(proof=malformed):
                 self.assert_rejected(malformed)
 
-    def test_missing_signing_secret_rejects_proof_but_keeps_fixed_direct_bearer_policy(self):
+    def test_missing_signing_secret_and_raw_bearers_fail_closed(self):
         with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", ""):
             self.assert_rejected(proof_for(payload_for()))
-            self.assertIsNone(require_user_management_step_up(TOKEN, {"auth_time": NOW}, now=NOW))
+            self.assert_rejected(None, {"auth_time": NOW})
             self.assert_rejected(None, {"auth_time": NOW - 301})
 
     def test_payload_requires_exact_fields_valid_json_and_no_duplicate_fields(self):
@@ -130,26 +130,29 @@ class UserManagementStepUpTests(StepUpSettingsFixture, unittest.TestCase):
 
     def test_issued_at_and_auth_time_clock_skew_limits_have_exact_boundaries(self):
         for issued_at in (NOW - 60, NOW + 30):
-            self.assertIsNone(require_user_management_step_up(TOKEN, {}, proof_for(payload_for(issued_at=issued_at)), now=NOW))
+            payload = payload_for(issued_at=issued_at)
+            self.assertEqual(verified_user_management_window(TOKEN, {}, proof_for(payload), now=NOW), payload)
         for issued_at in (NOW - 61, NOW + 31, -(10**1000), 10**1000):
             self.assert_rejected(proof_for(payload_for(issued_at=issued_at)), {})
-        self.assertIsNone(require_user_management_step_up(TOKEN, {}, proof_for(payload_for(auth_time=NOW + 30)), now=NOW))
+        future_payload = payload_for(auth_time=NOW + 30)
+        self.assertEqual(verified_user_management_window(TOKEN, {}, proof_for(future_payload), now=NOW), future_payload)
         self.assert_rejected(proof_for(payload_for(auth_time=NOW + 31)), {})
         self.assert_rejected(proof_for(payload_for(auth_time=10**1000)), {})
 
     def test_optional_access_token_auth_time_must_match_verified_login_without_coercion(self):
         auth_time = NOW - 1
-        proof = proof_for(payload_for(auth_time=auth_time))
-        self.assertIsNone(require_user_management_step_up(TOKEN, {}, proof, now=NOW))
-        self.assertIsNone(require_user_management_step_up(TOKEN, {"auth_time": float(auth_time)}, proof, now=NOW))
+        payload = payload_for(auth_time=auth_time)
+        proof = proof_for(payload)
+        self.assertEqual(verified_user_management_window(TOKEN, {}, proof, now=NOW), payload)
+        self.assertEqual(verified_user_management_window(TOKEN, {"auth_time": float(auth_time)}, proof, now=NOW), payload)
         for invalid in (None, True, False, str(auth_time), auth_time - 1, auth_time + 0.5,
                         float("nan"), float("inf"), -(10**1000), 10**1000):
             with self.subTest(auth_time=invalid):
                 self.assert_rejected(proof, {"auth_time": invalid})
 
-    def test_absent_header_preserves_five_minute_direct_bearer_limits_and_rejects_bad_claims(self):
+    def test_absent_header_cannot_bypass_server_window_revocation_with_fresh_auth_time(self):
         for auth_time in (NOW, NOW - 300, NOW + 30, NOW - 0.5):
-            self.assertIsNone(require_user_management_step_up(TOKEN, {"auth_time": auth_time}, now=NOW))
+            self.assert_rejected(None, {"auth_time": auth_time})
         for invalid in (None, True, False, str(NOW), NOW - 300.001, NOW + 30.001,
                         float("nan"), float("inf"), -(10**1000), 10**1000):
             with self.subTest(auth_time=invalid):
@@ -162,8 +165,10 @@ class UserManagementStepUpDependencyTests(StepUpSettingsFixture, unittest.Isolat
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=TOKEN)
         with patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value={"auth_time": NOW})) as verify, \
              patch("routers.keycloak_admin.time.time", return_value=NOW):
-            self.assertEqual(await keycloak_admin._admin_context(credentials), TOKEN)
-            verify.assert_awaited_once_with(credentials)
+            with self.assertRaises(HTTPException) as error:
+                await keycloak_admin._admin_context(credentials)
+            self.assertEqual(error.exception.status_code, 401)
+            verify.assert_awaited_once_with(credentials, None)
         with patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock()) as verify:
             with self.assertRaises(HTTPException) as error:
                 await keycloak_admin._admin_context(None, proof_for(payload_for()))
@@ -181,7 +186,8 @@ class UserManagementStepUpDependencyTests(StepUpSettingsFixture, unittest.Isolat
             return {"accepted": True}
         payload = payload_for(duration=60, auth_time=NOW - 3599)
         with patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value={"auth_time": payload["authTime"]})), \
-             patch("routers.keycloak_admin.time.time", return_value=NOW):
+             patch("routers.keycloak_admin.time.time", return_value=NOW), \
+             patch("routers.keycloak_admin.require_unlocked_window", new=AsyncMock()):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
                 headers = {"Authorization": "Bearer " + TOKEN, "X-InOut-Step-Up": proof_for(payload)}
                 self.assertEqual((await client.get("/protected", headers=headers)).status_code, 200)

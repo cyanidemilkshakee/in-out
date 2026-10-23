@@ -17,7 +17,7 @@
 .heading { min-width: 0; }
 .header h1 { margin: 0; font-size: clamp(29px, calc(2.7vw + 1px), 37px); font-weight: 800; line-height: 1.15; letter-spacing: -.045em; }
 .headerActions { gap: 10px; flex-shrink: 0; }
-.secondaryButton, .dangerButton, .searchButton, .clearButton {
+.secondaryButton, .dangerButton, .primaryButton, .searchButton, .clearButton {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
   min-height: 40px; padding: 8px 13px; border: 1px solid transparent;
   border-radius: 10px; background: transparent; color: var(--ui-text-primary);
@@ -28,6 +28,8 @@
 .iconActionButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-inset); color: var(--ui-text-primary); }
 .secondaryButton { background: var(--user-surface); }
 .secondaryButton:hover:not(:disabled), .clearButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-inset); }
+.primaryButton { background: var(--admin-text); color: var(--ui-text-inverse); }
+.primaryButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: color-mix(in srgb, var(--admin-text) 85%, var(--admin-bg)); }
 .searchButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-inset); }
 .clearButton { color: var(--ui-text-secondary); border-color: transparent; }
 .dangerButton { color: var(--ui-text-danger); background: color-mix(in srgb, var(--ui-text-danger) 3%, transparent); }
@@ -45,6 +47,17 @@
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; min-width: 0; }
 .panel { min-width: 0; overflow: hidden; border: 1px solid transparent; border-radius: 14px; background: var(--user-surface); transition: border-color 150ms ease; }
 .panel:hover { border-color: var(--ui-border-hover); }
+.checkpointPanel { display: grid; gap: 14px; padding: 16px; }
+.checkpointHeader h2 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.3; letter-spacing: -.025em; }
+.checkpointHeader p { margin: 4px 0 0; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.45; }
+.checkpointForm { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; padding-block: 14px; border-block: 1px solid var(--admin-line); }
+.checkpointFormActions { display: flex; grid-column: 1 / -1; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.checkpointList { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.checkpointItem { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 10px 12px; border: 1px solid var(--admin-line); border-radius: 9px; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.4; }
+.checkpointName { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--ui-text-primary); }
+.checkpointName > svg { flex: 0 0 auto; color: var(--ui-text-secondary); }
+.checkpointName > strong { min-width: 0; overflow-wrap: anywhere; }
+.checkpointName > small { color: var(--ui-text-secondary); font-size: 13px; white-space: nowrap; }
 .directoryHeader { display: grid; gap: 14px; padding: 16px; border-bottom: 1px solid var(--admin-line); }
 .titleRow { justify-content: space-between; gap: 14px; }
 .titleRow > div { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -64,7 +77,7 @@
 .stateFilter button { min-width: 0; min-height: 32px; padding: 6px 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ui-text-secondary); font: inherit; font-size: 15px; font-weight: 600; line-height: 1.4; cursor: pointer; }
 .stateFilter button[aria-pressed="true"] { border-color: transparent; background: var(--user-surface); color: var(--ui-text-primary); }
 .stateFilter button:hover:not(:disabled) { border-color: var(--ui-border-hover); color: var(--ui-text-primary); }
-.directoryGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px; min-width: 0; }
+.directoryGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px; min-width: 0; max-height: min(78dvh, 950px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-line) transparent; }
 .userCard { display: grid; align-content: start; gap: 12px; width: 100%; min-width: 0; padding: 15px; border: 1px solid transparent; border-radius: 11px; background: var(--user-surface); color: var(--ui-text-primary); font: inherit; text-align: left; cursor: pointer; transition: border-color 150ms ease, background-color 150ms ease; }
 .userCard[data-selected="true"] { background: color-mix(in srgb, var(--ui-text-info) 3%, var(--user-surface)); }
 .userCard:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-inset); }
@@ -86,7 +99,7 @@
 .roleBadge[data-role="admin"] { color: var(--ui-text-info); }
 .checkpointLine { display: flex; align-items: flex-start; gap: 6px; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
 .checkpointLine > svg { flex-shrink: 0; margin-top: 2px; }
-.editor { min-width: 0; scroll-margin-top: 24px; }
+.editor { min-width: 0; max-height: min(82dvh, calc(100dvh - 48px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-line) transparent; scroll-margin-top: 24px; }
 .editorHeader { justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; padding: 18px; border-bottom: 1px solid var(--admin-line); }
 .editorHeader .selectedIdentity { flex: 1; }
 .selectedIdentity { min-width: 0; align-items: center; gap: 10px; }
@@ -145,8 +158,8 @@
 
 @media (min-width: 1101px) {
   .workspace[data-selected="true"] { grid-template-columns: minmax(310px, .7fr) minmax(0, 1.3fr); }
-  .workspace[data-selected="true"] .directoryGrid { grid-template-columns: minmax(0, 1fr); max-height: 950px; overflow-y: auto; scrollbar-width: thin; }
-  .editor { position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow-y: auto; scrollbar-width: thin; }
+  .workspace[data-selected="true"] .directoryGrid { grid-template-columns: minmax(0, 1fr); }
+  .editor { position: sticky; top: 24px; }
 }
 @media (max-width: 1250px) {
   .directoryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -171,6 +184,8 @@
   .dialogHeader h2 { font-size: 23px; }
   .dialogIcon { width: 36px; height: 36px; flex-basis: 36px; border-radius: 10px; }
   .dialogBody { padding: 16px; }
+  .checkpointForm { grid-template-columns: minmax(0, 1fr); }
+  .checkpointFormActions { grid-column: auto; }
 }
 @media (max-width: 650px) { .directoryGrid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 400px) {
@@ -184,4 +199,4 @@
   .dialogBody { padding: 18px; }
 }
 @media (max-width: 500px) { .securityActionRow { flex-direction: row; gap: 8px; }.securityActionRow > button { padding-inline: 8px; white-space: nowrap; } }
-@media (prefers-reduced-motion: reduce) { .loadingIcon { animation: none; }.userCard, .iconActionButton, .secondaryButton, .dangerButton { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .loadingIcon { animation: none; }.userCard, .iconActionButton, .secondaryButton, .primaryButton, .dangerButton { transition: none; } }

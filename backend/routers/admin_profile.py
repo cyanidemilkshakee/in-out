@@ -12,6 +12,7 @@ from auth import verify_admin_request
 from database import get_db
 from models import AdminAccount
 from redis_client import publish_data_changed
+from event_outbox import enqueue_changed
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
@@ -31,7 +32,7 @@ class AvailabilityUpdateRequest(BaseModel):
 
 
 def _review_note_policy(_settings: Optional[dict[str, bool]]) -> dict[str, bool]:
-    """Review decisions are auditable security actions, so the policy is always on."""
+    """Denial notes are required; administrator approval notes remain optional."""
     return {"requireReviewNote": True}
 
 
@@ -64,6 +65,7 @@ async def _identity_profile(db, admin):
             avatar_data_url="", settings=_review_note_policy(None),
             created_at=datetime.now(timezone.utc))
         db.add(account)
+    db.info["profile_initialized"] = True
     await db.flush()
     return account
 
@@ -71,6 +73,8 @@ async def _identity_profile(db, admin):
 @router.get("/profile")
 async def get_admin_profile(db: AsyncSession = Depends(get_db), admin: dict = Depends(verify_admin_request)) -> dict[str, Any]:
     account = await _identity_profile(db, admin)
+    if db.info.get("profile_initialized"):
+        await enqueue_changed(db)
     await db.commit()
     return _serialize_account(account)
 
@@ -84,8 +88,8 @@ async def update_admin_profile(payload: ProfileUpdateRequest, db: AsyncSession =
         if key == "settings":
             value = _review_note_policy(value)
         setattr(account, key, value)
+    await enqueue_changed(db)
     await db.commit()
-    await publish_data_changed()
     return _serialize_account(account)
 
 
@@ -102,6 +106,6 @@ async def update_admin_availability(payload: AvailabilityUpdateRequest, db: Asyn
             raise HTTPException(status_code=422, detail="offlineUntil must be between one minute and 24 hours from now")
     account = await _identity_profile(db, admin)
     account.offline_until = offline_until
+    await enqueue_changed(db)
     await db.commit()
-    await publish_data_changed()
     return {"offline_until": account.offline_until.isoformat() if account.offline_until else None}

@@ -1,70 +1,40 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { Suspense, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { Download } from "lucide-react";
 import { AdminPageFrame } from "../../../frontend/components/admin/tables/AdminPageFrame";
 import { EmployeeTable } from "../../../frontend/components/admin/tables/EmployeeTable";
-import { EmployeeCreator } from "../../../frontend/components/admin/tables/EmployeeCreator";
-import { HardwareCreator } from "../../../frontend/components/admin/tables/HardwareCreator";
-import type { MetricTrendPoint } from "../../../frontend/components/analytics/MetricTrendChart";
-import type { TimeRange } from "../../../frontend/components/analytics/TrendChart";
-import { Download } from "lucide-react";
-import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
-import { getPersonSessionIndex } from "../../../lib/analyticsUtils";
-import { eventTimestamp } from "../../../lib/dateRanges";
+import { RegistryCreateDialog } from "../../../frontend/components/admin/tables/RegistryCreateDialog";
+import { useDataActions } from "../../../frontend/context/DataContext";
+import { employeeActivityPatterns, employeeActivityRangeDays } from "../../../lib/analyticsQueries";
+import { assertCsvBound, readExport } from "../../../lib/exportRead";
+import { createRefreshScheduler } from "../../../lib/refreshScheduler";
+import type { TimeRange } from "../../../lib/dateRanges";
+import type { HardwareAsset, Person, RegistryKind, RegistryPage as RegistryPageData, RegistrySortKey, SortDirection } from "../../../lib/types";
 
-const PeopleTable = dynamic(
-  () =>
-    import("../../../frontend/components/admin/tables/PeopleTable").then(
-      (module) => module.PeopleTable
-    )
-);
-const HardwareTable = dynamic(
-  () =>
-    import("../../../frontend/components/admin/tables/HardwareTable").then(
-      (module) => module.HardwareTable
-    )
-);
-const MetricTrendChart = dynamic(
-  () =>
-    import("../../../frontend/components/analytics/MetricTrendChart").then(
-      (module) => module.MetricTrendChart
-    ),
-  { ssr: false }
-);
-
-type RegistryTab = "employees" | "visitors" | "hardware";
-type RegistryChartProps = {
-  title: string;
-  valueLabel: string;
-  color: string;
-  unit: string;
-  aggregation: "sum" | "average";
-};
-
-const REGISTRY_TABS: Array<{ id: RegistryTab; label: string }> = [
-  { id: "employees", label: "Employees" },
-  { id: "visitors", label: "Visitors" },
-  { id: "hardware", label: "Hardware" },
-];
+const PeopleTable = dynamic(() => import("../../../frontend/components/admin/tables/PeopleTable").then(module => module.PeopleTable));
+const HardwareTable = dynamic(() => import("../../../frontend/components/admin/tables/HardwareTable").then(module => module.HardwareTable));
+const MetricTrendChart = dynamic(() => import("../../../frontend/components/analytics/MetricTrendChart").then(module => module.MetricTrendChart), { ssr: false });
+const REGISTRY_TABS = [
+  { id: "employee", label: "Employees", tab: "employees" },
+  { id: "visitor", label: "Visitors", tab: "visitors" },
+  { id: "hardware", label: "Hardware", tab: "hardware" },
+] as const;
+const PAGE_SIZE = 25;
 
 function csvCell(value: unknown) {
   const raw = String(value ?? "");
-  const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
-  return `"${safe.replaceAll('"', '""')}"`;
+  return `"${(/^[=+\-@]/.test(raw) ? `'${raw}` : raw).replaceAll('"', '""')}"`;
 }
 
 function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
-  if (rows.length === 0) return;
+  if (!rows.length) return;
   const columns = Object.keys(rows[0]);
-  const csv = [
-    columns.map(csvCell).join(","),
-    ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(",")),
-  ].join("\r\n");
-  const url = URL.createObjectURL(
-    new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" })
-  );
+  const csv = [columns.map(csvCell).join(","), ...rows.map(row => columns.map(column => csvCell(row[column])).join(","))].join("\r\n");
+  assertCsvBound(csv);
+  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -73,231 +43,171 @@ function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
 }
 
 function RegistryWorkspace() {
-  const {
-    people: staff,
-    hardwareAssets: assets,
-    movements,
-    permissions,
-    alerts,
-  } = useDataState();
-  const { createEmployee, createHardwareAsset } = useDataActions();
-  const searchParams = useSearchParams();
+  const { createEmployee, createVisitor, createHardwareAsset, queryRegistryPage } = useDataActions();
+  const params = useSearchParams();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<RegistryTab>("employees");
+  const initialTab = REGISTRY_TABS.find(tab => tab.tab === params.get("tab"))?.id ?? "employee";
+  const [kind, setKind] = useState<RegistryKind>(initialTab);
   const [timeRange, setTimeRange] = useState<TimeRange>("1D");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<RegistrySortKey>("name");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [revision, setRevision] = useState(0);
+  const [data, setData] = useState<RegistryPageData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const exportController = useRef<AbortController | null>(null);
+  useEffect(() => () => exportController.current?.abort(), []);
+  const overviewKey = useRef("");
+  const activeRead = useRef<AbortController | null>(null);
+  const refreshPending = useRef(false);
+  const refreshScheduler = useMemo(() => createRefreshScheduler(() => {
+    if (activeRead.current) refreshPending.current = true;
+    else setRevision(value => value + 1);
+  }), []);
+  const days = employeeActivityRangeDays(timeRange);
+  const tab = REGISTRY_TABS.find(item => item.id === kind)!;
+
   useEffect(() => {
-    const tab = searchParams.get("tab");
-    if (tab === "permissions" || tab === "alerts") {
-      const query = new URLSearchParams(searchParams.toString());
-      router.replace(`/admin/logs?${query.toString()}`);
-      return;
-    }
-    if (tab === "employees" || tab === "visitors" || tab === "hardware") setActiveTab(tab);
-  }, [router, searchParams]);
-  const deferredSearch = useDeferredValue(search);
-  const sessionsByPerson = useMemo(
-    () => getPersonSessionIndex(movements),
-    [movements]
-  );
+    if (params.get("tab") === "permissions" || params.get("tab") === "alerts") router.replace(`/admin/logs?${params}`);
+  }, [params, router]);
+  useEffect(() => {
+    const timer = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 200);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useEffect(() => {
+    const reload = () => refreshScheduler.request();
+    const receive = (event: Event) => {
+      try {
+        const update = JSON.parse((event as CustomEvent<string>).detail);
+        const movementKind = update.movement?.subjectType ?? update.movement?.subject_type;
+        const affected = update.type === "data_changed" || update.type === "snapshot_required" || movementKind === kind
+          || (Array.isArray(update.people) && update.people.some((person: Person) => person.type === kind))
+          || (kind === "hardware" && Array.isArray(update.hardwareAssets) && update.hardwareAssets.length > 0);
+        if (affected) reload();
+      } catch { /* A reconnect reconciles malformed events. */ }
+    };
+    window.addEventListener("inout:presence-message", receive);
+    window.addEventListener("inout:presence-sync", reload);
+    const restore = () => { if (document.visibilityState === "visible") reload(); };
+    window.addEventListener("focus", restore);
+    window.addEventListener("online", restore);
+    document.addEventListener("visibilitychange", restore);
+    return () => {
+      window.removeEventListener("inout:presence-message", receive);
+      window.removeEventListener("inout:presence-sync", reload);
+      window.removeEventListener("focus", restore);
+      window.removeEventListener("online", restore);
+      document.removeEventListener("visibilitychange", restore);
+      refreshScheduler.cancel();
+    };
+  }, [refreshScheduler, kind]);
+  useEffect(() => {
+    if (search !== debouncedSearch) return;
+    const controller = new AbortController();
+    activeRead.current = controller;
+    refreshPending.current = false;
+    refreshScheduler.cancel();
+    const key = JSON.stringify([kind, days, revision]);
+    const includeOverview = overviewKey.current !== key;
+    setLoading(true);
+    setError("");
+    void queryRegistryPage({ kind, days, limit: PAGE_SIZE, offset: (page - 1) * PAGE_SIZE,
+      search: debouncedSearch.trim() || undefined, sortKey, sortDirection, includeOverview }, controller.signal)
+      .then(result => {
+        if (controller.signal.aborted) return;
+        if (includeOverview) overviewKey.current = key;
+        setData(current => includeOverview ? result : { ...result, summary: current?.summary, trend: current?.trend });
+        if (Number.isSafeInteger(result.eventRevision)) window.dispatchEvent(new CustomEvent("inout:snapshot-revision", {
+          detail: { revision: result.eventRevision, scope: "registry" },
+        }));
+        if (result.total && result.offset >= result.total) setPage(Math.ceil(result.total / PAGE_SIZE));
+      })
+      .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Unable to load registry."); })
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        activeRead.current = null;
+        setLoading(false);
+        if (refreshPending.current) { refreshPending.current = false; refreshScheduler.request(); }
+      });
+    return () => { controller.abort(); if (activeRead.current === controller) activeRead.current = null; };
+  }, [kind, days, page, debouncedSearch, search, sortKey, sortDirection, revision, queryRegistryPage, refreshScheduler]);
 
-  // Filter Employees
-  const allEmployees = useMemo(
-    () => staff.filter((person) => person.type === "employee"),
-    [staff]
-  );
-  const employees = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    return allEmployees.filter(
-      (person) =>
-        (!needle || person.name.toLowerCase().includes(needle) || person.barcode.toLowerCase().includes(needle))
-    );
-  }, [allEmployees, deferredSearch]);
-  const insideEmployees = useMemo(() => allEmployees.reduce((count, person) => count + (person.inside ? 1 : 0), 0), [allEmployees]);
+  const visible = data?.kind === kind ? data : null;
+  const sessionsByPerson = useMemo(() => new Map(Object.entries(visible?.activityDays ?? {}).map(([id, activityDays]) => [id,
+    employeeActivityPatterns({ days: activityDays, totalHours: 0, previousTotalHours: 0, startAt: "", endAt: "", previousStartAt: "", previousEndAt: "" }).reverse(),
+  ])), [visible?.activityDays]);
+  const summary = visible?.summary;
+  const frameMetric = kind === "employee" ? `${summary?.inside ?? 0}/${summary?.total ?? 0} on-site`
+    : kind === "visitor" ? `${summary?.pending ?? 0} pending · ${summary?.preApproved ?? 0} pre-approved`
+    : `${summary?.restricted ?? 0} restricted`;
+  const sort = { key: sortKey, direction: sortDirection, onChange: (key: RegistrySortKey) => {
+    setSortKey(key); setSortDirection(sortKey === key && sortDirection === "asc" ? "desc" : "asc"); setPage(1);
+  } };
+  const reload = () => setRevision(value => value + 1);
 
-  // Filter Visitors
-  const allVisitors = useMemo(
-    () => staff.filter((person) => person.type === "visitor"),
-    [staff]
-  );
-  const visitors = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    return allVisitors.filter(
-      (person) =>
-        (!needle || [person.name, person.barcode, person.host, person.company].some((value) => value?.toLowerCase().includes(needle)))
-    );
-  }, [allVisitors, deferredSearch]);
-  const preApprovedCount = useMemo(() => allVisitors.reduce((count, person) => count + (person.status === "pre_approved" ? 1 : 0), 0), [allVisitors]);
-  const pendingVisitorCount = useMemo(() => allVisitors.filter((person) => person.status === "pending_approval").length, [allVisitors]);
-
-  // Filter Hardware
-  const filteredAssets = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
-    return assets.filter(
-      (asset) =>
-        !needle || asset.name.toLowerCase().includes(needle) || asset.barcode.toLowerCase().includes(needle) || asset.owner.toLowerCase().includes(needle)
-    );
-  }, [assets, deferredSearch]);
-  const restrictedCount = useMemo(() => assets.reduce((count, asset) => count + (asset.status === "restricted" ? 1 : 0), 0), [assets]);
-  let frameMetric = `${insideEmployees}/${allEmployees.length} on-site`;
-  let chartProps: RegistryChartProps = {
-    title: "Working hours",
-    valueLabel: "AVG WORKING HOURS",
-    color: "#ea580c",
-    unit: "h",
-    aggregation: "average",
-  };
-
-  if (activeTab === "visitors") {
-    frameMetric = `${pendingVisitorCount} pending · ${preApprovedCount} pre-approved`;
-    chartProps = { title: "Visitor movements", valueLabel: "VISITOR MOVEMENTS", color: "#db2777", unit: "", aggregation: "sum" };
-  } else if (activeTab === "hardware") {
-    frameMetric = `${restrictedCount} restricted`;
-    chartProps = { title: "Hardware scans", valueLabel: "HARDWARE SCANS", color: "#8b5cf6", unit: "", aggregation: "sum" };
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    setError("");
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 30_000);
+    exportController.current = controller;
+    try {
+      const result = await readExport<RegistryPageData>("registry", { kind, days, search: debouncedSearch.trim() || undefined,
+        sortKey, sortDirection }, controller.signal);
+      const records: Array<Person | HardwareAsset> = kind === "hardware" ? result.hardwareAssets : result.people;
+      const averages = result.averages;
+      const rows: Array<Record<string, unknown>> = records.map(record => kind === "employee" ? {
+        name: record.name, barcode: record.barcode, allowedZones: record.allowedZones.join("; "), status: record.status, inside: record.inside,
+        [`avgWorkHoursPerDay_${timeRange}`]: averages[record.id] ?? "", createdAt: record.createdAt,
+      } : kind === "visitor" ? {
+        name: record.name, barcode: record.barcode, company: "company" in record ? record.company : "", host: "host" in record ? record.host : "",
+        purpose: "purpose" in record ? record.purpose : "", validFrom: "validFrom" in record ? record.validFrom : "", validTo: "validTo" in record ? record.validTo : "",
+        status: record.status, inside: record.inside,
+      } : { name: record.name, barcode: record.barcode, owner: "owner" in record ? record.owner : "", category: "category" in record ? record.category : "",
+        allowedZones: record.allowedZones.join("; "), status: record.status, inside: record.inside, createdAt: record.createdAt });
+      downloadCsv(`inout-${tab.tab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to export registry."); }
+    finally { clearTimeout(timer); setExporting(false); }
   }
 
-  const metricPoints = useMemo<MetricTrendPoint[]>(() => {
-    if (activeTab === "employees") {
-      return [...sessionsByPerson.values()].flatMap((sessions) =>
-        sessions.map((session) => ({
-            timestamp: session.dateObj.toISOString(),
-            value: session.workedHours,
-          }))
-      );
-    }
-    if (activeTab === "visitors" || activeTab === "hardware") {
-      return movements
-        .filter((movement) =>
-          activeTab === "visitors"
-            ? movement.subjectType === "visitor"
-            : movement.subjectType === "hardware"
-        )
-        .flatMap((movement) => {
-          const timestamp = eventTimestamp(movement);
-          return timestamp > 0
-            ? [{ timestamp: new Date(timestamp).toISOString(), value: 1 }]
-            : [];
-        });
-    }
-    return [];
-  }, [activeTab, movements, sessionsByPerson]);
-
-  function handleExport() {
-    const rows: Array<Record<string, unknown>> = activeTab === "employees"
-        ? employees.map((person) => ({
-            name: person.name,
-            barcode: person.barcode,
-            allowedZones: person.allowedZones.join("; "),
-            status: person.status,
-            inside: person.inside,
-            createdAt: person.createdAt,
-          }))
-        : activeTab === "visitors"
-          ? visitors.map((person) => ({
-              name: person.name,
-              barcode: person.barcode,
-              company: person.company,
-              host: person.host,
-              purpose: person.purpose,
-              validFrom: person.validFrom,
-              validTo: person.validTo,
-              status: person.status,
-              inside: person.inside,
-            }))
-          : filteredAssets.map((asset) => ({
-              name: asset.name,
-              barcode: asset.barcode,
-              owner: asset.owner,
-              category: asset.category,
-              allowedZones: asset.allowedZones.join("; "),
-              status: asset.status,
-              inside: asset.inside,
-              createdAt: asset.createdAt,
-            }));
-    downloadCsv(`inout-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
-  }
-
-  return (
-    <AdminPageFrame
-      title="Registry"
-      metric={frameMetric}
-      preTitle={
-        <div className="registry-segmented-shell">
-          <div className="pill-segmented-group registry-segmented-group" role="tablist" aria-label="Registry data type">
-            {REGISTRY_TABS.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                role="tab"
-                aria-selected={activeTab === tab.id}
-                className={`pill-segmented-button ${activeTab === tab.id ? "active" : ""}`}
-                onClick={() => { setActiveTab(tab.id); setSearch(""); }}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      }
-      headerRight={
-        <MetricTrendChart
-          title={chartProps.title}
-          valueLabel={chartProps.valueLabel}
-          timeRange={timeRange}
-          onTimeRangeChange={setTimeRange}
-          color={chartProps.color}
-          points={metricPoints}
-          aggregation={chartProps.aggregation}
-          unit={chartProps.unit}
-        />
-      }
-    >
-      <section className="registry-workspace">
-        <div className="admin-panel workspace-main">
-          <div className="filter-bar">
-            {activeTab === "employees" && <EmployeeCreator onCreate={createEmployee} />}
-            {activeTab === "hardware" && <HardwareCreator onCreate={createHardwareAsset} />}
-            
-            <button
-              className="admin-button admin-button--ghost ghost-button"
-              type="button"
-              onClick={handleExport}
-              disabled={
-                (activeTab === "employees" && employees.length === 0) ||
-                (activeTab === "visitors" && visitors.length === 0) ||
-                (activeTab === "hardware" && filteredAssets.length === 0)
-              }
-            >
-              <Download />
-              Export
-            </button>
-            <label className="search-control registry-search-control">
-              <span className="sr-only">Search</span>
-              <input
-                type="search"
-                maxLength={200}
-                placeholder={`Search ${REGISTRY_TABS.find((tab) => tab.id === activeTab)?.label.toLowerCase()}...`}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </label>
-          </div>
-          
-          {activeTab === "employees" && (
-            <EmployeeTable
-              people={employees}
-              movements={movements}
-              sessionsByPerson={sessionsByPerson}
-              permissions={permissions}
-              alerts={alerts}
-            />
-          )}
-          {activeTab === "visitors" && <PeopleTable title="Visitors" people={visitors} />}
-          {activeTab === "hardware" && <HardwareTable assets={filteredAssets} />}
-        </div>
-      </section>
-    </AdminPageFrame>
-  );
+  return <AdminPageFrame title="Registry" metric={frameMetric}
+    preTitle={<div className="registry-segmented-shell"><div className="pill-segmented-group registry-segmented-group" role="tablist" aria-label="Registry data type">
+      {REGISTRY_TABS.map(item => <button key={item.id} type="button" role="tab" aria-selected={kind === item.id}
+        className={`pill-segmented-button ${kind === item.id ? "active" : ""}`}
+        onClick={() => { setKind(item.id); setPage(1); setSearch(""); setDebouncedSearch(""); setSortKey("name"); setSortDirection("asc"); }}>
+        {item.label}</button>)}
+    </div></div>}
+    headerRight={<MetricTrendChart title={kind === "employee" ? "Working hours" : kind === "visitor" ? "Visitor movements" : "Hardware scans"}
+      valueLabel={kind === "employee" ? "AVG WORKING HOURS" : kind === "visitor" ? "VISITOR MOVEMENTS" : "HARDWARE SCANS"}
+      timeRange={timeRange} onTimeRangeChange={setTimeRange} color={kind === "employee" ? "#ea580c" : kind === "visitor" ? "#db2777" : "#8b5cf6"}
+      points={[]} aggregation={kind === "employee" ? "average" : "sum"} unit={kind === "employee" ? "h" : ""} summary={visible?.trend} />}
+  >
+    <section className="registry-workspace"><div className="admin-panel workspace-main" aria-busy={loading}>
+      <div className="filter-bar">
+        <RegistryCreateDialog initialKind={kind} employees={[]} checkpoints={visible?.checkpoints ?? []} searchEmployees
+          onCreateEmployee={async input => { const result = await createEmployee(input); reload(); return result; }}
+          onCreateVisitor={async input => { const result = await createVisitor(input); reload(); return result; }}
+          onCreateHardware={async input => { const result = await createHardwareAsset(input); reload(); return result; }} />
+        <button className="admin-button admin-button--ghost ghost-button" type="button" onClick={() => void handleExport()} disabled={exporting || !visible?.total}>
+          <Download />{exporting ? "Exporting…" : "Export"}</button>
+        <label className="search-control registry-search-control"><span className="sr-only">Search</span>
+          <input type="search" maxLength={200} placeholder={`Search ${tab.label.toLowerCase()}...`} value={search} onChange={event => setSearch(event.target.value)} /></label>
+      </div>
+      {error ? <p className="inline-note" role="alert">{error} <button type="button" onClick={reload}>Retry</button></p> : null}
+      {kind === "employee" ? <EmployeeTable people={visible?.people ?? []} movements={visible?.movements ?? []} sessionsByPerson={sessionsByPerson}
+        timeRange={timeRange} averageHoursByPerson={visible?.averages ?? null} averageHoursLoading={loading} permissions={[]} alerts={[]} sort={sort} />
+        : kind === "visitor" ? <PeopleTable title="Visitors" people={visible?.people ?? []} sort={sort} /> : <HardwareTable assets={visible?.hardwareAssets ?? []} sort={sort} />}
+      <div className="pagination"><button type="button" disabled={page === 1 || loading} onClick={() => setPage(value => Math.max(1, value - 1))}>Previous</button>
+        <span>Page {page} of {Math.max(1, Math.ceil((visible?.total ?? 0) / PAGE_SIZE))} · {visible?.total ?? 0} records</span>
+        <button type="button" disabled={loading || page * PAGE_SIZE >= (visible?.total ?? 0)} onClick={() => setPage(value => value + 1)}>Next</button>
+      </div>
+    </div></section>
+  </AdminPageFrame>;
 }
 
 export default function RegistryPage() {

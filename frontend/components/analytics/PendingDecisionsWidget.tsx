@@ -98,7 +98,7 @@ export function PendingDecisionsWidget({
       {feedback ? <p className="pending-decision-request-note" role="status">{feedback}</p> : null}
 
       {pendingRequests.length ? (
-        <ul className="alert-list-container pending-decision-list">
+        <ul className="alert-list-container pending-decision-list scrollable-content">
           {pendingRequests.map((request) => {
             const busy = workingId === request.id;
             const checkpointName = request.checkpoint || checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId;

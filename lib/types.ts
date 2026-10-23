@@ -41,6 +41,14 @@ export type VisibleColumn =
 
 export type SortDirection = "asc" | "desc";
 
+export type AlertSortKey =
+  | "createdAt"
+  | "title"
+  | "subjectName"
+  | "subjectType"
+  | "severity"
+  | "status";
+
 export type Person = {
   id: string;
   name: string;
@@ -70,6 +78,7 @@ export type HardwareAsset = {
   name: string;
   barcode: string;
   owner: string;
+  ownerId?: string;
   assignedEmployeeId?: string;
   assignedEmployeeName?: string;
   category: string;
@@ -111,7 +120,6 @@ export type ScanAnalytics = {
   totalAutomatic: number;
   totalManual: number;
   totalRestricted: number;
-  totalExpired: number;
   totalOtherDenied: number;
   activeInside: number;
 };
@@ -131,8 +139,12 @@ export type MovementEvent = {
   reason?: string;
   denialCode?: DenialCode;
   scanType?: "auto" | "manual";
+  captureMethod?: "scanner" | "manual";
   syncState: SyncState;
   hardwareIds: string[];
+  sourceEventId?: string;
+  carrierId?: string;
+  carrierName?: string;
   createdAt?: string;
   capturedOfflineAt?: string;
   source?: "paper_register";
@@ -185,7 +197,7 @@ export type AlertReview = {
 export type AlertWarningSummary = {
   subjectId: string;
   subjectName: string;
-  subjectType: "employee" | "hardware";
+  subjectType: SubjectType;
   barcode: string;
   count: number;
   resetAt?: string;
@@ -203,6 +215,11 @@ export type AlertRuleAssignment = {
   irregularitySkipDates: string[];
   source: "default" | "custom";
   revision: number;
+};
+
+export type AlertRuleAssignmentDirectory = {
+  subjects: AlertRuleAssignment[];
+  rules: AlertRule[];
 };
 
 export type AlertEvaluationResult = {
@@ -269,6 +286,21 @@ export type PermissionRequest = {
   previousValidTo?: string;
 };
 
+export type TerminalVisitorStatus = "pending" | "approved" | "denied" | "expired" | "restricted" | "inactive";
+
+export type TerminalVisitor = {
+  id: string;
+  name: string;
+  barcode: string;
+  host?: string;
+  company?: string;
+  allowedZones: string[];
+  validFrom?: string;
+  validTo?: string;
+  createdAt?: string;
+  status: TerminalVisitorStatus;
+};
+
 export type PermissionRequestInput = Omit<PermissionRequest, "id" | "status" | "createdAt"> & {
   newVisitor?: { name: string; host: string; company?: string };
   permanentAccess?: boolean;
@@ -284,14 +316,16 @@ export type AlertRule = {
   scope: string;
   conditionKey:
     | "no_break"
-    | "irregularity";
+    | "irregularity"
+    | "cross_building_scan"
+    | "visitor_overstay";
   recentTriggers: number;
-  eligibleSubjectTypes?: Array<"employee" | "hardware">;
+  eligibleSubjectTypes?: SubjectType[];
 };
 
 export type AuditEvent = {
   id: string;
-  category: "movement" | "alert" | "permission";
+  category: "movement" | "alert" | "permission" | "security";
   action: string;
   subjectId: string;
   subjectName: string;
@@ -306,16 +340,9 @@ export type AuditEvent = {
   createdAt: string;
 };
 
-export type WorkdayStatus = {
-  employeeId: string;
-  employeeName: string;
-  date: string;
-  breakMinutes: number;
-  minutesInside: number;
-  shiftEnded: boolean;
-};
-
 export type ScanDecision = {
+  replayed?: boolean;
+  authorizeMovement?: boolean;
   event: MovementEvent;
   subject?: SubjectRecord;
   carriedHardware: HardwareAsset[];
@@ -335,6 +362,8 @@ export type DataScope =
   | "all";
 
 export type AppDataSnapshot = {
+  terminalReplayPolicy?: TerminalReplayPolicy;
+  eventRevision?: number;
   people: Person[];
   hardwareAssets: HardwareAsset[];
   checkpoints: Checkpoint[];
@@ -348,14 +377,19 @@ export type AppDataSnapshot = {
   alertRules: AlertRule[];
   alertWarnings: AlertWarningSummary[];
   alertRuleAssignments: AlertRuleAssignment[];
+  alertSummary?: AlertCommandSummary;
   auditEvents: AuditEvent[];
   adminAvailability?: { status: "available" | "offline"; availableAt: string | null };
   terminalAssignment?: { operatorSubject: string; checkpointId: string | null };
+  terminalVisitors: TerminalVisitor[];
 };
+
+export type TerminalReplayPolicy = { receiptRetentionDays: number; serverTime: string };
 
 export type CreateEmployeeInput = {
   name: string;
   barcode: string;
+  status: Extract<Person["status"], "active" | "inactive">;
   allowedZone?: string;
   allowedZones?: string[];
 };
@@ -363,7 +397,7 @@ export type CreateEmployeeInput = {
 export type CreateHardwareAssetInput = {
   name: string;
   barcode: string;
-  owner: string;
+  ownerId: string;
   category: string;
   allowedZone: string;
   status: HardwareAsset["status"];
@@ -377,13 +411,16 @@ export type RecordScanInput = {
   online: boolean;
   scanType: "auto" | "manual";
   capturedOfflineAt?: string;
+  expectedOperatorSubject?: string;
+  /** Retry transport metadata; excluded from the original scan fingerprint. */
+  queueCapturedAt?: string;
 };
 
 export type BarcodeManualReviewInput = {
   barcode: string;
   checkpointId: string;
   direction?: Direction;
-  eventId?: string;
+  eventId: string;
   operatorNote: string;
 };
 
@@ -405,6 +442,8 @@ export type CreateVisitorResult = {
 };
 
 export type RecordScanResult = {
+  replayed?: boolean;
+  authorizeMovement?: boolean;
   decision: ScanDecision;
   updatedPeople: Person[];
   updatedHardwareAssets: HardwareAsset[];
@@ -434,6 +473,7 @@ export type MovementQuery = {
   subjectGroup?: "people" | "hardware";
   startAt?: string;
   endAt?: string;
+  denialCategory?: "restricted" | "other";
   includeChart?: boolean;
   sortKey?: VisibleColumn;
   sortDirection?: SortDirection;
@@ -447,6 +487,46 @@ export type MovementPage = {
   page: number;
   pageSize: number;
   checkpoints: string[];
+};
+
+export type DashboardAnalyticsQuery = {
+  subjectGroup: "people" | "hardware";
+  startAt?: string;
+  endAt?: string;
+};
+
+export type AnalyticsPeriod = {
+  scanAnalytics: ScanAnalytics;
+  alertCount: number;
+  breakdown: Record<string, number>;
+};
+
+export type DashboardAnalytics = {
+  current: AnalyticsPeriod;
+  previous: AnalyticsPeriod | null;
+  startAt: string | null;
+  endAt: string;
+  previousStartAt: string | null;
+  previousEndAt: string | null;
+};
+
+export type EmployeeActivityQuery = { subjectId: string; days: number; endAt?: string };
+export type EmployeeActivitySummaryQuery = { days: number; endAt?: string };
+export type EmployeeActivitySummary = {
+  averages: Record<string, number | null>;
+  days: number;
+  startAt: string;
+  endAt: string;
+};
+export type EmployeeActivity = {
+  days: Array<{ date: string; workedHours: number; percentage: number;
+    sessions: Array<{ start: number; end: number; type: "work" | "break"; zIndex: number }> }>;
+  totalHours: number;
+  previousTotalHours: number;
+  startAt: string;
+  endAt: string;
+  previousStartAt: string;
+  previousEndAt: string;
 };
 
 export type AuditEventQuery = {
@@ -465,6 +545,8 @@ export type AuditEventPage = {
 };
 
 export type AlertQuery = {
+  view?: "command" | "subject";
+  reviewState?: "needs_review" | "reviewed";
   limit: number;
   offset: number;
   status?: Alert["status"] | "active";
@@ -472,6 +554,8 @@ export type AlertQuery = {
   search?: string;
   startAt?: string;
   endAt?: string;
+  sortKey?: AlertSortKey;
+  sortDirection?: SortDirection;
 };
 
 export type AlertPage = {
@@ -480,14 +564,33 @@ export type AlertPage = {
   limit: number;
   offset: number;
   warnings?: AlertWarningSummary[];
+  rules?: AlertRule[];
+  people?: Person[];
+  assignments?: AlertRuleAssignment[];
+  summary?: Pick<AlertCommandSummary, "openCount" | "confirmedWarnings">;
+  eventRevision?: number;
+  totalSubjectAlerts?: number;
+  currentWarnings?: Alert[];
+  recentAlerts?: Alert[];
+};
+
+export type AlertCommandSummary = {
+  openCount: number;
+  confirmedWarnings: number;
+  limit: number;
+  offset: number;
 };
 
 export interface DataService {
-  getSnapshot(scope?: DataScope): Promise<AppDataSnapshot>;
-  queryOpenAlertCount(): Promise<number>;
-  queryMovements(query: MovementQuery): Promise<MovementPage>;
-  queryAlerts(query: AlertQuery): Promise<AlertPage>;
-  queryAuditEvents(query: AuditEventQuery): Promise<AuditEventPage>;
+  getSnapshot(scope?: DataScope, signal?: AbortSignal): Promise<AppDataSnapshot>;
+  queryOpenAlertCount(signal?: AbortSignal): Promise<number>;
+  queryMovements(query: MovementQuery, signal?: AbortSignal): Promise<MovementPage>;
+  queryDashboardAnalytics(query: DashboardAnalyticsQuery, signal?: AbortSignal): Promise<DashboardAnalytics>;
+  queryEmployeeActivity(query: EmployeeActivityQuery, signal?: AbortSignal): Promise<EmployeeActivity>;
+  queryEmployeeActivitySummary(query: EmployeeActivitySummaryQuery, signal?: AbortSignal): Promise<EmployeeActivitySummary>;
+  queryAlerts(query: AlertQuery, signal?: AbortSignal): Promise<AlertPage>;
+  queryAlertRuleAssignments(subjectId: string, signal?: AbortSignal): Promise<AlertRuleAssignmentDirectory>;
+  queryAuditEvents(query: AuditEventQuery, signal?: AbortSignal): Promise<AuditEventPage>;
   createEmployee(input: CreateEmployeeInput): Promise<Person>;
   createVisitor(input: CreateVisitorInput): Promise<CreateVisitorResult>;
   createHardwareAsset(input: CreateHardwareAssetInput): Promise<HardwareAsset>;
@@ -496,7 +599,6 @@ export interface DataService {
     assetId: string,
     patch: Partial<Omit<HardwareAsset, "id">>
   ): Promise<HardwareAsset>;
-  acknowledgeAlert(alertId: string): Promise<Alert>;
   reviewAlert(alertId: string, decision: AlertReview["decision"], reason?: string): Promise<{ alert: Alert }>;
   resetAlertWarnings(subjectId: string, reason: string): Promise<unknown>;
   setAlertRuleAssignments(subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision?: number): Promise<AlertRuleAssignment>;
@@ -513,5 +615,27 @@ export interface DataService {
   recordScan(input: RecordScanInput, idempotencyKey?: string): Promise<RecordScanResult>;
   evaluateAlertRules(): Promise<AlertEvaluationResult>;
   requestBarcodeManualReview(input: BarcodeManualReviewInput): Promise<PermissionRequest>;
-  addMovementNote(eventId: string, note: string): Promise<string[]>;
+  queryRegistryPage(query: RegistryPageQuery, signal?: AbortSignal): Promise<RegistryPage>;
+  queryRegistrySubjects(query: RegistrySubjectQuery, signal?: AbortSignal): Promise<RegistrySubjectPage>;
+  querySubjectProfile(subjectId: string, signal?: AbortSignal): Promise<SubjectProfile>;
 }
+
+export type RegistryKind = "employee" | "visitor" | "hardware";
+export type RegistrySortKey = "name" | "createdAt" | "barcode" | "status" | "inside" | "owner" | "category" | "company" | "host" | "validTo" | "latestScan" | "averageHours";
+export type RegistryPageQuery = {
+  kind: RegistryKind; limit: number; offset: number; search?: string; days: number;
+  sortKey?: RegistrySortKey; sortDirection?: SortDirection; includeOverview?: boolean;
+};
+export type RegistryTrend = {
+  values: number[]; value: number; percentage: number; isUp: boolean; startAt: string; endAt: string;
+};
+export type RegistryPage = {
+  kind: RegistryKind; people: Person[]; hardwareAssets: HardwareAsset[]; movements: MovementEvent[];
+  activityDays: Record<string, EmployeeActivity["days"]>; averages: Record<string, number | null>;
+  total: number; limit: number; offset: number; checkpoints: Checkpoint[]; eventRevision?: number;
+  summary?: { total: number; inside: number; pending: number; preApproved: number; restricted: number };
+  trend?: RegistryTrend;
+};
+export type RegistrySubjectQuery = { kind?: RegistryKind | "people"; limit: number; offset: number; search?: string };
+export type RegistrySubjectPage = { items: Array<Person | HardwareAsset>; total: number; limit: number; offset: number };
+export type SubjectProfile = { person?: Person; hardwareAsset?: HardwareAsset; permissions: AccessPermission[]; eventRevision?: number };

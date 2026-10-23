@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, Integer, Boolean, CheckConstraint, Index, func, text
+from sqlalchemy import Column, String, ForeignKey, DateTime, Integer, BigInteger, Boolean, CheckConstraint, Index, case, func, literal, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 import uuid
 
@@ -12,6 +13,8 @@ class Subject(Base):
     id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     kind: str = Column(String, nullable=False)
     barcode: str = Column(String, nullable=False, unique=True)
+    # Migration/review ledger owns this gate; editable metadata cannot disable it.
+    warning_hold_materialized: bool = Column(Boolean, nullable=False, default=True, server_default=text("true"))
 
     presence_state = relationship("PresenceState", back_populates="subject", uselist=False)
     permissions = relationship("AccessPermission", back_populates="subject", uselist=False)
@@ -41,13 +44,23 @@ class HardwareAsset(Base):
     subject = relationship("Subject", back_populates="hardware")
 
 
-
 class Checkpoint(Base):
     __tablename__ = "checkpoints"
 
     id: str = Column(String, primary_key=True)
     data = Column(JSONB, nullable=False)
 
+    @hybrid_property
+    def zone_id(self):
+        return (self.data or {}).get("zone")
+
+    @zone_id.expression
+    def zone_id(cls):
+        return case(
+            (cls.id == "cp-main", literal("public")),
+            (cls.id == "server-room", literal("secure")),
+            else_=cls.data["zone"].astext,
+        )
 
 class TerminalCheckpointAssignment(Base):
     __tablename__ = "terminal_checkpoint_assignments"
@@ -67,6 +80,9 @@ class PresenceState(Base):
     state: str = Column(String, nullable=False)  # 'inside' | 'outside'
     entry_building_id: str | None = Column(String, nullable=True)
     last_scan_timestamp = Column(DateTime(timezone=True), nullable=True)
+    # Continuous visit time survives repeated approved scans while still inside.
+    entry_started_at = Column(DateTime(timezone=True), nullable=True)
+    visitor_overstay_alerted_entry_at = Column(DateTime(timezone=True), nullable=True)
     # One admitted visit, consumed by the matching exit. Never grants re-entry.
     entry_override = Column(JSONB, nullable=True)
     updated_at = Column(
@@ -217,6 +233,16 @@ class AdminAccount(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class UserManagementWindowLock(Base):
+    """Revocations survive cookie removal, token refresh and service restarts."""
+    __tablename__ = "user_management_window_locks"
+    keycloak_subject = Column(String, primary_key=True)
+    window_id = Column(String(36), primary_key=True)
+    locked_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    __table_args__ = (Index("idx_user_management_locks_expiry", "expires_at"),)
+
+
 class AlertRuleAssignment(Base):
     """Per-subject rule overrides and dates that skip irregularity alerts."""
     __tablename__ = "alert_rule_assignments"
@@ -231,4 +257,32 @@ class AlertRuleAssignment(Base):
         CheckConstraint("jsonb_typeof(rule_ids) = 'array'", name="ck_alert_rule_assignments_array"),
         CheckConstraint("jsonb_typeof(irregularity_skip_dates) = 'array'", name="ck_alert_rule_assignments_skip_dates_array"),
         CheckConstraint("revision > 0", name="ck_alert_rule_assignments_revision"),
+    )
+
+
+class EventStreamState(Base):
+    """A transactionally ordered revision, independent of delivery latency."""
+    __tablename__ = "event_stream_state"
+    id = Column(Integer, primary_key=True)
+    revision = Column(BigInteger, nullable=False, default=0)
+    presence_revision = Column(BigInteger, nullable=False, default=0)
+    previous_presence_revision = Column(BigInteger, nullable=False, default=0)
+
+
+class EventOutbox(Base):
+    __tablename__ = "event_outbox"
+    id = Column(BigInteger, primary_key=True, autoincrement=False)
+    event_key = Column(String(36), nullable=False, unique=True)
+    kind = Column(String, nullable=False)
+    payload = Column(JSONB, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    available_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    lease_owner = Column(String(36), nullable=True)
+    lease_until = Column(DateTime(timezone=True), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (
+        CheckConstraint("kind IN ('presence', 'workflow_start', 'workflow_signal')", name="ck_event_outbox_kind"),
+        Index("idx_event_outbox_pending", "available_at", "id", postgresql_where=text("delivered_at IS NULL")),
+        Index("idx_event_outbox_replay", "id", postgresql_where=text("kind = 'presence'")),
     )

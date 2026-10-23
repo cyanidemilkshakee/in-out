@@ -6,12 +6,10 @@ import {
   accessWindowBounds,
   addFacilityCalendarMonths,
   facilityToday,
-  historicalDateTimeLimits,
   parseFacilityDate,
   parseFacilityDateTime,
   validateAccessWindow,
   validateHistoricalDateRange,
-  validateHistoricalDateTimeRange,
 } from "../lib/dateTimeValidation";
 
 test("strict facility parsing rejects impossible dates and times without rollover", () => {
@@ -63,14 +61,4 @@ test("historical date ranges allow past dates, open endpoints, same-day ranges a
   assert.ok(validateHistoricalDateRange("", "2026-10-07", now).end);
   assert.ok(validateHistoricalDateRange("2026-10-06", "2026-10-05", now).end);
   assert.ok(validateHistoricalDateRange("2026-02-29", "2026-10-05", now).start);
-});
-
-test("completed visits use facility timezone, permit any valid past date, and require exit after entry capped at now", () => {
-  const now = new Date("2026-10-06T12:00:30+05:30");
-  assert.deepEqual(validateHistoricalDateTimeRange("1999-01-01T08:00", "2026-10-06T12:00", now), {});
-  assert.ok(validateHistoricalDateTimeRange("2026-10-06T12:01", "2026-10-06T12:02", now).start);
-  assert.ok(validateHistoricalDateTimeRange("2026-10-06T10:00", "2026-10-06T12:01", now).end);
-  assert.ok(validateHistoricalDateTimeRange("2026-10-06T10:00", "2026-10-06T10:00", now).end);
-  assert.ok(validateHistoricalDateTimeRange("2026-02-29T08:00", "2026-10-06T12:00", now).start);
-  assert.deepEqual(historicalDateTimeLimits("2026-10-06T10:00", "2026-10-06T11:00", now), { start: { max: "2026-10-06T10:59" }, end: { min: "2026-10-06T10:01", max: "2026-10-06T12:00" } });
 });

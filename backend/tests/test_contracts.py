@@ -1,4 +1,5 @@
 import asyncio
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -11,7 +12,7 @@ from movement_logic import evaluate_scan, apply_movement_state
 from auth import verify_admin_request, verify_terminal_access_request
 from fastapi.security import HTTPAuthorizationCredentials
 from auth import verify_keycloak_token
-from jose import jwt, jwk
+import jwt
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives import serialization
 from datetime import datetime, timezone, timedelta
@@ -21,7 +22,7 @@ class ContractTests(unittest.TestCase):
     def test_signed_tokens_require_the_configured_audience(self):
         private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         key = private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
-        public = jwk.construct(private.public_key().public_bytes(serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo), "RS256").to_dict()
+        public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private.public_key()))
         public["kid"] = "contract-key"
         claims = {"sub": "admin", "typ": "Bearer", "iss": "https://identity.test/realms/inout", "aud": "another-client", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}
         with patch("auth._load_jwks", return_value=[public]), patch("auth.settings.KEYCLOAK_ISSUER", claims["iss"]):
@@ -38,10 +39,9 @@ class ContractTests(unittest.TestCase):
         self.assertEqual(payload.selected_hardware_ids, ["h1"])
         self.assertIsNone(payload.direction)
 
-    def test_missing_bearer_is_401_even_in_dev(self):
-        with patch("auth.settings.ENV", "dev"):
-            with self.assertRaises(HTTPException) as error:
-                asyncio.run(verify_admin_request(None))
+    def test_missing_bearer_is_401(self):
+        with self.assertRaises(HTTPException) as error:
+            asyncio.run(verify_admin_request(None))
         self.assertEqual(error.exception.status_code, 401)
 
     def test_terminal_access_allows_admins_and_operators(self):

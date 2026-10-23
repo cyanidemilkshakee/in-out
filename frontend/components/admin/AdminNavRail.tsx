@@ -9,7 +9,7 @@ import { useOpenAlertCount } from "./AdminLiveProvider";
 
 const navigationItems = [
   { path: "/admin/dashboard", icon: Grid2X2, label: "Dashboard", exact: true },
-  { path: "/admin/logs", icon: History, label: "Movements" },
+  { path: "/admin/logs", icon: History, label: "Logs" },
   { path: "/admin/permissions", icon: Key, label: "Permission Manager" },
   { path: "/admin/alerts", icon: Bell, label: "Alert Command Center" },
   { path: "/admin/registry", icon: BookUser, label: "Registry" },
@@ -49,6 +49,11 @@ export function AdminNavRail({ scrollTint }: { scrollTint: number }) {
       const version = ++stepUpRequestVersion.current;
       try {
         const response = await fetch("/api/auth/step-up", { cache: "no-store" });
+        if (response.status === 401) {
+          const currentPath = `${window.location.pathname}${window.location.search}`;
+          window.location.assign(`/login?from=${encodeURIComponent(currentPath)}`);
+          return;
+        }
         if (!response.ok) throw new Error("Unable to read step-up status.");
         const result = await response.json() as { unlocked?: unknown; expiresAt?: unknown };
         if (mounted && version === stepUpRequestVersion.current) {
@@ -93,7 +98,6 @@ export function AdminNavRail({ scrollTint }: { scrollTint: number }) {
     </nav>
     <div className="admin-rail-account">
       {accountOpen ? <section id="admin-account-menu" className="admin-account-menu" aria-label="Account menu">
-        <div className="admin-account-menu-heading"><UserCog size={16} aria-hidden="true" /><span>Account</span></div>
         <div className="admin-account-menu-links"><Link href="/admin/profile" onClick={closeAccountMenu}><UserCog size={16} aria-hidden="true" /> Manage profile</Link><Link href="/admin/users" className="admin-user-management-link" onClick={closeAccountMenu} aria-label={`Manage users${isUserManagementUnlocked ? `, unlocked for ${stepUpCountdown}` : ", locked"}`}><span className="admin-user-management-label"><UsersRound size={16} aria-hidden="true" /><span>Manage users</span></span><span className="admin-user-stepup-status" data-unlocked={isUserManagementUnlocked} aria-label={isUserManagementUnlocked ? `Unlocked, ${stepUpCountdown} remaining` : "Locked, sign-in required"}>{isUserManagementUnlocked ? <time>{stepUpCountdown}</time> : null}{isUserManagementUnlocked ? <LockKeyholeOpen size={15} aria-hidden="true" /> : <LockKeyhole size={15} aria-hidden="true" />}</span></Link></div>
         <button className="admin-account-signout" type="button" onClick={() => { setAccountOpen(false); setConfirmingLogout(true); }}><LogOut size={16} aria-hidden="true" /> Sign out</button>
       </section> : null}

@@ -4,11 +4,16 @@
     "target": "ES2022",
     "module": "commonjs",
     "moduleResolution": "node",
+    "jsx": "react-jsx",
     "allowJs": true,
     "noEmit": false,
     "incremental": false,
     "outDir": ".test-dist",
-    "rootDir": "."
+    "rootDir": ".",
+    "paths": {
+      "jose/jwks/remote": ["./node_modules/jose/dist/types/jwks/remote.d.ts"],
+      "jose/jwt/verify": ["./node_modules/jose/dist/types/jwt/verify.d.ts"]
+    }
   },
   "include": [
     "tests/**/*.ts",

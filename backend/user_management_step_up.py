@@ -13,7 +13,8 @@ from config import settings
 
 STEP_UP_DURATION_MINUTES = frozenset({5, 10, 15, 20, 30, 60})
 STEP_UP_PROOF_DOMAIN = "inout:user-management-step-up:v1."
-_PROOF_FIELDS = frozenset({"issuedAt", "authTime", "expiresAt", "durationMinutes", "tokenHash"})
+_PROOF_FIELDS = frozenset({"issuedAt", "authTime", "expiresAt", "durationMinutes", "tokenHash", "windowId"})
+_WINDOW_ID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 _INTEGER_FIELDS = ("issuedAt", "authTime", "expiresAt", "durationMinutes")
 _BASE64URL = re.compile(r"^[A-Za-z0-9_-]+$")
 _TOKEN_HASH = re.compile(r"^[0-9a-f]{64}$")
@@ -53,21 +54,11 @@ def _numeric_auth_time(value):
     return type(value) is int or (type(value) is float and math.isfinite(value))
 
 
-def require_user_management_step_up(token, claims, proof=None, *, now=None):
-    """Raise 401 unless a signed selected window or the direct-token fallback holds.
-
-    An invalid supplied proof never falls back to the unsigned access-token
-    auth_time. Refreshing tokens/issuing proofs does not extend authTime's window.
-    JWT validation and the administrator role remain the caller's responsibility.
-    """
+def verified_user_management_window(token, claims, proof=None, *, now=None):
+    """Verify a BFF proof; a raw bearer cannot bypass a revoked app window."""
     now = time.time() if now is None else now
     if proof is None:
-        auth_time = claims.get("auth_time")
-        if not _numeric_auth_time(auth_time):
-            _reject()
-        if not now - settings.KEYCLOAK_STEP_UP_MAX_AGE_SECONDS <= auth_time <= now + 30:
-            _reject()
-        return
+        _reject()
 
     secret = settings.KEYCLOAK_STEP_UP_SIGNING_SECRET
     if not secret or not isinstance(proof, str) or not 1 <= len(proof) <= 2048:
@@ -84,6 +75,8 @@ def require_user_management_step_up(token, claims, proof=None, *, now=None):
     except (ValueError, UnicodeError, binascii.Error, RecursionError):
         _reject()
     if not isinstance(payload, dict) or set(payload) != _PROOF_FIELDS:
+        _reject()
+    if not isinstance(payload["windowId"], str) or not _WINDOW_ID.fullmatch(payload["windowId"]):
         _reject()
     if any(type(payload[field]) is not int for field in _INTEGER_FIELDS):
         _reject()
@@ -107,3 +100,4 @@ def require_user_management_step_up(token, claims, proof=None, *, now=None):
         access_auth_time = claims["auth_time"]
         if not _numeric_auth_time(access_auth_time) or access_auth_time != auth_time:
             _reject()
+    return payload

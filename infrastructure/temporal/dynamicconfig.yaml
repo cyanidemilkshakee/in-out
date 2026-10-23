@@ -1,0 +1,2 @@
+# Explicit empty baseline; the official server image has no bundled config file.
+{}

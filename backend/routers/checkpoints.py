@@ -1,7 +1,7 @@
 """
-Checkpoint endpoints.
+Fixed facility checkpoint endpoint.
 
-GET /v1/checkpoints — list all checkpoints ordered by id
+GET /v1/checkpoints — list the facility's two fixed checkpoints
 """
 
 from typing import Any
@@ -21,7 +21,7 @@ router = APIRouter(prefix="/v1/checkpoints", tags=["checkpoints"])
 async def list_checkpoints(
     db: AsyncSession = Depends(get_read_db),
 ) -> list[dict[str, Any]]:
-    """Return all checkpoints ordered by id."""
+    """Return the facility's fixed checkpoints ordered by id."""
     result = await db.execute(select(Checkpoint).where(Checkpoint.id.in_(CHECKPOINT_IDS)).order_by(Checkpoint.id))
     checkpoints = result.scalars().all()
     return [{**c.data, "id": c.id} for c in checkpoints]

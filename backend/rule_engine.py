@@ -12,6 +12,7 @@ evaluate_scheduled_rules(rules, movements, workdays, existing_alerts) -> list[di
 from __future__ import annotations
 
 import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal, TypedDict
 
@@ -30,6 +31,8 @@ AlertCategory = Literal["access_violation", "presence_anomaly", "hardware_custod
 ConditionKey = Literal[
     "no_break",
     "irregularity",
+    "cross_building_scan",
+    "visitor_overstay",
 ]
 
 RETIRED_ALERT_RULE_IDS = frozenset({
@@ -68,6 +71,28 @@ DEFAULT_ALERT_RULES: list[dict[str, object]] = [
         "conditionKey": "irregularity",
         "recentTriggers": 0,
     },
+    {
+        "id": "rule-cross-building-scan",
+        "name": "Scan in another zone",
+        "description": "Alert when an employee or visitor scans in another zone while recorded inside a zone.",
+        "category": "presence_anomaly",
+        "severity": "high",
+        "enabled": True,
+        "scope": "Employees and visitors",
+        "conditionKey": "cross_building_scan",
+        "recentTriggers": 0,
+    },
+    {
+        "id": "rule-visitor-overstay",
+        "name": "Visitor inside over 12 hours",
+        "description": "Alert once per visit when a visitor remains inside a zone for more than 12 continuous hours.",
+        "category": "presence_anomaly",
+        "severity": "medium",
+        "enabled": True,
+        "scope": "Visitors",
+        "conditionKey": "visitor_overstay",
+        "recentTriggers": 0,
+    },
 ]
 
 
@@ -95,9 +120,15 @@ def is_retired_alert(raw: dict[str, Any]) -> bool:
 
 
 def eligible_alert_subject_types(rule: dict[str, Any]) -> tuple[str, ...]:
-    """Only implemented, nonretired conditions can be assigned to subjects."""
-    if rule.get("conditionKey") in ("no_break", "irregularity") and not is_retired_alert(rule):
+    """Return applicability for implemented, nonretired rules."""
+    if is_retired_alert(rule):
+        return ()
+    if rule.get("conditionKey") in ("no_break", "irregularity"):
         return ("employee",)
+    if rule.get("conditionKey") == "cross_building_scan":
+        return ("employee", "visitor")
+    if rule.get("conditionKey") == "visitor_overstay":
+        return ("visitor",)
     return ()
 
 
@@ -175,6 +206,9 @@ class Alert(TypedDict, total=False):
     explanation: str
     sourceEventId: str
     subjectId: str
+    subjectType: SubjectType
+    entryStartedAt: str
+    entryBuildingId: str | None
     conditionKey: ConditionKey
     createdAt: str
 
@@ -282,6 +316,42 @@ def _local_time(dt: datetime) -> str:
     hour = local.hour % 12 or 12
     suffix = "AM" if local.hour < 12 else "PM"
     return f"{hour}:{local.minute:02d}:{local.second:02d} {suffix}"
+
+
+def evaluate_visitor_overstay_rules(
+    rules: list[AlertRule], visits: list[dict[str, Any]], now: datetime | None = None,
+) -> list[Alert]:
+    """Evaluate authoritative, continuous visits independently of attendance."""
+    rule = _find_enabled_rule(rules, "visitor_overstay")
+    if rule is None:
+        return []
+    evaluation_now = now or datetime.now(timezone.utc)
+    generated = []
+    for visit in visits:
+        started_at = visit.get("entryStartedAt")
+        if (visit.get("subjectType") != "visitor" or visit.get("state") != "inside"
+                or not visit.get("subjectId") or not isinstance(started_at, datetime)
+                or started_at.tzinfo is None
+                or evaluation_now - started_at <= timedelta(hours=12)
+                or visit.get("alertedEntryAt") == started_at):
+            continue
+        start_utc = started_at.astimezone(timezone.utc).isoformat()
+        identity = uuid.uuid5(uuid.NAMESPACE_URL, f"in-out:visitor-overstay:{visit['subjectId']}:{start_utc}")
+        building = visit.get("buildingName") or visit.get("buildingId") or "an unrecorded zone"
+        name = visit.get("subjectName") or visit.get("barcode") or visit["subjectId"]
+        generated.append(Alert(
+            id=f"AL-{identity.hex.upper()}", severity=rule.get("severity", "medium"),
+            status="open", title="Visitor inside over 12 hours",
+            reason=f"{name} has remained inside {building} for more than 12 continuous hours.",
+            subjectName=name, subjectId=visit["subjectId"], subjectType="visitor",
+            barcode=visit.get("barcode") or visit["subjectId"], checkpoint=building,
+            date=_local_date(evaluation_now), time=_local_time(evaluation_now),
+            category=rule.get("category", "presence_anomaly"), ruleId=rule.get("id"),
+            conditionKey="visitor_overstay", entryStartedAt=start_utc,
+            entryBuildingId=visit.get("buildingId"),
+            explanation=f"The current visit began at {start_utc}; no approved exit has ended it. Repeated scans do not restart the visit clock.",
+        ))
+    return generated
 
 
 # ---------------------------------------------------------------------------

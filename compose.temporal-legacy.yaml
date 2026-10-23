@@ -1,0 +1,23 @@
+# Temporary recovery for an existing, verified four-shard Temporal 1.26 cluster.
+# Select explicitly with -f compose.yaml -f compose.temporal-legacy.yaml.
+# This overlay does not initialize or upgrade schemas, and retains vendor CVEs.
+services:
+  temporal-schema-init:
+    environment:
+      INOUT_TEMPORAL_LEGACY: '1'
+      NUM_HISTORY_SHARDS: '4'
+    volumes:
+      - ./infrastructure/temporal/verify_legacy.py:/maintenance/temporal/verify_legacy.py:ro
+    command: [python, /maintenance/temporal/verify_legacy.py]
+
+  temporal:
+    image: temporalio/server:1.26.3@sha256:78b6f98ce0a8f0bc131f0a2dd29785bd94d0a4e3023457bbe8a9f07c12ebf738
+    user: temporal
+    # Render the legacy configuration into private tmpfs instead of writing /etc.
+    entrypoint: [bash, /maintenance/start_legacy.sh]
+    environment:
+      NUM_HISTORY_SHARDS: '4'
+    volumes:
+      - ./infrastructure/temporal/start_legacy.sh:/maintenance/start_legacy.sh:ro
+    # Read-only filesystem, no-new-privileges and dropped capabilities inherit
+    # from the base service; repeating security_opt creates invalid duplicates.

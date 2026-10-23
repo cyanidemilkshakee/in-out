@@ -1,6 +1,6 @@
 "use client";
 
-import { type ChangeEvent, useEffect, useState } from "react";
+import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import {
   Camera,
   KeyRound,
@@ -24,9 +24,9 @@ type ProfileIdentity = {
 };
 
 const defaultProfile: ProfileIdentity = {
-  name: "Admin",
-  nickname: "ops-admin",
-  email: "admin@company.com",
+  name: "",
+  nickname: "",
+  email: "",
   avatarDataUrl: ""
 };
 
@@ -43,9 +43,16 @@ export default function ProfilePage() {
   const [pictureError, setPictureError] = useState("");
   const [settings, setSettings] = useState<ProfileSettings>(defaultSettings);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [loaded, setLoaded] = useState(false);
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const savePending = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
+    setLoading(true);
+    setLoaded(false);
+    setFormError("");
     void getAdminProfile()
       .then((result) => {
         if (cancelled) return;
@@ -56,6 +63,7 @@ export default function ProfilePage() {
           avatarDataUrl: result.avatarDataUrl,
         });
         setSettings(result.settings);
+        setLoaded(true);
       })
       .catch((error) => {
         if (!cancelled) {
@@ -63,11 +71,12 @@ export default function ProfilePage() {
             error instanceof Error ? error.message : "Unable to load the admin profile."
           );
         }
-      });
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadAttempt]);
 
   function markChanged() {
     setSaved(false);
@@ -75,6 +84,7 @@ export default function ProfilePage() {
   }
 
   function updateProfile(key: keyof ProfileIdentity, value: string) {
+    if (!loaded || loading || savePending.current) return;
     setProfile((current) => ({ ...current, [key]: value }));
     markChanged();
   }
@@ -84,7 +94,7 @@ export default function ProfilePage() {
     event.target.value = "";
     setPictureError("");
 
-    if (!file) return;
+    if (!file || !loaded || loading || savePending.current) return;
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
       setPictureError("Choose a JPEG, PNG, or WebP image.");
       return;
@@ -117,18 +127,12 @@ export default function ProfilePage() {
   }
 
   async function savePreferences() {
+    if (!loaded || loading || savePending.current) return;
     const cleanName = profile.name.trim();
     const cleanNickname = profile.nickname.trim();
-    const cleanEmail = profile.email.trim();
-    if (!cleanName || !cleanNickname || !cleanEmail) {
+    if (!cleanName || !cleanNickname) {
       setSaved(false);
-      setFormError("Name, nickname, and email are required.");
-      return;
-    }
-
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      setSaved(false);
-      setFormError("Enter a valid email address.");
+      setFormError("Name and nickname are required.");
       return;
     }
 
@@ -136,13 +140,15 @@ export default function ProfilePage() {
       ...profile,
       name: cleanName,
       nickname: cleanNickname,
-      email: cleanEmail
     };
 
+    savePending.current = true;
     setSaving(true);
     try {
       const result = await updateAdminProfile({
-        ...cleanProfile,
+        name: cleanProfile.name,
+        nickname: cleanProfile.nickname,
+        avatarDataUrl: cleanProfile.avatarDataUrl,
         settings,
       });
       setProfile({
@@ -160,6 +166,7 @@ export default function ProfilePage() {
         error instanceof Error ? error.message : "Unable to save profile preferences."
       );
     } finally {
+      savePending.current = false;
       setSaving(false);
     }
   }
@@ -179,7 +186,7 @@ export default function ProfilePage() {
           <span className="profile-avatar-edit-icon" aria-hidden="true">
             <Camera />
           </span>
-          <input type="file" accept="image/*" onChange={handlePictureChange} />
+          <input type="file" accept="image/*" disabled={!loaded || loading || saving} onChange={handlePictureChange} />
         </label>
         {pictureError ? <small className="profile-picture-error" role="alert">{pictureError}</small> : null}
         <div className="profile-identity-info">
@@ -207,6 +214,7 @@ export default function ProfilePage() {
                 type="text"
                 autoComplete="name"
                 value={profile.name}
+                disabled={!loaded || loading || saving}
                 onChange={(event) => updateProfile("name", event.target.value)}
               />
             </label>
@@ -216,6 +224,7 @@ export default function ProfilePage() {
                 type="text"
                 autoComplete="nickname"
                 value={profile.nickname}
+                disabled={!loaded || loading || saving}
                 onChange={(event) => updateProfile("nickname", event.target.value)}
               />
             </label>
@@ -232,8 +241,8 @@ export default function ProfilePage() {
           </div>
           <SettingsToggle
             checked={settings.requireReviewNote}
-            label="Manual-review decision notes"
-            description="A decision note is required for every administrator approval or denial."
+            label="Permission denial notes"
+            description="A note is required when denying permission. Approval notes are optional."
             disabled
           />
         </section>
@@ -241,14 +250,17 @@ export default function ProfilePage() {
       </div>
 
       <div className="profile-save-action">
-        <span className="sr-only" role="status" aria-live="polite">
-          {formError || (saved ? "Your profile and preferences are saved." : "Unsaved profile changes.")}
-        </span>
+        {formError ? <div className="inline-note" role="alert">
+          <span>{formError}</span>
+          {!loaded && !loading && <button type="button" className="admin-button admin-button--ghost ghost-button" onClick={() => setLoadAttempt((attempt) => attempt + 1)}>Retry</button>}
+        </div> : <span role="status" aria-live="polite">
+          {loading ? "Loading profile…" : saved ? "Your profile and preferences are saved." : ""}
+        </span>}
         <button
           className="admin-button admin-button--primary primary-button"
           type="button"
           onClick={() => void savePreferences()}
-          disabled={saving}
+          disabled={!loaded || loading || saving}
         >
           <Save aria-hidden="true" />
           {saving ? "Saving…" : "Save preferences"}

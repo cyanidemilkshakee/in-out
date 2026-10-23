@@ -1,0 +1,12 @@
+# Add only when Keycloak must send email to an SMTP service outside the
+# internal application networks. This grants Keycloak outbound connectivity.
+services:
+  keycloak:
+    networks:
+      - web
+      - identity-db
+      - keycloak-egress
+
+networks:
+  keycloak-egress:
+    driver: bridge

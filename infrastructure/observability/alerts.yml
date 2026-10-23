@@ -1,0 +1,38 @@
+groups:
+  - name: inout-gateway
+    rules:
+      - alert: KongMetricsTargetDown
+        expr: up{job="kong"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: Kong metrics endpoint is unreachable
+          description: Prometheus has failed to scrape the private Kong Status API for at least one minute.
+
+      - alert: KongRateLimitRejectionsElevated
+        expr: sum(increase(kong_http_requests_total{code="429"}[5m])) >= 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kong is rejecting a sustained burst of requests
+          description: At least five HTTP 429 responses were observed in each recent five-minute window.
+
+      - alert: KongUpstreamErrorsElevated
+        expr: sum(increase(kong_http_requests_total{code=~"5.."}[5m])) >= 5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kong is returning repeated upstream/server errors
+          description: At least five HTTP 5xx responses were observed in each recent five-minute window.
+
+      - alert: KongUpstreamLatencyHigh
+        expr: histogram_quantile(0.95, sum by (le, service, route) (rate(kong_upstream_latency_ms_bucket[5m]))) > 2000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Kong upstream p95 latency is above two seconds
+          description: A service/route has had p95 upstream latency above two seconds for five minutes.

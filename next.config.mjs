@@ -9,6 +9,14 @@ const nextConfig = {
   outputFileTracingRoot: projectRoot,
   output: "standalone",
   poweredByHeader: false,
+  async headers() {
+    return [{ source: "/:path*", headers: [
+      { key: "Content-Security-Policy", value: "frame-ancestors 'none'; object-src 'none'; base-uri 'self'" },
+      { key: "X-Frame-Options", value: "DENY" },
+      { key: "X-Content-Type-Options", value: "nosniff" },
+      { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
+    ] }];
+  },
   experimental: {
     // Turbopack-aware: tree-shake these packages at module level in both
     // Webpack (pages/app fallback) and Turbopack dev server.
@@ -28,7 +36,7 @@ const nextConfig = {
     serverActions: {
       allowedOrigins: (
         process.env.NEXT_SERVER_ACTION_ALLOWED_ORIGINS ||
-        "localhost:1008,127.0.0.1:1008"
+        "app.localhost:1008,localhost:1008,127.0.0.1:1008"
       )
         .split(",")
         .map((origin) => origin.trim())

@@ -1,12 +1,15 @@
 import type { Alert, HardwareAsset, MovementEvent, Person, PermissionRequest, AccessPermission } from "../../lib/types";
 import type { DataState } from "./dataTypes";
 import { mergeById } from "./dataHelpers";
+import { isRestrictedDenialCode } from "../../lib/analyticsUtils";
 import { mergePermissionRequests } from "../../lib/permissionRequestRevisions";
 import { mergeAlerts } from "../../lib/alertRevisions";
 import { normalizeAccessPermission, normalizeAlert, normalizeDashboardMovement, normalizePermissionRequest } from "../../lib/normalizeDashboard";
 import { normalizeSubjectZones } from "../../lib/facilityZones";
 
 export type PresenceUpdate = {
+  revision?: number;
+  previousRevision?: number;
   type?: string;
   subject_id?: string;
   state?: "inside" | "outside";
@@ -21,6 +24,7 @@ export type PresenceUpdate = {
 export function parsePresenceUpdate(raw: string): PresenceUpdate | null {
   const value = JSON.parse(raw);
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  if (value.revision !== undefined && (!Number.isSafeInteger(value.revision) || value.revision < 0)) return null;
   for (const key of ["people", "hardwareAssets"]) {
     if (value[key] !== undefined && (!Array.isArray(value[key]) ||
         value[key].some((item: unknown) => !item || typeof item !== "object" || typeof (item as { id?: unknown }).id !== "string"))) return null;
@@ -35,6 +39,7 @@ export function parsePresenceUpdate(raw: string): PresenceUpdate | null {
 }
 
 export function applyPresenceUpdate(current: DataState, update: PresenceUpdate): DataState {
+  if (update.revision !== undefined && current.eventRevision !== undefined && update.revision <= current.eventRevision) return current;
   update = { ...update,
     alerts: update.alerts?.map(normalizeAlert),
     movement: update.movement ? normalizeDashboardMovement(update.movement as unknown as Record<string, unknown>) : undefined,
@@ -78,14 +83,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
   }
   const movementTotals = (item: MovementEvent) => {
     const approved = item.result === "approved";
-    const restricted = [
-      "asset_restricted",
-      "access_restricted",
-      "hardware_restricted",
-      "zone_not_permitted",
-      "cross_building_access",
-    ].includes(item.denialCode ?? "");
-    const expired = item.denialCode === "expired_pass";
+    const restricted = isRestrictedDenialCode(item.denialCode);
     return {
       totalScans: 1,
       totalApproved: Number(approved),
@@ -95,13 +93,12 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
       totalAutomatic: Number(item.scanType === "auto"),
       totalManual: Number(item.scanType !== "auto"),
       totalRestricted: Number(!approved && restricted),
-      totalExpired: Number(!approved && expired),
-      totalOtherDenied: Number(!approved && !restricted && !expired),
+      totalOtherDenied: Number(!approved && !restricted),
     };
   };
   const analyticsKeys = [
     "totalScans", "totalApproved", "totalDenied", "totalEntries", "totalExits",
-    "totalAutomatic", "totalManual", "totalRestricted", "totalExpired", "totalOtherDenied",
+    "totalAutomatic", "totalManual", "totalRestricted", "totalOtherDenied",
   ] as const;
   let analytics = current.scanAnalytics;
   if (movement) {
@@ -114,6 +111,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
   }
   return {
     ...current, people, hardwareAssets, permissionRequests, alerts, permissions,
+    ...(update.revision !== undefined ? { eventRevision: update.revision } : {}),
     movements: movement ? mergeById(current.movements, [movement]).slice(0, 100) : current.movements,
     scanAnalytics: { ...analytics, activeInside: Math.max(0, current.scanAnalytics.activeInside + occupancyDelta) },
   };

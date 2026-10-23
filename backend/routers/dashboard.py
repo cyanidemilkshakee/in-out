@@ -6,10 +6,14 @@ and presence counts.
 from typing import Any
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import verify_admin_request
 from database import get_read_db
+from event_outbox import read_event_revision
+from models import AccessPermission, HardwareAsset, Person, Subject
+from zone_access import admin_zone_ids, subject_zone_condition
 
 router = APIRouter(prefix="/v1/dashboard", tags=["dashboard"])
 
@@ -17,6 +21,7 @@ router = APIRouter(prefix="/v1/dashboard", tags=["dashboard"])
 @router.get("")
 async def get_dashboard(
     db: AsyncSession = Depends(get_read_db),
+    actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """
     Returns the dashboard data groups from one consistent read session:
@@ -26,6 +31,15 @@ async def get_dashboard(
     - presenceCounts: inside/outside counts
     """
 
+    event_revision = await read_event_revision(db)
+    zone_ids = await admin_zone_ids(db, actor)
+    visible_subject_ids = list((await db.scalars(select(Subject.id)
+        .outerjoin(Person, Person.subject_id == Subject.id)
+        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
+        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
+        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id))).all())
+    zone_ids = list(zone_ids) or ["__no_active_zone__"]
+    visible_subject_ids = visible_subject_ids or ["__no_visible_subject__"]
     analytics_sql = text("""
         WITH duplicate_review_sources AS (
             SELECT DISTINCT pr.data->>'eventId' AS source_event_id
@@ -48,7 +62,7 @@ async def get_dashboard(
                 WHERE result = 'denied'
                 AND denial_code IN (
                     'asset_restricted','access_restricted',
-                    'hardware_restricted','zone_not_permitted','cross_building_access'
+                    'hardware_restricted','zone_not_permitted','cross_building_access','expired_pass'
                 )
             )                                                                  AS restricted,
             count(*) FILTER (
@@ -58,12 +72,17 @@ async def get_dashboard(
                     'hardware_restricted','zone_not_permitted','cross_building_access',
                     'expired_pass'
                 ))
-            )                                                                  AS other_denied,
-            count(*) FILTER (
-                WHERE result = 'denied' AND denial_code = 'expired_pass'
-            )                                                                  AS expired
+            )                                                                  AS other_denied
         FROM movements
         WHERE id NOT IN (SELECT source_event_id FROM duplicate_review_sources)
+          AND checkpoint_id IN (
+              SELECT id FROM checkpoints
+              WHERE CASE
+                  WHEN id = 'cp-main' THEN 'public'
+                  WHEN id = 'server-room' THEN 'secure'
+                  ELSE data->>'zone'
+              END = ANY(:zone_ids)
+          )
     """)
 
     recent_sql = text("""
@@ -80,6 +99,14 @@ async def get_dashboard(
                scan_type, subject_type, sync_state, denial_code, data
         FROM movements
         WHERE id NOT IN (SELECT source_event_id FROM duplicate_review_sources)
+          AND checkpoint_id IN (
+              SELECT id FROM checkpoints
+              WHERE CASE
+                  WHEN id = 'cp-main' THEN 'public'
+                  WHEN id = 'server-room' THEN 'secure'
+                  ELSE data->>'zone'
+              END = ANY(:zone_ids)
+          )
         ORDER BY occurred_at DESC
         LIMIT 100
     """)
@@ -93,6 +120,16 @@ async def get_dashboard(
           AND COALESCE(data->>'ruleId', '') <> 'rule-manual-review'
           AND COALESCE(data->>'ruleId', '') <> 'rule-unknown-barcode'
           AND COALESCE(data->>'title', '') NOT ILIKE 'Unknown barcode%'
+          AND (data->>'zoneId' = ANY(:zone_ids)
+            OR data->>'checkpointId' IN (
+              SELECT id FROM checkpoints
+              WHERE CASE
+                  WHEN id = 'cp-main' THEN 'public'
+                  WHEN id = 'server-room' THEN 'secure'
+                  ELSE data->>'zone'
+              END = ANY(:zone_ids)
+            )
+            OR data->>'subjectId' = ANY(:subject_ids))
         ORDER BY created_at DESC
         LIMIT 10
     """)
@@ -101,6 +138,16 @@ async def get_dashboard(
         SELECT data
         FROM permission_requests
         WHERE data->>'status' = 'pending'
+          AND ((data->'requestedZones') ?| CAST(:zone_ids AS text[])
+            OR data->>'checkpointId' IN (
+              SELECT id FROM checkpoints
+              WHERE CASE
+                  WHEN id = 'cp-main' THEN 'public'
+                  WHEN id = 'server-room' THEN 'secure'
+                  ELSE data->>'zone'
+              END = ANY(:zone_ids)
+            )
+            OR subject_id = ANY(:subject_ids))
         ORDER BY created_at DESC
         LIMIT 20
     """)
@@ -109,14 +156,16 @@ async def get_dashboard(
         SELECT p.state, count(*) AS cnt
         FROM presence_state p JOIN subjects s ON s.id = p.subject_id
         WHERE s.kind IN ('employee', 'visitor')
+          AND s.id = ANY(:subject_ids)
         GROUP BY p.state
     """)
 
-    analytics_result = await db.execute(analytics_sql)
-    recent_result = await db.execute(recent_sql)
-    alerts_result = await db.execute(alerts_sql)
-    pending_decisions_result = await db.execute(pending_decisions_sql)
-    presence_result = await db.execute(presence_sql)
+    query_params = {"zone_ids": zone_ids, "subject_ids": visible_subject_ids}
+    analytics_result = await db.execute(analytics_sql, query_params)
+    recent_result = await db.execute(recent_sql, query_params)
+    alerts_result = await db.execute(alerts_sql, query_params)
+    pending_decisions_result = await db.execute(pending_decisions_sql, query_params)
+    presence_result = await db.execute(presence_sql, query_params)
 
     # --- Analytics ---
     row = analytics_result.mappings().one()
@@ -129,7 +178,6 @@ async def get_dashboard(
         "totalAutomatic":   int(row["automatic"]   or 0),
         "totalManual":      int(row["manual"]      or 0),
         "totalRestricted":  int(row["restricted"]  or 0),
-        "totalExpired":     int(row["expired"]     or 0),
         "totalOtherDenied": int(row["other_denied"] or 0),
     }
 
@@ -162,6 +210,7 @@ async def get_dashboard(
     analytics["activeInside"] = presence_counts["inside"]
 
     payload = {
+        "eventRevision": event_revision,
         "analytics":       analytics,
         "recentMovements": recent_movements,
         "openAlerts":      open_alerts,

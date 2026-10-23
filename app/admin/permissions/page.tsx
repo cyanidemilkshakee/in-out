@@ -40,7 +40,8 @@ export default function PermissionManagerPage() {
   } = useDataState();
   const {
     decidePermissionRequest,
-    releaseEntryRestriction,
+    updatePerson,
+    updateHardwareAsset,
     refresh,
   } = useDataActions();
   const [tab, setTab] = useState<DirectoryTab>("people");
@@ -62,14 +63,17 @@ export default function PermissionManagerPage() {
   const focusedSubjectRef = useRef("");
   const decisionNoteRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
 
-  async function runAction(action: () => Promise<void>) {
-    if (busy) return;
+  async function runAction(action: () => Promise<void>): Promise<boolean> {
+    if (busy) return false;
     setBusy(true);
     setActionError("");
     try {
       await action();
+      return true;
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Unable to save the permission decision.");
+      await refresh().catch(() => {});
+      return false;
     } finally {
       setBusy(false);
     }
@@ -89,6 +93,21 @@ export default function PermissionManagerPage() {
   function focusRequest(requestId: string) {
     setSelectedRequestId(requestId);
     setRequestFocusVersion((value) => value + 1);
+  }
+
+  function revokePermission(permission: AccessPermission) {
+    return runAction(async () => {
+      if (permission.subjectType === "hardware") {
+        const asset = hardwareAssets.find((item) => item.id === permission.subjectId);
+        if (!asset) throw new Error("The hardware record could not be found.");
+        await updateHardwareAsset(asset.id, { status: "restricted" });
+      } else {
+        const person = people.find((item) => item.id === permission.subjectId);
+        if (!person) throw new Error("The person record could not be found.");
+        await updatePerson(person.id, { status: "restricted" });
+      }
+      setFeedback(`${permission.subjectName}: access revoked and marked restricted.`);
+    });
   }
 
   useEffect(() => {
@@ -127,9 +146,18 @@ export default function PermissionManagerPage() {
     () => permissions.filter((permission) => !isOneTimeManualReviewRecord(permission)),
     [permissions]
   );
+  const approvedVisitorIds = useMemo(() => new Set(permissionRequests
+    .filter((request) => request.status === "approved" && (request.type === "visitor" || request.type === "zone_access"))
+    .map((request) => request.subjectId)), [permissionRequests]);
+  const directoryPermissions = useMemo(() => managedPermissions.filter((permission) => {
+    if (permission.subjectType !== "visitor") return true;
+    if (permission.state === "pending_approval") return false;
+    if (permission.state === "active" || permission.source !== "request") return true;
+    return approvedVisitorIds.has(permission.subjectId);
+  }), [managedPermissions, approvedVisitorIds]);
   const directoryRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return managedPermissions.filter((permission) => {
+    return directoryPermissions.filter((permission) => {
       const typeMatches = tab === "people"
         ? permission.subjectType === "employee" || permission.subjectType === "visitor"
         : permission.subjectType === "hardware";
@@ -142,7 +170,7 @@ export default function PermissionManagerPage() {
           .includes(needle);
       return typeMatches && stateMatches && searchMatches;
     }).sort((left, right) => left.subjectName.localeCompare(right.subjectName));
-  }, [managedPermissions, search, stateFilter, tab, people, hardwareAssets]);
+  }, [directoryPermissions, search, stateFilter, tab, people, hardwareAssets]);
   useEffect(() => {
     if (!highlightSubjectId || selectedRequestId || requestContext || focusedSubjectRef.current === highlightSubjectId) return;
     const frame = window.requestAnimationFrame(() => {
@@ -218,26 +246,21 @@ export default function PermissionManagerPage() {
       <div className={requestStyles.managerLayout}>
         <AccessDirectory rows={directoryRows} hardwareAssets={hardwareAssets} tab={tab} onTabChange={setTab}
           search={search} onSearchChange={setSearch} stateFilter={stateFilter} onStateFilterChange={setStateFilter}
-          highlightedSubjectId={highlightSubjectId} busy={busy} isLoading={isLoading} error={error} total={managedPermissions.length}
+          highlightedSubjectId={highlightSubjectId} busy={busy} isLoading={isLoading} error={error} total={directoryPermissions.length}
           onReviewRequest={(permission) => {
             const request = pendingRequests.find((item) => item.subjectId === permission.subjectId);
             if (request) focusRequest(request.id);
             else setFeedback("This subject has no pending request to review.");
           }}
           onManageAccess={(permission) => setRequestContext({ subjectId: permission.subjectId, type: "zone_access" })}
-          onReassign={(permission) => setRequestContext({ subjectId: permission.subjectId, type: "hardware_custody" })}
-          onReleaseRestriction={(permission, reason) => { void runAction(async () => {
-            if (!permission.entryRestriction?.active) return;
-            await releaseEntryRestriction(permission.entryRestriction.triggerAlertId, reason);
-            setFeedback(`${permission.subjectName}: entry restriction lifted. Their entry zones and valid window still apply.`);
-          }); }} />
+          onReassign={(permission) => setRequestContext({ subjectId: permission.subjectId, type: "hardware_custody" })} />
         <div className={requestStyles.queueColumn}>
           <section className={requestStyles.queuePanel} aria-labelledby="manual-review-title">
             <div className={requestStyles.queueHeading}>
               <div className={requestStyles.sectionTitle}><span className={requestStyles.reviewIcon} aria-hidden="true"><Clock3 size={20} strokeWidth={1.7} /></span><div><h2 id="manual-review-title">Manual reviews</h2><p>Terminal exceptions awaiting a decision.</p></div></div>
               <span className={requestStyles.queueCount}>{manualReviewRequests.length} pending</span>
             </div>
-            <div className={requestStyles.reviewList}>
+            <div className={`${requestStyles.reviewList} scrollable-content`}>
               {isLoading && pendingRequests.length === 0 ? (
                 <div className={requestStyles.queueEmpty} role="status">Loading manual reviews…</div>
               ) : error && pendingRequests.length === 0 ? (
@@ -276,24 +299,49 @@ export default function PermissionManagerPage() {
                 <h2 id="other-pending-title">Other pending permissions</h2>
                 <span className={requestStyles.queueCount}>{otherPendingRequests.length} pending</span>
               </div>
-              <div className={requestStyles.reviewList}>
+              <div className={`${requestStyles.reviewList} scrollable-content`}>
                 {otherPendingRequests.map((request) => (
-              <article id={request.id} key={request.id} tabIndex={-1} className={`${requestStyles.otherRequest} ${selectedRequestId === request.id ? requestStyles.selected : ""}`}>
-                <span className={requestStyles.badge} data-type={request.type}>{REQUEST_LABELS[request.type]}</span>
-                <h3>{request.subjectName}{request.barcode ? ` · ${request.barcode}` : ""}</h3>
-                <p className={requestStyles.requestMeta}>{request.purpose}<br />Requested by {request.requester} · {formatRequestDate(request.createdAt)}</p>
-                <dl>
-                  <div><dt>Checkpoint</dt><dd>{checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId || "Not specified"}</dd></div>
-                  {request.type !== "hardware_custody" && <div><dt>Requested zones</dt><dd>{formatFacilityZones(request.requestedZones) || "None"}</dd></div>}
-                  {request.direction ? <div><dt>Movement</dt><dd>{request.direction === "entry" ? "Entry" : "Exit"}</dd></div> : null}
-                  {request.eventId && <div><dt>Denied scan</dt><dd><a href={`/admin/logs?eventId=${encodeURIComponent(request.eventId)}`}>{request.eventId}</a></dd></div>}
-                  {request.type !== "hardware_custody" && <div><dt>Requested window</dt><dd>{permissionWindowLabels(request.validFrom, request.validTo).start}<br />{permissionWindowLabels(request.validFrom, request.validTo).end}</dd></div>}
-                </dl>
-                {request.type === "hardware_custody" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Custodian change</strong><span>{request.previousCarrierName || hardwareAssets.find((asset) => asset.id === (request.hardwareId || request.subjectId))?.assignedEmployeeName || "Unassigned"} → {request.carrierName || request.carrierId || "No employee selected"}</span><span>Reassigns custody until the next reassignment. Zone access stays separate.</span></div>}
-                {request.type === "zone_access" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Current → proposed access</strong><span>{formatFacilityZones(request.previousZones ?? permissions.find((item) => item.subjectId === request.subjectId)?.zones ?? people.find((item) => item.id === request.subjectId)?.allowedZones ?? hardwareAssets.find((item) => item.id === request.subjectId)?.allowedZones ?? []) || "No current zones"} → {formatFacilityZones(request.requestedZones) || "None"}</span><span>Previous window: {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).start} / {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).end}</span><span>Replaces the complete zone set and valid window.</span></div>}
+              <article id={request.id} key={request.id} tabIndex={-1} className={`${requestStyles.otherRequest} ${request.type === "visitor" ? requestStyles.visitorRequest : ""} ${selectedRequestId === request.id ? requestStyles.selected : ""}`}>
+                {request.type === "visitor" ? (
+                  <>
+                    <header className={requestStyles.visitorRequestHeader}>
+                      <span className={requestStyles.visitorRequestAvatar} aria-hidden="true">{request.subjectName.split(" ").filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span>
+                      <div className={requestStyles.visitorRequestIdentity}>
+                        <div className={requestStyles.visitorRequestNameLine}>
+                          <h3>{request.subjectName}</h3>
+                          {request.barcode ? <span className={requestStyles.visitorBarcode}>{request.barcode}</span> : null}
+                          <span className={requestStyles.visitorPendingState}><span aria-hidden="true" />Pending</span>
+                        </div>
+                        <span className={requestStyles.visitorRequestType}>Visitor · {formatFacilityZones(request.requestedZones) || "No zones assigned"}</span>
+                      </div>
+                    </header>
+                    <p className={requestStyles.requestMeta}>{request.purpose} · Requested by {request.requester} · {formatRequestDate(request.createdAt)}</p>
+                    <dl className={requestStyles.visitorRequestDetails}>
+                      <div><dt>Checkpoint</dt><dd>{checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId || "Not specified"}</dd></div>
+                      <div><dt>Requested zones</dt><dd>{formatFacilityZones(request.requestedZones) || "None"}</dd></div>
+                      <div><dt>Access</dt><dd>{permissionWindowLabels(request.validFrom, request.validTo).start.replace(/^Starts /, "")}</dd></div>
+                      <div><dt>Expires</dt><dd>{permissionWindowLabels(request.validFrom, request.validTo).end.replace(/^Ends /, "")}</dd></div>
+                    </dl>
+                  </>
+                ) : (
+                  <>
+                    <span className={requestStyles.badge} data-type={request.type}>{REQUEST_LABELS[request.type]}</span>
+                    <h3>{request.subjectName}{request.barcode ? ` · ${request.barcode}` : ""}</h3>
+                    <p className={requestStyles.requestMeta}>{request.purpose}<br />Requested by {request.requester} · {formatRequestDate(request.createdAt)}</p>
+                    <dl>
+                      <div><dt>Checkpoint</dt><dd>{checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId || "Not specified"}</dd></div>
+                      {request.type !== "hardware_custody" && <div><dt>Requested zones</dt><dd>{formatFacilityZones(request.requestedZones) || "None"}</dd></div>}
+                      {request.direction ? <div><dt>Movement</dt><dd>{request.direction === "entry" ? "Entry" : "Exit"}</dd></div> : null}
+                      {request.eventId && <div><dt>Denied scan</dt><dd><a href={`/admin/logs?eventId=${encodeURIComponent(request.eventId)}`}>{request.eventId}</a></dd></div>}
+                      {request.type !== "hardware_custody" && <div><dt>Requested window</dt><dd>{permissionWindowLabels(request.validFrom, request.validTo).start}<br />{permissionWindowLabels(request.validFrom, request.validTo).end}</dd></div>}
+                    </dl>
+                    {request.type === "hardware_custody" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Custodian change</strong><span>{hardwareAssets.find((asset) => asset.id === (request.hardwareId || request.subjectId))?.assignedEmployeeName || "Unassigned"} → {request.carrierName || request.carrierId || "No employee selected"}</span><span>Reassigns custody until the next reassignment. Zone access stays separate.</span></div>}
+                    {request.type === "zone_access" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Current → proposed access</strong><span>{formatFacilityZones(permissions.find((item) => item.subjectId === request.subjectId)?.zones ?? people.find((item) => item.id === request.subjectId)?.allowedZones ?? hardwareAssets.find((item) => item.id === request.subjectId)?.allowedZones ?? []) || "No current zones"} → {formatFacilityZones(request.requestedZones) || "None"}</span><span>Window when requested: {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).start} / {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).end}</span><span>Replaces the complete zone set and valid window.</span></div>}
+                  </>
+                )}
                 {request.operatorNote ? <p className="permission-request-note">{request.operatorNote}</p> : null}
                 <>
-                <label className="permission-decision-note">
+                <label className={`${request.type === "visitor" ? requestStyles.visitorRequestNote : ""} permission-decision-note`}>
                   <span>Operator note</span>
                   <textarea className="admin-surface"
                     ref={(node) => { decisionNoteRefs.current[request.id] = node; }}
@@ -311,7 +359,7 @@ export default function PermissionManagerPage() {
                     }}
                   />
                 </label>
-                <div className="request-decision-controls">
+                <div className={request.type === "visitor" ? requestStyles.visitorRequestActions : "request-decision-controls"}>
                   <div className="request-actions">
                     <button type="button" className="permission-approve-button" disabled={busy} onClick={() => void decide(request, "approved")}>{requestApprovalLabel(request)}</button>
                     <button type="button" className="permission-deny-button" disabled={busy} onClick={() => void decide(request, "denied")}>Deny</button>
@@ -326,7 +374,7 @@ export default function PermissionManagerPage() {
         </div>
       </div>
 
-      {requestContext && <RequestDialog mode="grant" context={requestContext} onClose={() => setRequestContext(null)} onReview={(requestId) => { setRequestContext(null); focusRequest(requestId); }} onSubmitted={(request) => { setRequestContext(null); setFeedback(`${request.subjectName}: ${REQUEST_LABELS[request.type].toLowerCase()} granted.`); setHighlightSubjectId(request.subjectId); setTab(request.type === "hardware_custody" || hardwareAssets.some((asset) => asset.id === request.subjectId) ? "hardware" : "people"); setSearch(""); setStateFilter("all"); void refresh(); }} />}
+      {requestContext && <RequestDialog mode="grant" context={requestContext} onClose={() => setRequestContext(null)} onReview={(requestId) => { setRequestContext(null); focusRequest(requestId); }} onRevokeAccess={revokePermission} onSubmitted={(request) => { setRequestContext(null); setFeedback(`${request.subjectName}: ${REQUEST_LABELS[request.type].toLowerCase()} granted.`); setHighlightSubjectId(request.subjectId); setTab(request.type === "hardware_custody" || hardwareAssets.some((asset) => asset.id === request.subjectId) ? "hardware" : "people"); setSearch(""); setStateFilter("all"); void refresh(); }} />}
     </div>
   );
 }

@@ -8,5 +8,5 @@ export default function RegistryDataLayout({
 }: {
   children: ReactNode;
 }) {
-  return <ScopedDataProvider scope="registry">{children}</ScopedDataProvider>;
+  return <ScopedDataProvider scope="registry" clientManaged>{children}</ScopedDataProvider>;
 }

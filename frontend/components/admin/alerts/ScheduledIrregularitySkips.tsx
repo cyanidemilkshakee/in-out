@@ -1,10 +1,12 @@
 "use client";
 
 import type { AlertRuleAssignment } from "../../../../lib/types";
+import { useId } from "react";
 import { formatIrregularitySkipDate, irregularitySkipDateRange } from "../../../../lib/irregularitySkipDates";
 import styles from "./EmployeeAlertManagement.module.css";
 
-export function ScheduledIrregularitySkips({ assignments }: { assignments: AlertRuleAssignment[] }) {
+export function ScheduledIrregularitySkips({ assignments, variant = "default" }: { assignments: AlertRuleAssignment[]; variant?: "default" | "profile" }) {
+  const titleId = useId();
   const { today, max } = irregularitySkipDateRange();
   const scheduled = assignments
     .filter((item) => item.subjectType === "employee")
@@ -15,12 +17,12 @@ export function ScheduledIrregularitySkips({ assignments }: { assignments: Alert
     .filter((item) => item.dates.length > 0)
     .sort((left, right) => left.subjectName.localeCompare(right.subjectName));
 
-  return <section className={styles.skipSchedule} aria-labelledby="scheduled-irregularity-skips-title">
+  return <section className={`${styles.skipSchedule} ${variant === "profile" ? styles.skipScheduleProfile : ""}`} aria-labelledby={titleId}>
     <header className={styles.skipScheduleHeading}>
-      <h3 id="scheduled-irregularity-skips-title">Scheduled irregularity skips</h3>
+      <h3 id={titleId}>Scheduled irregularity skips</h3>
       <span>Next six months</span>
     </header>
-    {scheduled.length ? <ul className={styles.skipScheduleList}>
+    {scheduled.length ? <ul className={`${styles.skipScheduleList} scrollable-content`}>
       {scheduled.map((item) => <li key={item.subjectId}>
         <strong>{item.subjectName}</strong>
         <div className={styles.skipScheduleDates}>{item.dates.map((date) => <time key={date} dateTime={date}>{formatIrregularitySkipDate(date)}</time>)}</div>

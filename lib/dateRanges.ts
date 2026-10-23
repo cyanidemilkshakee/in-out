@@ -1,5 +1,7 @@
 import type { MovementEvent } from "./types";
 
+export type TimeRange = "1D" | "1W" | "1M" | "1Y";
+
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const FACILITY_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
 

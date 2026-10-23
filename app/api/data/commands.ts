@@ -8,7 +8,9 @@ import type {
 } from "../../../lib/types";
 import { callPythonApi } from "../pythonApi";
 import {
+  CommandValidationError,
   requireObject,
+  requireRecordPathSegment as recordPathSegment,
   requireString,
   response,
   type ServerTiming,
@@ -58,7 +60,7 @@ export async function executeCommand(
       return send(normalizeSubjectZones({ id: result.id, barcode: result.barcode, type: "hardware", ...result.data }));
     }
     case "updatePerson": {
-      const personId = requireString(body.personId, "Person id");
+      const personId = recordPathSegment(body.personId, "Person id");
       const patch = requireObject(body.patch, "Person patch") as Partial<Omit<Person, "id">>;
       const payload = { data: { ...patch } } as { data: Partial<Omit<Person, "id">>; barcode?: string };
       if (patch.barcode) {
@@ -69,7 +71,7 @@ export async function executeCommand(
       return send(normalizeSubjectZones({ id: result.id, barcode: result.barcode, type: result.kind, ...result.data }));
     }
     case "updateHardwareAsset": {
-      const assetId = requireString(body.assetId, "Asset id");
+      const assetId = recordPathSegment(body.assetId, "Asset id");
       const patch = requireObject(body.patch, "Hardware patch") as Partial<Omit<HardwareAsset, "id">>;
       const payload = { data: { ...patch } } as { data: Partial<Omit<HardwareAsset, "id">>; barcode?: string };
       if (patch.barcode) {
@@ -80,17 +82,17 @@ export async function executeCommand(
       return send(normalizeSubjectZones({ id: result.id, barcode: result.barcode, type: "hardware", ...result.data }));
     }
     case "acknowledgeAlert":
-      return send(await callPythonApi(`/v1/alerts/${requireString(body.alertId, "Alert id")}`, "PATCH", { status: "acknowledged" }));
+      return send(await callPythonApi(`/v1/alerts/${recordPathSegment(body.alertId, "Alert id")}`, "PATCH", { status: "acknowledged" }));
     case "reviewAlert": {
-      const result = await callPythonApi(`/v1/alerts/${encodeURIComponent(requireString(body.alertId, "Alert id"))}/review`, "POST", {
+      const result = await callPythonApi(`/v1/alerts/${recordPathSegment(body.alertId, "Alert id")}/review`, "POST", {
         decision: body.decision, reason: body.reason ?? "",
       });
       return send({ ...result, alert: normalizeAlert(result.alert) });
     }
     case "resetAlertWarnings":
-      return send(await callPythonApi(`/v1/alert-warnings/${encodeURIComponent(requireString(body.subjectId, "Subject id"))}/reset`, "POST", { reason: body.reason }));
+      return send(await callPythonApi(`/v1/alert-warnings/${recordPathSegment(body.subjectId, "Subject id")}/reset`, "POST", { reason: body.reason }));
     case "setAlertRuleAssignments":
-      return send(normalizeAlertRuleAssignment(await callPythonApi(`/v1/alert-rule-assignments/${encodeURIComponent(requireString(body.subjectId, "Subject id"))}`, "PUT", {
+      return send(normalizeAlertRuleAssignment(await callPythonApi(`/v1/alert-rule-assignments/${recordPathSegment(body.subjectId, "Subject id")}`, "PUT", {
         ruleIds: body.ruleIds, irregularitySkipDates: body.irregularitySkipDates,
         ...(body.expectedRevision !== undefined ? { expectedRevision: body.expectedRevision } : {}),
       })));
@@ -98,7 +100,7 @@ export async function executeCommand(
       const input = requireObject(body.input, "Permission input");
       const result = await callPythonApi("/v1/permissions/grant", "POST", {
         subject_id: input.newVisitor ? "" : requireString(input.subjectId, "Subject id"),
-        checkpoint_id: input.checkpointId || "cp-main",
+        checkpoint_id: requireString(input.checkpointId, "Checkpoint id"),
         request_type: requireString(input.type, "Permission type"),
         reason: typeof input.purpose === "string" ? input.purpose.trim() : "",
         barcode: input.barcode,
@@ -119,7 +121,7 @@ export async function executeCommand(
         auditEvent: result.auditEvent ? normalizeAuditEvent(result.auditEvent) : undefined });
     }
     case "releaseEntryRestriction":
-      return send(await callPythonApi(`/v1/alerts/${encodeURIComponent(requireString(body.alertId, "Alert id"))}/release-entry-restriction`,
+      return send(await callPythonApi(`/v1/alerts/${recordPathSegment(body.alertId, "Alert id")}/release-entry-restriction`,
         "POST", { reason: requireString(body.reason, "Reason for lifting restriction") }));
     case "submitPermissionRequest": {
       const input = requireObject(body.request, "Request input");
@@ -129,7 +131,7 @@ export async function executeCommand(
         : input.operatorNote;
       return send(normalizePermissionRequest(await callPythonApi("/v1/permission-requests", "POST", {
         subject_id: requireString(input.subjectId, "Subject id"),
-        checkpoint_id: input.checkpointId || "cp-main",
+        checkpoint_id: requireString(input.checkpointId, "Checkpoint id"),
         request_type: requestType,
         reason: typeof input.purpose === "string" ? input.purpose.trim() : "",
         subject_name: input.subjectName,
@@ -149,16 +151,16 @@ export async function executeCommand(
     case "decidePermissionRequest": {
       const decision = requireString(body.decision, "Decision");
       if (decision !== "approved" && decision !== "denied") {
-        throw new Error("Decision must be approved or denied.");
+        throw new CommandValidationError("Decision must be approved or denied.");
       }
-      const requestId = requireString(body.requestId, "Request id");
+      const requestId = recordPathSegment(body.requestId, "Request id");
       const reason = typeof body.reason === "string" ? body.reason.trim() : "";
       if (decision === "denied" && !reason) {
-        throw new Error("A decision note is required when denying a permission request.");
+        throw new CommandValidationError("A decision note is required when denying a permission request.");
       }
       const validForMinutes = body.validForMinutes;
       if (validForMinutes !== undefined && !isManualReviewDuration(validForMinutes)) {
-        throw new Error("Choose 15 minutes, 30 minutes, 1 hour, 2 hours, or 4 hours for Valid for.");
+        throw new CommandValidationError("Choose 15 minutes, 30 minutes, 1 hour, 2 hours, or 4 hours for Valid for.");
       }
       const result = await callPythonApi(`/v1/permission-requests/${requestId}/decide`, "POST", {
         decision,
@@ -177,7 +179,7 @@ export async function executeCommand(
     }
     case "dismissPermissionNotification":
       return send(normalizePermissionRequest(await callPythonApi(
-        `/v1/permission-requests/${requireString(body.requestId, "Request id")}/dismiss`,
+        `/v1/permission-requests/${recordPathSegment(body.requestId, "Request id")}/dismiss`,
         "POST",
         {}
       )));
@@ -207,8 +209,8 @@ export async function executeCommand(
       return send(normalizePermissionRequest(await callPythonApi("/v1/terminal/manual-reviews", "POST", input)));
     }
     case "addMovementNote":
-      return send(await callPythonApi(`/v1/movements/${encodeURIComponent(requireString(body.eventId, "Event id"))}/notes`, "POST", { note: body.note }));
+      return send(await callPythonApi(`/v1/movements/${recordPathSegment(body.eventId, "Event id")}/notes`, "POST", { note: body.note }));
     default:
-      throw new Error(`Unsupported command: ${action}.`);
+      throw new CommandValidationError("Unsupported command.");
   }
 }

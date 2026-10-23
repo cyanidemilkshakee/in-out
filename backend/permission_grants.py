@@ -6,15 +6,16 @@ from fastapi import HTTPException
 from sqlalchemy import select, case
 from sqlalchemy.orm import selectinload
 
-from access_validation import validate_checkpoint_id, validate_permission_window, validate_zones
+from access_validation import require_registered_checkpoint, validate_permission_window, validate_zones
 from models import Subject, Person, Checkpoint, PermissionRequestModel
 from permission_decisions import apply_permission_decision
 from schemas import SubjectCreate
+from registry_validation import validated_metadata
 
 
-async def apply_direct_permission(db, payload, actor):
+async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
     now = datetime.now(timezone.utc)
-    checkpoint_id = validate_checkpoint_id(payload.checkpoint_id)
+    checkpoint_id = await require_registered_checkpoint(db, payload.checkpoint_id)
     checkpoint = await db.get(Checkpoint, checkpoint_id)
     if not checkpoint:
         raise HTTPException(422, "Checkpoint not registered")
@@ -28,8 +29,7 @@ async def apply_direct_permission(db, payload, actor):
         if kind != "visitor" or payload.subject_id or not payload.barcode:
             raise HTTPException(422, "New visitor permissions require a barcode and no existing subject")
         # Registry validation is shared; the subject, grant and history commit together.
-        from routers.registry import _validated_metadata
-        incoming = _validated_metadata(SubjectCreate(kind="visitor", barcode=payload.barcode,
+        incoming = validated_metadata(SubjectCreate(kind="visitor", barcode=payload.barcode,
             data=payload.new_visitor.model_dump(exclude_none=True)))
         subject = Subject(id=str(uuid.uuid4()), barcode=payload.barcode, kind="visitor")
         subject.person = Person(data={**incoming, "id": subject.id, "barcode": subject.barcode,
@@ -79,14 +79,14 @@ async def apply_direct_permission(db, payload, actor):
         carrier = await db.get(Subject, payload.carrier_id) if payload.carrier_id else None
         if not carrier or carrier.kind != "employee":
             raise HTTPException(422, "Custody permission requires a registered employee")
-        if subject_data.get("assignedEmployeeId") == carrier.id:
+        if (subject_data.get("assignedEmployeeId") or subject_data.get("ownerId")) == carrier.id:
             raise HTTPException(422, "This employee already has custody of this asset")
         carrier_data = await db.get(Person, carrier.id)
         carrier_name = (carrier_data.data or {}).get("name", carrier.barcode) if carrier_data else carrier.barcode
     else:
         if kind == "zone_access" and not payload.requested_zones:
             raise HTTPException(422, "Choose the complete resulting zone set")
-        zones = validate_zones(payload.requested_zones or [checkpoint.data.get("zone", "public")])
+        zones = validate_zones(payload.requested_zones or [checkpoint.zone_id], known_zone_ids=known_zone_ids)
         valid_from = payload.valid_from or now.isoformat()
         valid_to = "" if permanent_access else payload.valid_to
         validate_permission_window(valid_from, valid_to, now=now, permanent=permanent_access)
@@ -110,7 +110,7 @@ async def apply_direct_permission(db, payload, actor):
         data["permanentAccess"] = True
     if carrier:
         data.update(hardwareId=subject.id, carrierId=carrier.id, carrierName=carrier_name,
-            previousCarrierId=subject_data.get("assignedEmployeeId") or "",
+            previousCarrierId=subject_data.get("assignedEmployeeId") or subject_data.get("ownerId") or "",
             previousCarrierName=subject_data.get("assignedEmployeeName") or "Unassigned")
     if kind == "zone_access":
         data.update(previousZones=subject_data.get("allowedZones") or [],

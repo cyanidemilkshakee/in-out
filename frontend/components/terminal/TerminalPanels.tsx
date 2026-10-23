@@ -40,7 +40,7 @@ export function TerminalActivity({ movements, requests }: { movements: MovementE
           <h2 id="recent-scans-title">Recent scans</h2>
           <span className={styles.activityHint}>At this checkpoint</span>
         </div>
-        {recent.length ? <div className={styles.tableScroll}>
+        {recent.length ? <div className={`${styles.tableScroll} scrollable-content`}>
           <table className={styles.activityTable}>
             <caption className={styles.srOnly}>Recent scans at the selected checkpoint</caption>
             <thead><tr><th scope="col">Person or asset</th><th scope="col">Movement</th><th scope="col">Result</th><th scope="col">Time</th></tr></thead>
@@ -63,7 +63,7 @@ export function TerminalActivity({ movements, requests }: { movements: MovementE
           <h2 id="manual-approvals-title">Manual approvals{pending > 0 && <span className={styles.count} aria-label={`${pending} pending`}>{pending}</span>}</h2>
           <span className={styles.activityHint}>At this checkpoint</span>
         </div>
-        {manualApprovals.length ? <div className={styles.tableScroll}>
+        {manualApprovals.length ? <div className={`${styles.tableScroll} scrollable-content`}>
           <table className={styles.activityTable}>
             <caption className={styles.srOnly}>Manual approvals at the selected checkpoint</caption>
             <thead><tr><th scope="col">Person or asset</th><th scope="col">Movement</th><th scope="col">Status</th><th scope="col">Time</th></tr></thead>
@@ -114,10 +114,10 @@ export function TerminalNotifications({
   return (
     <aside className={styles.pendingPanel} aria-labelledby="permission-notifications-title">
       <header className={styles.pendingPanelHeader}>
-        <h2 id="permission-notifications-title">Permission notifications</h2>
+        <h2 id="permission-notifications-title">Pending notifications</h2>
       </header>
       {dismissError && <p className={styles.notificationError} role="alert">{dismissError}</p>}
-      {visibleRequests.length ? <ul className={`${styles.pendingList} ${styles.notificationList}`} aria-live="polite" aria-relevant="additions text">
+      {visibleRequests.length ? <ul className={`${styles.pendingList} ${styles.notificationList} scrollable-content`} aria-live="polite" aria-relevant="additions text">
         {visibleRequests.map((request) => {
           const hasDecision = request.status === "approved" || request.status === "denied";
           const direction = request.direction === "exit" ? "Exit" : "Entry";

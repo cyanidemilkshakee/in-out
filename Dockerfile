@@ -31,7 +31,9 @@ COPY . .
 # Uncomment the following line in case you want to disable telemetry during the build.
 ENV NEXT_TELEMETRY_DISABLED=1
 
-RUN npm run build
+# Keep Webpack/SWC work across source changes without copying caches into the
+# runtime image. BuildKit owns this mount; the application stays standalone.
+RUN --mount=type=cache,target=/app/.next/cache npm run build
 
 # Production image, copy all the files and run next
 FROM base AS runner
@@ -40,6 +42,10 @@ WORKDIR /app
 ENV NODE_ENV=production
 # Uncomment the following line in case you want to disable telemetry during runtime.
 ENV NEXT_TELEMETRY_DISABLED=1
+
+# The standalone server needs Node only. npm's private dependency tree is not
+# covered by package-lock.json and must not remain in the runtime image.
+RUN rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 
 RUN addgroup --system --gid 10001 nodejs
 RUN adduser --system --uid 10001 nextjs

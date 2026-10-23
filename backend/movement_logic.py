@@ -178,23 +178,38 @@ def _status_for(
     if subject is None:
         return {"result": "denied", "reason": "Barcode not registered"}
 
+    matching_exit = direction == "exit" and bool(subject.get("inside"))
+
     # The administrator admitted this visit despite the entry policy. Once the
     # subject is inside, preserve the matching exit even after the approval's
     # validity window has elapsed. Extra assets do not inherit that approval.
     override = subject.get("entryOverride")
     if direction == "exit" and subject.get("inside") and isinstance(override, dict) and override.get("requestId"):
         admitted_assets = set(override.get("hardwareIds") or [])
-        if all(
-            asset.get("inside") and asset.get("id") in admitted_assets for asset in carried_hardware
-        ):
-            return {"result": "approved", "reason": "Exit for manually approved entry"}
+        if not all(asset.get("inside") and asset.get("id") in admitted_assets for asset in carried_hardware):
+            return {"result": "denied", "reason": "Carried hardware is not covered by this manually approved entry"}
+        # A review may authorize the existing custody exception for one visit,
+        # never a later transfer or a newly unsafe hardware status. These
+        # snapshots come from locked PresenceState, not client input.
+        custody = override.get("hardwareCustody") or {}
+        for asset in ([subject] if _is_hardware(subject) else []) + carried_hardware:
+            if asset.get("status") != "active":
+                return {"result": "denied", "reason": f"Hardware {asset.get('name', '')} is {asset.get('status') or 'inactive'}"}
+            snapshot = custody.get(asset.get("id"))
+            current = {field: asset.get(field) for field in ("ownerId", "assignedEmployeeId")}
+            if isinstance(snapshot, dict) and snapshot != current:
+                return {"result": "denied", "reason": "Hardware custody changed since reviewed entry; custody approval required"}
+            if snapshot is None and not _is_hardware(subject) and (
+                asset.get("assignedEmployeeId") or asset.get("ownerId")) not in (None, "", subject.get("id")):
+                return {"result": "denied", "reason": "Hardware custody approval required for legacy reviewed entry"}
+        return {"result": "approved", "reason": "Exit for manually approved entry"}
 
     for field, label, predicate in (
         ("validFrom", "Access pass is not active yet", lambda value: now < value),
-        ("validTo", "Access pass has expired", lambda value: now > value),
+        ("validTo", "Access pass has expired", lambda value: now >= value),
     ):
         raw_value = subject.get(field)
-        if not raw_value:
+        if not raw_value or matching_exit:
             continue
         try:
             parsed = datetime.fromisoformat(str(raw_value).replace("Z", "+00:00"))
@@ -208,16 +223,15 @@ def _status_for(
     # Hardware-specific restrictions
     if _is_hardware(subject) and subject.get("status") != "active":
         return {"result": "denied", "reason": f"Asset {subject.get('status') or 'inactive'}"}
-
     # Employee-specific restrictions
-    if not _is_hardware(subject) and subject.get("type") == "employee":
+    if not matching_exit and not _is_hardware(subject) and subject.get("type") == "employee":
         if subject.get("status") == "restricted":
             return {"result": "denied", "reason": "Employee access restricted"}
         if subject.get("status") != "active":
             return {"result": "denied", "reason": f"Employee access {subject.get('status') or 'inactive'}"}
 
     # Visitor-specific checks
-    if not _is_hardware(subject) and subject.get("type") == "visitor":
+    if not matching_exit and not _is_hardware(subject) and subject.get("type") == "visitor":
         if subject.get("status") == "expired":
             return {"result": "denied", "reason": "Temporary barcode expired"}
         if subject.get("status") != "pre_approved":
@@ -244,8 +258,8 @@ def _status_for(
             (
                 a
                 for a in carried_hardware
-                if a.get("assignedEmployeeId")
-                and a.get("assignedEmployeeId") != subject.get("id")
+                if (a.get("assignedEmployeeId") or a.get("ownerId"))
+                and (a.get("assignedEmployeeId") or a.get("ownerId")) != subject.get("id")
             ),
             None,
         )
@@ -266,7 +280,7 @@ def _status_for(
             return asset_decision
 
     # Zone check
-    if not _zone_allowed(subject, checkpoint):
+    if not matching_exit and not _zone_allowed(subject, checkpoint):
         return {"result": "denied", "reason": "Checkpoint zone not permitted"}
 
     # Already-inside / no-active-entry
@@ -275,11 +289,7 @@ def _status_for(
     if direction == "exit" and not subject.get("inside"):
         return {"result": "denied", "reason": "No active entry found"}
 
-    # Warehouse-specific hardware exit block
-    if _is_hardware(subject) and direction == "exit" and checkpoint.get("id") == "cp-warehouse":
-        return {"result": "denied", "reason": "Asset not expected out"}
-
-    return {"result": "approved", "reason": "-"}
+    return {"result": "approved", "reason": "Exit for existing admitted entry" if matching_exit else "-"}
 
 
 # ---------------------------------------------------------------------------
@@ -300,7 +310,7 @@ def denial_code_for_reason(reason: str | None = None) -> str:
         return "approval_pending"
     if "not pre-approved" in normalized:
         return "not_preapproved"
-    if "assigned to" in normalized:
+    if "assigned to" in normalized or "custody" in normalized:
         return "custody_mismatch"
     if "checkpoint zone" in normalized:
         return "zone_not_permitted"
@@ -379,6 +389,16 @@ def evaluate_scan(
         a for a in hardware if a.get("id") in selected_hardware_ids
     ]
     decision = _status_for(subject, checkpoint, direction, carried_hardware, now)
+    reviewed_hardware_exit = (_is_hardware(subject) and direction == "exit" and subject.get("inside")
+        and decision["result"] == "approved" and decision.get("reason") == "Exit for manually approved entry"
+        and isinstance(subject.get("entryOverride"), dict)
+        and subject["entryOverride"].get("hardwareCustody", {}).get(subject.get("id")) ==
+            {field: subject.get(field) for field in ("ownerId", "assignedEmployeeId")})
+    if _is_hardware(subject) and (subject.get("assignedEmployeeId") or subject.get("ownerId")) and not reviewed_hardware_exit:
+        decision = {
+            "result": "denied",
+            "reason": "Hardware assigned to an employee; scan the assigned employee with this hardware",
+        }
 
     sync_state: SyncState = "synced" if online else "queued"
 

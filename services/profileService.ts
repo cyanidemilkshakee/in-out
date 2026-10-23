@@ -14,7 +14,7 @@ export type AdminProfile = {
 export type UpdateAdminProfileInput = {
   name: string;
   nickname: string;
-  email: string;
+  email?: string;
   avatarDataUrl: string;
   settings: ProfileSettings;
 };

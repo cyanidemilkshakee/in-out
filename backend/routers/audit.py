@@ -8,11 +8,14 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func
+from sqlalchemy import select, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db
 from models import AuditEvent
+from models import AccessPermission, Checkpoint, HardwareAsset, Person, Subject
+from auth import verify_admin_request
+from zone_access import admin_zone_ids, subject_zone_condition
 
 router = APIRouter(prefix="/v1/audit-events", tags=["audit"])
 
@@ -28,13 +31,25 @@ async def list_audit_events(
     startAt: Optional[str] = Query(None),
     endAt: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_read_db),
+    actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """
     Return a paginated list of audit events ordered newest-first.
     Optional ?category= filters on the JSONB data->>'category' field.
     """
-    q = select(AuditEvent)
-    count_q = select(func.count()).select_from(AuditEvent)
+    zone_ids = await admin_zone_ids(db, actor)
+    visible_subject_ids = list((await db.scalars(select(Subject.id)
+        .outerjoin(Person, Person.subject_id == Subject.id)
+        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
+        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
+        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id))).all())
+    scope = or_(
+        AuditEvent.data["zoneId"].astext.in_(zone_ids),
+        AuditEvent.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
+        AuditEvent.data["subjectId"].astext.in_(visible_subject_ids),
+    )
+    q = select(AuditEvent).where(scope)
+    count_q = select(func.count()).select_from(AuditEvent).where(scope)
 
     for value, is_start in ((startAt, True), (endAt, False)):
         if not value:

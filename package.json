@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22.5.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "test:gateway": "docker compose -p inout-kong-test -f gateway/compose.test.yaml run --build --rm tests",
@@ -18,9 +18,13 @@
     "db:test:up": "docker compose --profile test up -d --wait db-test",
     "typecheck": "node scripts/run-with-timeout.mjs 120 node node_modules/typescript/bin/tsc --noEmit",
     "test:compile": "node scripts/run-with-timeout.mjs 120 node node_modules/typescript/bin/tsc -p tsconfig.test.json",
-    "test": "npm run test:compile && node .test-dist/tests/contracts.test.js && node .test-dist/tests/dateTimeValidation.test.js && node .test-dist/tests/keycloak.test.js && node tests/keycloak-account.test.mjs",
+    "test": "npm run test:compile && node .test-dist/tests/refreshCoordinator.test.js && node .test-dist/tests/contracts.test.js && node .test-dist/tests/dateTimeValidation.test.js && node .test-dist/tests/keycloak.test.js && node .test-dist/tests/logoutIntent.test.js && node .test-dist/tests/buttonWorkflows.test.js && node .test-dist/tests/accountWorkflows.test.js && node .test-dist/tests/offlineQueue.test.js && node .test-dist/tests/analyticsQueries.test.js && node .test-dist/tests/reportReadBudget.test.js && node .test-dist/tests/requestContext.test.js && node .test-dist/tests/securityBoundaries.test.js && node .test-dist/tests/authRequestBoundary.test.js && node .test-dist/tests/keycloakTokenValidation.test.js && node .test-dist/tests/keycloakCredentials.test.js && node tests/keycloak-sign-in.test.mjs && node tests/keycloak-audit.test.mjs && node tests/keycloak-account.test.mjs",
     "keycloak:account:check": "node scripts/keycloak-account-access.mjs --check",
     "keycloak:account:repair": "node scripts/keycloak-account-access.mjs --apply",
+    "keycloak:recovery:check": "node scripts/configure-keycloak-recovery.mjs --check",
+    "keycloak:recovery:apply": "node scripts/configure-keycloak-recovery.mjs --apply",
+    "keycloak:app-sign-in:check": "node scripts/configure-keycloak-app-sign-in.mjs --check",
+    "keycloak:app-sign-in:apply": "node scripts/configure-keycloak-app-sign-in.mjs --apply",
     "test:auth:http": "node scripts/run-with-timeout.mjs 180 node scripts/test-keycloak-http.mjs",
     "test:auth:account": "node scripts/test-keycloak-account.mjs",
     "test:postgres": "docker compose --profile test run --build --rm backend-tests",
@@ -28,6 +32,7 @@
   },
   "dependencies": {
     "chart.js": "^4.5.1",
+    "jose": "6.2.10",
     "lucide-react": "^0.468.0",
     "next": "^15.5.25",
     "next-auth": "^5.0.0-beta.32",

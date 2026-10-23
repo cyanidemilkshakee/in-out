@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 
 from models import AlertRule, AlertRuleAssignment, AuditEvent, HardwareAsset, Person, Subject
+from data_limits import bounded_rows
 from rule_engine import eligible_alert_subject_types, with_default_alert_rules
 
 RuleId = Annotated[str, Field(strict=True, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]
@@ -57,8 +58,18 @@ async def lock_scheduled_alert_evaluation(db):
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("scheduled-alert-evaluation", 0))))
 
 
-async def assignment_rule_catalog(db):
-    rows = (await db.scalars(select(AlertRule).order_by(AlertRule.id))).all()
+async def alert_rule_catalog(db, *, maximum_rows=None):
+    query = select(AlertRule).order_by(AlertRule.id)
+    if maximum_rows is None:
+        rows = [row[0] for row in await bounded_rows(db, query)]
+    else:
+        # Evaluator capacity failures have a separate service-unavailable
+        # contract; retain it for workers rather than returning partial rules.
+        rows = (await db.scalars(query.limit(maximum_rows + 1))).all()
+    if maximum_rows is not None and len(rows) > maximum_rows:
+        raise HTTPException(503, detail={"code": "alert_evaluation_capacity_exceeded",
+            "message": "Alert evaluation exceeds its configured capacity; no partial evaluation was performed",
+            "resource": "rules", "maximum": maximum_rows})
     rules = []
     for row in rows:
         if not isinstance(row.data, dict) or not isinstance(row.id, str):
@@ -70,6 +81,13 @@ async def assignment_rule_catalog(db):
             rules.append(rule)
     return [{**rule, "eligibleSubjectTypes": list(eligible_alert_subject_types(rule))}
             for rule in with_default_alert_rules(rules) if eligible_alert_subject_types(rule)]
+
+
+async def assignment_rule_catalog(db, *, maximum_rows=None):
+    # Building safety rules apply automatically and cannot be disabled by an
+    # employee's attendance selections.
+    return [rule for rule in await alert_rule_catalog(db, maximum_rows=maximum_rows)
+            if rule.get("conditionKey") in {"no_break", "irregularity"}]
 
 
 def effective_rule_ids(subject_type, rules, assignment=None):
@@ -93,15 +111,28 @@ def assignment_document(subject, metadata, rules, assignment=None):
             "revision": assignment.revision if assignment is not None else 0}
 
 
-async def list_alert_rule_assignments(db):
+async def list_alert_rule_assignments(db, subject_id=None, *, subject_ids=None):
+    if subject_id is not None:
+        subject_id = subject_id.strip()
+        if not subject_id:
+            raise HTTPException(422, "Subject filter must not be blank")
     rules = await assignment_rule_catalog(db)
     # Metadata and overrides are fetched in bulk; no relationship lazy loads
     # or per-subject rule queries are needed for this directory.
-    subjects = (await db.execute(select(Subject, Person.data, HardwareAsset.data)
+    subjects_query = (select(Subject, Person.data, HardwareAsset.data)
         .outerjoin(Person, Person.subject_id == Subject.id)
         .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
-        .where(Subject.kind.in_(("employee", "hardware"))).order_by(Subject.id))).all()
-    overrides = {row.subject_id: row for row in (await db.scalars(select(AlertRuleAssignment))).all()}
+        .where(Subject.kind.in_(("employee", "hardware"))).order_by(Subject.id))
+    overrides_query = select(AlertRuleAssignment).order_by(AlertRuleAssignment.subject_id)
+    if subject_id is not None:
+        subjects_query = subjects_query.where(Subject.id == subject_id)
+        overrides_query = overrides_query.where(AlertRuleAssignment.subject_id == subject_id)
+    elif subject_ids is not None:
+        subjects_query = subjects_query.where(Subject.id.in_(subject_ids))
+        overrides_query = overrides_query.where(AlertRuleAssignment.subject_id.in_(subject_ids))
+    subjects = await bounded_rows(db, subjects_query)
+    overrides = {row[0].subject_id: row[0] for row in await bounded_rows(db,
+        overrides_query)}
     return {"rules": rules, "subjects": [assignment_document(subject,
         hardware if subject.kind == "hardware" else person, rules, overrides.get(subject.id))
         for subject, person, hardware in subjects]}

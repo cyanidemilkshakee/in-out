@@ -1,0 +1,67 @@
+# Overlay only infrastructure/compose.test.yaml; never the operational compose.yaml.
+# Uses isolated tmpfs databases, private networks, synthetic credentials and no ports.
+services:
+  temporal-schema-init:
+    networks: [temporal-db]
+    image: inout-temporal-maintenance-fixture
+    build:
+      context: ./temporal
+      dockerfile: Dockerfile
+      additional_contexts:
+        backend: service:provision
+    environment:
+      SQL_HOST: postgres-primary
+      TEMPORAL_DB_PASSWORD: isolated-workflow-credential-00000000000000
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      provision: {condition: service_completed_successfully}
+  temporal:
+    profiles: !reset []
+    image: temporalio/server:1.32.1@sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049
+    environment:
+      DB: postgres12
+      DB_PORT: '5432'
+      POSTGRES_USER: inout_temporal
+      POSTGRES_PWD: isolated-workflow-credential-00000000000000
+      POSTGRES_SEEDS: postgres-primary
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      BIND_ON_IP: 0.0.0.0
+      DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/inout-dynamic.yaml
+    volumes: [./temporal/dynamicconfig.yaml:/etc/temporal/inout-dynamic.yaml:ro]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    # CLI is absent from this image; smoke/bootstrap checks actual gRPC readiness.
+    healthcheck:
+      disable: true
+    depends_on:
+      temporal-schema-init: {condition: service_completed_successfully}
+  temporal-smoke:
+    networks: [workflow]
+    image: inout-security-infra-runtime
+    environment:
+      TEMPORAL_HOST: temporal:7233
+    volumes: [./temporal:/maintenance/temporal:ro]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    command: [python, /maintenance/temporal/smoke.py, --prepare]
+    depends_on:
+      temporal: {condition: service_started}
+  temporal-ui:
+    profiles: [ui-compatibility]
+    networks: [workflow]
+    image: temporalio/ui:2.55.0@sha256:3899d5cf749b5555c9f798d46f2423b1d6190ea391ca713db5d1bba961759e58
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://fixture.invalid
+    depends_on:
+      temporal: {condition: service_started}

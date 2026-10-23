@@ -17,6 +17,11 @@
 .accessFieldsRow { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(200px, 1fr); align-items: end; gap: 12px; min-width: 0; }
 .accessFieldsStack { grid-template-columns: minmax(0, 1fr); }
 .checkpointField { align-self: end; }
+.zoneFieldset { display: grid; gap: 9px; margin: 0; padding: 12px; border: 1px solid var(--admin-line); border-radius: 10px; }
+.zoneFieldset legend { padding-inline: 5px; font-size: 15px; font-weight: var(--weight-bold); }
+.zoneOptions { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.zoneOption { display: inline-flex; align-items: center; gap: 8px; min-height: 32px; cursor: pointer; }
+.zoneOption input { width: 17px; height: 17px; margin: 0; accent-color: var(--admin-text); }
 .roles { display: grid; grid-area: roles; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .creationGrid .roles { grid-template-columns: minmax(0, 1fr); }
 .roleCard { position: relative; display: flex; align-items: center; gap: 9px; min-width: 0; padding: 10px; border: 1px solid transparent; border-radius: 10px; background: var(--admin-surface); cursor: pointer; transition: border-color 150ms ease, background 150ms ease; }

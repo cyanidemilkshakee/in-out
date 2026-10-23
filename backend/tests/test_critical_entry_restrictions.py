@@ -194,7 +194,7 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_prior_success_replay_is_blocked_after_hold_without_duplicating_movement(self):
         self.authorize()
         key = uuid.uuid4()
-        body = {"barcode": "p1", "checkpointId": "cp-main", "direction": "entry", "selectedHardwareIds": ["h1"]}
+        body = {"barcode": "p1", "checkpointId": "cp-main", "selectedHardwareIds": ["h1"]}
         admitted = await self.scan(body, key=key)
         self.assertTrue(admitted.json()["allowed"], admitted.text)
         await self.trigger(subject_id="h1")
@@ -206,10 +206,10 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await db.get(ScanRequest, key)).response_body, admitted.json())
             self.assertEqual((await db.get(PresenceState, "p1")).state, "inside")
         exit_key = uuid.uuid4()
-        exit_body = {**body, "direction": "exit"}
+        exit_body = body
         exited = await self.scan(exit_body, key=exit_key)
         self.assertTrue(exited.json()["allowed"], exited.text)
-        self.assertEqual((await self.scan(exit_body, key=exit_key)).json(), exited.json())
+        self.assertEqual((await self.scan(exit_body, key=exit_key)).json(), database_fixture.replay_receipt(exited.json()))
 
     async def test_offline_capture_is_checked_against_current_server_owned_hold(self):
         self.authorize()

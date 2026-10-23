@@ -9,12 +9,14 @@
 import type {
   Alert,
   AlertWarningSummary,
+  AlertRule,
   AlertRuleAssignment,
   AccessPermission,
   AppDataSnapshot,
   AuditEvent,
   MovementEvent,
   PermissionRequest,
+  TerminalVisitor,
 } from "./types";
 import type { DataScope } from "./types";
 import { canonicalCheckpointId, normalizeFacilityCheckpoints, normalizeFacilityZones, normalizeSubjectZones } from "./facilityZones";
@@ -43,8 +45,12 @@ export function normalizeDashboardMovement(raw: Record<string, unknown>): Moveme
     reason:       data.reason as string | undefined,
     denialCode:   (raw.denial_code ?? data.denialCode) as MovementEvent["denialCode"] | undefined,
     scanType:     (raw.scan_type ?? data.scanType ?? "manual") as MovementEvent["scanType"],
+    captureMethod: data.captureMethod === "scanner" || data.captureMethod === "manual" ? data.captureMethod : undefined,
     syncState:    (raw.sync_state ?? data.syncState ?? "synced") as MovementEvent["syncState"],
     hardwareIds:  (data.hardwareIds ?? []) as string[],
+    sourceEventId: typeof data.sourceEventId === "string" ? data.sourceEventId : undefined,
+    carrierId: typeof data.carrierId === "string" ? data.carrierId : undefined,
+    carrierName: typeof data.carrierName === "string" ? data.carrierName : undefined,
     createdAt:    occurredAt || undefined,
     source: data.source === "paper_register" ? "paper_register" : undefined,
     paperReference: typeof data.paperReference === "string" ? data.paperReference : undefined,
@@ -99,7 +105,7 @@ export function normalizeAlertWarningSummary(raw: unknown): AlertWarningSummary 
   return {
     subjectId: typeof value.subjectId === "string" ? value.subjectId : "",
     subjectName: typeof value.subjectName === "string" ? value.subjectName : "Unknown subject",
-    subjectType: value.subjectType === "hardware" ? "hardware" : "employee",
+    subjectType: value.subjectType === "hardware" || value.subjectType === "visitor" ? value.subjectType : "employee",
     barcode: typeof value.barcode === "string" ? value.barcode : "",
     count: typeof value.count === "number" && Number.isSafeInteger(value.count) && value.count >= 0 ? value.count : 0,
     resetAt: typeof value.resetAt === "string" ? value.resetAt : undefined,
@@ -263,7 +269,7 @@ const EMPTY: AppDataSnapshot = {
   scanAnalytics: {
     totalScans: 0, totalApproved: 0, totalDenied: 0,
     totalEntries: 0, totalExits: 0, totalAutomatic: 0, totalManual: 0,
-    totalRestricted: 0, totalExpired: 0, totalOtherDenied: 0, activeInside: 0,
+    totalRestricted: 0, totalOtherDenied: 0, activeInside: 0,
   },
   movementNotes:      {},
   permissions:        [],
@@ -272,6 +278,7 @@ const EMPTY: AppDataSnapshot = {
   alertWarnings:      [],
   alertRuleAssignments: [],
   auditEvents:        [],
+  terminalVisitors:   [],
 };
 
 // ---------------------------------------------------------------------------
@@ -305,7 +312,6 @@ export function normalizeDashboardSnapshot(raw: unknown): AppDataSnapshot {
       totalAutomatic:   analytics.totalAutomatic   ?? 0,
       totalManual:      analytics.totalManual      ?? 0,
       totalRestricted:  analytics.totalRestricted  ?? 0,
-      totalExpired:     analytics.totalExpired     ?? 0,
       totalOtherDenied: analytics.totalOtherDenied ?? 0,
       activeInside:     analytics.activeInside     ?? (presenceCounts.inside ?? 0),
     },
@@ -324,6 +330,13 @@ export function normalizeAlertsSnapshot(raw: unknown): AppDataSnapshot {
     alerts:     items.filter((item) => !isRemovedAlert(item)).map(normalizeAlert),
     alertWarnings: (Array.isArray(r.warnings) ? r.warnings : []).map(normalizeAlertWarningSummary),
     alertRuleAssignments: (Array.isArray(r.assignments) ? r.assignments : []).map(normalizeAlertRuleAssignment),
+    ...(r.summary && typeof r.summary === "object" ? {
+      alertSummary: {
+        openCount: Number((r.summary as Record<string, unknown>).openCount ?? 0),
+        confirmedWarnings: Number((r.summary as Record<string, unknown>).confirmedWarnings ?? 0),
+        limit: Number(r.limit ?? 50), offset: Number(r.offset ?? 0),
+      },
+    } : {}),
     alertRules: rules.map((rule) => ({
       id:             (rule.id ?? "") as string,
       name:           (rule.name ?? "") as string,
@@ -332,9 +345,9 @@ export function normalizeAlertsSnapshot(raw: unknown): AppDataSnapshot {
       severity:       (rule.severity ?? "medium") as Alert["severity"],
       enabled:        (rule.enabled ?? true) as boolean,
       scope:          (rule.scope ?? "") as string,
-      conditionKey:   (rule.conditionKey ?? "irregularity") as "no_break" | "irregularity",
+      conditionKey:   (rule.conditionKey ?? "irregularity") as AlertRule["conditionKey"],
       recentTriggers: (rule.recentTriggers ?? 0) as number,
-      eligibleSubjectTypes: (Array.isArray(rule.eligibleSubjectTypes) ? rule.eligibleSubjectTypes : ["employee"]).filter((kind): kind is "employee" | "hardware" => kind === "employee" || kind === "hardware"),
+      eligibleSubjectTypes: (Array.isArray(rule.eligibleSubjectTypes) ? rule.eligibleSubjectTypes : ["employee"]).filter((kind): kind is "employee" | "visitor" | "hardware" => kind === "employee" || kind === "visitor" || kind === "hardware"),
     })).filter((rule) =>
       String(rule.conditionKey) !== "manual_review" &&
       String(rule.conditionKey) !== "unknown_barcode" &&
@@ -410,15 +423,45 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
     checkpoints?: AppDataSnapshot["checkpoints"];
     movements?: unknown[];
     permissionRequests?: unknown[];
+    terminalVisitors?: unknown[];
     adminAvailability?: AppDataSnapshot["adminAvailability"];
     terminalAssignment?: AppDataSnapshot["terminalAssignment"];
+    terminalReplayPolicy?: AppDataSnapshot["terminalReplayPolicy"];
   };
   const presence = new Map((r.presence ?? []).map(p => [p.subjectId, p.state === "inside"]));
   const subjects: Record<string, unknown>[] = (r.subjects ?? []).map(s => normalizeSubjectZones({ ...s, allowedZones: s.allowedZones, type: s.type ?? s.kind, inside: presence.get(String(s.id)) ?? Boolean(s.inside) }));
+  const terminalAssignment = r.terminalAssignment
+    ? {
+        ...r.terminalAssignment,
+        checkpointId: r.terminalAssignment.checkpointId
+          ? canonicalCheckpointId(r.terminalAssignment.checkpointId)
+          : null,
+      }
+    : undefined;
   return {
     ...EMPTY,
-    checkpoints: normalizeFacilityCheckpoints(r.checkpoints).filter(checkpoint => !r.terminalAssignment || checkpoint.id === r.terminalAssignment.checkpointId),
-    terminalAssignment: r.terminalAssignment,
+    terminalVisitors: (r.terminalVisitors ?? []).map((rawVisitor) => {
+      const visitor = (rawVisitor ?? {}) as Record<string, unknown>;
+      const rawStatus = visitor.status;
+      const status: TerminalVisitor["status"] = rawStatus === "pending" || rawStatus === "approved" || rawStatus === "denied" || rawStatus === "expired" || rawStatus === "restricted" || rawStatus === "inactive"
+        ? rawStatus
+        : "pending";
+      return {
+        id: String(visitor.id ?? ""),
+        name: String(visitor.name ?? "Visitor"),
+        barcode: String(visitor.barcode ?? ""),
+        ...(typeof visitor.host === "string" ? { host: visitor.host } : {}),
+        ...(typeof visitor.company === "string" ? { company: visitor.company } : {}),
+        allowedZones: normalizeFacilityZones(Array.isArray(visitor.allowedZones) ? visitor.allowedZones.filter((zone): zone is string => typeof zone === "string") : []),
+        ...(typeof visitor.validFrom === "string" ? { validFrom: visitor.validFrom } : {}),
+        ...(typeof visitor.validTo === "string" ? { validTo: visitor.validTo } : {}),
+        ...(typeof visitor.createdAt === "string" ? { createdAt: visitor.createdAt } : {}),
+        status,
+      };
+    }).filter((visitor) => visitor.id),
+    checkpoints: normalizeFacilityCheckpoints(r.checkpoints).filter(checkpoint => !terminalAssignment || checkpoint.id === terminalAssignment.checkpointId),
+    terminalAssignment,
+    terminalReplayPolicy: r.terminalReplayPolicy,
     people: subjects.filter(s => s.type !== "hardware") as AppDataSnapshot["people"],
     hardwareAssets: r.hardwareAssets?.map(normalizeSubjectZones) ?? (subjects.filter(s => s.type === "hardware") as AppDataSnapshot["hardwareAssets"]),
     movements: ((r.movements ?? []) as Record<string, unknown>[]).map(normalizeDashboardMovement),
@@ -432,6 +475,13 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
 
 /** Normalize any backend bundle using the same mapping for SSR and BFF loads. */
 export function normalizeDataScope(scope: DataScope, raw: unknown): AppDataSnapshot {
+  const revision = raw && typeof raw === "object" ? (raw as { eventRevision?: unknown }).eventRevision : undefined;
+  const snapshot = normalizeScope(scope, raw);
+  return typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 0
+    ? { ...snapshot, eventRevision: revision } : snapshot;
+}
+
+function normalizeScope(scope: DataScope, raw: unknown): AppDataSnapshot {
   switch (scope) {
     case "alerts":
       return normalizeAlertsSnapshot(raw);

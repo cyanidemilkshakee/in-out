@@ -1,4 +1,11 @@
+import { parseFacilityDate } from "./dateTimeValidation";
+
 const FACILITY_TIME_ZONE = "Asia/Kolkata";
+
+export function isIrregularitySkipDate(value: string, now = new Date()) {
+  const { today, max } = irregularitySkipDateRange(now);
+  return parseFacilityDate(value) !== undefined && value >= today && value <= max;
+}
 
 export function irregularitySkipDateRange(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
@@ -18,7 +25,9 @@ export function irregularitySkipDateRange(now = new Date()) {
 
 export function formatIrregularitySkipDate(date: string) {
   const parsed = new Date(`${date}T12:00:00Z`);
-  return Number.isNaN(parsed.getTime()) ? date : new Intl.DateTimeFormat(undefined, {
+  // Keep the locale explicit so SSR (Node) and the browser produce identical
+  // text during hydration. The facility UI uses the Indian date convention.
+  return Number.isNaN(parsed.getTime()) ? date : new Intl.DateTimeFormat("en-IN", {
     timeZone: FACILITY_TIME_ZONE,
     year: "numeric",
     month: "short",

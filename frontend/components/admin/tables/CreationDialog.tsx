@@ -1,42 +1,41 @@
-import { useEffect, useState, type ReactNode } from "react";
-import { createPortal } from "react-dom";
-import { BadgePlus, X } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { ArrowRight, BadgePlus, Loader2, X } from "lucide-react";
+import styles from "../permissions/PermissionForm.module.css";
 
 export function CreationDialog({
   triggerLabel,
   title,
   description,
   submitLabel,
-  cardClassName = "",
   error,
   onOpen,
   onSubmit,
   children,
   triggerClassName,
+  onOpenChange,
 }: {
   triggerLabel: string;
   title: string;
   description: string;
   submitLabel: string;
-  cardClassName?: string;
   error?: string;
   onOpen?: () => void;
   onSubmit: () => Promise<boolean | void> | boolean | void;
   children: ReactNode;
   triggerClassName?: string;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const dialogRef = useRef<HTMLDialogElement>(null);
+
+  useEffect(() => { onOpenChange?.(open); }, [onOpenChange, open]);
 
   useEffect(() => {
     if (!open) return;
-
-    function closeOnEscape(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
+    const dialog = dialogRef.current;
+    if (dialog && !dialog.open) dialog.showModal();
+    return () => { if (dialog?.open) dialog.close(); };
   }, [open]);
 
   async function submit() {
@@ -49,10 +48,15 @@ export function CreationDialog({
     }
   }
 
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    void submit();
+  }
+
   return (
-    <div className="temporary-id-popover">
+    <>
       <button
-        className={`admin-button admin-button--ghost ghost-button temporary-create-trigger ${triggerClassName || ""}`.trim()}
+        className={`${styles.trigger} ${triggerClassName || ""}`.trim()}
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
@@ -61,54 +65,39 @@ export function CreationDialog({
           setOpen(true);
         }}
       >
-        <BadgePlus aria-hidden="true" />
+        <BadgePlus size={17} aria-hidden="true" />
         {triggerLabel}
       </button>
 
-      {open && typeof document !== "undefined"
-        ? createPortal(
-            <div
-              className="temporary-id-overlay role-admin"
-              role="presentation"
-              onMouseDown={() => setOpen(false)}
-            >
-              <form
-                className={`temporary-id-form temporary-id-card creation-dialog-card ${cardClassName}`.trim()}
-                role="dialog"
-                aria-modal="true"
-                aria-label={title}
-                onMouseDown={(event) => event.stopPropagation()}
-                onSubmit={(event) => {
-                  event.preventDefault();
-                  void submit();
-                }}
-              >
-                <div className="temporary-id-card-header creation-dialog-header">
-                  <div className="creation-dialog-heading">
-                    <strong>{title}</strong>
-                    <span>{description}</span>
-                  </div>
-                  <button
-                    className="admin-button admin-button--icon icon-button compact-button"
-                    type="button"
-                    onClick={() => setOpen(false)}
-                    aria-label={`Close ${title.toLowerCase()}`}
-                  >
-                    <X size={17} />
-                  </button>
-                </div>
+      <dialog
+        ref={dialogRef}
+        className={`${styles.dialog} scrollable-content`}
+        aria-labelledby="creation-dialog-title"
+        onCancel={(event) => { event.preventDefault(); if (!submitting) setOpen(false); }}
+        onClick={(event) => { if (event.target === event.currentTarget && !submitting) setOpen(false); }}
+      >
+        <form onSubmit={handleSubmit} className={styles.form}>
+          <header className={styles.header}>
+            <span className={styles.headerIcon} aria-hidden="true"><BadgePlus size={23} strokeWidth={1.7} /></span>
+            <div><h2 id="creation-dialog-title">{title}</h2><p>{description}</p></div>
+            <button className={styles.close} type="button" disabled={submitting} onClick={() => setOpen(false)} aria-label={`Close ${title.toLowerCase()}`}>
+              <X size={19} />
+            </button>
+          </header>
 
-                {children}
+          <div className={`${styles.body} scrollable-content`}>
+            {children}
+            {error ? <p className={styles.error} role="alert">{error}</p> : null}
+          </div>
 
-                {error ? <p className="temporary-id-form-error" role="alert">{error}</p> : null}
-                <button className="admin-button admin-button--primary primary-button creation-dialog-submit" type="submit" disabled={submitting}>
-                  {submitting ? "Creating..." : submitLabel}
-                </button>
-              </form>
-            </div>,
-            document.body
-          )
-        : null}
-    </div>
+          <footer className={styles.footer}>
+            <button className={styles.cancelButton} type="button" disabled={submitting} onClick={() => setOpen(false)}>Cancel</button>
+            <button className={styles.submitButton} type="submit" disabled={submitting}>
+              {submitting ? <><Loader2 size={16} className={styles.spinner} />Creating…</> : <>{submitLabel}<ArrowRight size={16} aria-hidden="true" /></>}
+            </button>
+          </footer>
+        </form>
+      </dialog>
+    </>
   );
 }

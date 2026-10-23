@@ -9,13 +9,93 @@ permissions:
   contents: read
 
 jobs:
+  infrastructure:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -p inout-infra-test -f infrastructure/compose.test.yaml run --build --rm tests
+      - name: Verify web isolation against live fixture services
+        run: python3 infrastructure/tests/run_network_boundary.py
+      - name: Scan PostgreSQL runtime
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          version: v0.69.3
+          image-ref: inout-postgres:17
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+      - name: Scan Redis runtime
+        if: success() || failure()
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          version: v0.69.3
+          image-ref: inout-redis:7
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+      - if: always()
+        run: docker compose -p inout-infra-test -f infrastructure/compose.test.yaml -f infrastructure/temporal/compose.fixture.yaml --profile network-boundary down --volumes --remove-orphans
+      - if: always()
+        run: docker compose -p inout-network-boundary-test -f infrastructure/compose.test.yaml -f infrastructure/temporal/compose.fixture.yaml --profile network-boundary down --volumes --remove-orphans
+
+  identity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker compose -p inout-keycloak-test -f keycloak/compose.test.yaml run --build --rm tests
+      - if: always()
+        run: docker compose -p inout-keycloak-test -f keycloak/compose.test.yaml down --volumes
+
   gateway:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: docker compose -p inout-kong-test -f gateway/compose.test.yaml run --build --rm tests
+      - name: Scan gateway runtime
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          version: v0.69.3
+          image-ref: inout-kong:3.9.3
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
       - if: always()
         run: docker compose -p inout-kong-test -f gateway/compose.test.yaml down --volumes
+
+  temporal:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify scoped schema guards and durable workflow restart
+        shell: bash
+        run: |
+          fixture() {
+            docker compose -p inout-temporal-compat -f infrastructure/compose.test.yaml -f infrastructure/temporal/compose.fixture.yaml "$@"
+          }
+          fixture run --build --rm temporal-smoke
+          fixture restart temporal
+          fixture run --no-deps --rm temporal-smoke python /maintenance/temporal/smoke.py
+          fixture stop temporal
+          fixture run --no-deps --rm -e INOUT_TEMPORAL_FIXTURE=1 temporal-schema-init python /maintenance/temporal/initialize_schema.py --fixture-self-test
+          fixture run --no-deps --rm temporal-schema-init
+          fixture run --no-deps --rm -e INOUT_TEMPORAL_FIXTURE=1 temporal-schema-init python /maintenance/temporal/initialize_schema.py --fixture-resume
+          fixture run --no-deps --rm temporal-schema-init python /maintenance/temporal/initialize_schema.py --verify-only
+          fixture --profile ui-compatibility up -d --no-deps temporal temporal-ui
+          fixture run --no-deps --rm temporal-smoke python /maintenance/temporal/check_ui.py
+      - name: Scan scoped workflow maintenance runtime
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          version: v0.69.3
+          image-ref: inout-temporal-maintenance-fixture
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+      - if: always()
+        run: docker compose -p inout-temporal-compat -f infrastructure/compose.test.yaml -f infrastructure/temporal/compose.fixture.yaml down --volumes --remove-orphans
 
   frontend:
     runs-on: ubuntu-latest
@@ -26,19 +106,74 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - run: npm audit --audit-level=moderate
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
       - run: npm run test:auth:http
+      - run: node scripts/test-security-http.mjs
+      - run: docker build -t inout-app-security .
+      - name: Scan standalone application runtime
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          version: v0.69.3
+          image-ref: inout-app-security
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+
+  vendor-images:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - quay.io/keycloak/keycloak:26.8.0
+          - temporalio/server:1.32.1@sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049
+          - temporalio/ui:2.55.0@sha256:3899d5cf749b5555c9f798d46f2423b1d6190ea391ca713db5d1bba961759e58
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan configured vendor runtime
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          version: v0.69.3
+          image-ref: ${{ matrix.image }}
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
 
   backend:
     runs-on: ubuntu-latest
     env:
       POSTGRES_PASSWORD: ci-postgres-password
+      APP_DB_PASSWORD: ci-app-database-password-32-characters
+      MIGRATION_DB_PASSWORD: ci-migration-database-password-32-characters
+      KEYCLOAK_DB_PASSWORD: ci-keycloak-database-password-32-characters
+      TEMPORAL_DB_PASSWORD: ci-temporal-database-password-32-characters
+      REDIS_QUOTA_PASSWORD: ci-redis-quota-password-32-characters
+      REDIS_EVENTS_PASSWORD: ci-redis-events-password-32-characters
+      REDIS_GATEWAY_PASSWORD: ci-redis-gateway-password-32-characters
+      KONG_IDENTITY_SECRET: ci-gateway-identity-secret-32-characters
       KEYCLOAK_ADMIN_USERNAME: ci-admin
       KEYCLOAK_ADMIN_PASSWORD: ci-keycloak-password
       KEYCLOAK_CLIENT_SECRET: ci-client-secret
       AUTH_SECRET: ci-auth-secret
     steps:
       - uses: actions/checkout@v4
-      - run: docker compose --profile test run --build --rm backend-tests
+      - name: Audit locked Python runtime dependencies
+        run: docker run --rm -v "$PWD/backend:/app:ro" -w /app ghcr.io/astral-sh/uv:0.12.5@sha256:e85be844203885286c60ffad8a858d48afb6c5a5c237ca0e67f12e74b8f174b1 audit --frozen --no-dev
+      - run: docker compose -p inout-backend-ci --profile test run --build --rm backend-tests
+      - name: Scan backend runtime and OS packages
+        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1
+        with:
+          version: v0.69.3
+          image-ref: inout-backend-ci-backend-tests
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: false
+          exit-code: '1'
+      - if: always()
+        run: docker compose -p inout-backend-ci --profile test down --volumes

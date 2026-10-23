@@ -2,11 +2,12 @@
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Suspense, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ChevronDown, Download } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import type {
   AlertPage,
+  MovementQuery,
   MovementPage,
   VisibleColumn,
   SortDirection,
@@ -19,6 +20,7 @@ import { AcknowledgedPermissionRequestsTable } from "../../../frontend/component
 import { AlertsHistoryTable } from "../../../frontend/components/admin/alerts/AlertsHistoryTable";
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import { isMovementEventId } from "../../../lib/movementReferences";
+import { movementAnalyticsFilters } from "../../../lib/analyticsQueries";
 import {
   compactRangeBounds,
   parseDateInput,
@@ -131,27 +133,6 @@ function LogTimeRangeDropdown({
   );
 }
 
-function csvCell(value: unknown) {
-  const raw = String(value ?? "");
-  const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
-  return `"${safe.replaceAll('"', '""')}"`;
-}
-
-function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
-  if (!rows.length) return;
-  const columns = Object.keys(rows[0]);
-  const csv = [
-    columns.map(csvCell).join(","),
-    ...rows.map((row) => columns.map((column) => csvCell(row[column])).join(",")),
-  ].join("\r\n");
-  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
 const defaultVisibleColumns: Record<VisibleColumn, boolean> = {
   date: true,
   time: true,
@@ -192,6 +173,7 @@ function LogsWorkspace() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [scanTypeFilter, setScanTypeFilter] = useState<"all" | "auto" | "manual">("all");
   const [directionFilter, setDirectionFilter] = useState<"all" | "entry" | "exit">("all");
+  const [denialCategory, setDenialCategory] = useState<MovementQuery["denialCategory"]>();
   const [subjectTypeFilter, setSubjectTypeFilter] = useState<"people" | "hardware">("people");
   const [page, setPage] = useState(1);
   const rowsPerPage = 25;
@@ -200,8 +182,9 @@ function LogsWorkspace() {
   const [timeRange, setTimeRange] = useState<TimeRange>("ALL");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
-  const deferredSearch = useDeferredValue(search);
-  const searchTerm = deferredSearch.trim();
+  const [linkedRange, setLinkedRange] = useState<{ startAt?: string; endAt?: string } | null>(null);
+  const [debouncedSearch, setDebouncedSearch] = useState(search);
+  const searchTerm = debouncedSearch.trim();
   const eventIdLookup = (linkedEventId && searchTerm === linkedEventId) || isMovementEventId(searchTerm)
     ? searchTerm : undefined;
   const [filtersReady, setFiltersReady] = useState(false);
@@ -220,14 +203,16 @@ function LogsWorkspace() {
     }),
   }));
   const [queryError, setQueryError] = useState("");
-  const initialQueryPending = useRef(Boolean(initialMovementPage));
   const searchParams = useSearchParams();
   const requestedTab = searchParams.get("tab");
   const activeTab: LogsTab = requestedTab === "permissions" || requestedTab === "alerts" ? requestedTab : "movements";
+  const initialQueryPending = useRef(Boolean(initialMovementPage) && activeTab === "movements");
+  const lastChartQuery = useRef<string | null>(null);
   const subjectId = searchParams.get("subject") || undefined;
+  const { startAt: alertStartAt, endAt: alertEndAt } = movementAnalyticsFilters(new URLSearchParams(searchParams.toString()));
   const [alertHistoryPage, setAlertHistoryPage] = useState<AlertPage>({ items: [], total: 0, limit: 50, offset: 0 });
   const acknowledgedRequests = useMemo(() => {
-    const needle = deferredSearch.trim().toLowerCase();
+    const needle = debouncedSearch.trim().toLowerCase();
     return permissionRequests
       .filter((request) => request.status !== "pending" && Boolean(request.notificationDismissedAt))
       .filter((request) => !needle || [request.subjectName, request.barcode,
@@ -235,7 +220,12 @@ function LogsWorkspace() {
         request.decisionReason]
         .some((value) => value?.toLowerCase().includes(needle)))
       .sort((left, right) => (right.notificationDismissedAt ?? "").localeCompare(left.notificationDismissedAt ?? ""));
-  }, [permissionRequests, deferredSearch]);
+  }, [permissionRequests, debouncedSearch]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search), 200);
+    return () => clearTimeout(timer);
+  }, [search]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -245,7 +235,9 @@ function LogsWorkspace() {
     const direction = params.get("direction");
     const reason = params.get("reason");
     const eventId = params.get("eventId")?.trim();
-    if ([subject, result, scanType, direction, reason, eventId].some(Boolean)) {
+    const analyticsFilters = movementAnalyticsFilters(params);
+    if ([subject, result, scanType, direction, reason, eventId, analyticsFilters.denialCategory,
+      analyticsFilters.startAt, analyticsFilters.endAt].some(Boolean)) {
       initialQueryPending.current = false;
     }
     if (subject === "people" || subject === "hardware") setSubjectTypeFilter(subject);
@@ -253,6 +245,15 @@ function LogsWorkspace() {
     if (scanType === "auto" || scanType === "manual") setScanTypeFilter(scanType);
     if (direction === "entry" || direction === "exit") setDirectionFilter(direction);
     if (reason) setSearch(reason);
+    setDenialCategory(analyticsFilters.denialCategory);
+    if (analyticsFilters.startAt || analyticsFilters.endAt) {
+      setLinkedRange({ startAt: analyticsFilters.startAt, endAt: analyticsFilters.endAt });
+      const facilityDate = (value?: string) => value ? new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+      }).format(new Date(value)) : "";
+      setStartDate(facilityDate(analyticsFilters.startAt));
+      setEndDate(facilityDate(analyticsFilters.endAt));
+    }
     if (eventId) {
       setLinkedEventId(eventId);
       setSearch(eventId);
@@ -265,26 +266,38 @@ function LogsWorkspace() {
   }, [activeTab, eventIdLookup, filtersReady]);
 
   useEffect(() => {
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    const reloadLedger = () => {
+      if (refreshTimer !== undefined) return;
+      refreshTimer = setTimeout(() => {
+        refreshTimer = undefined;
+        setQueryRevision(current => current + 1);
+      }, 250);
+    };
     const receiveMovement = (event: Event) => {
       try {
         const update = JSON.parse((event as CustomEvent<string>).detail);
-        if (update?.type === "manual_review_decision") {
-          setQueryRevision(current => current + 1);
+        if (update?.movement || update?.type === "manual_review_decision" || update?.type === "data_changed") {
+          reloadLedger();
         }
       } catch {
         // Ignore malformed stream events; reconnect reloads the ledger.
       }
     };
-    const reloadLedger = () => setQueryRevision(current => current + 1);
     window.addEventListener("inout:presence-message", receiveMovement);
-    window.addEventListener("inout:presence-reconnected", reloadLedger);
+    window.addEventListener("inout:presence-sync", reloadLedger);
     return () => {
+      clearTimeout(refreshTimer);
       window.removeEventListener("inout:presence-message", receiveMovement);
-      window.removeEventListener("inout:presence-reconnected", reloadLedger);
+      window.removeEventListener("inout:presence-sync", reloadLedger);
     };
   }, []);
 
   const rangeBounds = useMemo(() => {
+    if (linkedRange) return {
+      rangeStart: linkedRange.startAt ? Date.parse(linkedRange.startAt) : Number.NEGATIVE_INFINITY,
+      rangeEnd: linkedRange.endAt ? Date.parse(linkedRange.endAt) : Number.POSITIVE_INFINITY,
+    };
     const preset = timeRange === "ALL"
       ? { start: Number.NEGATIVE_INFINITY, end: Number.POSITIVE_INFINITY }
       : compactRangeBounds(timeRange);
@@ -293,14 +306,15 @@ function LogsWorkspace() {
       ? preset.end
       : Math.min(endDate ? parseDateInput(endDate, true) ?? preset.end : preset.end, Date.now());
     return { rangeStart, rangeEnd };
-  }, [endDate, startDate, timeRange]);
+  }, [endDate, startDate, timeRange, linkedRange]);
 
   useEffect(() => {
     setPage(1);
   }, [
     checkpointFilter,
-    deferredSearch,
+    debouncedSearch,
     directionFilter,
+    denialCategory,
     endDate,
     scanTypeFilter,
     startDate,
@@ -310,14 +324,7 @@ function LogsWorkspace() {
   ]);
 
   useEffect(() => {
-    if (!filtersReady) return;
-    if (initialQueryPending.current) {
-      initialQueryPending.current = false;
-      return;
-    }
-    let cancelled = false;
-    setIsQuerying(true);
-    setQueryError("");
+    if (!filtersReady || activeTab !== "movements" || search !== debouncedSearch) return;
     const rangeQuery = {
       ...(Number.isFinite(rangeBounds.rangeStart)
         ? { startAt: new Date(rangeBounds.rangeStart).toISOString() }
@@ -326,27 +333,49 @@ function LogsWorkspace() {
         ? { endAt: new Date(rangeBounds.rangeEnd).toISOString() }
         : {}),
     };
-    void queryMovements({
-      page: eventIdLookup ? 1 : page,
-      pageSize: rowsPerPage,
+    const filters = {
       eventId: eventIdLookup,
-      search: deferredSearch.trim() || undefined,
+      search: debouncedSearch.trim() || undefined,
       checkpoint:
         checkpointFilter === "all" ? undefined : checkpointFilter,
       result: statusFilter === "all" ? undefined : statusFilter,
       scanType: scanTypeFilter === "all" ? undefined : scanTypeFilter,
       direction: directionFilter === "all" ? undefined : directionFilter,
+      denialCategory,
       subjectGroup: subjectTypeFilter,
       ...rangeQuery,
+    };
+    // Row ordering and pagination do not change the report/chart population.
+    // Stream invalidations do, even when the visible filters stay the same.
+    const chartQuery = JSON.stringify([filters, queryRevision]);
+    if (initialQueryPending.current) {
+      initialQueryPending.current = false;
+      lastChartQuery.current = chartQuery;
+      return;
+    }
+    const includeChart = lastChartQuery.current !== chartQuery;
+    const controller = new AbortController();
+    setIsQuerying(true);
+    setQueryError("");
+    void queryMovements({
+      ...filters,
+      page: eventIdLookup ? 1 : page,
+      pageSize: rowsPerPage,
       sortKey,
       sortDirection,
-    })
+      includeChart,
+    }, controller.signal)
       .then((result) => {
-        if (cancelled) return;
-        setMovementPage(result);
+        if (controller.signal.aborted) return;
+        if (includeChart) lastChartQuery.current = chartQuery;
+        setMovementPage(current => includeChart ? result : {
+          ...result,
+          chartItems: current.chartItems,
+          checkpoints: current.checkpoints,
+        });
       })
       .catch((error) => {
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setQueryError(
             error instanceof Error
               ? error.message
@@ -355,15 +384,17 @@ function LogsWorkspace() {
         }
       })
       .finally(() => {
-        if (!cancelled) setIsQuerying(false);
+        if (!controller.signal.aborted) setIsQuerying(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [
+    activeTab,
     checkpointFilter,
-    deferredSearch,
+    debouncedSearch,
     directionFilter,
+    denialCategory,
     eventIdLookup,
     filtersReady,
     page,
@@ -372,6 +403,7 @@ function LogsWorkspace() {
     rangeBounds.rangeEnd,
     rangeBounds.rangeStart,
     scanTypeFilter,
+    search,
     sortDirection,
     sortKey,
     statusFilter,
@@ -387,39 +419,6 @@ function LogsWorkspace() {
     1,
     Math.ceil(movementPage.total / rowsPerPage)
   );
-  function exportHistory() {
-    const rows: Array<Record<string, unknown>> = activeTab === "permissions"
-      ? acknowledgedRequests.map((request) => ({
-          requestType: request.type,
-          subject: request.subjectName,
-          barcode: request.barcode,
-          checkpoint: request.checkpoint,
-          decision: request.status,
-          decidedAt: request.decidedAt,
-          operatorNote: request.operatorNote,
-          decisionNote: request.decisionReason,
-        }))
-      : alertHistoryPage.items.map((alert) => ({
-          alertId: alert.id,
-          alert: alert.title,
-          subject: alert.subjectName,
-          barcode: alert.barcode,
-          severity: alert.severity,
-          triggeredAt: alert.createdAt,
-          checkpoint: alert.checkpoint,
-          reason: alert.reason,
-          status: alert.status,
-          decision: alert.review?.decision,
-          reviewedAt: alert.review?.reviewedAt,
-          reviewedBy: alert.review?.reviewedBy,
-          reviewNote: alert.review?.reason,
-          warningResetAt: alert.warningResetAt,
-          warningResetBy: alert.warningResetBy,
-          warningResetReason: alert.warningResetReason,
-        }));
-    downloadCsv(`inout-${activeTab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
-  }
-
   return (
     <AdminPageFrame
       title={activeTab === "movements" ? "Movement Logs" : activeTab === "permissions" ? "Permission Logs" : "Alert Logs"}
@@ -453,13 +452,13 @@ function LogsWorkspace() {
       <div className="admin-panel workspace-main">
 
         <div className="filter-bar">
-          <ReportBuilder movements={movementPage.chartItems} alerts={alerts} auditEvents={auditEvents} />
+          <ReportBuilder movements={movementPage.chartItems} alerts={alerts} auditEvents={auditEvents} activeSource="movements" checkpoints={movementPage.checkpoints} />
           <LogTimeRangeDropdown
             range={timeRange}
             startDate={startDate}
             endDate={endDate}
-            onRangeChange={(value) => { setTimeRange(value); setPage(1); }}
-            onDateRangeChange={(start, end) => { setStartDate(start); setEndDate(end); setPage(1); }}
+            onRangeChange={(value) => { setLinkedRange(null); setTimeRange(value); setPage(1); }}
+            onDateRangeChange={(start, end) => { setLinkedRange(null); setStartDate(start); setEndDate(end); setPage(1); }}
           />
           <label className="select-control">
             <span className="sr-only">Filter by checkpoint</span>
@@ -469,6 +468,15 @@ function LogsWorkspace() {
             >
               <option value="all">All Checkpoints</option>
               {movementPage.checkpoints.map(cp => <option key={cp} value={cp}>{cp}</option>)}
+            </select>
+          </label>
+          <label className="select-control">
+            <span className="sr-only">Filter by denial category</span>
+            <select value={denialCategory ?? "all"} onChange={event => setDenialCategory(
+              event.target.value === "all" ? undefined : event.target.value as MovementQuery["denialCategory"])}>
+              <option value="all">All denial reasons</option>
+              <option value="restricted">Restricted</option>
+              <option value="other">Other</option>
             </select>
           </label>
           <label className="select-control">
@@ -562,9 +570,7 @@ function LogsWorkspace() {
       <section className="registry-workspace">
         <div className="admin-panel workspace-main">
           <div className="filter-bar">
-            <button className="admin-button admin-button--ghost ghost-button" type="button" onClick={exportHistory} disabled={!acknowledgedRequests.length}>
-              <Download />Export
-            </button>
+            <ReportBuilder movements={movementPage.chartItems} alerts={alerts} auditEvents={auditEvents} activeSource="permissions" checkpoints={movementPage.checkpoints} />
             <label className="search-control registry-search-control">
               <span className="sr-only">Search acknowledged permission requests</span>
               <input type="search" maxLength={200} placeholder="Search permissions..." value={search} onChange={(event) => setSearch(event.target.value)} />
@@ -574,18 +580,16 @@ function LogsWorkspace() {
         </div>
       </section>
     ) : (
-      <section className="registry-workspace">
+      <section className="split-workspace log-workspace">
         <div className="admin-panel workspace-main">
           <div className="filter-bar">
-            <button className="admin-button admin-button--ghost ghost-button" type="button" onClick={exportHistory} disabled={!alertHistoryPage.items.length}>
-              <Download />Export page
-            </button>
-            <label className="search-control registry-search-control">
+            <ReportBuilder movements={movementPage.chartItems} alerts={alerts} auditEvents={auditEvents} activeSource="alerts" checkpoints={movementPage.checkpoints} />
+            <label className="search-control">
               <span className="sr-only">Search alert history</span>
               <input type="search" maxLength={200} placeholder="Search alerts..." value={search} onChange={(event) => setSearch(event.target.value)} />
             </label>
           </div>
-          <AlertsHistoryTable search={deferredSearch} subjectId={subjectId} people={people} onLoad={setAlertHistoryPage} />
+          <AlertsHistoryTable search={debouncedSearch} subjectId={subjectId} startAt={alertStartAt} endAt={alertEndAt} people={people} onLoad={setAlertHistoryPage} />
         </div>
       </section>
     )}

@@ -1,4 +1,4 @@
-"""The facility's two checkpoints, stable zone IDs, and legacy aliases."""
+"""The facility's fixed zones, checkpoints, and legacy aliases."""
 import hashlib
 import itertools
 import json
@@ -19,12 +19,11 @@ _CHECKPOINT_FIELDS = {"checkpointId", "checkpoint_id", "entryCheckpointId", "exi
 
 
 def canonical_checkpoint_id(value):
-    """Keep unrelated historical IDs intact; write validation is separate."""
+    """Keep legacy checkpoint aliases stable when reading persisted records."""
     return "cp-main" if value == "main-gate" else value
 
 
 def building_for_checkpoint(checkpoint_id):
-    """Return the building identity for a checkpoint, independently of zone access."""
     checkpoint_id = canonical_checkpoint_id(checkpoint_id)
     return next((item["buildingId"] for item in CHECKPOINTS if item["id"] == checkpoint_id), None)
 
@@ -41,8 +40,6 @@ def normalize_zones(values, *, strict=True):
             raise ValueError("Choose Main Entrance or Server Room")
         else:
             result.append(value)
-    # Stable canonical ordering prevents equivalent selections producing
-    # different access snapshots; unrelated history remains unchanged.
     canonical = [zone for zone in FACILITY_ZONES if zone in result]
     for zone in result:
         if zone not in canonical:
@@ -63,8 +60,7 @@ def normalize_facility_document(value, *, strict_zones=False):
         elif key in _ZONE_FIELDS and isinstance(item, list):
             result[key] = normalize_zones(item, strict=strict_zones)
         elif key in {"zone", "allowedZone"} and isinstance(item, str):
-            token = item.strip().casefold()
-            result[key] = _ZONE_ALIASES.get(token, item)
+            result[key] = _ZONE_ALIASES.get(item.strip().casefold(), item)
         elif key == "checkpoint" and item == "main-gate":
             result[key] = "Main Entrance"
         else:
@@ -73,12 +69,7 @@ def normalize_facility_document(value, *, strict_zones=False):
 
 
 def compatible_request_fingerprints(body, checkpoint_keys):
-    """Accept old offline keys without weakening payload or actor checks.
-
-    Hashes already persisted before consolidation cannot be reversed. Compare
-    both spellings of the same checkpoint while keeping every other input
-    byte-equivalent to the existing normalized fingerprint contract.
-    """
+    """Accept old offline keys without weakening payload or actor checks."""
     canonical = {**body, **{key: canonical_checkpoint_id(body[key]) for key in checkpoint_keys}}
     alias_keys = [key for key in checkpoint_keys if canonical[key] == "cp-main"]
     fingerprints = []

@@ -9,10 +9,11 @@ from typing import Literal, Optional
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy import select, func, or_
-from sqlalchemy.orm import selectinload
+from sqlalchemy import select, func, or_, and_, case
 
-from models import Alert, AlertReview, WarningReset, Subject, AuditEvent, CriticalEntryRestriction
+from config import settings
+from data_limits import bounded_rows
+from models import Alert, AlertReview, WarningReset, Subject, Person, HardwareAsset, AuditEvent, CriticalEntryRestriction
 from critical_entry_restrictions import (
     entry_restrictions_for_subjects, release_critical_entry_restriction,
     CONFIRMED_WARNING_ENTRY_THRESHOLD, confirmed_warning_count,
@@ -73,7 +74,8 @@ async def _resolve_subject(db, binding):
         return None
     kind, value = binding
     predicate = Subject.id == value if kind == "id" else func.lower(Subject.barcode) == value
-    matches = (await db.scalars(select(Subject).where(predicate))).all()
+    # Two matches suffice to reject ambiguous legacy barcode bindings.
+    matches = (await db.scalars(select(Subject).where(predicate).limit(2))).all()
     return matches[0] if len(matches) == 1 else None
 
 
@@ -88,25 +90,45 @@ def _resolve_from_directory(data, by_id, by_barcode):
     return matches[0] if len(matches) == 1 else None
 
 
-async def warning_directory(db):
+async def warning_directory(db, *, subject_ids=None, barcodes=None):
     """Bulk, authoritative warning counts independent of alert pagination/retention."""
-    subjects = (await db.scalars(select(Subject).options(
-        selectinload(Subject.person), selectinload(Subject.hardware)).order_by(Subject.id))).all()
-    resets = {row.subject_id: row for row in (await db.scalars(select(WarningReset))).all()}
-    counts = dict((await db.execute(select(AlertReview.subject_id, func.count())
+    # This directory needs names, not complete subject metadata. Project the
+    # JSON field in SQL so unrelated metadata is never loaded for alert pages.
+    subjects_query = (select(Subject, case(
+        (Person.subject_id.is_not(None), Person.data["name"]),
+        else_=HardwareAsset.data["name"],
+    ).label("subject_name"))
+        .outerjoin(Person, Person.subject_id == Subject.id)
+        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
+        .order_by(Subject.id))
+    focused = subject_ids is not None or barcodes is not None
+    if focused:
+        subjects_query = subjects_query.where(or_(Subject.id.in_(subject_ids or []),
+            func.lower(Subject.barcode).in_(barcodes or [])))
+    subject_rows = await bounded_rows(db, subjects_query)
+    subjects = [row[0] for row in subject_rows]
+    names = {row[0].id: row[1] for row in subject_rows}
+    selected_ids = [subject.id for subject in subjects]
+    resets_query = select(WarningReset)
+    counts_query = select(AlertReview.subject_id, func.count())
+    if focused:
+        resets_query = resets_query.where(WarningReset.subject_id.in_(selected_ids))
+        counts_query = counts_query.where(AlertReview.subject_id.in_(selected_ids))
+    resets = {row[0].subject_id: row[0] for row in await bounded_rows(db, resets_query)}
+    # Bound the number of grouped subjects, never the history being counted.
+    counts = dict(await bounded_rows(db, counts_query
         .outerjoin(WarningReset, WarningReset.subject_id == AlertReview.subject_id)
         .where(AlertReview.decision == "confirmed", or_(WarningReset.reset_at.is_(None),
             AlertReview.reviewed_at > WarningReset.reset_at))
-        .group_by(AlertReview.subject_id))).all())
+        .group_by(AlertReview.subject_id)))
     restrictions = await entry_restrictions_for_subjects(db, [subject.id for subject in subjects])
     by_id = {subject.id: subject for subject in subjects}
     by_barcode = {}
     summaries = {}
     for subject in subjects:
         by_barcode.setdefault(subject.barcode.lower(), []).append(subject)
-        metadata = subject.person.data if subject.person else subject.hardware.data if subject.hardware else {}
         reset = resets.get(subject.id)
-        summary = {"subjectId": subject.id, "subjectName": metadata.get("name") or subject.barcode,
+        summary = {"subjectId": subject.id, "subjectName": names[subject.id] or subject.barcode,
             "subjectType": subject.kind, "barcode": subject.barcode,
             "count": counts.get(subject.id, 0), "entryRestriction": restrictions.get(subject.id)}
         if reset:
@@ -115,12 +137,20 @@ async def warning_directory(db):
     return subjects, by_id, by_barcode, summaries, resets
 
 
-async def enrich_alert_documents(db, alerts):
-    """Return alert items and all employee/hardware warning summaries in bulk."""
-    _, by_id, by_barcode, summaries, resets = await warning_directory(db)
+async def enrich_alert_documents(db, alerts, *, focused=False, subject_ids=None):
+    """Return alert items and all registered-subject warning summaries in bulk."""
     ids = [alert.id for alert in alerts]
-    reviews = {row.alert_id: row for row in (await db.scalars(
-        select(AlertReview).where(AlertReview.alert_id.in_(ids)))).all()} if ids else {}
+    if not focused:
+        _, by_id, by_barcode, summaries, resets = await warning_directory(db)
+    reviews = {row[0].alert_id: row[0] for row in await bounded_rows(db,
+        select(AlertReview).where(AlertReview.alert_id.in_(ids)))} if ids else {}
+    if focused:
+        bindings = [_binding(alert.data or {}) for alert in alerts]
+        selected_ids = set(subject_ids or []) | {review.subject_id for review in reviews.values() if review.subject_id}
+        selected_ids.update(binding[1] for binding in bindings if binding and binding[0] == "id")
+        barcodes = {binding[1] for binding in bindings if binding and binding[0] == "barcode"}
+        _, by_id, by_barcode, summaries, resets = await warning_directory(db,
+            subject_ids=sorted(selected_ids), barcodes=sorted(barcodes))
     items = []
     for alert in alerts:
         review = reviews.get(alert.id)
@@ -150,8 +180,61 @@ async def enrich_alert_documents(db, alerts):
             # These fields are server-owned, not proof of a ledger decision.
             data.pop("review", None)
         items.append(data)
-    warnings = [summary for summary in summaries.values() if summary["subjectType"] in ("employee", "hardware")]
+    warnings = [summary for summary in summaries.values() if summary["subjectType"] in ("employee", "visitor", "hardware")]
     return {"items": items, "warnings": warnings}
+
+
+async def _require_previous_alerts_reviewed(db, alert, subject):
+    """Require a final accept/excuse decision on every earlier alert for this subject."""
+    status = Alert.data["status"].astext
+    explicit_subject = func.btrim(Alert.data["subjectId"].astext) == subject.id
+    no_explicit_subject = or_(Alert.data["subjectId"].astext.is_(None), Alert.data["subjectId"].astext == "")
+    legacy_barcode = and_(no_explicit_subject,
+        func.lower(func.btrim(Alert.data["barcode"].astext)) == subject.barcode.lower())
+    earlier = or_(Alert.created_at < alert.created_at,
+        and_(Alert.created_at == alert.created_at, Alert.id < alert.id))
+    already_reviewed = select(AlertReview.alert_id).where(AlertReview.alert_id == Alert.id).exists()
+    pending = await db.scalar(select(Alert.id).where(
+        Alert.id != alert.id,
+        earlier,
+        or_(status.in_(("open", "acknowledged")), status.is_(None)),
+        or_(explicit_subject, legacy_barcode),
+        ~already_reviewed,
+    ).order_by(Alert.created_at, Alert.id).limit(1))
+    if pending:
+        raise HTTPException(409, "Review earlier alerts for this person before acting on a newer alert")
+
+
+async def acknowledge_alert(db, alert_id):
+    """Acknowledge an open alert, serializing against reviews and warning resets."""
+    alert = await db.get(Alert, alert_id)
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    binding = _binding(alert.data or {})
+    subject = await _resolve_subject(db, binding)
+    if subject:
+        subject = await db.scalar(select(Subject).where(Subject.id == subject.id).with_for_update()
+            .execution_options(populate_existing=True))
+        if subject and binding[0] == "barcode" and subject.barcode.lower() != binding[1]:
+            raise HTTPException(409, "The alert subject changed; refresh before acknowledging")
+    alert = await db.scalar(select(Alert).where(Alert.id == alert_id).with_for_update()
+        .execution_options(populate_existing=True))
+    if not alert:
+        raise HTTPException(404, "Alert not found")
+    if _binding(alert.data or {}) != binding:
+        raise HTTPException(409, "The alert subject changed; refresh before acknowledging")
+    if await db.get(AlertReview, alert_id, populate_existing=True):
+        raise HTTPException(409, "Reviewed alerts are final; reset the subject warnings to clear accepted warnings")
+    if (alert.data or {}).get("status") == "acknowledged":
+        return (await enrich_alert_documents(db, [alert]))["items"][0]
+    if subject:
+        await _require_previous_alerts_reviewed(db, alert, subject)
+        warning_count = await confirmed_warning_count(db, subject.id)
+        if warning_count >= CONFIRMED_WARNING_ENTRY_THRESHOLD:
+            raise HTTPException(409, "Reset this person's confirmed warnings before acknowledging another alert")
+    alert.data = {**(alert.data or {}), "status": "acknowledged", "id": alert.id}
+    await db.flush()
+    return (await enrich_alert_documents(db, [alert]))["items"][0]
 
 
 def _audit(actor, action, reason, *, subject=None, related_id=None, extra=None):
@@ -210,6 +293,11 @@ async def review_alert(db, alert_id, decision, actor, reason=None):
         raise HTTPException(409, "The alert subject changed; refresh before reviewing")
     if decision == "confirmed" and not subject:
         raise HTTPException(422, "A registered subject is required to confirm a warning")
+    if subject:
+        await _require_previous_alerts_reviewed(db, alert, subject)
+        warning_count = await confirmed_warning_count(db, subject.id)
+        if warning_count >= CONFIRMED_WARNING_ENTRY_THRESHOLD:
+            raise HTTPException(409, "Reset this person's confirmed warnings before reviewing another alert")
     # Read time after the serialization lock, not the transaction start time.
     now = datetime.now(timezone.utc)
     snapshot = {**(alert.data or {}), "id": alert.id}
@@ -247,7 +335,8 @@ async def reset_subject_warnings(db, subject_id, actor, reason):
     query = select(AlertReview).where(AlertReview.subject_id == subject_id, AlertReview.decision == "confirmed")
     if reset:
         query = query.where(AlertReview.reviewed_at > reset.reset_at)
-    current_reviews = (await db.scalars(query)).all()
+    current_reviews = [row[0] for row in await bounded_rows(db,
+        query.order_by(AlertReview.alert_id), maximum=settings.DATA_ANALYTICS_MAX_ROWS)]
     restriction = await db.get(CriticalEntryRestriction, subject_id, populate_existing=True)
     active_hold = restriction is not None and restriction.active
     if reset and not current_reviews and not active_hold:
@@ -260,12 +349,15 @@ async def reset_subject_warnings(db, subject_id, actor, reason):
     else:
         reset.reset_at, reset.reset_by, reset.reason = now, actor, reason
     # Keep original review/history, but reset accepted alerts leave active views.
-    ids = [review.alert_id for review in current_reviews]
     reset_document = {"resetAt": now.isoformat(), "resetBy": actor, "reason": reason}
     for review in current_reviews:
         review.alert_data = {**review.alert_data, "status": "acknowledged", "warningReset": reset_document}
-    if ids:
-        alerts = (await db.scalars(select(Alert).where(Alert.id.in_(ids)).order_by(Alert.id).with_for_update())).all()
+    if current_reviews:
+        # A SQL subquery avoids one bind parameter per retained review.
+        review_ids = query.with_only_columns(AlertReview.alert_id)
+        alerts = [row[0] for row in await bounded_rows(db,
+            select(Alert).where(Alert.id.in_(review_ids)).order_by(Alert.id).with_for_update(),
+            maximum=settings.DATA_ANALYTICS_MAX_ROWS)]
         for alert in alerts:
             if (alert.data or {}).get("status") == "warned":
                 alert.data = {**alert.data, "status": "acknowledged", "warningReset": reset_document}

@@ -43,7 +43,10 @@
 .field :is(input, select, textarea)[aria-invalid="true"] { border-color: var(--ui-text-danger); box-shadow: 0 0 0 1px var(--ui-text-danger); }
 .field :is(input, select, textarea):disabled { opacity: .5; cursor: not-allowed; }
 .field select option { background: var(--admin-bg); color: var(--ui-text-primary); }
-.dates, .visitorFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.dates, .visitorFields, .creationFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.creationFieldSpan { grid-column: 1 / -1; }
+.trigger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 19px; border: 1px solid var(--admin-text); border-radius: 11px; background: var(--admin-text); color: var(--admin-bg); font-size: 15px; font-weight: var(--weight-bold); white-space: nowrap; cursor: pointer; transition: opacity 150ms ease; }
+.trigger:hover { opacity: .85; }
 .permanentToggle { display: inline-flex; align-items: center; gap: 8px; width: fit-content; min-height: 24px; margin-top: 2px; color: var(--ui-text-secondary); font-size: 15px; font-weight: var(--weight-semibold); cursor: pointer; }
 .permanentToggle input { width: 16px; height: 16px; min-height: 16px; margin: 0; padding: 0; accent-color: var(--admin-text); }
 .permanentToggle input:focus-visible { outline: 2px solid var(--ui-text-accent); outline-offset: 3px; }
@@ -58,6 +61,9 @@
 .currentAccess p { margin: 2px 0; }
 .currentAccess p strong { color: var(--ui-text-primary); font-weight: var(--weight-semibold); }
 .currentAccessWindow { display: flex; flex-wrap: wrap; column-gap: 18px; row-gap: 2px; }
+.revokeAction { display: inline-flex; align-items: center; justify-self: start; gap: 8px; min-height: 38px; margin-top: 8px; padding: 7px 12px; border: 1px solid color-mix(in srgb, var(--ui-text-danger) 36%, var(--admin-line)); border-radius: 10px; background: transparent; color: var(--ui-text-danger); font: inherit; font-size: 14px; font-weight: var(--weight-bold); cursor: pointer; }
+.revokeAction:hover:not(:disabled) { border-color: var(--ui-text-danger); background: color-mix(in srgb, var(--ui-text-danger) 7%, transparent); }
+.revokeAction:disabled { cursor: wait; opacity: .6; }
 .reviewAction { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; padding: 0; border: 0; background: transparent; color: var(--ui-text-primary); font: inherit; font-weight: var(--weight-bold); cursor: pointer; }
 .reviewAction:hover { text-decoration: underline; text-underline-offset: 4px; }
 .error, .field .dateError { margin: 0; color: var(--ui-text-danger); font-size: 15px; font-weight: var(--weight-semibold); line-height: 1.5; }
@@ -84,9 +90,11 @@
   .typeChoice { display: flex; align-items: center; gap: 9px; min-height: 48px; padding: 10px; }
   .typeChoice svg { flex: 0 0 auto; }
   .body { padding: 20px 18px; gap: 17px; }
-  .dates, .visitorFields { grid-template-columns: minmax(0, 1fr); }
+  .dates, .visitorFields, .creationFields { grid-template-columns: minmax(0, 1fr); }
+  .creationFieldSpan { grid-column: 1; }
   .footer { gap: 8px; padding: 15px 18px; }
   .submitButton { flex: 1; }
 }
+@media (max-width: 767px) { .trigger { width: 100%; } }
 @media (max-width: 360px) { .headerIcon { display: none; }.typeChoice { gap: 6px; padding: 9px 7px; } }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; }.typeChoice, .field :is(input, select, textarea), .cancelButton, .submitButton { transition: none; } }

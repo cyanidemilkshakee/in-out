@@ -1,5 +1,11 @@
 import type { Session } from "next-auth"
 import type { JWT } from "next-auth/jwt"
+import { boundedIdentityResponse } from "./keycloakTokenValidation"
+
+export type KeycloakRefreshConfig = {
+  issuer?: string; clientId?: string; clientSecret?: string
+  validateAccessToken: (value: string, expectedSubject: string | undefined) => Promise<void>
+}
 
 export type RoleToken = JWT & {
   access_token?: string
@@ -11,6 +17,8 @@ export type RoleToken = JWT & {
   step_up_expires_at?: number
   step_up_duration_minutes?: number
   step_up_extension_seconds?: number
+  step_up_window_id?: string
+  step_up_intent_id?: string
   error?: "RefreshTokenError"
 }
 
@@ -24,6 +32,7 @@ export type AppSession = Session & {
   stepUpExpiresAt?: number
   stepUpDurationMinutes?: number
   stepUpExtensionSeconds?: number
+  stepUpWindowId?: string
   error?: "RefreshTokenError"
 }
 
@@ -33,7 +42,7 @@ function tokenClaims(value: unknown): Record<string, unknown> {
     const encoded = value.split(".")[1]
     if (!encoded) return {}
     const base64 = encoded.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(encoded.length / 4) * 4, "=")
-    const payload = JSON.parse(atob(base64))
+    const payload = JSON.parse(new TextDecoder().decode(Uint8Array.from(atob(base64), (character) => character.charCodeAt(0))))
     return payload && typeof payload === "object" ? payload as Record<string, unknown> : {}
   } catch {
     return {}
@@ -46,25 +55,28 @@ export function rolesFromAccessToken(value: unknown): string[] {
   return Array.isArray(roles) ? roles.filter((role): role is string => typeof role === "string") : []
 }
 
+export function subjectFromAccessToken(value: unknown): string | undefined {
+  const subject = tokenClaims(value).sub
+  return typeof subject === "string" && subject ? subject : undefined
+}
+
 /** Read auth_time from an OIDC token. For a fresh-login step-up, pass the
  * ID token: Keycloak normally places auth_time there, not in the access token.
  */
 export function authTimeFromToken(value: unknown): number | undefined {
   const authTime = tokenClaims(value).auth_time
-  return typeof authTime === "number" && Number.isFinite(authTime) ? authTime : undefined
+  return typeof authTime === "number" && Number.isSafeInteger(authTime) && authTime > 0 ? authTime : undefined
 }
 
-// Kept as a compatibility alias for existing callers. auth_time is usually
-// available only in the ID token, despite the historical function name.
-export const authTimeFromAccessToken = authTimeFromToken
-
 export function invalidSession(token: RoleToken, error: RoleToken["error"] = "RefreshTokenError"): RoleToken {
-  return { ...token, access_token: undefined, refresh_token: undefined, expires_at: undefined, roles: [], error }
+  return { ...token, access_token: undefined, refresh_token: undefined, expires_at: undefined, roles: [],
+    auth_time: undefined, step_up_expires_at: undefined, step_up_duration_minutes: undefined,
+    step_up_extension_seconds: undefined, step_up_window_id: undefined, step_up_intent_id: undefined, error }
 }
 
 export async function refreshKeycloakToken(
   token: RoleToken,
-  config: { issuer?: string; clientId?: string; clientSecret?: string },
+  config: KeycloakRefreshConfig,
   fetcher: typeof fetch = fetch,
   now = Date.now(),
 ): Promise<RoleToken> {
@@ -79,6 +91,7 @@ export async function refreshKeycloakToken(
       method: "POST",
       headers: { "Content-Type": "application/x-www-form-urlencoded" },
       cache: "no-store",
+      redirect: "error",
       signal: AbortSignal.timeout(10_000),
       body: new URLSearchParams({
         grant_type: "refresh_token", refresh_token: token.refresh_token,
@@ -86,22 +99,27 @@ export async function refreshKeycloakToken(
       }),
     })
     if (!response.ok) return invalidSession(token)
-    const refreshed = await response.json() as Record<string, unknown>
+    const refreshed = await (await boundedIdentityResponse(response)).json() as Record<string, unknown>
     if (typeof refreshed.access_token !== "string" || !refreshed.access_token ||
-        typeof refreshed.expires_in !== "number" || !Number.isFinite(refreshed.expires_in) || refreshed.expires_in <= 0 ||
+        typeof refreshed.expires_in !== "number" || !Number.isSafeInteger(refreshed.expires_in) || refreshed.expires_in <= 0 || refreshed.expires_in > 86_400 ||
         typeof refreshed.token_type !== "string" || refreshed.token_type.toLowerCase() !== "bearer" ||
         (refreshed.refresh_token !== undefined && (typeof refreshed.refresh_token !== "string" || !refreshed.refresh_token))) {
       return invalidSession(token)
     }
+    await config.validateAccessToken(refreshed.access_token, subjectFromAccessToken(token.access_token) ?? token.sub)
+    const refreshedAuthTime = authTimeFromToken(refreshed.access_token)
+    if (refreshedAuthTime !== undefined && token.auth_time !== undefined && refreshedAuthTime !== token.auth_time) return invalidSession(token)
+    const jwtExpiry = tokenClaims(refreshed.access_token).exp
+    const expiresAt = Math.floor(now / 1000) + refreshed.expires_in
     return {
       ...token,
       access_token: refreshed.access_token,
       refresh_token: (refreshed.refresh_token as string | undefined) ?? token.refresh_token,
-      expires_at: Math.floor(now / 1000) + refreshed.expires_in,
+      expires_at: typeof jwtExpiry === "number" && Number.isSafeInteger(jwtExpiry) ? Math.min(expiresAt, jwtExpiry) : expiresAt,
       roles: rolesFromAccessToken(refreshed.access_token),
       // Refresh responses generally do not carry auth_time. Preserve the
       // original authentication time unless the new token explicitly has it.
-      auth_time: authTimeFromToken(refreshed.access_token) ?? token.auth_time,
+      auth_time: token.auth_time ?? refreshedAuthTime,
       error: undefined,
     }
   } catch {
@@ -113,7 +131,10 @@ export function keycloakSession(session: Session, token: RoleToken, serverOnly: 
   // Only the server-only auth instance receives bearer and refresh tokens.
   return {
     user: session.user,
-    subject: token.error ? undefined : token.sub,
+    // The Python API authorizes and scopes terminal assignments using the
+    // bearer token's `sub`. Use that same principal in the browser so the UI,
+    // offline queue and API cannot disagree about which account is active.
+    subject: token.error ? undefined : subjectFromAccessToken(token.access_token) ?? token.sub,
     expires: session.expires,
     provider: token.provider,
     roles: token.error ? [] : token.roles ?? [],
@@ -122,7 +143,7 @@ export function keycloakSession(session: Session, token: RoleToken, serverOnly: 
     stepUpDurationMinutes: token.step_up_duration_minutes,
     stepUpExtensionSeconds: token.step_up_extension_seconds,
     error: token.error,
-    ...(serverOnly && !token.error ? { access_token: token.access_token, refresh_token: token.refresh_token } : {}),
+    ...(serverOnly && !token.error ? { access_token: token.access_token, refresh_token: token.refresh_token, stepUpWindowId: token.step_up_window_id } : {}),
   }
 }
 

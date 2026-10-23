@@ -27,7 +27,10 @@ function errorResponse(error: unknown) {
   const message = error instanceof Error ? error.message : "Profile request failed.";
   return NextResponse.json(
     { error: message },
-    { status: error instanceof PythonApiError || error instanceof RequestBodyError ? error.status : message.includes("already exists") ? 409 : 400 }
+    {
+      status: error instanceof PythonApiError || error instanceof RequestBodyError ? error.status : message.includes("already exists") ? 409 : 400,
+      headers: error instanceof PythonApiError && error.retryAfter ? { "Retry-After": error.retryAfter } : undefined,
+    }
   );
 }
 

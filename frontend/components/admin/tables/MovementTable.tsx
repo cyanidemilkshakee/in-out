@@ -103,7 +103,12 @@ export function MovementTable({
       case "date": return <td key={column} className="column-date" data-label="Date">{event.date}</td>;
       case "time": return <td key={column} className="column-time" data-label="Time">{event.time}</td>;
       case "createdAt": return <td key={column} className="column-createdAt" data-label="Created At">{event.createdAt}</td>;
-      case "name": return <td key={column} className="column-name" data-label="Name">{event.subjectName}</td>;
+      case "name": return <td key={column} className="column-name" data-label="Name">
+        {event.subjectName}
+        {event.subjectType === "hardware" && event.sourceEventId && <div>
+          <small>{event.carrierName ? `Carried by ${event.carrierName} · ` : ""}<a href={`/admin/logs?eventId=${encodeURIComponent(event.sourceEventId)}`}>Source scan</a></small>
+        </div>}
+      </td>;
       case "active": return <td key={column} className="column-active" data-label="Status">{renderStatus(event)}</td>;
       case "type": return <td key={column} className="column-type cell-capitalize" data-label="Type">{event.subjectType}</td>;
       case "result": return <td key={column} className="column-result" data-label="Result"><ResultPill value={event.result} /></td>;
@@ -117,7 +122,7 @@ export function MovementTable({
   };
 
   return (
-    <div className="admin-table-wrap table-wrap">
+    <div className="admin-table-wrap table-wrap scrollable-content">
       <table className={`data-table movement-table resizable density-${density}${layout === "logs" ? " movement-table--logs" : ""}`}>
         <thead>
           <tr>

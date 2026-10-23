@@ -55,8 +55,12 @@
 .account summary::-webkit-details-marker { display: none; }
 .account summary svg:first-child { width: 18px; height: 18px; }
 .account summary svg:last-child { width: 12px; height: 12px; }
-.accountMenu { position: absolute; z-index: 5; right: 0; top: 46px; width: 200px; border: 1px solid var(--admin-line); border-radius: var(--radius); background: var(--admin-bg); box-shadow: var(--admin-shadow); }
+.accountMenu { position: absolute; z-index: 5; right: 0; top: 46px; width: min(260px, calc(100vw - 24px)); overflow: hidden; border: 1px solid var(--admin-line); border-radius: var(--radius); background: var(--admin-bg); box-shadow: var(--admin-shadow); }
 .accountMenu > div { display: grid; gap: 2px; }
+.accountMenu > .accountIdentity { gap: 3px; padding: 12px 14px; border-bottom: 1px solid var(--admin-line); }
+.accountIdentity strong { color: var(--ui-text-primary); font-size: 14px; font-weight: var(--weight-bold); overflow-wrap: anywhere; }
+.accountIdentity span { color: var(--ui-text-secondary); font-size: 13px; overflow-wrap: anywhere; }
+.accountIdentity small { color: var(--ui-text-secondary); font-size: 12px; font-weight: var(--weight-semibold); }
 .accountMenu a, .accountMenu form button { width: 100%; border: 0; background: transparent; color: var(--ui-text-primary); text-align: left; font: inherit; font-size: 14px; }
 .accountMenu a:hover, .accountMenu form button:hover { background: var(--admin-surface-strong); }
 .adminAccountLinks { padding: 6px 6px 0; }
@@ -66,10 +70,6 @@
 .heading h1 { margin: 0; }
 .checkpointControl { display: grid; gap: 6px; }
 .checkpointControl > span:first-child { color: var(--ui-text-secondary); font-size: 13px; font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.5px; }
-.selectWrap { display: flex; align-items: center; position: relative; }
-.selectWrap select { width: 100%; appearance: none; border: 1px solid var(--admin-line); padding: 10px 36px 10px 13px; background: transparent; color: var(--ui-text-primary); cursor: pointer; text-overflow: ellipsis; }
-.selectWrap > svg { position: absolute; pointer-events: none; color: var(--ui-text-secondary); }
-.selectWrap option { color: var(--ui-text-primary); background: var(--admin-bg); }
 
 .connectionError { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 16px; padding: 11px 15px; border: 1px solid var(--admin-line); color: var(--ui-text-danger); font-size: 14px; font-weight: var(--weight-medium); }
 .connectionError span { overflow-wrap: anywhere; }
@@ -126,7 +126,7 @@
 .resultTitleLine { display: flex; align-items: center; flex-wrap: wrap; gap: 7px 10px; }
 .result h2 { margin: 0; color: var(--ui-text-primary); line-height: 1.1; }
 .result p { margin: 4px 0 0; color: var(--ui-text-secondary); font-weight: var(--weight-medium); line-height: 1.5; overflow-wrap: anywhere; }
-.adminOfflineNotice { grid-column: 2; grid-row: 3; justify-self: center; width: min(480px, calc(100% - 48px)); margin: 0 auto; color: var(--ui-text-danger); font-size: 14px; font-weight: var(--weight-bold); line-height: 1.35; overflow-wrap: anywhere; }
+.adminOfflineNotice { grid-column: 2; grid-row: 3; justify-self: center; width: max-content; max-width: 100%; margin: 0 auto; color: var(--ui-text-danger); font-size: 13px; font-weight: var(--weight-bold); line-height: 1.35; text-align: center; white-space: nowrap; }
 .resultSubject { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; margin-top: 2px; overflow-wrap: anywhere; }
 .resultSubject strong { font-size: 17px; font-weight: var(--weight-extrabold); }
 .resultSubject span { font-size: 13px; color: var(--ui-text-secondary); font-weight: var(--weight-medium); }
@@ -166,9 +166,10 @@
 
 .activityHeader { justify-content: space-between; gap: 12px; min-height: 57px; border-bottom: 1px solid var(--admin-line); }
 .count { display: grid; place-items: center; min-width: 20px; height: 20px; border-radius: var(--radius); padding: 0 5px; background: var(--admin-surface-strong); color: var(--ui-text-primary); font-size: 14px; font-weight: var(--weight-bold); }
-.activityHint { color: var(--ui-text-secondary); font-size: 13px; font-weight: var(--weight-medium); }
-.tableScroll { width: 100%; overflow-x: auto; }
+.activityHint { color: var(--ui-text-secondary); font-size: 15px; font-weight: var(--weight-medium); }
+.tableScroll { width: 100%; max-height: min(70dvh, 760px); overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .activityTable { width: 100%; border-collapse: collapse; text-align: left; font-size: 14px; }
+.activityTable thead th { position: sticky; top: 0; z-index: 1; background: var(--admin-bg); }
 .activityTable th { padding: 11px 0; color: var(--ui-text-secondary); font-weight: var(--weight-bold); text-transform: uppercase; letter-spacing: 0.4px; white-space: nowrap; }
 .activityTable td { padding: 13px 0; }
 .activityTable th:not(:last-child), .activityTable td:not(:last-child) { padding-right: 20px; }
@@ -231,12 +232,27 @@
 }
 .headingCopy { grid-column: 2; grid-row: 1; text-align: center; }
 .heading h1 { font-size: clamp(34px, 3.15vw, 52px); font-weight: var(--weight-black); line-height: 1; letter-spacing: -2px; }
-.checkpointGroup { display: grid; grid-column: 1; grid-row: 2; width: min(260px, 100%); gap: 12px; min-width: 0; }
-.checkpointControl { width: 100%; max-width: none; min-width: 0; margin: 0; }
+.registerVisitorButton { grid-column: 1; grid-row: 2; justify-self: start; align-self: start; }
+.checkpointControl { grid-column: 2; grid-row: 2; justify-self: center; width: min(260px, 100%); max-width: none; min-width: 0; margin: 0; }
+.registrationNotice { grid-column: 2; grid-row: 3; justify-self: center; width: min(480px, 100%); }
 .assignedCheckpoint { display: block; min-height: 51px; border: 1px solid var(--admin-line); border-radius: var(--radius); padding: 13px 17px; color: var(--ui-text-primary); font-size: var(--type-16); font-weight: var(--weight-bold); }
 .checkpointControl small { color: var(--ui-text-secondary); font-size: 13px; line-height: 1.5; }
-.selectWrap select { min-height: 51px; border-radius: var(--radius); padding-left: 17px; font-size: 16px; font-weight: var(--weight-bold); }
-.selectWrap > svg { right: 15px; width: 17px; height: 17px; }
+.visitorRoster { grid-column: 1; grid-row: 1 / span 3; align-self: center; min-width: 0; max-height: min(60dvh, 540px); margin: 0; overflow: hidden; border: 1px solid var(--admin-line); border-radius: var(--radius); background: var(--admin-surface); }
+.visitorRosterHeader { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; min-height: 44px; padding: 9px 14px; border-bottom: 1px solid var(--admin-line); }
+.visitorRosterHeader h2 { margin: 0; color: var(--ui-text-primary); font-size: 15px; font-weight: var(--weight-extrabold); }
+.visitorRosterHeader > span { color: var(--ui-text-secondary); font-size: 13px; font-weight: var(--weight-semibold); }
+.visitorRosterList { display: grid; max-height: min(54dvh, 480px); overflow: auto; margin: 0; padding: 0 14px; list-style: none; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-line-strong) transparent; }
+.visitorRosterList > li { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--admin-line); }
+.visitorRosterList > li:last-child { border-bottom: 0; }
+.visitorRosterIdentity { display: grid; gap: 3px; min-width: 0; }
+.visitorRosterIdentity strong { display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 9px; color: var(--ui-text-primary); font-size: 14px; font-weight: var(--weight-extrabold); overflow-wrap: anywhere; }
+.visitorRosterIdentity strong span { color: var(--ui-text-secondary); font-size: 13px; font-weight: var(--weight-semibold); }
+.visitorRosterIdentity small { color: var(--ui-text-secondary); font-size: 12px; font-weight: var(--weight-medium); line-height: 1.4; overflow-wrap: anywhere; }
+.visitorRosterStatus { flex: 0 0 auto; padding: 4px 8px; border-radius: var(--radius); background: color-mix(in srgb, var(--ui-text-positive) 8%, transparent); color: var(--ui-text-positive); font-size: 12px; font-weight: var(--weight-bold); white-space: nowrap; }
+.visitorRosterStatus[data-status="pending"] { background: color-mix(in srgb, var(--ui-text-warning) 9%, transparent); color: var(--ui-text-warning); }
+.visitorRosterStatus[data-status="denied"], .visitorRosterStatus[data-status="restricted"] { background: color-mix(in srgb, var(--ui-text-danger) 8%, transparent); color: var(--ui-text-danger); }
+.visitorRosterStatus[data-status="expired"], .visitorRosterStatus[data-status="inactive"] { background: var(--admin-surface-strong); color: var(--ui-text-secondary); }
+.visitorRosterEmpty { justify-content: flex-start !important; color: var(--ui-text-secondary); font-size: 13px; }
 
 .queueStatus {
   position: absolute;
@@ -259,14 +275,15 @@
 .scanWorkspace {
   --terminal-stack-gap: clamp(28px, 3.5vw, 40px);
   display: grid;
-  grid-template-columns: minmax(48px, 1fr) minmax(400px, 620px) minmax(265px, 400px);
-  grid-template-rows: auto auto;
+  grid-template-columns: minmax(220px, 1fr) minmax(400px, 2.4fr) minmax(265px, 1fr);
+  grid-template-rows: auto auto auto;
   column-gap: clamp(28px, 5vw, 90px);
+  row-gap: clamp(16px, 2vw, 28px);
   align-items: center;
   min-height: 300px;
   padding-block: var(--terminal-stack-gap);
 }
-.scanSection { grid-column: 2; grid-row: 2; min-width: 0; padding: 0; border: 0; }
+.scanSection { grid-column: 2; grid-row: 1; min-width: 0; padding: 0; border: 0; }
 .scanForm { display: grid; gap: 11px; }
 .fieldLabel { display: none; }
 .barcodeInput { min-height: 65px; gap: 13px; padding: 5px 8px 5px 18px; border-color: var(--admin-text); border-radius: var(--radius); background: color-mix(in srgb, var(--admin-bg) 88%, white); box-shadow: 0 0 0 3px color-mix(in srgb, var(--admin-text) 4%, transparent); }
@@ -276,17 +293,17 @@
 .submitButton svg { width: 19px; height: 19px; }
 .submitButton:hover:not(:disabled) { transform: translateX(2px); }
 .submitButton:disabled { cursor: not-allowed; opacity: .58; }
-.result { grid-column: 2; grid-row: 1; min-height: 0; margin-bottom: 14px; padding: 0; }
+.result { grid-column: 2; grid-row: 2; min-height: 0; margin-bottom: 0; padding: 0; }
 .resultEyebrow { display: none; }
 .resultBody { align-items: center; gap: 17px; }
 .resultIcon { width: 72px; height: 72px; border-radius: var(--radius); }
 .resultIcon svg { width: 31px; height: 31px; }
 .result h2 { font-size: clamp(25px, 2vw, 34px); font-weight: var(--weight-black); letter-spacing: -1.2px; }
-.result p { max-width: 430px; font-size: var(--type-15); }
+.result p { max-width: 620px; font-size: var(--type-15); }
 .resultActions { margin-top: 8px; }
-.reviewNote { width: min(100%, 430px); }
+.reviewNote { width: min(100%, 620px); }
 
-.pendingPanel { grid-column: 3; grid-row: 1 / span 2; align-self: stretch; display: flex; flex-direction: column; min-height: 230px; border: 1px solid var(--admin-line-strong); }
+.pendingPanel { grid-column: 3; grid-row: 1 / span 3; align-self: center; display: flex; flex-direction: column; width: 100%; max-height: min(68dvh, 600px); min-height: 230px; border: 1px solid var(--admin-line-strong); }
 .pendingPanelHeader { display: flex; align-items: center; justify-content: center; min-height: 36px; border-bottom: 1px solid var(--admin-line); }
 .pendingPanelHeader h2 { margin: 0; color: var(--ui-text-primary); font-size: var(--type-15); font-weight: var(--weight-extrabold); letter-spacing: -.2px; }
 .pendingEmpty { display: grid; flex: 1; place-content: center; justify-items: center; padding: 25px 14px; text-align: center; }
@@ -298,7 +315,7 @@
 .pendingIdentity { display: grid; min-width: 0; gap: 3px; }
 .pendingIdentity strong { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; color: var(--ui-text-primary); font-size: 13px; font-weight: var(--weight-extrabold); overflow-wrap: anywhere; }
 .pendingIdentity strong > span { color: var(--ui-text-secondary); font-size: 13px; font-weight: var(--weight-semibold); }
-.notificationList { max-height: 300px; overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
+.notificationList { max-height: min(52dvh, 420px); overflow-y: auto; overscroll-behavior: contain; padding-right: 2px; }
 .notificationMeta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-bottom: 3px; }
 .notificationMeta .status { font-size: 13px; }
 .notificationMeta time { color: var(--ui-text-secondary); font-size: 13px; font-weight: var(--weight-semibold); white-space: nowrap; }
@@ -322,7 +339,7 @@
 
 .activity { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 40px; padding-top: 0; }
 .activityColumn { min-width: 0; }
-.activityHeader h2 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ui-text-primary); font-size: 14px; font-weight: var(--weight-extrabold); }
+.activityHeader h2 { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ui-text-primary); font-size: 16px; font-weight: var(--weight-extrabold); }
 .activityTable th { font-size: 13px; }
 
 .scanFeedback { position: fixed; z-index: 50; inset: 0; display: grid; place-items: center; overflow: hidden; pointer-events: none; color: var(--ui-text-positive); background: radial-gradient(circle at 50% 48%, color-mix(in srgb, var(--terminal-success) 17%, transparent), color-mix(in srgb, var(--terminal-success) 6%, transparent) 42%, transparent 74%); animation: feedbackWash 2400ms ease-out both; }
@@ -359,10 +376,13 @@
 
 @media (max-width: 1199px) {
   .heading { grid-template-columns: minmax(190px, 1fr) minmax(320px, 1.4fr) minmax(160px, .6fr); }
-  .scanWorkspace { grid-template-columns: minmax(0, 1fr) minmax(250px, 330px); column-gap: 36px; row-gap: var(--terminal-stack-gap); }
-  .scanSection, .result { grid-column: 1; }
-  .adminOfflineNotice { grid-column: 1; grid-row: 3; }
-  .pendingPanel { grid-column: 2; }
+  .scanWorkspace { grid-template-columns: minmax(0, 1fr) minmax(250px, 330px); grid-template-rows: auto auto auto auto; column-gap: 36px; row-gap: var(--terminal-stack-gap); }
+  .visitorRoster { grid-column: 1 / -1; grid-row: 1; max-height: min(36dvh, 360px); }
+  .visitorRosterList { max-height: min(30dvh, 280px); }
+  .scanSection { grid-column: 1; grid-row: 2; }
+  .result { grid-column: 1; grid-row: 3; }
+  .adminOfflineNotice { grid-column: 1; grid-row: 4; }
+  .pendingPanel { grid-column: 2; grid-row: 2 / span 3; align-self: center; }
   .activity { gap: 32px; }
 }
 @media (max-width: 767px) {
@@ -371,11 +391,15 @@
   .heading { display: flex; min-height: 0; flex-direction: column; align-items: stretch; gap: 24px; padding: 24px 0; }
   .headingCopy { text-align: left; }
   .heading h1 { }
-  .checkpointGroup { width: 100%; justify-self: stretch; }
-  .checkpointControl { width: 100%; margin: 0; }
+  .registerVisitorButton { align-self: flex-start; }
+  .checkpointControl { align-self: center; width: min(260px, 100%); }
+  .registrationNotice { align-self: center; }
   .scanWorkspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto; gap: var(--terminal-stack-gap); }
-  .result, .scanSection, .pendingPanel { grid-column: 1; grid-row: auto; }
+  .visitorRoster, .result, .scanSection, .pendingPanel { grid-column: 1; grid-row: auto; }
+  .visitorRoster { max-height: min(42dvh, 360px); }
+  .visitorRosterList { max-height: min(36dvh, 300px); }
   .adminOfflineNotice { grid-column: 1; grid-row: auto; }
+  .adminOfflineNotice { width: min(100%, 480px); white-space: normal; }
   .result { margin-bottom: 0; padding: 0; }
   .pendingPanel { min-height: 200px; }
   .activity { grid-template-columns: minmax(0, 1fr); gap: 24px; }
@@ -399,32 +423,13 @@
 }
 @media (min-width: 1200px) {
   .scanWorkspace {
-    display: block;
-    position: relative;
-    min-height: 300px;
+    grid-template-columns: minmax(220px, 1fr) minmax(400px, 2.4fr) minmax(265px, 1fr);
+    column-gap: clamp(24px, 3vw, 60px);
+    min-height: 360px;
   }
-
-  .result {
-    width: min(480px, calc(100% - 48px));
-    min-height: 0;
-    margin: 0 auto var(--terminal-stack-gap);
-    padding: 0;
-  }
-
-  .scanSection {
-    width: min(930px, calc(100% - 48px));
-    margin: 0 auto;
-    padding: 0;
-    border: 0;
-  }
-
-  .pendingPanel {
-    position: absolute;
-    top: 24px;
-    right: 0;
-    width: min(400px, 24vw);
-    min-height: 230px;
-  }
+  .visitorRoster { width: 100%; }
+  .scanSection { width: 100%; margin: 0; }
+  .result { width: 100%; margin: 0; }
 }
 .entryHoldNotice {
   padding: 10px 12px;
