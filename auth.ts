@@ -5,7 +5,6 @@ import { cookies } from "next/headers"
 import { authTimeFromToken, invalidSession, keycloakSession, rolesFromAccessToken, subjectFromAccessToken, type RoleToken } from "./lib/keycloakSession"
 import { refreshKeycloakTokenSingleFlight } from "./lib/keycloakRefresh"
 import { completedStepUpWindow, USER_MANAGEMENT_STEP_UP_COOKIE, verifyStepUpIntent } from "./lib/userManagementStepUp"
-import { matchesAdminStepUpIdentity } from "./lib/authCallbackSession"
 import { safeAuthRedirect } from "./lib/authRequestBoundary"
 import { boundedIdentityResponse, verifyKeycloakToken, verifyKeycloakTokenPair } from "./lib/keycloakTokenValidation"
 import { authenticateKeycloakCredentials, KeycloakCredentialsError, type VerifiedCredentials } from "./lib/keycloakCredentials"
@@ -57,29 +56,17 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
     session: { strategy: "jwt" },
     providers: keycloakConfigured ? [Credentials({
       name: "InOut",
-      credentials: { username: {}, password: { type: "password" }, otp: {}, stepUp: {} },
+      credentials: { username: {}, password: { type: "password" }, otp: {} },
       async authorize(credentials) {
-        let identity: VerifiedCredentials
         try {
-          identity = await authenticateKeycloakCredentials(credentials, {
+          const identity = await authenticateKeycloakCredentials(credentials, {
             issuer: keycloakPublicIssuer!, clientId: process.env.KEYCLOAK_CLIENT_ID!,
             clientSecret: process.env.KEYCLOAK_CLIENT_SECRET!, jwksIssuer: process.env.KEYCLOAK_JWKS_BASE,
           })
+          return { id: identity.id, name: identity.name, email: identity.email, verifiedIdentity: identity }
         } catch (error) {
           throw new AppCredentialsSignin(error instanceof KeycloakCredentialsError ? error.code : "service_unavailable")
         }
-        if (credentials?.stepUp === "1") {
-          const secret = process.env.AUTH_SECRET
-          const cookieStore = await cookies()
-          const intent = secret
-            ? await verifyStepUpIntent(cookieStore.get(USER_MANAGEMENT_STEP_UP_COOKIE)?.value, secret)
-            : null
-          if (!intent) throw new AppCredentialsSignin("step_up_expired")
-          if (!matchesAdminStepUpIdentity(intent, identity.id, identity.roles)) {
-            throw new AppCredentialsSignin("step_up_account_mismatch")
-          }
-        }
-        return { id: identity.id, name: identity.name, email: identity.email, verifiedIdentity: identity }
       },
     }), Keycloak({
       clientId: process.env.KEYCLOAK_CLIENT_ID!,

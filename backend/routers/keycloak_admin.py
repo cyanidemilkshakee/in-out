@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import unicodedata
 from typing import Annotated, Any, Literal
 import time
 from urllib.parse import quote
@@ -19,38 +18,26 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-from auth import verify_admin_request
+from auth import has_master_admin_role, verify_admin_request
 from config import settings
 from database import get_db
-from data_limits import precharge_mutation_response
 from keycloak_http import get_keycloak_admin_client
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from models import TerminalCheckpointAssignment
+from models import Checkpoint, OrganizationZone, TerminalCheckpointAssignment, ZoneAdminAssignment
 from event_outbox import enqueue_changed
-from terminal_assignments import enqueue_checkpoint_assignment, set_checkpoint_assignment
+from terminal_assignments import publish_checkpoint_assignment, enqueue_checkpoint_assignment, set_checkpoint_assignment
 from user_management_step_up import verified_user_management_window
 from user_management_locks import get_window_guard_db, require_unlocked_window
-from user_management_policy import can_manage_user, can_update_user_fields
-from zone_access import require_checkpoint_scope
-from token_revocation import revoke_principal_tokens
+from user_management_policy import MASTER_ADMIN_ROLE, can_manage_user, can_update_user_fields
+from zone_access import admin_zone_ids, require_checkpoint_scope
 
 router = APIRouter(prefix="/v1/keycloak", tags=["keycloak"])
 _bearer = HTTPBearer(auto_error=False)
-APP_ROLES = frozenset({"admin", "operator"})
+APP_ROLES = frozenset({"admin", "operator", MASTER_ADMIN_ROLE})
 ASSIGNABLE_ROLES = frozenset({"admin", "operator"})
 CheckpointId = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
 logger = logging.getLogger(__name__)
-PASSWORD_POLICY_ERROR = "Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a symbol."
-
-
-def _validate_password_policy(value: str) -> str:
-    if (len(value) < 8 or len(value) > 128 or not any(char.isupper() for char in value) or
-            not any(char.islower() for char in value) or
-            not any(unicodedata.category(char).startswith("N") for char in value) or
-            not any(unicodedata.category(char)[0] in {"P", "S"} for char in value)):
-        raise ValueError(PASSWORD_POLICY_ERROR)
-    return value
 
 
 class UserCreateRequest(BaseModel):
@@ -64,6 +51,7 @@ class UserCreateRequest(BaseModel):
     roles: list[Literal["admin", "operator"]] = Field(default_factory=list)
     enabled: bool = True
     checkpoint_id: CheckpointId | None = Field(None, alias="checkpointId")
+    zone_ids: list[str] = Field(default_factory=list, alias="zoneIds", max_length=100)
 
     @field_validator("email")
     @classmethod
@@ -86,12 +74,20 @@ class UserUpdateRequest(BaseModel):
     enabled: bool | None = None
     checkpoint_id: CheckpointId | None = Field(None, alias="checkpointId")
     roles: list[Literal["admin", "operator"]] | None = None
+    zone_ids: list[str] | None = Field(None, alias="zoneIds", max_length=100)
 
     @field_validator("roles", mode="before")
     @classmethod
     def roles_not_null(cls, value: Any) -> Any:
         if value is None:
             raise ValueError("Roles must be a list when provided")
+        return value
+
+    @field_validator("zone_ids", mode="before")
+    @classmethod
+    def zone_ids_not_null(cls, value: Any) -> Any:
+        if value is None:
+            raise ValueError("Zone IDs must be a list when provided")
         return value
 
     @field_validator("email")
@@ -178,7 +174,7 @@ async def _request(token: str, method: str, path: str, payload: Any = None) -> h
 
 def _user_summary(user: dict[str, Any], roles: list[str] | None = None,
     checkpoint_id: str | None = None, can_manage: bool = False,
-    ) -> dict[str, Any]:
+    zone_ids: list[str] | None = None) -> dict[str, Any]:
     return {
         "id": user.get("id"),
         "username": user.get("username", ""),
@@ -189,6 +185,7 @@ def _user_summary(user: dict[str, Any], roles: list[str] | None = None,
         "emailVerified": bool(user.get("emailVerified", False)),
         "createdTimestamp": user.get("createdTimestamp"),
         "checkpointId": checkpoint_id,
+        "zoneIds": zone_ids or [],
         "canManage": can_manage,
         **({"roles": roles} if roles is not None else {}),
     }
@@ -202,7 +199,8 @@ async def _user_roles(token: str, user_id: str) -> list[str]:
 
 async def _replace_roles(token: str, user_id: str, requested: list[str], mutations: list[str] | None = None) -> list[str]:
     current_response = await _request(token, "GET", f"users/{quote(user_id, safe='')}/role-mappings/realm")
-    # Only supported application roles are mutable through this API.
+    # Only normal application roles are mutable here. master-admin is
+    # provisioned separately and cannot be granted or removed by this API.
     current = [role for role in current_response.json() if isinstance(role, dict) and role.get("name") in ASSIGNABLE_ROLES]
     role_models: list[dict[str, Any]] = []
     for role in sorted(set(requested)):
@@ -235,6 +233,15 @@ async def _lock_user(db: AsyncSession, user_id: str) -> None:
         {"identity": "keycloak-user:" + user_id})
 
 
+async def _replace_zone_assignments(db: AsyncSession, user_id: str, zone_ids: list[str], actor_id: str) -> None:
+    current = list(await db.scalars(select(ZoneAdminAssignment).where(
+        ZoneAdminAssignment.admin_subject == user_id).with_for_update()))
+    for assignment in current:
+        await db.delete(assignment)
+    for zone_id in zone_ids:
+        db.add(ZoneAdminAssignment(admin_subject=user_id, zone_id=zone_id, assigned_by=actor_id))
+
+
 def _profile_body(user: dict[str, Any]) -> dict[str, Any]:
     return {key: user.get(key, "" if key not in {"enabled", "emailVerified"} else False)
         for key in ("username", "firstName", "lastName", "email", "enabled", "emailVerified")}
@@ -264,6 +271,14 @@ async def list_users(
     assignments = (await db.execute(select(TerminalCheckpointAssignment)
         .where(TerminalCheckpointAssignment.terminal_identity.in_(identities)))).scalars().all()
     checkpoints = {assignment.terminal_identity: assignment.checkpoint_id for assignment in assignments}
+    checkpoint_rows = await db.scalars(select(Checkpoint).where(
+        Checkpoint.id.in_(set(checkpoints.values()) or {"__none__"})))
+    checkpoint_zones = {checkpoint.id: checkpoint.zone_id for checkpoint in checkpoint_rows}
+    zone_assignments = await db.scalars(select(ZoneAdminAssignment).where(
+        ZoneAdminAssignment.admin_subject.in_([user["id"] for user in users if isinstance(user.get("id"), str)] or ["__none__"])))
+    zones_by_user: dict[str, list[str]] = {}
+    for assignment in zone_assignments:
+        zones_by_user.setdefault(assignment.admin_subject, []).append(assignment.zone_id)
     role_limit = asyncio.Semaphore(8)
 
     async def user_roles(user_id: str) -> tuple[str, list[str]]:
@@ -272,13 +287,19 @@ async def list_users(
 
     user_ids = [user["id"] for user in users if isinstance(user.get("id"), str)]
     roles_by_user = dict(await asyncio.gather(*(user_roles(user_id) for user_id in user_ids)))
+    allowed_zones = await admin_zone_ids(db, actor)
+    if not has_master_admin_role(actor):
+        users = [user for user in users
+            if roles_by_user.get(user.get("id", ""), []) == ["operator"]
+            and checkpoint_zones.get(checkpoints.get("browser:" + user.get("id", ""), "")) in allowed_zones]
     return {
         "items": [
             _user_summary(
                 user,
                 roles_by_user.get(user.get("id", ""), []),
                 checkpoints.get("browser:" + user.get("id", "")),
-                can_manage_user(True, roles_by_user.get(user.get("id", ""), [])),
+                can_manage_user(has_master_admin_role(actor), roles_by_user.get(user.get("id", ""), [])),
+                zones_by_user.get(user.get("id", ""), []),
             )
             for user in users
         ],
@@ -294,30 +315,33 @@ async def get_user(user_id: str, token: str = Depends(_admin_context), db: Async
     assignment = await db.get(TerminalCheckpointAssignment, "browser:" + user_id)
     roles = await _user_roles(token, user_id)
     checkpoint_id = assignment.checkpoint_id if assignment else None
-    if not can_manage_user(True, roles):
+    if not can_manage_user(has_master_admin_role(actor), roles):
         raise HTTPException(404, "User not found")
+    if not has_master_admin_role(actor):
+        allowed_zones = await admin_zone_ids(db, actor)
+        checkpoint = await db.get(Checkpoint, checkpoint_id) if checkpoint_id else None
+        if roles != ["operator"] or checkpoint is None or checkpoint.zone_id not in allowed_zones:
+            raise HTTPException(404, "User not found")
+    zone_ids = list(await db.scalars(select(ZoneAdminAssignment.zone_id).where(
+        ZoneAdminAssignment.admin_subject == user_id).order_by(ZoneAdminAssignment.zone_id)))
     return _user_summary(user, roles, checkpoint_id,
-        can_manage_user(True, roles))
+        can_manage_user(has_master_admin_role(actor), roles), zone_ids)
 
 
 @router.post("/users", status_code=201)
 async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_context),
     db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
+    if not has_master_admin_role(actor):
+        raise HTTPException(403, "Only a master-admin can create identity accounts")
     if "operator" in payload.roles and not payload.checkpoint_id:
         raise HTTPException(422, "Assign a checkpoint when creating an operator account")
+    if "admin" in payload.roles and not payload.zone_ids:
+        raise HTTPException(422, "Assign at least one zone when creating an admin account")
+    if payload.zone_ids:
+        from access_validation import validate_registered_zones
+        payload.zone_ids = await validate_registered_zones(db, payload.zone_ids)
     if payload.checkpoint_id:
         await require_checkpoint_scope(db, actor, payload.checkpoint_id)
-    predicted = _user_summary({
-        "id": "0" * 36,
-        "username": payload.username,
-        "firstName": payload.first_name,
-        "lastName": payload.last_name,
-        "email": payload.email,
-        "enabled": payload.enabled,
-        "emailVerified": False,
-        "createdTimestamp": 9_999_999_999_999,
-    }, payload.roles, payload.checkpoint_id, can_manage_user(True, payload.roles))
-    await precharge_mutation_response(db, predicted)
     try:
         response = await _request(token, "POST", "users", {
             "username": payload.username,
@@ -345,16 +369,16 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
         if payload.checkpoint_id:
             await set_checkpoint_assignment(db, identity, payload.checkpoint_id, actor["sub"])
             await enqueue_checkpoint_assignment(db, identity)
-            # Persist the checkpoint before granting the operator role. This
-            # keeps a newly created operator from becoming usable until their
-            # terminal scope is durable.
-            await enqueue_changed(db)
-            await db.commit()
-            assignment_saved = True
+        if "admin" in payload.roles:
+            await _replace_zone_assignments(db, user_id, payload.zone_ids, actor["sub"])
         roles = await _replace_roles(token, user_id, payload.roles)
         if payload.enabled:
             await _request(token, "PUT", f"users/{quote(user_id, safe='')}", {"enabled": True})
         user = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
+        if payload.checkpoint_id or "admin" in payload.roles:
+            await enqueue_changed(db)
+            await db.commit()
+            assignment_saved = True
     except Exception as error:
         await db.rollback()
         cleanup_failed = False
@@ -371,9 +395,7 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
             try:
                 await set_checkpoint_assignment(db, identity, None, actor["sub"])
                 await enqueue_checkpoint_assignment(db, identity)
-                await enqueue_changed(db)
                 await db.commit()
-                assignment_saved = False
             except Exception:
                 cleanup_failed = True
                 await db.rollback()
@@ -381,7 +403,8 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
         if cleanup_failed:
             raise HTTPException(503, f"Creation incomplete. Recovery is required for Keycloak account {user_id} ({payload.username}); inspect the account before retrying.") from error
         raise _recovered_failure(error, "Creation was rolled back; the new account was removed. You can retry.") from error
-    return _user_summary(user, roles, payload.checkpoint_id, can_manage_user(True, roles))
+    return _user_summary(user, roles, payload.checkpoint_id, can_manage_user(True, roles),
+        payload.zone_ids if "admin" in roles else [])
 
 
 @router.patch("/users/{user_id}")
@@ -390,35 +413,59 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
     await _lock_user(db, user_id)
     current = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
     previous_roles = await _user_roles(token, user_id)
-    administrator = True
-    if not can_manage_user(administrator, previous_roles):
-        raise HTTPException(404, "User not found")
-    if not can_update_user_fields(administrator, previous_roles, payload.model_fields_set):
-        raise HTTPException(403, "This account cannot be managed")
+    master_admin = has_master_admin_role(actor)
+    if not can_manage_user(master_admin, previous_roles):
+        raise HTTPException(403, "This account can only be managed by a master-admin")
+    if not can_update_user_fields(master_admin, previous_roles, payload.model_fields_set):
+        raise HTTPException(403, "Admins may change only an operator's enabled state and checkpoint")
     assignment = await db.get(TerminalCheckpointAssignment, "browser:" + user_id, with_for_update=True)
     previous_checkpoint = assignment.checkpoint_id if assignment else None
+    previous_zones = list(await db.scalars(select(ZoneAdminAssignment.zone_id).where(
+        ZoneAdminAssignment.admin_subject == user_id).order_by(ZoneAdminAssignment.zone_id)))
     checkpoint = payload.checkpoint_id if "checkpoint_id" in payload.model_fields_set else previous_checkpoint
     requested_roles = sorted(set(payload.roles)) if payload.roles is not None else previous_roles
     if "operator" in requested_roles and not checkpoint:
         raise HTTPException(422, "Assign a checkpoint when granting or retaining the operator role")
+    if not master_admin:
+        allowed_zones = await admin_zone_ids(db, actor)
+        assigned_checkpoint = await db.get(Checkpoint, previous_checkpoint) if previous_checkpoint else None
+        if previous_roles != ["operator"] or assigned_checkpoint is None or assigned_checkpoint.zone_id not in allowed_zones:
+            raise HTTPException(404, "User not found")
     if checkpoint:
         await require_checkpoint_scope(db, actor, checkpoint)
+    if "admin" in requested_roles:
+        target_zones = payload.zone_ids if payload.zone_ids is not None else previous_zones
+        if not target_zones:
+            raise HTTPException(422, "Assign at least one zone to every admin account")
+        from access_validation import validate_registered_zones
+        target_zones = await validate_registered_zones(db, target_zones)
+    else:
+        target_zones = []
     updates = payload.model_dump(exclude_none=True)
-    body = {target: updates[source] for source, target in (
-        ("first_name", "firstName"), ("last_name", "lastName"), ("email", "email"), ("enabled", "enabled"),
-    ) if source in updates}
-    if "email" in updates and updates["email"] != current.get("email", ""):
-        body["emailVerified"] = False
-    predicted_user = {**current, **body}
-    predicted = _user_summary(predicted_user, requested_roles, checkpoint,
-        can_manage_user(administrator, requested_roles))
-    await precharge_mutation_response(db, predicted)
+    if master_admin:
+        body = {
+            "username": current.get("username", ""),
+            "firstName": updates.get("first_name", current.get("firstName", "")),
+            "lastName": updates.get("last_name", current.get("lastName", "")),
+            "email": updates.get("email", current.get("email", "")),
+            "enabled": updates.get("enabled", current.get("enabled", False)),
+            "emailVerified": current.get("emailVerified", False) if updates.get("email", current.get("email", "")) == current.get("email", "") else False,
+        }
+    else:
+        # Keep ordinary-admin provider writes limited to the one permitted
+        # Keycloak access flag. Checkpoint-only changes stay in PostgreSQL.
+        body = {"enabled": updates["enabled"]} if "enabled" in updates else {}
     checkpoint_changed = checkpoint != previous_checkpoint
+    zones_changed = target_zones != previous_zones
     profile_attempted = False
     role_mutations: list[str] = []
     try:
         if checkpoint_changed:
             await set_checkpoint_assignment(db, "browser:" + user_id, checkpoint, actor["sub"])
+        if zones_changed:
+            if not master_admin:
+                raise HTTPException(403, "Only a master-admin can assign administrator zones")
+            await _replace_zone_assignments(db, user_id, target_zones, actor["sub"])
         if body:
             profile_attempted = True
             try:
@@ -431,10 +478,11 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
             await _replace_roles(token, user_id, requested_roles, role_mutations)
         saved = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
         saved_roles = await _user_roles(token, user_id)
-        if requested_roles != previous_roles or "enabled" in body:
-            await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
-        if checkpoint_changed:
-            await enqueue_checkpoint_assignment(db, "browser:" + user_id)
+        if checkpoint_changed or zones_changed:
+            if checkpoint_changed:
+                await enqueue_checkpoint_assignment(db, "browser:" + user_id)
+            else:
+                await enqueue_changed(db)
             await db.commit()
     except Exception as error:
         recovery_failed = False
@@ -457,7 +505,7 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
             raise HTTPException(503, f"Save incomplete. Recovery is required for Keycloak account {user_id}; reload its current state and inspect it in Keycloak before retrying.") from error
         raise _recovered_failure(error, "Save was rolled back; the previous account settings were restored.") from error
     return _user_summary(saved, saved_roles, checkpoint,
-        can_manage_user(administrator, saved_roles))
+        can_manage_user(master_admin, saved_roles), target_zones)
 
 
 @router.put("/users/{user_id}/roles")
@@ -469,12 +517,11 @@ async def replace_user_roles(user_id: str, payload: RolesRequest, token: str = D
 
 @router.put("/users/{user_id}/password")
 async def reset_password(user_id: str, payload: PasswordResetRequest, token: str = Depends(_admin_context),
-    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
+    actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
+    if not has_master_admin_role(actor):
+        raise HTTPException(403, "Only a master-admin can reset account passwords")
     if not can_manage_user(True, await _user_roles(token, user_id)):
-        raise HTTPException(404, "User not found")
-    result = {"updated": True}
-    await precharge_mutation_response(db, result)
-    await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
+        raise HTTPException(403, "This account can only be managed through the master-admin bootstrap")
     await _request(token, "PUT", f"users/{quote(user_id, safe='')}/reset-password", {
         "type": "password", "value": payload.password, "temporary": payload.temporary,
     })
@@ -483,11 +530,10 @@ async def reset_password(user_id: str, payload: PasswordResetRequest, token: str
 
 @router.post("/users/{user_id}/logout")
 async def end_user_sessions(user_id: str, token: str = Depends(_admin_context),
-    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
+    actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
+    if not has_master_admin_role(actor):
+        raise HTTPException(403, "Only a master-admin can end account sessions")
     if not can_manage_user(True, await _user_roles(token, user_id)):
-        raise HTTPException(404, "User not found")
-    result = {"ended": True}
-    await precharge_mutation_response(db, result)
-    await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
+        raise HTTPException(403, "This account can only be managed through the master-admin bootstrap")
     await _request(token, "POST", f"users/{quote(user_id, safe='')}/logout")
     return result

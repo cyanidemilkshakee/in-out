@@ -19,7 +19,7 @@ class HardwareHistoryTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixtures.DatabaseTests.asyncTearDown
 
     async def _read(self, endpoint="/v1/movements", **params):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "history-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "history-admin"}
         response = await self.client.get(endpoint, params=params)
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
@@ -227,7 +227,7 @@ class HardwareHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_carried_asset_with_recorded_history_cannot_be_deleted(self):
         await self._scan()
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "history-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "history-admin"}
         response = await self.client.delete("/v1/registry/subjects/h1")
         self.assertEqual(response.status_code, 409, response.text)
         async with self.sessions() as db:
@@ -236,7 +236,7 @@ class HardwareHistoryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_unused_asset_is_still_deletable_after_an_unrelated_person_scan(self):
         await self._scan(hardware=[])
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "history-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "history-admin"}
         response = await self.client.delete("/v1/registry/subjects/h1")
         self.assertEqual(response.status_code, 204, response.text)
         async with self.sessions() as db:

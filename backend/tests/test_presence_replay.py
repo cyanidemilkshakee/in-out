@@ -56,15 +56,13 @@ class PresenceReplayTests(unittest.IsolatedAsyncioTestCase):
     async def test_out_of_order_publication_replays_missing_committed_predecessors(self):
         rows = [change(1, 0), change(3, 1), change(4, 3)]
         frames, _ = await self.collect([rows[2], rows[0], rows[2]], [0], rows)
-        data_frames = [frame for frame in frames if "data: " in frame and "event:" not in frame]
-        self.assertEqual([int(frame.split("id: ", 1)[1].split("\n", 1)[0]) for frame in data_frames], [1, 3, 4])
-        self.assertEqual([json.loads(frame.split("data: ", 1)[1].split("\n", 1)[0]) for frame in data_frames],
-                         [{"type": "data_changed"}] * 3)
+        data = [json.loads(frame.split("data: ")[1]) for frame in frames if "event:" not in frame]
+        self.assertEqual([row["revision"] for row in data], [1, 3, 4])
 
     async def test_heartbeat_repairs_committed_event_before_redis_delivery(self):
         row = change(2, 0)
         frames, _ = await self.collect([None], [0, 2], [row])
-        self.assertTrue(any("id: 2\n" in frame and '"type":"data_changed"' in frame for frame in frames))
+        self.assertTrue(any('"revision":2' in frame for frame in frames))
         self.assertEqual(frames[-1], ": heartbeat\n\n")
 
     async def test_unrecoverable_or_excessive_backlog_requires_snapshot(self):

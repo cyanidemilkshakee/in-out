@@ -5,7 +5,6 @@ import type { AppSession } from "../../lib/keycloakSession"
 import { safeAuthRedirect } from "../../lib/authRequestBoundary"
 import { isStepUpDurationMinutes } from "../../lib/userManagementStepUp"
 import { hasAdminAccess } from "../../lib/applicationRoles"
-import { LOGIN_FAILURE_MESSAGE } from "../../lib/loginMessages"
 
 export default async function LoginPage(props: {
   searchParams: Promise<{ from?: string; error?: string; stepUp?: string; durationMinutes?: string }>
@@ -19,7 +18,7 @@ export default async function LoginPage(props: {
 
   const errorMessages: Record<string, string> = {
     Configuration: "Sign-in is temporarily unavailable. Please try again later.",
-    default: LOGIN_FAILURE_MESSAGE,
+    default: "Sign-in failed. Please try again.",
   }
   const initialError = searchParams?.error
     ? Object.hasOwn(errorMessages, searchParams.error) ? errorMessages[searchParams.error] : errorMessages.default

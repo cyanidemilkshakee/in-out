@@ -7,7 +7,6 @@ from sqlalchemy.orm import selectinload
 from config import settings
 from critical_entry_restrictions import entry_restrictions_for_subjects
 from data_limits import bounded_rows
-from facility_zones import CHECKPOINT_IDS
 from models import AccessPermission, Checkpoint, HardwareAsset, Movement, Person, PresenceState, Subject
 from movement_analytics import FACILITY_ZONE, build_activity_days
 from movement_history import canonical_movement_filter, movement_history
@@ -186,9 +185,9 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
               "activityDays": activity_days, "averages": {subject_id: averages.get(subject_id) for subject_id in ids},
               "total": total, "limit": limit, "offset": offset,
               "checkpoints": [{**(checkpoint.data or {}), "id": checkpoint.id} for checkpoint in (await db.scalars(
-                  select(Checkpoint).where(Checkpoint.id.in_(CHECKPOINT_IDS),
+                  select(Checkpoint).where(Checkpoint.active.is_(True),
                       *([Checkpoint.zone_id.in_(zone_ids)] if zone_ids is not None else []))
-                  .order_by(Checkpoint.zone_id, Checkpoint.id))).all()]}
+                  .order_by(Checkpoint.zone_id, Checkpoint.number))).all()]}
     if include_overview:
         counter_filters = [Subject.kind == kind]
         if zone_ids is not None:

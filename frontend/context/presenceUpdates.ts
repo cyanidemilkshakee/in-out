@@ -136,7 +136,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
     }
   }
   return {
-    ...current, people, hardwareAssets, permissionRequests, terminalVisitors, alerts, permissions,
+    ...current, people, hardwareAssets, permissionRequests, alerts, permissions,
     ...(update.revision !== undefined ? { eventRevision: update.revision } : {}),
     movements: movement ? mergeById(current.movements, [movement]).slice(0, 100) : current.movements,
     scanAnalytics: { ...analytics, activeInside: Math.max(0, current.scanAnalytics.activeInside + occupancyDelta) },

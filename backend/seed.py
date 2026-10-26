@@ -19,12 +19,18 @@ async def seed_reference_data(engine) -> None:
     """Production-safe reference data required for the app to operate."""
     print("→ Seeding reference data...")
     async with engine.begin() as conn:
+        await conn.execute(text("""
+            INSERT INTO organization_zones (id, name) VALUES ('a', 'A'), ('b', 'B')
+            ON CONFLICT (id) DO NOTHING
+        """))
         for checkpoint in CHECKPOINTS:
             await conn.execute(text("""
-                INSERT INTO checkpoints (id, data)
-                VALUES (:id, CAST(:data AS jsonb))
+                INSERT INTO checkpoints (id, data, zone_id, number, gate_type, required, active)
+                VALUES (:id, CAST(:data AS jsonb), :zone_id, :number, :gate_type, :required, true)
                 ON CONFLICT (id) DO NOTHING
-            """), {"id": checkpoint["id"], "data": json.dumps({**checkpoint, "online": True})})
+            """), {"id": checkpoint["id"], "data": json.dumps({**checkpoint, "online": True}),
+                "zone_id": checkpoint["zone"], "number": checkpoint["number"],
+                "gate_type": checkpoint["gateType"], "required": checkpoint["required"]})
         await conn.execute(
             text(
                 """
@@ -50,7 +56,7 @@ async def seed_demo_data(engine) -> None:
     async with engine.begin() as conn:
         await _seed_registered_subject(conn, subject_id="seed-demo-employee", kind="employee",
             barcode="DEMO-BARCODE-123", permission_id="seed-demo-permission",
-            data={"name": "Demo Employee", "status": "active", "allowedZones": ["public", "secure"], "inside": False})
+            data={"name": "Demo Employee", "status": "active", "allowedZones": ["a", "b"], "inside": False})
 
 
 async def _seed_registered_subject(

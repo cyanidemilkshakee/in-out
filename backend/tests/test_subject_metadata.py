@@ -13,7 +13,7 @@ from models import AccessPermission, Checkpoint, Person, PresenceState, ScanRequ
 from schemas import BrowserScanPayload, SubjectCreate, SubjectUpdate
 from routers.registry import create_subject, get_subject, list_subjects, registry_bundle, update_subject
 from routers.permissions import list_permissions
-from permission_decisions import apply_permission_decision, decision_event, zone_permission_version
+from permission_decisions import apply_permission_decision, publish_decision, zone_permission_version
 from terminal_scans import record_scan
 from subject_metadata import validate_subject_metadata_size
 from database import database_engine_options
@@ -122,7 +122,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
             bundle = await registry_bundle(db, actor=ADMIN)
         self.assert_retired_absent(bundle["people"][0])
         self.assertEqual(bundle["people"][0]["type"], "employee")
-        db.execute.side_effect = [rows([("employee",)]), rows(), rows(), rows(), rows([(subject,)]), rows()]
+        db.execute.side_effect = [rows(), rows(), rows(), rows([(subject,)]), rows()]
         with patch("critical_entry_restrictions.entry_restrictions_for_subjects", new=AsyncMock(return_value={})):
             permissions = await list_permissions(db, ADMIN)
         self.assert_retired_absent(permissions["subjects"][0])
@@ -213,7 +213,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assert_retired_absent(subject.person.data)
         self.assertEqual(result["person"]["allowedZones"], ["secure"])
         self.assertEqual(result["permission"]["validTo"], end)
-        event = decision_event(result)
+        event = await publish_decision(result)
         self.assert_retired_absent(event["people"][0])
 
 

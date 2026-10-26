@@ -11,7 +11,7 @@ umask 077
 task_connection_rules='+auth +hello +ping +select +client|setinfo'
 {
   printf 'user default off\n'
-  printf 'user inout-quota on >%s ~inout:presence-lease:* ~inout:security-limits:* ~inout:auth:revocation:* -@all %s +eval +evalsha +get +mget +set +incr +incrby +ttl +pttl +expire +time +zremrangebyscore +zcard +zadd +zscore +zrem\n' "$REDIS_QUOTA_PASSWORD" "$task_connection_rules"
+  printf 'user inout-quota on >%s ~inout:presence-lease:* ~inout:security-limits:* -@all %s +eval +evalsha +get +set +incr +incrby +ttl +pttl +expire +time +zremrangebyscore +zcard +zadd +zscore +zrem\n' "$REDIS_QUOTA_PASSWORD" "$task_connection_rules"
   # Kong's synchronous bundled policy needs only its own expiring counters.
   printf 'user inout-gateway on >%s ~ratelimit:* -@all %s +eval +incr +expire +info\n' "$REDIS_GATEWAY_PASSWORD" "$task_connection_rules"
   printf 'user inout-events on >%s &presence:updates -@all %s +publish +subscribe +unsubscribe +pubsub\n' "$REDIS_EVENTS_PASSWORD" "$task_connection_rules"

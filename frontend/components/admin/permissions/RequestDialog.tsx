@@ -4,9 +4,10 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ArrowRight, Boxes, Loader2, MapPin, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { useDataActions, useDataState } from "../../../context/DataContext";
 import type { AccessPermission, PermissionRequest, PermissionRequestInput } from "../../../../lib/types";
-import { FACILITY_ZONES, formatFacilityZones, normalizeFacilityZones } from "../../../../lib/facilityZones";
+import { facilityZoneLabel, formatFacilityZones, normalizeFacilityZones } from "../../../../lib/facilityZones";
 import { accessDateTimeLimits, accessWindowBounds, parseFacilityDateTime, validateAccessWindow, type DateRangeErrors } from "../../../../lib/dateTimeValidation";
 import { useDateTimeNow } from "../../../hooks/useDateTimeNow";
+import { useOrganizationZones } from "../../../hooks/useOrganizationZones";
 import { FacilityZoneSelection } from "./FacilityZoneSelection";
 import { facilityDateInput, facilityDateIso, permissionWindowLabels, REQUEST_LABELS } from "./requestPresentation";
 import styles from "./PermissionForm.module.css";
@@ -41,7 +42,9 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
 }) {
   const { people, hardwareAssets, checkpoints, permissions, permissionRequests } = useDataState();
   const { submitPermissionRequest, createVisitor, grantPermission, releaseEntryRestriction } = useDataActions();
-  const zoneChoices = FACILITY_ZONES;
+  const { zones: organizationZones } = useOrganizationZones();
+  const zoneChoices = organizationZones.length ? organizationZones : [...new Set(checkpoints.map((item) => item.zoneId ?? item.zone))]
+    .filter(Boolean).map((id) => ({ id, name: facilityZoneLabel(id), active: true, checkpoints: [] }));
   const isGrant = mode === "grant";
   const now = useDateTimeNow();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -94,7 +97,8 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
   const needsDateWindow = isVisitorType || type === "zone_access";
   const needsCheckpointField = !isGrant && !isVisitorType;
   const selectedZoneIds = normalizeFacilityZones(zones);
-  const visitorCheckpoint = checkpoints.find((item) => item.zone === selectedZoneIds[0]);
+  const visitorCheckpoint = checkpoints.find((item) => (item.zoneId ?? item.zone) === selectedZoneIds[0] && (item.required || item.number === 1))
+    ?? checkpoints.find((item) => (item.zoneId ?? item.zone) === selectedZoneIds[0]);
   const permissionCheckpointId = isVisitorType
     ? visitorCheckpoint?.id ?? ""
     : checkpointId;
@@ -357,11 +361,11 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
         <label className={styles.field}><span>Company</span><input className="admin-surface" maxLength={120} value={visitorDraft.company} disabled={busy} onChange={(event) => setVisitorDraft((current) => ({ ...current, company: event.target.value }))} /></label>
       </div>}
 
-      {needsCheckpointField && <label className={styles.field}><span>Checkpoint</span><select className="admin-surface" aria-invalid={invalidCheckpoint || undefined} required disabled={busy} value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)}><option value="">Choose a checkpoint</option>{checkpoints.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+      {needsCheckpointField && <label className={styles.field}><span>Checkpoint</span><select className="admin-surface" aria-invalid={invalidCheckpoint || undefined} required disabled={busy} value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)}><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((item) => <option key={item.id} value={item.id}>{facilityZoneLabel(item.zoneId ?? item.zone)} · {item.name}{item.gateLabel ? ` · ${item.gateLabel}` : ""}</option>)}</select></label>}
 
       {type === "hardware_custody" && <label className={styles.field}><span>{isGrant ? "New custodian" : "Requested custodian"}</span><select className="admin-surface" aria-invalid={invalidCarrier || undefined} required disabled={busy} value={carrierId} onChange={(event) => setCarrierId(event.target.value)}><option value="">Choose an employee</option>{people.filter((person) => person.type === "employee").map((person) => <option key={person.id} value={person.id} disabled={person.id === currentCustodianId}>{person.name} · {person.barcode}{person.id === currentCustodianId ? " · Current custodian" : ""}</option>)}</select></label>}
 
-      {needsZones && <FacilityZoneSelection label={type === "zone_access" ? "Zone access" : "Allowed zones"} value={zones} onChange={(next) => { setZones(next); setError(""); }} disabled={busy} invalid={invalidZones} />}
+      {needsZones && <FacilityZoneSelection label={type === "zone_access" ? "Zone access" : "Allowed zones"} value={zones} onChange={(next) => { setZones(next); setError(""); }} zones={zoneChoices} disabled={busy || !zoneChoices.length} invalid={invalidZones} />}
 
       {isVisitorAccess && visitorRequest && <div className={styles.notice}><strong>Approval already pending</strong><p>{isGrant ? `Grant permission will approve ${visitorRequest.subjectName}'s pending visitor request using the dates and zones selected here.` : `${visitorRequest.subjectName} is already awaiting review.`}</p>{!isGrant && <button type="button" className={styles.reviewAction} onClick={() => onReview(visitorRequest.id)}>Review pending permission <ArrowRight size={16} /></button>}</div>}
 

@@ -15,7 +15,7 @@ Approved database/workflow/queue changes, regression evidence and deployment req
 | Dashboard | Scan totals, entry/exit analytics, presence counts, and recent activity |
 | Registry | Employees, temporary visitors, hardware assets, and completed permission/grant history |
 | Permissions | Pending reviews, direct administrator grants, current access for every registered subject, and explicit critical-restriction release |
-| Checkpoint assignments | Assign operators and terminals to the facility's two fixed checkpoints |
+| Checkpoint management | Master-admin creation of checkpoints in either existing access zone; records become available for account assignment and scanning |
 | Security terminal | Barcode scanning, up to four optional carried-hardware barcodes, a fixed account-assigned checkpoint, automatic entry/exit decisions, and persistent results |
 | Movement logs | Search and filters, pagination, analytics, and movement notes |
 | Alerts and audit | Scheduled attendance rules, accept/excuse review, warning-count reset with critical-hold release, per-employee assignments, and Registry alert history; evaluation every five minutes |
@@ -28,19 +28,20 @@ Approved database/workflow/queue changes, regression evidence and deployment req
 | --- | --- |
 | `admin` realm role | All admin pages and `/terminal`; scans/manual reviews additionally require a checkpoint assignment |
 | `operator` realm role | `/terminal` and its scan/manual-review workflow; no admin pages |
-| Keycloak realm administrator (built-in) | Keycloak realm configuration and identity-provider administration |
+| `master-admin` realm role | All `admin` access plus step-up-protected admin/operator management and checkpoint creation |
+| Keycloak realm master administrator (built-in) | Keycloak configuration and identity management; distinct from the application's `master-admin` role |
 
 The `admin` role grants access to every application page, including the security terminal. Scanning requires a checkpoint assignment, and user management requires a recent reauthentication. The `operator` role grants terminal access without admin pages. Keycloak login accounts and registry people are separate: creating a login does not register a person for checkpoint access.
 
 **Manage users** offers unlock durations of **5, 10, 15, 20, or 30 minutes, or 1 hour**, defaulting to **5 minutes**. A new window starts at the fresh provider authentication time and keeps its expiry across reloads and token refreshes. While unlocked, choose from the same six choices under **Extend for** and press **Extend**. Completing a fresh app-form sign-in adds the selected duration to the captured active expiry; an expired or manually locked window starts fresh. Changing the selection alone keeps the old countdown. **Lock** takes effect immediately, including during longer windows. Starting an extension locks the current window until the fresh login completes; canceling that login leaves user management locked.
 
-While Manage users is unlocked, an administrator can assign an operator to one of the facility's fixed checkpoints. The assignment is recorded with audit evidence and becomes available to that account's terminal session.
+While Manage users is unlocked, a `master-admin` can use **Add checkpoint** to create a uniquely named checkpoint in the existing **Public** or **Secure** zone. The checkpoint is saved with an audit record and becomes available immediately for account assignment and terminal authorization. Checkpoints cannot be deleted, preserving movement and assignment history. Creating new zones is not supported.
 
 The local app runs at `app.localhost:1008` and Keycloak at `auth.localhost:1005`. These distinct hostnames separate normal app, identity and unrelated localhost cookies. Cookies remain shared between ports on the same hostname; this local HTTP deployment assumes trusted workstation processes.
 
 The Next.js runtime accepts up to **64 KiB of total request headers**, matching the gateway's allowance for a **32 KiB individual Cookie header** plus forwarded headers. Docker and the npm development/start commands use the same Node limit. Kong's **64 KiB response-header buffer** also accepts the complete block of chunked `Set-Cookie` headers. A session spread across Auth.js cookie chunks together with temporary OAuth state, PKCE, and nonce cookies must complete reauthentication without a `431` or an oversized-response `502`. After changing these settings, rebuild/recreate the app (`docker compose up -d --no-deps --build --wait app`) and recreate Kong (`docker compose up -d --no-deps --wait kong`); restarting old containers retains their previous limits.
 
-The facility has two fixed areas: **Main Entrance** (`public`, checkpoint `cp-main`) and **Server Room** (`secure`, checkpoint `server-room`). Access forms can select either or both areas. Legacy `main-gate` scans resolve to `cp-main`; old display-name permissions and `All Zones` normalize to these two identifiers.
+The facility has two zones: **Main Entrance** (`public`, seeded checkpoint `cp-main`) and **Server Room** (`secure`, seeded checkpoint `server-room`). Master-admins can add checkpoints within either zone; every checkpoint in a zone inherits that zone's building identity. Access forms select either or both zones. Legacy `main-gate` scans resolve to `cp-main`; old display-name permissions and `All Zones` normalize to these two identifiers.
 
 **Alert Command → Automated rules** includes two automatic building checks. A person recorded inside one building who scans at the other building generates a high-severity alert linked to that scan; the scan remains blocked. A visitor staying inside for **more than 12 continuous hours** generates one medium-severity alert per visit, at the next five-minute evaluation or an administrator's manual evaluation. Exits end the visit; denied scans, retries and redundant entries do not restart its clock. These rules apply automatically to their supported subjects and are independent of employee attendance selections.
 
@@ -152,11 +153,9 @@ For an **existing realm**, keep its current client secret from **Clients → ino
 
 Sign-in stays on the application's `/login` page with its own username/password form. The server exchanges those credentials, and an optional authenticator code, through the confidential `inout-frontend` client's Direct Access Grant. The form does not automatically redirect to Keycloak. Its credentials callback retains Auth.js CSRF checks, strict same-origin validation, bounded inputs, gateway throttling and cryptographic verification of the resulting tokens. The client secret stays on the server. Provider tokens are confined to server-side exchanges and encrypted HttpOnly session cookies, excluded from public session JSON; passwords are not stored in the session. Use HTTPS outside local development.
 
-For an existing realm, startup import does not overwrite clients: run `npm run keycloak:app-sign-in:apply` through the temporary admin gateway in step 3, then verify with `npm run keycloak:app-sign-in:check`. This enables Direct Access Grants for the confidential frontend client, removes the previous custom login setting when present, and preserves its secret, exact return URLs, scope mappings and unrelated attributes. Standard Flow with S256 stays available for Keycloak's recovery pages. Postman's public client keeps password grants disabled; implicit flow and service accounts remain disabled for the application client.
+For an existing realm, startup import does not overwrite clients: run `npm run keycloak:app-sign-in:apply` through the temporary admin gateway in step 3, then verify with `npm run keycloak:app-sign-in:check`. This enables Direct Access Grants for the confidential frontend client, removes the previous custom login setting when present, and preserves its secret, exact return URLs, scope mappings and unrelated attributes. Standard Flow with S256 stays available for optional built-in account setup and recovery. Postman's public client keeps password grants disabled; implicit flow and service accounts remain disabled for the application.
 
-Passwords must contain at least 8 characters, including an uppercase letter, a lowercase letter, a number, and a symbol. The app validates these requirements when setting or resetting a password, and Keycloak enforces the same policy. For an existing realm, run `npm run keycloak:password-policy:apply` through the temporary admin gateway and verify with `npm run keycloak:password-policy:check`. The policy also keeps the existing rule that a password cannot match the username or email.
-
-New users who must change a temporary password can complete that step on the app's `/login` page. This uses a separate confidential Keycloak client named `inout-account-setup`; create it with client authentication and service accounts enabled, both browser flows and Direct Access Grants disabled, and assign only `realm-management/manage-users` to its service account. Set its generated client secret as `KEYCLOAK_ACCOUNT_SETUP_CLIENT_SECRET` in `.env` and restart the app. The app verifies the temporary password through `inout-frontend`, then updates only the user's password and removes only the `UPDATE_PASSWORD` action. Accounts requiring authenticator enrollment or any other security action are refused and must be completed by an administrator. Already enrolled authenticator codes can be submitted on the app sign-in form. The login UI remains app-hosted; [Keycloak recommends Authorization Code over Direct Grant](https://www.keycloak.org/securing-apps/oidc-layers).
+Direct grants cannot finish Keycloak required actions such as first-login password changes or authenticator enrollment. When valid credentials require those actions, the app displays **Complete account setup** to open Keycloak's built-in pages. Already enrolled authenticator codes can be submitted directly with the password. This application-hosted form is an explicit product choice: [Keycloak recommends Authorization Code over Direct Grant](https://www.keycloak.org/securing-apps/oidc-layers).
 
 To send recovery emails, set `KEYCLOAK_SMTP_*` values in `.env` before running `npm run keycloak:recovery:apply`. Without an SMTP host and sender address, the recovery page is available but Keycloak cannot deliver reset emails. For an SMTP service outside Docker's internal networks, add `compose.keycloak-smtp.yaml` when starting the stack; it gives only Keycloak outbound connectivity. The recovery command updates only recovery and supplied SMTP settings while preserving users and clients.
 
@@ -185,14 +184,12 @@ Enable the separate loopback administration gateway for initial setup:
 docker compose -f compose.yaml -f compose.keycloak-admin.yaml up -d --wait keycloak-admin
 npm run keycloak:app-sign-in:apply
 npm run keycloak:app-sign-in:check
-npm run keycloak:password-policy:apply
-npm run keycloak:password-policy:check
 ```
 
 To enable password-reset email, configure the SMTP values in `.env` and also run `npm run keycloak:recovery:apply` while this maintenance gateway is available.
 
 1. Open [Keycloak administration](http://auth.localhost:1009/admin) using the master credentials from `.env`.
-2. Select the `inout` realm, create a user under **Users**, and set a password under **Credentials**. Turn **Temporary** off for immediate app-form sign-in. If it is on, the user can change the password on the app's `/login` page before signing in.
+2. Select the `inout` realm, create a user under **Users**, and set a password under **Credentials**. Turn **Temporary** off for immediate app-form sign-in. If it is on, the user must finish the password change through **Complete account setup** before using the app form.
 3. Assign the `admin` realm role under **Role mapping**, preserving default realm roles. Admins can also use the terminal. Create a separate user with `operator` when you want terminal-only access.
 4. Sign in at [app.localhost:1008](http://app.localhost:1008). After role changes, sign out and back in to obtain updated claims.
 
@@ -708,7 +705,7 @@ The browser calls `/api/data`, `/api/profile`, `/api/presence`, and `/api/keyclo
 | `/v1/audit-events` | Administrator alert, review, reset, assignment, permission, and movement audit history |
 | `GET /v1/exports` | Administrator complete report/Registry projection with validated filters, one consistent snapshot, row/byte/deadline limits and disconnect cancellation |
 | `POST /v1/alerts/{alert_id}/release-entry-restriction` | Administrator release of a critical entry restriction with a required reason |
-| `GET /v1/checkpoints`, `/v1/admin/profile` | Administrator checkpoint listing and profile preferences |
+| `GET/POST /v1/checkpoints`, `/v1/admin/profile` | Administrator checkpoint listing; checkpoint creation requires master-admin role and recent step-up |
 | `/v1/keycloak/users` and user subroutes | Administrator identity creation/editing, roles, checkpoint assignment, password reset, and session logout; recent reauthentication required |
 | `/v1/presence`, `/v1/presence/stream` | Authenticated presence snapshots and server-sent events |
 
@@ -733,7 +730,7 @@ Migrations run in `backend-init`; restarting only `python-api` does not apply th
 
 Before upgrading from a version with the admin notification inbox, let existing manual-override workflows finish on the old Temporal worker. Their recorded histories contain the retired activity and cannot replay on the new worker. The upgrade migration removes the old inbox table; approval requests, decisions, and audit history remain available in Permission Manager.
 
-The facility-zone consolidation migration merges the duplicate Main Entrance checkpoint into `cp-main`, preserving movement history and scan retry keys. Reference seeding inserts or updates only the canonical `cp-main` and `server-room` records.
+The zone consolidation migration merges the duplicate Main Entrance checkpoint into `cp-main`, preserving movement history and scan retry keys. Reference seeding inserts or updates the canonical `cp-main` and `server-room` records without removing additional checkpoints created by a master-admin.
 
 ### Existing-volume maintenance
 
@@ -747,7 +744,7 @@ docker compose run --build --rm --no-deps db-provision python /maintenance/provi
 
 This explicit operation rotates scoped credentials and supported ownership/grants without rewriting application rows, then synchronizes the administrator password to `POSTGRES_PASSWORD`. It refuses connected project clients; it does not terminate them. Clear the transient credential afterward, run `backend-init`, and check health, login and service boundaries before restoring writers. Interrupted cross-database maintenance needs inspection and an idempotent rerun with the valid administrator credential; rollback requires the tested backup.
 
-Keycloak import preserves existing realms. Through the temporary administration gateway, keep the existing client secret and set the `inout-frontend` callback exactly to `${AUTH_URL}/api/auth/callback/keycloak`, web origin to `${AUTH_URL}`, and logout URLs to `${AUTH_URL}/login` and `${AUTH_URL}/logout/complete`. Apply and verify the app's password policy with `npm run keycloak:password-policy:apply` and `npm run keycloak:password-policy:check`. The policy applies to future password changes; existing passwords need no change. Verify login and account/API permissions, then stop the gateway.
+Keycloak import preserves existing realms. Through the temporary administration gateway, keep the existing client secret and set the `inout-frontend` callback exactly to `${AUTH_URL}/api/auth/callback/keycloak`, web origin to `${AUTH_URL}`, and logout URLs to `${AUTH_URL}/login` and `${AUTH_URL}/logout/complete`. Apply realm password policy `length(12) and maxLength(128) and notUsername and notEmail`. It applies to future password changes; existing weak passwords need a separate intentional reset. Verify login and account/API permissions, then stop the gateway.
 
 ### Temporal upgrade
 

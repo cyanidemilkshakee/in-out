@@ -18,13 +18,13 @@ from schemas import ScanPayload
 
 
 class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
-    async def test_registered_checkpoint_can_be_used_as_an_assignment(self):
+    async def test_registered_dynamic_checkpoint_can_be_used_as_an_assignment(self):
         db = Mock(
             scalar=AsyncMock(return_value=TerminalCheckpointAssignment(
-                terminal_identity="browser:operator", checkpoint_id="cp-main")),
-            get=AsyncMock(return_value=Checkpoint(id="cp-main", data={"name": "Main Entrance"})),
+                terminal_identity="browser:operator", checkpoint_id="cp-north-lobby")),
+            get=AsyncMock(return_value=Checkpoint(id="cp-north-lobby", data={"name": "North Lobby"})),
         )
-        self.assertEqual(await require_checkpoint(db, "browser:operator", "cp-main"), "cp-main")
+        self.assertEqual(await require_checkpoint(db, "browser:operator", "cp-north-lobby"), "cp-north-lobby")
 
     async def test_operator_and_admin_without_step_up_cannot_change_assignments(self):
         app = FastAPI()
@@ -69,7 +69,7 @@ class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
         with patch("routers.keycloak_admin._request", new=AsyncMock()) as identity:
             with self.assertRaises(HTTPException) as error:
                 await keycloak_admin.create_user(payload, "token", Mock(), {
-                    "sub": "admin", "realm_access": {"roles": ["admin"]}})
+                    "sub": "master", "realm_access": {"roles": ["master-admin"]}})
             self.assertEqual(error.exception.status_code, 422)
             identity.assert_not_awaited()
 

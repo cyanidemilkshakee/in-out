@@ -10,12 +10,12 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import ARRAY, Text, bindparam, select, func, exc, delete, or_, false, and_
+from sqlalchemy import select, func, exc, delete, or_, false
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db, get_read_db
-from data_limits import bounded_rows, precharge_mutation_response
+from data_limits import bounded_rows
 from event_outbox import enqueue_changed, enqueue_workflow_start
 from auth import verify_admin_or_operator_request, verify_admin_request, has_admin_role
 from terminal_assignments import browser_identity, require_checkpoint
@@ -31,10 +31,11 @@ from models import (
     Checkpoint,
 )
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
+from temporal_worker import get_temporal_client, TASK_QUEUE
 from access_validation import (require_registered_checkpoint, validate_window,
     validate_permission_window, validate_registered_zones)
-from facility_zones import CHECKPOINT_IDS
-from permission_decisions import enqueue_decision, permission_version
+from permission_decisions import publish_decision, enqueue_decision, permission_version
+from redis_client import publish_data_changed
 from subject_metadata import current_subject_metadata, validate_subject_metadata_size
 from manual_review_policy import revised_access_data
 from registry_validation import (
@@ -42,7 +43,7 @@ from registry_validation import (
     is_barcode_conflict as _is_barcode_conflict,
     validated_metadata as _validated_metadata,
 )
-from zone_access import admin_zone_ids, checkpoint_zone_condition, require_checkpoint_scope, require_subject_scope, subject_zone_condition, validate_zone_subset
+from zone_access import admin_zone_ids, require_checkpoint_scope, require_subject_scope, subject_zone_condition, validate_zone_subset
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +300,6 @@ async def create_subject(
             await enqueue_decision(db, {"request": visitor_request, "person": data})
         else:
             await enqueue_changed(db)
-        await precharge_mutation_response(db, response)
         await db.commit()
         await db.refresh(new_sub)
     except HTTPException:
@@ -317,7 +317,7 @@ async def create_subject(
         logger.error("Error creating subject", extra={"exception_type": type(error).__name__})
         raise HTTPException(status_code=500, detail="Internal server error")
 
-    return response
+    return SubjectResponse(id=new_sub.id, barcode=new_sub.barcode, kind=new_sub.kind, data=data, request=visitor_request)
 
 
 @router.put("/{subject_id}", response_model=SubjectResponse)
@@ -411,10 +411,8 @@ async def update_subject(
         if "status" in patch:
             permission_data["state"] = {"pre_approved": "active", "inactive": "revoked", "maintenance": "restricted"}.get(patch["status"], patch["status"])
         permission.data = revised_access_data(permission.data, permission_data, permission=True)
-    response = SubjectResponse(id=sub.id, barcode=sub.barcode, kind=sub.kind, data=current_data)
     try:
         await enqueue_changed(db)
-        await precharge_mutation_response(db, response)
         await db.commit()
     except HTTPException:
         await db.rollback()
@@ -431,7 +429,7 @@ async def update_subject(
         logger.error("Error updating subject", extra={"exception_type": type(error).__name__})
         raise HTTPException(status_code=500, detail="Internal server error")
 
-    return response
+    return SubjectResponse(id=sub.id, barcode=sub.barcode, kind=sub.kind, data=current_data)
 
 
 @router.delete("/{subject_id}", status_code=204)
@@ -555,7 +553,6 @@ async def registry_bundle(
             Alert.data["zoneId"].astext.in_(zone_ids),
             Alert.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
             Alert.data["subjectId"].astext.in_(visible_subject_ids) if visible_subject_ids else false(),
-            unscoped_alert,
         ))
         .order_by(Alert.created_at.desc())
         .limit(200)
@@ -586,9 +583,6 @@ async def registry_bundle(
             AuditEvent.data["zoneId"].astext.in_(zone_ids),
             AuditEvent.data["subjectId"].astext.in_(visible_subject_ids) if visible_subject_ids else false(),
             AuditEvent.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
-            and_(AuditEvent.data["zoneId"].astext.is_(None),
-                AuditEvent.data["subjectId"].astext.is_(None),
-                AuditEvent.data["checkpointId"].astext.is_(None)),
         )).order_by(AuditEvent.created_at.desc(), AuditEvent.id).limit(500)
     )).scalars().all()
     request_rows = (await db.execute(
@@ -622,16 +616,17 @@ async def registry_bundle(
         "permissionRequests": [row[0].data for row in await bounded_rows(db,
             select(PermissionRequestModel)
             .where(or_(
-                PermissionRequestModel.data["requestedZones"].has_any(
-                    bindparam("requested_zone_ids", value=list(zone_ids), type_=ARRAY(Text()))
-                ),
+                PermissionRequestModel.data["requestedZones"].has_any(list(zone_ids)),
                 PermissionRequestModel.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
                 PermissionRequestModel.subject_id.in_(visible_subject_ids) if visible_subject_ids else false(),
             ))
             .order_by(PermissionRequestModel.created_at.desc())
         )],
-        "checkpoints": [{**(checkpoint.data or {}), "id": checkpoint.id} for checkpoint in (await db.execute(
-            select(Checkpoint).where(Checkpoint.id.in_(CHECKPOINT_IDS), Checkpoint.zone_id.in_(zone_ids))
-            .order_by(Checkpoint.zone_id, Checkpoint.id)
+        "checkpoints": [{**(checkpoint.data or {}), "id": checkpoint.id,
+            "zoneId": checkpoint.zone_id, "number": checkpoint.number,
+            "gateType": checkpoint.gate_type, "required": checkpoint.required,
+            "active": checkpoint.active} for checkpoint in (await db.execute(
+            select(Checkpoint).where(Checkpoint.active.is_(True), Checkpoint.zone_id.in_(zone_ids))
+            .order_by(Checkpoint.zone_id, Checkpoint.number)
         )).scalars().all()],
     }

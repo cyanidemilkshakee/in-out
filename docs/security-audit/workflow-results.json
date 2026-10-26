@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-10",
+  "scope": "Six bounded probes in independently generated disposable PostgreSQL test schemas",
+  "command": "docker compose --profile test run --rm --no-deps -v ./docs/security-audit:/audit:ro backend-tests python /audit/workflow-poc.py",
+  "exit_code": 0,
+  "tests": 6,
+  "duration_seconds": 30.390,
+  "observations": [
+    {"probe": "eight_concurrent_fresh_scans", "allowed": 1, "denied": 7, "protected": true},
+    {"probe": "cached_success_after_revocation_and_exit", "fresh_allowed": false, "replayed_allowed": true, "persisted_presence": "outside", "new_gate_authorization_proven": false},
+    {"probe": "client_manual_classification", "scan_type": "manual", "allowed": true, "admin_attribution": null, "access_policy_bypass": false},
+    {"probe": "normal_expiry_blocks_exit", "allowed": false, "reason": "Access pass has expired", "physical_lock_tested": false},
+    {"probe": "stale_custody_transfer", "request_previous_carrier": "p1", "actual_carrier_before_decision": "p3", "carrier_after_decision": "p2", "requires_administrator_approval": true},
+    {"probe": "stale_zone_request_after_revocation", "before": "revoked", "after": "active", "zones": ["public", "secure"], "requires_administrator_approval": true}
+  ]
+}

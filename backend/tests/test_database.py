@@ -130,6 +130,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["person"]["status"], "pre_approved")
         self.assertEqual(result["permission"]["zones"], ["public", "secure"])
         self.assertEqual(result["request"]["decidedBy"], "grant-admin")
+        temporal.assert_not_awaited()
+        publish.assert_not_awaited()
         self.assertEqual(len(await self.durable_events("manual_review_decision", request_id=result["request"]["id"])), 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(PermissionRequestModel)
@@ -302,21 +304,23 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bundle["checkpoints"], [])
         self.assertIsNone(bundle["terminalAssignment"]["checkpointId"])
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
-        original = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-        self.assertEqual(original.status_code, 200, original.text)
-        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).json(), replay_receipt(original.json()))
-        async with self.sessions() as db:
-            await set_checkpoint_assignment(db, "browser:operator", "server-room", "admin")
-            await db.commit()
-        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
-        # Rewriting the old queued request must not create a second scan.
-        changed = await self.client.post("/v1/terminal/scans", json={**body, "checkpointId": "server-room"}, headers=headers)
-        self.assertEqual(changed.status_code, 409, changed.text)
-        async with self.sessions() as db:
-            await set_checkpoint_assignment(db, "browser:operator", None, "admin")
-            await db.commit()
-        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
-        self.assertEqual(len(await self.durable_events("scan")), 1)
+        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
+            original = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+            self.assertEqual(original.status_code, 200, original.text)
+            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).json(), replay_receipt(original.json()))
+            async with self.sessions() as db:
+                await set_checkpoint_assignment(db, "browser:operator", "server-room", "admin")
+                await db.commit()
+            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
+            # Rewriting the old queued request must not create a second scan.
+            changed = await self.client.post("/v1/terminal/scans", json={**body, "checkpointId": "server-room"}, headers=headers)
+            self.assertEqual(changed.status_code, 409, changed.text)
+            async with self.sessions() as db:
+                await set_checkpoint_assignment(db, "browser:operator", None, "admin")
+                await db.commit()
+            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
+            publish.assert_not_awaited()
+            self.assertEqual(len(await self.durable_events("scan")), 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 2)
@@ -375,13 +379,17 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             "windowId": str(uuid.uuid4()),
         })
         headers["X-InOut-Step-Up"] = step_up
-        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), patch("auth.verify_keycloak_token", return_value=actor) as token, patch("routers.keycloak_admin._request", side_effect=identity):
+        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), \
+             patch("auth.verify_keycloak_token", return_value=actor) as token, \
+             patch("routers.keycloak_admin._request", side_effect=identity), \
+             patch("routers.keycloak_admin.publish_checkpoint_assignment", new=AsyncMock()) as publish:
             response = await self.client.post("/v1/keycloak/users", headers=headers, json={
                 "username": "new-operator", "password": "Isolated9-test-password", "roles": ["operator"], "checkpointId": "server-room",
             })
             self.assertEqual(response.status_code, 201, response.text)
             self.assertEqual(response.json()["checkpointId"], "server-room")
             self.assertEqual(response.json()["roles"], ["operator"])
+            publish.assert_not_awaited()
             self.assertEqual((await self.durable_events("terminal_assignment"))[0]["terminalIdentity"], "browser:" + user_id)
             async with self.sessions() as db:
                 audit = await db.scalar(select(AuditEvent))
@@ -413,10 +421,12 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_retry_does_not_publish_an_old_presence_event(self):
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
         headers = {"Idempotency-Key": str(uuid.uuid4())}
-        for _ in range(2):
-            response = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
-            self.assertEqual(response.status_code, 200, response.text)
-        self.assertEqual(len(await self.durable_events("scan")), 1)
+        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
+            for _ in range(2):
+                response = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
+                self.assertEqual(response.status_code, 200, response.text)
+            publish.assert_not_awaited()
+            self.assertEqual(len(await self.durable_events("scan")), 1)
 
     async def test_approval_window_is_persisted_and_dashboard_excludes_equipment(self):
         from routers.dashboard import get_dashboard
@@ -469,14 +479,15 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         body = {"barcode": "p1", "checkpointId": "cp-main", "selectedHardwareIds": ["h1"], "scanType": "auto", "online": True}
         headers = {"Idempotency-Key": str(uuid.uuid4())}
-        response = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-        self.assertEqual(response.status_code, 200, response.text)
-        result = response.json()
-        self.assertEqual(result["decision"]["event"]["subjectName"], "Alice")
-        self.assertTrue(result["updatedPeople"][0]["inside"])
-        self.assertTrue(result["updatedHardwareAssets"][0]["inside"])
-        retry = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-        self.assertEqual(retry.json(), replay_receipt(result))
+        with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
+            response = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+            result = response.json()
+            self.assertEqual(result["decision"]["event"]["subjectName"], "Alice")
+            self.assertTrue(result["updatedPeople"][0]["inside"])
+            self.assertTrue(result["updatedHardwareAssets"][0]["inside"])
+            retry = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+            self.assertEqual(retry.json(), replay_receipt(result))
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             # Cooldown has elapsed; auto mode must derive an exit from persisted presence.
@@ -854,31 +865,36 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         body = {"barcode": "unknown-manual-denial", "checkpointId": "cp-main"}
         key = str(uuid.uuid4())
-        scan = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-        self.assertEqual(scan.status_code, 200, scan.text)
-        source = scan.json()["decision"]["event"]
-        self.assertEqual((source["result"], source["scanType"]), ("denied", "auto"))
-        review = await self.client.post("/v1/terminal/manual-reviews", json={
-            **body, "eventId": source["id"], "direction": "entry", "operatorNote": "No valid identification",
-        })
-        self.assertEqual(review.status_code, 200, review.text)
-        url = f"/v1/permission-requests/{review.json()['id']}/decide"
-        decision = {"decision": "denied", "reason": "Identification could not be verified"}
-        response = await self.client.post(url, json=decision)
-        self.assertEqual(response.status_code, 200, response.text)
-        event = response.json()["movement"]
-        self.assertEqual((event["id"], event["result"], event["scanType"]), (source["id"], "denied", "manual"))
-        self.assertEqual(event["createdAt"], source["createdAt"])
-        self.assertEqual(event["initialScanType"], "auto")
-        self.assertEqual(event["denialCode"], "manual_review")
-        published = (await self.durable_events("manual_review_decision", request_id=review.json()["id"]))[-1]
-        self.assertEqual(published["movement"]["scanType"], "manual")
-        retry = await self.client.post(url, json=decision)
-        self.assertEqual(retry.status_code, 200, retry.text)
-        self.assertEqual(retry.json()["movement"], event)
-        # An original scan retry retains its immutable response, not a new event.
-        replay = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-        self.assertEqual(replay.json(), replay_receipt(scan.json()))
+        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
+             patch("permission_decisions.publish_presence_update", new=AsyncMock()) as publish, \
+             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
+             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
+            scan = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+            self.assertEqual(scan.status_code, 200, scan.text)
+            source = scan.json()["decision"]["event"]
+            self.assertEqual((source["result"], source["scanType"]), ("denied", "auto"))
+            review = await self.client.post("/v1/terminal/manual-reviews", json={
+                **body, "eventId": source["id"], "direction": "entry", "operatorNote": "No valid identification",
+            })
+            self.assertEqual(review.status_code, 200, review.text)
+            url = f"/v1/permission-requests/{review.json()['id']}/decide"
+            decision = {"decision": "denied", "reason": "Identification could not be verified"}
+            response = await self.client.post(url, json=decision)
+            self.assertEqual(response.status_code, 200, response.text)
+            event = response.json()["movement"]
+            self.assertEqual((event["id"], event["result"], event["scanType"]), (source["id"], "denied", "manual"))
+            self.assertEqual(event["createdAt"], source["createdAt"])
+            self.assertEqual(event["initialScanType"], "auto")
+            self.assertEqual(event["denialCode"], "manual_review")
+            publish.assert_not_awaited()
+            published = (await self.durable_events("manual_review_decision", request_id=review.json()["id"]))[-1]
+            self.assertEqual(published["movement"]["scanType"], "manual")
+            retry = await self.client.post(url, json=decision)
+            self.assertEqual(retry.status_code, 200, retry.text)
+            self.assertEqual(retry.json()["movement"], event)
+            # An original scan retry retains its immutable response, not a new event.
+            replay = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+            self.assertEqual(replay.json(), replay_receipt(scan.json()))
         for endpoint in ("/v1/movements", "/v1/movements/analytics"):
             manual = await self.client.get(endpoint, params={"scanType": "manual", "result": "denied"})
             automatic = await self.client.get(endpoint, params={"scanType": "auto", "result": "denied"})
@@ -948,45 +964,51 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             person = await db.get(Person, "p1")
             person.data = {**person.data, "status": "restricted"}
             await db.commit()
-        for outcome in ("denied", "approved"):
-            with self.subTest(outcome=outcome):
-                async with self.sessions() as db:
-                    scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
-                    await db.commit()
-                    req_id = await self._create_review(db, "p1", "p1", scan["decision"]["event"])
-                url = f"/v1/permission-requests/{req_id}"
-                decided = await self.client.post(url + "/decide", json={"decision": outcome, "reason": "ID checked"})
-                self.assertEqual(decided.status_code, 200, decided.text)
-                self.assertNotIn("terminalAcknowledgementRequired", decided.json()["request"])
-                async with self.sessions() as db:
-                    movement = dict((await db.get(Movement, scan["decision"]["event"]["id"])).data)
-                    person = dict((await db.get(Person, "p1")).data)
-                    state = await db.get(PresenceState, "p1")
-                    presence = (state.state, state.last_scan_timestamp, state.entry_override)
-                    counts = [await db.scalar(select(func.count()).select_from(model))
-                              for model in (Movement, AuditEvent, AccessPermission, ScanRequest)]
-                # A retry keeps the dismissal idempotent while the outbox retains one event.
-                dismissed = await self.client.post(url + "/dismiss")
-                self.assertEqual(dismissed.status_code, 200, dismissed.text)
-                notice = dismissed.json()
-                self.assertEqual((notice["status"], notice["decidedAt"], notice["decisionReason"]),
-                                 (outcome, decided.json()["request"]["decidedAt"], "ID checked"))
-                self.assertEqual(notice["notificationDismissedBy"], "test-operator")
-                self.assertTrue(notice["notificationDismissedAt"])
-                retry = await self.client.post(url + "/dismiss")
-                self.assertEqual(retry.json(), notice)
-                self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
-                bundle = await self.client.get("/v1/terminal/bundle")
-                self.assertEqual(bundle.status_code, 200, bundle.text)
-                self.assertEqual(next(item for item in bundle.json()["permissionRequests"] if item["id"] == req_id), notice)
-                async with self.sessions() as db:
-                    self.assertEqual((await db.get(Movement, scan["decision"]["event"]["id"])).data, movement)
-                    self.assertEqual((await db.get(Person, "p1")).data, person)
-                    state = await db.get(PresenceState, "p1")
-                    self.assertEqual((state.state, state.last_scan_timestamp, state.entry_override), presence)
-                    self.assertEqual([await db.scalar(select(func.count()).select_from(model))
-                                      for model in (Movement, AuditEvent, AccessPermission, ScanRequest)], counts)
-                    self.assertEqual((await db.get(PermissionRequestModel, req_id)).data, notice)
+        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
+             patch("permission_decisions.publish_presence_update", new=AsyncMock()), \
+             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
+             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
+            for outcome in ("denied", "approved"):
+                with self.subTest(outcome=outcome):
+                    async with self.sessions() as db:
+                        scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
+                        await db.commit()
+                        req_id = await self._create_review(db, "p1", "p1", scan["decision"]["event"])
+                    url = f"/v1/permission-requests/{req_id}"
+                    decided = await self.client.post(url + "/decide", json={"decision": outcome, "reason": "ID checked"})
+                    self.assertEqual(decided.status_code, 200, decided.text)
+                    self.assertNotIn("terminalAcknowledgementRequired", decided.json()["request"])
+                    async with self.sessions() as db:
+                        movement = dict((await db.get(Movement, scan["decision"]["event"]["id"])).data)
+                        person = dict((await db.get(Person, "p1")).data)
+                        state = await db.get(PresenceState, "p1")
+                        presence = (state.state, state.last_scan_timestamp, state.entry_override)
+                        counts = [await db.scalar(select(func.count()).select_from(model))
+                                  for model in (Movement, AuditEvent, AccessPermission, ScanRequest)]
+                    # Event publication can fail after a successful optional dismissal.
+                    with patch("routers.permissions.publish_presence_update", new=AsyncMock(side_effect=RuntimeError("offline"))) as publish:
+                        dismissed = await self.client.post(url + "/dismiss")
+                        self.assertEqual(dismissed.status_code, 200, dismissed.text)
+                        notice = dismissed.json()
+                        self.assertEqual((notice["status"], notice["decidedAt"], notice["decisionReason"]),
+                                         (outcome, decided.json()["request"]["decidedAt"], "ID checked"))
+                        self.assertEqual(notice["notificationDismissedBy"], "test-operator")
+                        self.assertTrue(notice["notificationDismissedAt"])
+                        retry = await self.client.post(url + "/dismiss")
+                        self.assertEqual(retry.json(), notice)
+                        publish.assert_not_awaited()
+                        self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
+                    bundle = await self.client.get("/v1/terminal/bundle")
+                    self.assertEqual(bundle.status_code, 200, bundle.text)
+                    self.assertEqual(next(item for item in bundle.json()["permissionRequests"] if item["id"] == req_id), notice)
+                    async with self.sessions() as db:
+                        self.assertEqual((await db.get(Movement, scan["decision"]["event"]["id"])).data, movement)
+                        self.assertEqual((await db.get(Person, "p1")).data, person)
+                        state = await db.get(PresenceState, "p1")
+                        self.assertEqual((state.state, state.last_scan_timestamp, state.entry_override), presence)
+                        self.assertEqual([await db.scalar(select(func.count()).select_from(model))
+                                          for model in (Movement, AuditEvent, AccessPermission, ScanRequest)], counts)
+                        self.assertEqual((await db.get(PermissionRequestModel, req_id)).data, notice)
 
     async def test_terminal_notification_dismissal_requires_assigned_checkpoint(self):
         from auth import verify_admin_or_operator_request
@@ -1006,13 +1028,15 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             assignment = await db.get(TerminalCheckpointAssignment, "browser:operator")
             assignment.checkpoint_id = "server-room"
             await db.commit()
-        accepted = await self.client.post(url)
-        self.assertEqual(accepted.status_code, 200, accepted.text)
-        self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
-        async with self.sessions() as db:
-            await db.delete(await db.get(TerminalCheckpointAssignment, "browser:operator"))
-            await db.commit()
-        self.assertEqual((await self.client.post(url)).status_code, 403)
+        with patch("routers.permissions.publish_presence_update", new=AsyncMock()) as publish:
+            accepted = await self.client.post(url)
+            self.assertEqual(accepted.status_code, 200, accepted.text)
+            self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
+            async with self.sessions() as db:
+                await db.delete(await db.get(TerminalCheckpointAssignment, "browser:operator"))
+                await db.commit()
+            self.assertEqual((await self.client.post(url)).status_code, 403)
+            publish.assert_not_awaited()
         actor = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         pending_id = None
         async with self.sessions() as db:
@@ -1495,7 +1519,6 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         payload = BrowserScanPayload(barcode="p1", checkpointId="main-gate")
         normalized = payload.model_dump(mode="json")
         normalized.pop("expected_operator_subject", None)
-        normalized.pop("queue_captured_at", None)
         normalized["barcode"] = payload.barcode.strip().lower()
         normalized["selected_hardware_ids"] = sorted(set(payload.selected_hardware_ids))
         old_hash = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()

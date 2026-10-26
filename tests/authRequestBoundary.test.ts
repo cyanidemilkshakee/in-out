@@ -4,7 +4,7 @@ import {
   AUTH_BODY_MAX_BYTES, AuthRequestError, isSameOriginAuthRequest, prepareAuthRequest, publicAuthSession,
   safeAuthCallbackUrl, safeAuthRedirect, safeAuthResponseUrl,
 } from "../lib/authRequestBoundary";
-import { issuedAuthSession, isCompletedAdminStepUpToken, matchesAdminStepUpIdentity } from "../lib/authCallbackSession";
+import { issuedAuthSession, isCompletedAdminStepUpToken } from "../lib/authCallbackSession";
 import type { StepUpIntent } from "../lib/userManagementStepUp";
 
 const origin = "https://app.invalid";
@@ -202,17 +202,13 @@ const callbackToken: Record<string, unknown> = {
 };
 
 test("step-up cleanup requires the exact admin account and newly consumed intent", () => {
-  assert.equal(matchesAdminStepUpIdentity(callbackIntent, callbackSubject, ["admin"]), true);
-  assert.equal(matchesAdminStepUpIdentity(callbackIntent, "operator-1", ["operator"]), false);
-  assert.equal(matchesAdminStepUpIdentity(callbackIntent, callbackSubject, ["operator"]), false);
-  assert.equal(matchesAdminStepUpIdentity(null, callbackSubject, ["admin"]), false);
   assert.equal(isCompletedAdminStepUpToken(callbackToken, callbackIntent, callbackNow), true);
-  const noAdminRole = {
+  const masterAdminToken = {
     ...callbackToken,
-    roles: ["super-admin"],
-    access_token: callbackBearer(callbackSubject, ["super-admin"]),
+    roles: ["master-admin"],
+    access_token: callbackBearer(callbackSubject, ["master-admin"]),
   };
-  assert.equal(isCompletedAdminStepUpToken(noAdminRole, callbackIntent, callbackNow), false);
+  assert.equal(isCompletedAdminStepUpToken(masterAdminToken, callbackIntent, callbackNow), true);
   for (const patch of [
     { sub: "other-admin" }, { access_token: callbackBearer("other-admin") },
     { roles: ["operator"] }, { access_token: callbackBearer(callbackSubject, ["operator"]) },

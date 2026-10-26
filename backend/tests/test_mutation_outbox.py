@@ -31,7 +31,10 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(events, [])
             events.append("enqueue")
 
-        with patch("routers.terminal.require_checkpoint", new=AsyncMock(return_value="cp-main")), patch("routers.terminal.record_scan", new=AsyncMock(return_value=result)), patch("routers.terminal.enqueue_presence", new=AsyncMock(side_effect=enqueue)) as queue:
+        with patch("routers.terminal.require_checkpoint", new=AsyncMock(return_value="cp-main")), \
+             patch("routers.terminal.record_scan", new=AsyncMock(return_value=result)), \
+             patch("routers.terminal.enqueue_presence", new=AsyncMock(side_effect=enqueue)) as queue, \
+             patch("routers.terminal.publish_presence_update", new=AsyncMock(side_effect=AssertionError("No HTTP Redis I/O"))):
             payload = BrowserScanPayload(barcode="p1", checkpointId="cp-main")
             returned = await terminal.scan(payload, uuid.uuid4(), db, {"sub": "operator"})
             self.assertIs(returned, result)
@@ -53,9 +56,7 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_decision_queues_signal_and_event_then_reports_queued_truthfully(self):
         order = []
-        db = Mock(scalar=AsyncMock(return_value=SimpleNamespace(data={
-            "id": "request", "type": "manual_override", "status": "pending", "requestedZones": ["public"]})),
-            commit=AsyncMock(side_effect=lambda: order.append("commit")))
+        db = Mock(commit=AsyncMock(side_effect=lambda: order.append("commit")))
         result = {"request": {"id": "request", "type": "manual_override", "status": "denied",
             "decidedBy": "system", "decisionReason": "Timed out"}}
 
@@ -69,10 +70,13 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
             self.assertIs(result_arg, result)
             order.append("event")
 
-        with patch("permission_decisions.apply_permission_decision", new=AsyncMock(return_value=result)), patch("routers.permissions._include_entry_restrictions", new=AsyncMock()), patch("routers.permissions.enqueue_workflow_signal", new=AsyncMock(side_effect=signal)), patch("routers.permissions.enqueue_decision", new=AsyncMock(side_effect=event)):
+        with patch("permission_decisions.apply_permission_decision", new=AsyncMock(return_value=result)), \
+             patch("routers.permissions._include_entry_restrictions", new=AsyncMock()), \
+             patch("routers.permissions.enqueue_workflow_signal", new=AsyncMock(side_effect=signal)), \
+             patch("routers.permissions.enqueue_decision", new=AsyncMock(side_effect=event)), \
+             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=AssertionError("No HTTP Temporal I/O"))):
             returned = await permissions.decide_permission_request("request",
-                PermissionDecision(decision="approved"), db,
-                {"sub": "admin", "realm_access": {"roles": ["admin"]}})
+                PermissionDecision(decision="approved"), db, {"sub": "admin"})
         self.assertEqual(order, ["signal", "event", "commit"])
         self.assertFalse(returned["workflowSignaled"])
         self.assertTrue(returned["workflowQueued"])

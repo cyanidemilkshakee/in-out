@@ -12,9 +12,9 @@ from sqlalchemy.orm import selectinload
 from models import (Subject, Person, HardwareAsset, AccessPermission, PresenceState,
                     PermissionRequestModel, Movement, Checkpoint, AuditEvent)
 from movement_logic import _current_date, _current_time
-from access_validation import (parse_validity, require_registered_checkpoint,
-    validate_permission_window, validate_registered_zones)
-from facility_zones import building_for_checkpoint, canonical_checkpoint_id, normalize_facility_document
+from access_validation import (parse_validity, validate_permission_window, validate_zones,
+    validate_registered_checkpoint, validate_registered_zones)
+from facility_zones import canonical_checkpoint_id, normalize_facility_document
 from schemas import manual_approval_minutes
 from manual_review_policy import MANUAL_REVIEW_TIMEOUT_MINUTES, manual_access_snapshot, revised_access_data
 from critical_entry_restrictions import (
@@ -294,7 +294,7 @@ async def _prepare_manual_approval_subject(db, req, data):
         raise HTTPException(422, "Reviewed hardware no longer exists")
     if subject.kind == "hardware" and not subject.hardware or subject.kind != "hardware" and not subject.person:
         raise HTTPException(422, "Subject metadata is missing")
-    zone_id = building_for_checkpoint(checkpoint.id)
+    zone_id = checkpoint.zone_id
     presence_rows = list(await db.scalars(select(PresenceState).where(
         PresenceState.subject_id.in_(subject_ids)
     ).order_by(PresenceState.subject_id).with_for_update().execution_options(populate_existing=True)))
@@ -518,3 +518,8 @@ async def enqueue_decision(db, result):
     """Call after domain writes/locks and before committing their transaction."""
     from event_outbox import enqueue_presence
     return await enqueue_presence(db, decision_event(result))
+
+
+async def publish_decision(result):
+    """Compatibility event builder; delivery belongs to the durable dispatcher."""
+    return decision_event(result)

@@ -122,6 +122,7 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json(), first.json())
+        publish.assert_not_awaited()
         async with self.sessions() as db:
             events = (await db.scalars(select(EventOutbox).where(EventOutbox.kind == "presence"))).all()
             self.assertEqual(len(events), 1)

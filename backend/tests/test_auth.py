@@ -81,10 +81,12 @@ class AuthenticationTests(unittest.TestCase):
             payload = auth.verify_keycloak_token(self.token({**self.claims(), "aud": ["account", "inout-frontend"]}))
             self.assertTrue(auth.has_admin_role(payload))
 
-    def test_only_the_admin_role_grants_application_admin_access(self):
-        self.assertTrue(auth.has_admin_role({"realm_access": {"roles": ["admin"]}}))
-        self.assertFalse(auth.has_admin_role({"realm_access": {"roles": ["operator"]}}))
-        self.assertFalse(auth.has_admin_role({"realm_access": {"roles": ["super-admin"]}}))
+    def test_master_admin_inherits_application_admin_access_but_remains_distinct(self):
+        payload = {"realm_access": {"roles": ["master-admin"]}}
+        self.assertTrue(auth.has_admin_role(payload))
+        self.assertTrue(auth.has_master_admin_role(payload))
+        self.assertFalse(auth.has_operator_role(payload))
+        self.assertFalse(auth.has_master_admin_role({"realm_access": {"roles": ["admin"]}}))
 
     def test_invalid_signature_and_mislabelled_kid_are_rejected(self):
         with patch("auth.httpx.get", return_value=self.response("old", "new")):
@@ -195,11 +197,6 @@ class ConcurrentAuthenticationTests(unittest.IsolatedAsyncioTestCase):
     claims = AuthenticationTests.claims
     token = AuthenticationTests.token
     response = AuthenticationTests.response
-
-    async def asyncSetUp(self):
-        revocation = patch("token_revocation.assert_token_active", new=AsyncMock())
-        revocation.start()
-        self.addCleanup(revocation.stop)
 
     async def parallel_requests(self, token, count=24):
         app = FastAPI()

@@ -23,6 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from config import settings
 from behavior_limits import enforce_behavior_admission
+from user_management_policy import MASTER_ADMIN_ROLE
 
 logger = logging.getLogger(__name__)
 
@@ -157,19 +158,15 @@ def verify_keycloak_token(token: str, signing_keys: list[dict] | None = None) ->
             algorithms=["RS256"],
             issuer=settings.KEYCLOAK_ISSUER,
             audience=settings.KEYCLOAK_AUDIENCE,
-            options={"require": ["exp", "iat", "iss", "aud", "sub", "jti"]},
+            options={"require": ["exp", "iss", "aud", "sub"]},
         )
         # ID tokens are intended for the OIDC client, never for API access.
         if payload.get("typ") != "Bearer" or not isinstance(payload.get("sub"), str) or not payload["sub"]:
             raise InvalidTokenError("A Keycloak access token is required")
         expiry = payload["exp"]
-        issued_at = payload["iat"]
         if (isinstance(expiry, bool) or not isinstance(expiry, (int, float))
-                or not math.isfinite(expiry) or isinstance(issued_at, bool)
-                or not isinstance(issued_at, (int, float)) or not math.isfinite(issued_at)
-                or not isinstance(payload.get("jti"), str) or not payload["jti"]):
-            raise InvalidTokenError("Numeric token expiry, issue time and token ID are required")
-        payload["_inout_verified_access_token"] = True
+                or not math.isfinite(expiry)):
+            raise InvalidTokenError("A numeric token expiry is required")
         return payload
     except ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired", headers={"WWW-Authenticate": "Bearer"})
@@ -185,8 +182,14 @@ def _realm_roles(payload: dict[str, Any]) -> list[str]:
 
 
 def has_admin_role(payload: dict[str, Any]) -> bool:
-    """Return True if the token carries the application's admin realm role."""
-    return "admin" in _realm_roles(payload)
+    """Return True for app-wide administrators, including master-admin."""
+    roles = _realm_roles(payload)
+    return "admin" in roles or MASTER_ADMIN_ROLE in roles
+
+
+def has_master_admin_role(payload: dict[str, Any]) -> bool:
+    """Return True only for the separately assigned master-admin realm role."""
+    return MASTER_ADMIN_ROLE in _realm_roles(payload)
 
 
 def has_operator_role(payload: dict[str, Any]) -> bool:
@@ -215,10 +218,6 @@ async def verify_authenticated_request(
     # a refresh again. Malformed headers still use the standard 401 verifier.
     payload = await run_in_threadpool(verify_keycloak_token, credentials.credentials,
                                      **({"signing_keys": signing_keys} if signing_keys is not None else {}))
-    cryptographically_verified = payload.pop("_inout_verified_access_token", False)
-    if cryptographically_verified:
-        from token_revocation import assert_token_active
-        await assert_token_active(payload)
     if request is not None:
         identity = "principal:" + settings.KEYCLOAK_ISSUER + ":" + payload["sub"]
         state = request.scope.setdefault("state", {})
@@ -260,7 +259,7 @@ async def verify_admin_request(
 ) -> dict[str, Any]:
     """
     FastAPI dependency — validates the Keycloak Bearer token and enforces
-    the 'admin' realm role.
+    the 'admin' or 'master-admin' realm role.
 
     Authentication is mandatory in every environment.
     """

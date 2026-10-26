@@ -53,11 +53,11 @@ async def benchmark(args):
         now = datetime.now(timezone.utc)
         async with case.sessions() as db:
             db.add_all([Subject(id=f"bench-person-{index}", kind="employee", barcode=f"BENCH-{index}",
-                person=Person(data={"name": f"Employee {index:05}", "status": "active", "allowedZones": ["public"], "inside": False}))
+                person=Person(data={"name": f"Employee {index:05}", "status": "active", "allowedZones": ["a"], "inside": False}))
                 for index in range(args.subjects)])
             await db.flush()
             db.add_all([Movement(id=f"bench-movement-{index}", subject_id=f"bench-person-{index % args.subjects}",
-                checkpoint_id="cp-main", occurred_at=now - timedelta(seconds=(args.movements - index) * 12),
+                checkpoint_id="a-1", occurred_at=now - timedelta(seconds=(args.movements - index) * 12),
                 result="approved", direction="entry" if (index // args.subjects) % 2 == 0 else "exit",
                 scan_type="auto", subject_type="employee", sync_state="synced",
                 data={"subjectName": f"Employee {index % args.subjects:05}", "barcode": f"BENCH-{index % args.subjects}", "checkpoint": "Front Gate"})
@@ -126,7 +126,7 @@ async def benchmark(args):
 
         async def scan(index):
             async with case.sessions() as db:
-                result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode=f"BENCH-{index}", checkpointId="cp-main"), "benchmark")
+                result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode=f"BENCH-{index}", checkpointId="a-1"), "benchmark")
                 if not result["allowed"]:
                     raise RuntimeError("Synthetic scan was denied: " + str(result["decision"]))
                 await enqueue_presence(db, {"type": "scan", "movement": result["decision"]["event"]})

@@ -233,9 +233,9 @@
 .headingCopy { grid-column: 2; grid-row: 1; text-align: center; }
 .heading h1 { font-size: clamp(34px, 3.15vw, 52px); font-weight: var(--weight-black); line-height: 1; letter-spacing: -2px; }
 .registerVisitorButton { grid-column: 1; grid-row: 2; justify-self: start; align-self: start; }
-.checkpointControl { grid-column: 2; grid-row: 2; justify-self: center; justify-items: center; width: min(260px, 100%); max-width: none; min-width: 0; margin: 0; text-align: center; }
+.checkpointControl { grid-column: 2; grid-row: 2; justify-self: center; width: min(260px, 100%); max-width: none; min-width: 0; margin: 0; }
 .registrationNotice { grid-column: 2; grid-row: 3; justify-self: center; width: min(480px, 100%); }
-.assignedCheckpoint { display: block; min-height: 51px; border: 1px solid var(--admin-line); border-radius: var(--radius); padding: 13px 17px; color: var(--ui-text-primary); font-size: var(--type-16); font-weight: var(--weight-bold); text-align: center; }
+.assignedCheckpoint { display: block; min-height: 51px; border: 1px solid var(--admin-line); border-radius: var(--radius); padding: 13px 17px; color: var(--ui-text-primary); font-size: var(--type-16); font-weight: var(--weight-bold); }
 .checkpointControl small { color: var(--ui-text-secondary); font-size: 13px; line-height: 1.5; }
 .visitorRoster { grid-column: 1; grid-row: 1 / span 3; align-self: center; min-width: 0; max-height: min(60dvh, 540px); margin: 0; overflow: hidden; border: 1px solid var(--admin-line); border-radius: var(--radius); background: var(--admin-surface); }
 .visitorRosterHeader { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; min-height: 44px; padding: 9px 14px; border-bottom: 1px solid var(--admin-line); }

@@ -21,7 +21,6 @@ import { AlertsHistoryTable } from "../../../frontend/components/admin/alerts/Al
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import { isMovementEventId } from "../../../lib/movementReferences";
 import { movementAnalyticsFilters } from "../../../lib/analyticsQueries";
-import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
 import {
   compactRangeBounds,
   parseDateInput,
@@ -472,6 +471,15 @@ function LogsWorkspace() {
                 const label = normalizeCheckpointLabel(checkpoint);
                 return label ? <option key={label} value={label}>{label}</option> : null;
               })}
+            </select>
+          </label>
+          <label className="select-control">
+            <span className="sr-only">Filter by denial category</span>
+            <select value={denialCategory ?? "all"} onChange={event => setDenialCategory(
+              event.target.value === "all" ? undefined : event.target.value as MovementQuery["denialCategory"])}>
+              <option value="all">All denial reasons</option>
+              <option value="restricted">Restricted</option>
+              <option value="other">Other</option>
             </select>
           </label>
           <label className="select-control">

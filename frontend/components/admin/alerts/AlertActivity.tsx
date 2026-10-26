@@ -3,22 +3,18 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, X } from "lucide-react";
 import type { Alert, Person } from "../../../../lib/types";
-import { normalizeCheckpointLabel } from "../../../../lib/normalizeDashboard";
 import { PersonStatusLabel } from "../PersonStatusLabel";
 import { alertTimestamp, formatAlertExplanation, formatAlertReviewDate, getAlertReviewState, getAlertWarningLevel, getOpenAlertWarningNumber, type AlertReviewFilter } from "./alertPresentation";
 
 type ReviewDecision = "confirmed" | "excused";
 type ReviewHandler = (alertId: string, decision: ReviewDecision, reason?: string) => Promise<Alert>;
 
-function AlertReviewCard({ alert, employeeStatus, onReview, hasEarlierUnreviewedAlert, disabled, showSubjectDetails, showDescription, showWarningLimitMessage }: {
+function AlertReviewCard({ alert, employeeStatus, onReview, hasEarlierUnreviewedAlert, disabled }: {
   alert: Alert;
   employeeStatus?: Person["status"];
   onReview: ReviewHandler;
   hasEarlierUnreviewedAlert: boolean;
   disabled: boolean;
-  showSubjectDetails: boolean;
-  showDescription: boolean;
-  showWarningLimitMessage: boolean;
 }) {
   const [reason, setReason] = useState("");
   const [invalidReason, setInvalidReason] = useState(false);
@@ -72,13 +68,13 @@ function AlertReviewCard({ alert, employeeStatus, onReview, hasEarlierUnreviewed
         <button type="button" className="alert-excuse-button" disabled={disabled || busy !== null || hasEarlierUnreviewedAlert || warningLimitReached} onClick={() => void review("excused")}><X size={15} aria-hidden="true" />{busy === "excused" ? "Excusing…" : "Excuse"}</button>
       </div>
       {hasEarlierUnreviewedAlert && <p className="alert-action-error" role="status">Review the earlier alert for this person first.</p>}
-      {showWarningLimitMessage && !hasEarlierUnreviewedAlert && warningLimitReached && <p className="alert-action-error" role="status">Reset confirmed warnings before reviewing another alert.</p>}
+      {!hasEarlierUnreviewedAlert && warningLimitReached && <p className="alert-action-error" role="status">Reset confirmed warnings before reviewing another alert.</p>}
       {error && <p className="alert-action-error" role="status">{error}</p>}
     </div>}
   </article>;
 }
 
-export function AlertActivity({ alerts, people, onReview, filter, isLoading = false, disabled = false, emptyMessage, className = "", totalCount, pagination, title: titleOverride, showSubjectDetails = true, showDescription = true, showWarningLimitMessage = true }: {
+export function AlertActivity({ alerts, people, onReview, filter, isLoading = false, disabled = false, emptyMessage, className = "", totalCount, pagination }: {
   alerts: Alert[];
   people: Person[];
   onReview: ReviewHandler;
@@ -89,10 +85,6 @@ export function AlertActivity({ alerts, people, onReview, filter, isLoading = fa
   className?: string;
   totalCount?: number;
   pagination?: ReactNode;
-  title?: string;
-  showSubjectDetails?: boolean;
-  showDescription?: boolean;
-  showWarningLimitMessage?: boolean;
 }) {
   const titleId = useId();
   const sortedAlerts = useMemo(() => [...alerts].sort((a, b) => {
@@ -108,7 +100,7 @@ export function AlertActivity({ alerts, people, onReview, filter, isLoading = fa
     () => new Map(people.filter((person) => person.type === "employee").map((person) => [person.barcode, person.status] as const)),
     [people]
   );
-  const title = titleOverride ?? (filter === "needs_review" ? "Open alerts" : filter === "confirmed" ? "Accepted alerts" : filter === "excused" ? "Excused mistakes" : "Alert history");
+  const title = filter === "needs_review" ? "Open alerts" : filter === "confirmed" ? "Accepted alerts" : filter === "excused" ? "Excused mistakes" : "Alert history";
   return <section className={`alert-activity-section admin-surface${filter === "needs_review" ? " alert-activity-section--open" : ""} ${className}`} aria-labelledby={titleId} aria-busy={isLoading}>
     <div className="permission-section-heading"><div><h2 id={titleId}>{title}</h2></div><span>{totalCount ?? sortedAlerts.length} {filter === "needs_review" ? "open" : "records"}</span></div>
     <div className="alert-activity-list scrollable-content">
@@ -122,7 +114,7 @@ export function AlertActivity({ alerts, people, onReview, filter, isLoading = fa
           const alertTime = alertTimestamp(alert);
           return sameSubject && (candidateTime < alertTime || (candidateTime === alertTime && candidate.id < alert.id));
         });
-        return <AlertReviewCard key={alert.id} alert={alert} employeeStatus={(alert.subjectId ? employeeStatuses.get(alert.subjectId) : undefined) ?? employeeStatusesByBarcode.get(alert.barcode)} onReview={onReview} hasEarlierUnreviewedAlert={hasEarlierUnreviewedAlert} disabled={disabled || isLoading} showSubjectDetails={showSubjectDetails} showDescription={showDescription} showWarningLimitMessage={showWarningLimitMessage} />;
+        return <AlertReviewCard key={alert.id} alert={alert} employeeStatus={(alert.subjectId ? employeeStatuses.get(alert.subjectId) : undefined) ?? employeeStatusesByBarcode.get(alert.barcode)} onReview={onReview} hasEarlierUnreviewedAlert={hasEarlierUnreviewedAlert} disabled={disabled || isLoading} />;
       }) : <div className="alert-activity-empty"><AlertTriangle size={22} aria-hidden="true" /><strong>{isLoading ? "Loading alerts…" : emptyMessage ?? `No ${filter === "needs_review" ? "open alerts" : "alert records"} match these filters.`}</strong>{!isLoading && !emptyMessage && <span>Try another review status, time range, or search.</span>}</div>}
     </div>
     {pagination}

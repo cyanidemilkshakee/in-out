@@ -2,8 +2,9 @@
 import asyncio
 import unittest
 import uuid
+from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import test_database as fixture
 from auth import verify_admin_request, verify_admin_or_operator_request, verify_terminal_access_request
@@ -25,23 +26,29 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "verified-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "verified-admin"}
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
-            "sub": "verified-admin", "realm_access": {"roles": ["admin"]}}
+            "sub": "operator", "realm_access": {"roles": ["operator"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
 
     async def request(self, **fields):
         self.authorize()
-        response = await self.client.post("/v1/permission-requests", json={
-            "subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
-            "reason": "Verified request", "requested_zones": ["public", "secure"], **fields})
+        temporal = SimpleNamespace(start_workflow=AsyncMock(), get_workflow_handle=lambda _: SimpleNamespace(signal=AsyncMock()))
+        with patch("routers.permissions.get_temporal_client", new=AsyncMock(return_value=temporal)), \
+             patch("routers.permissions.publish_decision", new=AsyncMock()):
+            response = await self.client.post("/v1/permission-requests", json={
+                "subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
+                "reason": "Verified request", "requested_zones": ["public", "secure"], **fields})
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
     async def decide(self, request_id, decision="approved"):
         self.authorize()
-        return await self.client.post(f"/v1/permission-requests/{request_id}/decide", json={
-            "decision": decision, "reason": "Verified decision"})
+        temporal = SimpleNamespace(get_workflow_handle=lambda _: SimpleNamespace(signal=AsyncMock()))
+        with patch("routers.permissions.get_temporal_client", new=AsyncMock(return_value=temporal)), \
+             patch("routers.permissions.publish_decision", new=AsyncMock()):
+            return await self.client.post(f"/v1/permission-requests/{request_id}/decide", json={
+                "decision": decision, "reason": "Verified decision"})
 
     async def add_pending_visitor(self):
         now = datetime.now(timezone.utc)
@@ -63,7 +70,7 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
             db.add(PermissionRequestModel(id="manual-request", subject_id=None, created_at=datetime.now(timezone.utc), data={
                 "id": "manual-request", "type": "manual_override", "status": "pending", "barcode": "unknown-forged"}))
             await db.commit()
-        with patch("workflows.activities.async_session", self.sessions):
+        with patch("workflows.activities.async_session", self.sessions), patch("permission_decisions.publish_decision", new=AsyncMock()):
             results = [await approve_override("manual-request", "forged-admin", "Forged signal"),
                 await deny_override("manual-request", "Forged signal"),
                 await approve_visitor("visitor-request", "Forged signal"),
@@ -82,7 +89,7 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.add_pending_visitor()
         approved = await self.decide("visitor-request")
         self.assertEqual(approved.status_code, 200, approved.text)
-        with patch("workflows.activities.async_session", self.sessions):
+        with patch("workflows.activities.async_session", self.sessions), patch("permission_decisions.publish_decision", new=AsyncMock()):
             observed = await approve_visitor("visitor-request", "Forged attribution")
             denied = await deny_visitor("visitor-request", "Forged opposite signal")
         self.assertEqual(observed, approved.json()["request"])
@@ -94,7 +101,7 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_timeout_uses_database_deadline_and_preserves_final_decision(self):
         await self.add_pending_visitor()
-        with patch("workflows.activities.async_session", self.sessions):
+        with patch("workflows.activities.async_session", self.sessions), patch("permission_decisions.publish_decision", new=AsyncMock()):
             self.assertEqual((await auto_deny_visitor("visitor-request"))["status"], "pending")
             async with self.sessions() as db:
                 req = await db.get(PermissionRequestModel, "visitor-request")

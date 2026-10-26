@@ -24,7 +24,7 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "export-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "export-admin"}
 
     async def test_authentication_and_public_row_limits_are_preserved(self):
         self.assertEqual((await self.client.get("/v1/exports?source=movements")).status_code, 401)

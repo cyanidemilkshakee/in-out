@@ -19,11 +19,12 @@ from sqlalchemy import select, func, literal, or_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_admin_request
-from facility_zones import CHECKPOINT_IDS, canonical_checkpoint_id
+from facility_zones import canonical_checkpoint_id
 from database import get_db, get_read_db, rollback_after_error
 from config import settings
-from data_limits import bounded_rows, precharge_mutation_response
+from data_limits import bounded_rows
 from models import Checkpoint, Movement, MovementNote
+from redis_client import publish_data_changed
 from event_outbox import enqueue_changed
 from movement_analytics import router as analytics_router, canonical_movement_filter, denial_category_filter
 from movement_history import movement_history, source_event_id
@@ -307,8 +308,8 @@ async def movement_analytics(
         select(history).where(*where).order_by(history.occurred_at.desc(), history.id).limit(500)
     )
     checkpoint_result = await db.execute(select(Checkpoint).where(
-        Checkpoint.id.in_(CHECKPOINT_IDS), Checkpoint.zone_id.in_(zone_ids))
-        .order_by(Checkpoint.zone_id, Checkpoint.id))
+        Checkpoint.active.is_(True), Checkpoint.zone_id.in_(zone_ids))
+        .order_by(Checkpoint.zone_id, Checkpoint.number))
     summary = summary_result.mappings().one()
     return {
         "summary": {key: int(value or 0) for key, value in summary.items()},
@@ -321,7 +322,8 @@ async def movement_analytics(
              "createdAt": movement.occurred_at.isoformat()}
             for movement in sample_result.scalars().all()
         ],
-        "checkpoints": [{**(checkpoint.data or {}), "id": checkpoint.id}
+        "checkpoints": [{**checkpoint.data, "id": checkpoint.id, "zoneId": checkpoint.zone_id,
+            "number": checkpoint.number, "gateType": checkpoint.gate_type, "required": checkpoint.required}
             for checkpoint in checkpoint_result.scalars().all()],
     }
 
@@ -358,7 +360,6 @@ async def _sync_movement_batch(db, event_ids, expected_state, zone_ids):
         await db.execute(update(Movement).where(Movement.id.in_([row.id for row in rows]))
                          .values(sync_state="synced"))
         await enqueue_changed(db)
-        await precharge_mutation_response(db, records)
         await db.commit()
         return records
     except (Exception, asyncio.CancelledError):
@@ -465,7 +466,5 @@ async def add_movement_note(
         .order_by(MovementNote.id)
     )
     await enqueue_changed(db)
-    response = [row[0] for row in rows]
-    await precharge_mutation_response(db, response)
     await db.commit()
-    return response
+    return [row[0] for row in rows]

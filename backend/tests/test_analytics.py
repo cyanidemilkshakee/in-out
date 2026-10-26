@@ -32,7 +32,7 @@ class ActivityBoundaryTests(unittest.TestCase):
 class AnalyticsDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         await fixtures.DatabaseTests.asyncSetUp(self)
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "analytics-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "analytics-admin"}
 
     async def asyncTearDown(self):
         await fixtures.DatabaseTests.asyncTearDown(self)

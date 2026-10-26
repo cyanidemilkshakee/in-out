@@ -12,6 +12,7 @@ from temporalio import activity
 from sqlalchemy import select
 
 from database import async_session  # use the session factory directly in activities
+from redis_client import publish_presence_update
 from event_outbox import enqueue_presence, MAX_EVENT_BYTES
 
 
@@ -86,8 +87,7 @@ async def auto_deny_visitor(request_id: str) -> Any:
 async def run_alert_rule_evaluation() -> int:
     """Evaluate scheduled alert rules and persist any newly triggered alerts."""
     from rule_engine import evaluate_scheduled_rules, evaluate_visitor_overstay_rules, build_workday_statuses
-    from models import AlertRuleAssignment, Alert as AlertModel, Movement as MovementModel, Person, PresenceState, Subject
-    from facility_zones import BUILDING_NAMES
+    from models import AlertRuleAssignment, Alert as AlertModel, Movement as MovementModel, OrganizationZone, Person, PresenceState, Subject
     from alert_rule_assignments import alert_rule_catalog
     from config import settings
     from fastapi import HTTPException
@@ -189,20 +189,21 @@ async def run_alert_rule_evaluation() -> int:
                 employees=people, now=evaluation_now, rule_assignments=rule_assignments,
                 irregularity_skip_dates=skip_dates)
             # Continuous visits have no movement-history cutoff.
-            visit_rows = require_complete((await db.execute(select(PresenceState, Subject, Person.data)
+            visit_rows = require_complete((await db.execute(select(PresenceState, Subject, Person.data, OrganizationZone.name)
                 .join(Subject, Subject.id == PresenceState.subject_id)
                 .outerjoin(Person, Person.subject_id == Subject.id)
+                .outerjoin(OrganizationZone, OrganizationZone.id == PresenceState.entry_building_id)
                 .where(Subject.id.in_(subject_ids), Subject.kind == "visitor", PresenceState.state == "inside")
                 .limit(settings.ALERT_EVALUATION_MAX_SUBJECTS + 1)
                 .execution_options(populate_existing=True))).all(), "visitor_presences", settings.ALERT_EVALUATION_MAX_SUBJECTS)
-            presences = {presence.subject_id: presence for presence, _, _ in visit_rows}
+            presences = {presence.subject_id: presence for presence, _, _, _ in visit_rows}
             visits = [{"subjectId": subject.id, "subjectType": subject.kind,
                 "subjectName": (metadata if isinstance(metadata, dict) else {}).get("name") or subject.barcode,
                 "barcode": subject.barcode, "state": presence.state, "buildingId": presence.entry_building_id,
-                "buildingName": BUILDING_NAMES.get(presence.entry_building_id),
+                "buildingName": zone_name,
                 "entryStartedAt": presence.entry_started_at,
                 "alertedEntryAt": presence.visitor_overstay_alerted_entry_at}
-                for presence, subject, metadata in visit_rows]
+                for presence, subject, metadata, zone_name in visit_rows]
             visitor_alerts = evaluate_visitor_overstay_rules(rules, visits, now=evaluation_now)
             return [*triggered, *visitor_alerts], visitor_alerts, presences
 

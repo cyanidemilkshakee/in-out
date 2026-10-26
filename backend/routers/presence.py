@@ -121,7 +121,7 @@ async def _sse_event_generator(request: Request, expires_at: float, claims: dict
                             continue
                 elif message is not None:
                     # Admins receive a refresh hint only; the event payload can
-                    # contain subjects or decisions from other facility zones.
+                    # contain subjects or decisions from other organization zones.
                     message = json.dumps({"type": "data_changed"})
                 yield ": heartbeat\n\n" if message is None else f"data: {message}\n\n"
     except asyncio.CancelledError:
@@ -202,8 +202,6 @@ async def _versioned_sse(request: Request, expires_at: float, claims: dict, afte
             active, raw, size = await queue.get()
             queued_bytes -= size
             if not active:
-                return
-            if time.time() >= expires_at:
                 return
             if raw is None:
                 if not administrator:
@@ -293,20 +291,11 @@ class LeasedStreamingResponse(StreamingResponse):
             # sending is blocked. Otherwise a live stream could outlast its
             # lease and no longer count toward the shared stream caps.
             try:
-                while time.time() < self.lease.expires_at:
-                    if not await renew_stream_lease(self.lease):
-                        # Losing the lease before token expiry means admission
-                        # is no longer valid, so stop the response immediately.
-                        # At token expiry, the SSE generator can finish its
-                        # normal response instead of being cancelled mid-send.
-                        if time.time() < self.lease.expires_at:
-                            group.cancel_scope.cancel()
-                        return
-                    remaining = self.lease.expires_at - time.time()
-                    if remaining > 0:
-                        await anyio.sleep(min(10, remaining))
+                while await renew_stream_lease(self.lease):
+                    await anyio.sleep(10)
             except Exception:
                 logger.exception("Presence stream lease renewal failed")
+            finally:
                 group.cancel_scope.cancel()
 
         try:

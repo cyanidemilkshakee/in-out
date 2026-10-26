@@ -12,6 +12,7 @@ from auth import verify_admin_request
 from database import get_db
 from data_limits import precharge_mutation_response
 from models import AdminAccount
+from redis_client import publish_data_changed
 from event_outbox import enqueue_changed
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
@@ -76,10 +77,8 @@ async def _identity_profile(db, admin):
 @router.get("/profile")
 async def get_admin_profile(db: AsyncSession = Depends(get_db), admin: dict = Depends(verify_admin_request)) -> dict[str, Any]:
     account = await _identity_profile(db, admin)
-    response = _serialize_account(account)
     if db.info.get("profile_initialized"):
         await enqueue_changed(db)
-        await precharge_mutation_response(db, response)
     await db.commit()
     return response
 
@@ -94,10 +93,8 @@ async def update_admin_profile(payload: ProfileUpdateRequest, db: AsyncSession =
             value = _review_note_policy(value)
         setattr(account, key, value)
     await enqueue_changed(db)
-    response = _serialize_account(account)
-    await precharge_mutation_response(db, response)
     await db.commit()
-    return response
+    return _serialize_account(account)
 
 
 @router.patch("/profile/availability")
@@ -114,7 +111,5 @@ async def update_admin_availability(payload: AvailabilityUpdateRequest, db: Asyn
     account = await _identity_profile(db, admin)
     account.offline_until = offline_until
     await enqueue_changed(db)
-    response = {"offline_until": account.offline_until.isoformat() if account.offline_until else None}
-    await precharge_mutation_response(db, response)
     await db.commit()
-    return response
+    return {"offline_until": account.offline_until.isoformat() if account.offline_until else None}

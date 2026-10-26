@@ -10,7 +10,7 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
-  "passwordPolicy": "length(8) and maxLength(128) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail",
+  "passwordPolicy": "length(12) and maxLength(128) and notUsername and notEmail",
   "accessTokenLifespan": 300,
   "eventsEnabled": true,
   "eventsExpiration": 2592000,
@@ -138,7 +138,7 @@
   "scopeMappings": [
     {
       "client": "inout-frontend",
-      "roles": ["admin", "operator"]
+      "roles": ["admin", "operator", "master-admin"]
     },
     {
       "client": "inout-postman",
@@ -156,6 +156,14 @@
             "account": ["manage-account", "view-profile"],
             "realm-management": ["manage-users", "query-users", "view-users", "view-realm"]
           }
+        }
+      },
+      {
+        "name": "master-admin",
+        "description": "Manage admin and operator accounts and checkpoint assignments",
+        "composite": true,
+        "composites": {
+          "realm": ["admin"]
         }
       },
       {

@@ -3,12 +3,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Bell, Download, History, ScanLine, ShieldCheck, X } from "lucide-react";
-import type { Alert, EmployeeActivity, MovementEvent, Person } from "../../../lib/types";
+import { ArrowUpRight, Download, ShieldCheck, X } from "lucide-react";
+import type { AccessPermission, Alert, EmployeeActivity, MovementEvent, Person } from "../../../lib/types";
 import { assertCsvBound, readExport } from "../../../lib/exportRead";
 import type { DayPattern } from "../../../lib/analyticsUtils";
 import { facilityZoneLabel, normalizeFacilityZones } from "../../../lib/facilityZones";
-import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
 import { averageWorkedHoursPerDay, employeeActivityPatterns, employeeActivityRangeDays, employeeHoursSeries } from "../../../lib/analyticsQueries";
 import { eventTimestamp } from "../../../lib/dateRanges";
 import { createRefreshScheduler } from "../../../lib/refreshScheduler";
@@ -45,13 +44,20 @@ function formatProfileTime(value?: string, fallbackTime?: string) {
     : date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 }
 
+function alertReviewLabel(alert: Alert) {
+  if (alert.review?.decision === "excused" || alert.status === "resolved") return "Excused";
+  if (alert.review?.decision === "confirmed" || alert.status === "warned") return "Confirmed warning";
+  return alert.status === "acknowledged" ? "Needs review" : "Open";
+}
+
 function csvCell(value: unknown) {
   const raw = String(value ?? "");
   const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
   return `"${safe.replaceAll('"', '""')}"`;
 }
 
-const PROFILE_MOVEMENT_PAGE_SIZE = 100;
+const PROFILE_ALERT_LIMIT = 5;
+const PROFILE_MOVEMENT_LIMIT = 7;
 
 function exportMovementCsv(person: Person, movements: MovementEvent[]) {
   if (!movements.length) return;
@@ -99,6 +105,7 @@ ChartJS.register(
 
 export function EmployeeProfileCard({
   person,
+  permissions,
   alerts,
   movements,
   onClose,
@@ -109,15 +116,19 @@ export function EmployeeProfileCard({
   movements: MovementEvent[];
   onClose: () => void;
 }) {
-  const { queryMovements, queryEmployeeActivity, updatePerson } = useDataActions();
-  const [timeRange, setTimeRange] = useState<"1W" | "1M" | "1Y">("1W");
+  const { queryMovements, queryEmployeeActivity, querySubjectProfile, updatePerson } = useDataActions();
+  const [timeRange, setTimeRange] = useState<"1Y" | "1M" | "1W">("1W");
   const [mounted, setMounted] = useState(false);
+  const [profilePermissions, setProfilePermissions] = useState(() => permissions.filter(permission => permission.subjectId === person.id));
+  const [permissionsLoading, setPermissionsLoading] = useState(true);
   const initialAlerts = useMemo(() => alerts
     .filter((alert) => alert.subjectId === person.id || (!alert.subjectId && alert.barcode.toLowerCase() === person.barcode.toLowerCase()))
     .sort((left, right) => alertTimestamp(right) - alertTimestamp(left)), [alerts, person.barcode, person.id]);
   const initialMovements = useMemo(() => movements
     .filter((movement) => movement.subjectId === person.id || (!movement.subjectId && movement.barcode.toLowerCase() === person.barcode.toLowerCase()))
     .sort((left, right) => eventTimestamp(right) - eventTimestamp(left)), [movements, person.barcode, person.id]);
+  const [profileAlerts, setProfileAlerts] = useState<Alert[]>(() => initialAlerts);
+  const [alertTriggerCount, setAlertTriggerCount] = useState(initialAlerts.length);
   const [movementLogs, setMovementLogs] = useState<MovementEvent[]>(() => initialMovements);
   const [movementLogCount, setMovementLogCount] = useState(initialMovements.length);
   const [movementNextPage, setMovementNextPage] = useState(2);
@@ -128,21 +139,8 @@ export function EmployeeProfileCard({
   const [historyError, setHistoryError] = useState("");
   const [profileRevision, setProfileRevision] = useState(0);
   const [exportingHistory, setExportingHistory] = useState(false);
-  const [showAlertHistory, setShowAlertHistory] = useState(false);
-  function toggleAlertHistory() {
-    setShowAlertHistory((visible) => !visible);
-    requestAnimationFrame(() => {
-      document.getElementById("employee-profile-alert-history")?.scrollIntoView({
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
-        block: "start",
-      });
-    });
-  }
   const exportController = useRef<AbortController | null>(null);
-  useEffect(() => () => {
-    exportController.current?.abort();
-    movementMoreController.current?.abort();
-  }, []);
+  useEffect(() => () => exportController.current?.abort(), []);
   const historyPerson = useRef(person.id);
   const [activity, setActivity] = useState<EmployeeActivity | null>(null);
   const [activityLoading, setActivityLoading] = useState(true);
@@ -152,6 +150,10 @@ export function EmployeeProfileCard({
   const [employeeStatusError, setEmployeeStatusError] = useState("");
   const darkTheme = useAdminTheme() === "dark";
   const assignedZones = normalizeFacilityZones(person.allowedZones);
+  const updateAlertHistory = useCallback((items: Alert[], total: number) => {
+    setProfileAlerts(items);
+    setAlertTriggerCount(total);
+  }, []);
   const subjectMovementRevision = useMemo(() => initialMovements.map(movement =>
     [movement.id, movement.result, movement.direction, movement.scanType, movement.createdAt, movement.manualReviewedAt].join(":"))
     .join("|"), [initialMovements]);
@@ -170,6 +172,16 @@ export function EmployeeProfileCard({
     window.addEventListener("inout:presence-sync", refresh);
     return () => { scheduler.cancel(); window.removeEventListener("inout:presence-message", receive); window.removeEventListener("inout:presence-sync", refresh); };
   }, [person.id]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    setPermissionsLoading(true);
+    void querySubjectProfile(person.id, controller.signal)
+      .then(profile => { if (!controller.signal.aborted) setProfilePermissions(profile.permissions.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))); })
+      .catch(() => { if (!controller.signal.aborted) setHistoryError("Permissions could not be loaded."); })
+      .finally(() => { if (!controller.signal.aborted) setPermissionsLoading(false); });
+    return () => controller.abort();
+  }, [person.id, querySubjectProfile, profileRevision]);
 
   async function downloadMovementHistory() {
     if (exportingHistory) return;
@@ -208,55 +220,20 @@ export function EmployeeProfileCard({
     const movementLoadController = new AbortController();
     setHistoryLoading(true);
     setHistoryError("");
-    movementMoreController.current?.abort();
-    movementMorePending.current = false;
-    setMovementLoadingMore(false);
-    setMovementNextPage(2);
     if (historyPerson.current !== person.id) {
       historyPerson.current = person.id;
       setMovementLogs([]);
       setMovementLogCount(0);
     }
-    void queryMovements({ page: 1, pageSize: PROFILE_MOVEMENT_PAGE_SIZE, subject_id: person.id, includeChart: false }, movementLoadController.signal)
+    void queryMovements({ page: 1, pageSize: PROFILE_MOVEMENT_LIMIT, subject_id: person.id, includeChart: false }, movementLoadController.signal)
       .then(page => {
         if (movementLoadController.signal.aborted) return;
         setMovementLogs(page.items);
         setMovementLogCount(page.total);
-        setMovementNextPage(2);
       }).catch(() => { if (!movementLoadController.signal.aborted) setHistoryError("Some movement history could not be loaded."); })
       .finally(() => { if (!movementLoadController.signal.aborted) setHistoryLoading(false); });
     return () => movementLoadController.abort();
   }, [person.id, queryMovements, subjectMovementRevision, profileRevision]);
-
-  const loadMoreMovementLogs = useCallback(async () => {
-    if (historyLoading || movementMorePending.current || movementLogs.length >= movementLogCount) return;
-    const controller = new AbortController();
-    movementMoreController.current?.abort();
-    movementMoreController.current = controller;
-    movementMorePending.current = true;
-    setMovementLoadingMore(true);
-    try {
-      const page = await queryMovements({
-        page: movementNextPage, pageSize: PROFILE_MOVEMENT_PAGE_SIZE,
-        subject_id: person.id, includeChart: false,
-      }, controller.signal);
-      if (controller.signal.aborted) return;
-      setMovementLogs((current) => {
-        const merged = new Map<string, MovementEvent>(current.map((movement) => [movement.id, movement] as const));
-        page.items.forEach((movement) => merged.set(movement.id, movement));
-        return [...merged.values()].sort((left, right) => eventTimestamp(right) - eventTimestamp(left));
-      });
-      setMovementLogCount(page.total);
-      setMovementNextPage((current) => current + 1);
-    } catch (cause) {
-      if (!controller.signal.aborted) setHistoryError(cause instanceof Error ? cause.message : "Some movement history could not be loaded.");
-    } finally {
-      if (movementMoreController.current === controller) {
-        movementMorePending.current = false;
-        setMovementLoadingMore(false);
-      }
-    }
-  }, [historyLoading, movementLogCount, movementLogs.length, movementNextPage, person.id, queryMovements]);
 
   useEffect(() => {
     setMounted(true);
@@ -280,7 +257,7 @@ export function EmployeeProfileCard({
   const periodDays = employeeActivityRangeDays(timeRange);
   const averageHoursPerDay = activity ? averageWorkedHoursPerDay(activity.days, periodDays) : null;
   const displayedAverageHours = averageHoursPerDay === null ? "—" : averageHoursPerDay.toFixed(1);
-  const panelBackground = darkTheme ? "#0f1413" : "#f4f7f5";
+  const panelBackground = darkTheme ? "#0f1413" : "rgb(237, 242, 240)";
   const textColor = darkTheme ? "#eef7f2" : "#18201f";
   const mutedColor = darkTheme ? "#aab8b3" : "#667085";
   const borderColor = darkTheme ? "#2f3d39" : "#dce5e0";
@@ -425,22 +402,14 @@ export function EmployeeProfileCard({
         onClick={(e) => e.stopPropagation()}
         >
         <div className="employee-profile-header">
-          <section className="employee-profile-main-header" aria-label={`${person.name} summary`}>
-            <div className="employee-profile-identity">
-              <h2 id="employee-profile-identity-title">{person.name}</h2>
-              <div className="employee-profile-identity-meta">
-                <span className="employee-profile-identity-barcode"><ScanLine size={16} aria-hidden="true" />{person.barcode}</span>
-                <div className="employee-profile-identity-zones">
-                  {assignedZones.length
-                    ? assignedZones.map((zone) => <span className="facility-zone-tag" key={zone}>{facilityZoneLabel(zone)}</span>)
-                    : <span>No zones assigned</span>}
-                </div>
-              </div>
-            </div>
-          </section>
-          <div className="employee-profile-period">
-            <div className="employee-profile-range-controls" aria-label="Activity date range">
-              {(["1W", "1M", "1Y"] as const).map((range) => {
+          <h2 id="employee-profile-title">Employee Profile</h2>
+          {person.type === "employee" && <label className="employee-profile-enabled-toggle" data-enabled={employeeEnabled}>
+            <input type="checkbox" checked={employeeEnabled} disabled={employeeStatusBusy} onChange={(event) => void setEmployeeStatus(event.target.checked)} />
+            <strong>Enabled</strong>
+          </label>}
+          <div className="employee-profile-header-actions">
+            <div className="employee-profile-range-controls">
+              {(["1Y", "1M", "1W"] as const).map((range) => {
                 const isSelected = range === timeRange;
                 return (
                   <button key={range} type="button" onClick={() => setTimeRange(range)}
@@ -485,18 +454,42 @@ export function EmployeeProfileCard({
 
         <div className="employee-profile-body scrollable-content">
         <div className="employee-profile-content scrollable-content">
-          <section className="employee-profile-dashboard-section employee-profile-average-section" aria-label="Average work hours per day" aria-busy={activityLoading}>
-            <div className="employee-profile-section-title-row">
-              <div>
-                <h3>Average daily hours</h3>
-                <span className="employee-profile-chart-period">Last {timeRange}</span>
+          <div className="employee-profile-details">
+            <div className="employee-profile-detail">
+              <div className="employee-profile-detail-label">Name</div>
+              <div className="employee-profile-detail-value" style={{ color: textColor }}>{person.name}</div>
+            </div>
+            <div className="employee-profile-detail">
+              <div className="employee-profile-detail-label">Barcode</div>
+              <div className="employee-profile-detail-value" style={{ color: textColor }}>{person.barcode}</div>
+            </div>
+            <div className="employee-profile-detail">
+              <div className="employee-profile-detail-label">Assigned zones</div>
+              <div className="employee-profile-detail-value">
+                <div className="facility-zone-list">
+                  {assignedZones.length
+                    ? assignedZones.map((zone) => <span className="facility-zone-tag" key={zone}>{facilityZoneLabel(zone)}</span>)
+                    : "No zones assigned"}
+                </div>
               </div>
-              <div className="employee-profile-chart-summary">
-                <div className="employee-profile-metric">
-                  <div className="employee-profile-summary-number" style={{ color: textColor }}>
-                    {activityLoading ? "…" : displayedAverageHours}
-                  </div>
-                  <div className="employee-profile-summary-label" style={{ color: mutedColor }}>HOURS / DAY</div>
+            </div>
+          </div>
+          {employeeStatusError ? <p className="employee-profile-history-error" role="alert">{employeeStatusError}</p> : null}
+
+          <div className="employee-profile-summary-grid" aria-label="Employee record counts">
+            <article className="employee-profile-summary-card"><span>Permissions</span><strong>{permissionsLoading ? "…" : profilePermissions.length}</strong></article>
+            <article className="employee-profile-summary-card"><span>Alert triggers</span><strong>{alertTriggerCount}</strong></article>
+            <article className="employee-profile-summary-card"><span>Movement logs</span><strong>{movementLogCount}</strong></article>
+          </div>
+
+          <div className="employee-profile-hours-chart" aria-busy={activityLoading}>
+            <div className="employee-profile-chart-summary">
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "2px", textAlign: "left" }}>
+                <div className="employee-profile-summary-number" style={{ color: textColor }}>
+                  {activityLoading ? "…" : displayedAverageHours}
+                </div>
+                <div className="employee-profile-summary-label" style={{ color: mutedColor }}>
+                  AVG HOURS / DAY · {timeRange}
                 </div>
               </div>
             </div>
@@ -508,15 +501,92 @@ export function EmployeeProfileCard({
             {activityError ? <p className="employee-profile-history-error" role="status">{activityError}</p> : null}
           </section>
 
-          <section className="employee-profile-dashboard-section employee-profile-work-pattern-section" aria-label="Work pattern">
-            <div className="employee-profile-work-pattern-scroll">
-              <WorkPatternChart timeRange={timeRange} sessions={completeSessions} endAt={activity?.endAt} />
-            </div>
-          </section>
+          <div className="employee-profile-work-pattern">
+            <WorkPatternChart timeRange={timeRange} sessions={completeSessions} endAt={activity?.endAt} />
+          </div>
+          {activityError ? <p className="employee-profile-history-error" role="status">{activityError}</p> : null}
 
+          <div className="employee-profile-record-grid">
+            <section className="employee-profile-record-section scrollable-content" aria-labelledby="employee-profile-permissions-title">
+              <div className="employee-profile-record-section-heading">
+                <h3 id="employee-profile-permissions-title">Employee permissions</h3>
+                <Link
+                  className="employee-profile-manage-permission"
+                  href={`/admin/permissions?subject=${encodeURIComponent(person.id)}`}
+                >
+                  <ShieldCheck size={16} aria-hidden="true" />
+                  Manage permissions
+                  <ArrowUpRight size={15} aria-hidden="true" />
+                </Link>
+              </div>
+              {profilePermissions.length ? <ul className="employee-profile-record-list">
+                {profilePermissions.slice(0, 3).map((permission) => <li key={permission.id}>
+                  <div className="employee-profile-record-heading"><strong>{permission.zones.length ? normalizeFacilityZones(permission.zones).map(facilityZoneLabel).join(" · ") : permission.assignment}</strong><span data-state={permission.state}>{permission.state.replaceAll("_", " ")}</span></div>
+                  <small>{formatProfileDate(permission.validFrom)} – {permission.validTo ? formatProfileDate(permission.validTo) : "No expiry"}</small>
+                  {permission.reason ? <p>{permission.reason}</p> : null}
+                </li>)}
+              </ul> : <p className="employee-profile-empty">No individual permission records.</p>}
+              {profilePermissions.length > 3 ? <p className="employee-profile-more-count">+{profilePermissions.length - 3} more</p> : null}
+            </section>
+
+              <section className="employee-profile-record-section employee-profile-alert-section" aria-labelledby="employee-profile-alert-triggers-title">
+                <div className="employee-profile-record-section-heading">
+                  <h3 id="employee-profile-alert-triggers-title">Alert triggers</h3>
+                  <Link
+                    className="employee-profile-manage-permission"
+                    href={`/admin/logs?tab=alerts&subject=${encodeURIComponent(person.id)}`}
+                  >
+                    View alerts
+                    <ArrowUpRight size={15} aria-hidden="true" />
+                  </Link>
+                </div>
+                {profileAlerts.length ? <ul className="employee-profile-record-list">
+                  {profileAlerts.slice(0, PROFILE_ALERT_LIMIT).map((alert) => <li key={alert.id}>
+                    <div className="employee-profile-record-heading"><strong>{alert.title}</strong><span data-state={alert.review?.decision ?? alert.status}>{alertReviewLabel(alert)}</span></div>
+                    <small>{formatProfileDate(alert.createdAt || `${alert.date} ${alert.time}`)}{alert.severity !== "medium" ? ` · ${alert.severity}` : ""}</small>
+                  </li>)}
+                </ul> : <p className="employee-profile-empty">{historyLoading ? "Loading alert history…" : "No alert triggers recorded."}</p>}
+                {Math.max(alertTriggerCount, profileAlerts.length) > PROFILE_ALERT_LIMIT ? <p className="employee-profile-more-count">+{Math.max(alertTriggerCount, profileAlerts.length) - PROFILE_ALERT_LIMIT} more</p> : null}
+              </section>
+
+            <section className="employee-profile-record-section employee-profile-movement-section scrollable-content" aria-labelledby="employee-profile-movements-title">
+              <div className="employee-profile-movement-header">
+                <h3 id="employee-profile-movements-title">Movement logs</h3>
+                <button
+                  className="admin-button admin-button--ghost ghost-button"
+                  type="button"
+                  onClick={() => void downloadMovementHistory()}
+                  disabled={historyLoading || movementLogCount === 0 || exportingHistory}
+                  title="Export complete movement history as CSV"
+                >
+                  <Download size={16} aria-hidden="true" /> {exportingHistory ? "Exporting…" : "Export CSV"}
+                </button>
+              </div>
+              {movementLogs.length ? <div className="employee-profile-movement-table-wrap">
+                <table className="employee-profile-movement-table">
+                  <caption className="sr-only">Movement history for {person.name}</caption>
+                  <thead><tr><th scope="col">Date &amp; time</th><th scope="col">Direction</th><th scope="col">Checkpoint</th><th scope="col">Result</th><th scope="col">Scan</th><th scope="col">Details</th></tr></thead>
+                  <tbody>{movementLogs.slice(0, PROFILE_MOVEMENT_LIMIT).map((movement) => {
+                    const timestamp = movement.createdAt || `${movement.date} ${movement.time}`;
+                    const details = movement.reason?.trim() || movement.denialCode?.replaceAll("_", " ") || (movement.result === "approved" ? "Access permitted" : "Access denied");
+                    const scanType = movement.manualReviewedAt ? "Manual review" : movement.scanType === "manual" ? "Manual scan" : movement.scanType === "auto" ? "Automatic" : "Not recorded";
+                    return <tr key={movement.id}>
+                      <td><time dateTime={movement.createdAt || undefined}>{formatProfileDate(timestamp)}</time></td>
+                      <td>{movement.direction === "entry" ? "Entry" : "Exit"}</td>
+                      <td>{movement.checkpoint || "Not recorded"}</td>
+                      <td><span className="employee-profile-movement-result" data-result={movement.result}>{movement.result === "approved" ? "Allowed" : "Denied"}</span></td>
+                      <td>{scanType}</td>
+                      <td>{details}</td>
+                    </tr>;
+                  })}</tbody>
+                </table>
+              </div> : <p className="employee-profile-empty">{historyLoading ? "Loading movement logs…" : "No movement logs recorded."}</p>}
+              {Math.max(movementLogCount, movementLogs.length) > PROFILE_MOVEMENT_LIMIT ? <p className="employee-profile-more-count">+{Math.max(movementLogCount, movementLogs.length) - PROFILE_MOVEMENT_LIMIT} more</p> : null}
+            </section>
+          </div>
+          {historyError ? <p className="employee-profile-history-error" role="status">{historyError}</p> : null}
         </div>
-        {movementHistory}
-        <EmployeeProfileAlerts key={person.id} person={person.type === "employee" ? { ...person, status: employeeEnabled ? "active" : "inactive" } : person} initialAlerts={initialAlerts} showHistory={showAlertHistory} />
+        <EmployeeProfileAlerts key={person.id} person={person.type === "employee" ? { ...person, status: employeeEnabled ? "active" : "inactive" } : person} initialAlerts={initialAlerts} onHistoryChanged={updateAlertHistory} />
         </div>
       </div>
     </div>,

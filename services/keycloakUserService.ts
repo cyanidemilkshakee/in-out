@@ -7,8 +7,9 @@ export type ManagedUser = {
   enabled: boolean;
   emailVerified: boolean;
   createdTimestamp?: number;
-  roles?: Array<"admin" | "operator">;
+  roles?: Array<"admin" | "operator" | "master-admin">;
   checkpointId?: string | null;
+  zoneIds?: string[];
   canManage: boolean;
 };
 

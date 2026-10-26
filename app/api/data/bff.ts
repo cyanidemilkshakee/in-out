@@ -6,7 +6,6 @@ import {
   normalizeAlert,
   normalizeDashboardMovement,
   normalizeDataScope,
-  normalizeTerminalVisitorPage,
   normalizeAccessPermission,
 } from "../../../lib/normalizeDashboard";
 import { normalizeSubjectZones } from "../../../lib/facilityZones";
@@ -89,16 +88,6 @@ function normalizeCheckpointLabels(value: unknown): string[] {
 export async function handleGet(request: NextRequest, timing: ServerTiming) {
   const load = (path: string) => callPythonApi(path, "GET", undefined, undefined, { signal: request.signal });
   const resource = request.nextUrl.searchParams.get("resource");
-  if (resource === "terminalVisitors") {
-    const cursor = request.nextUrl.searchParams.get("cursor");
-    if (cursor !== null && (!cursor.trim() || cursor.length > 200)) {
-      return errorResponse("Visitor cursor is invalid.", timing, 400);
-    }
-    const query = new URLSearchParams({ limit: "100" });
-    if (cursor) query.set("cursor", cursor);
-    const raw = await load(`/v1/terminal/visitors?${query}`);
-    return response(timing.measure("normalize", () => normalizeTerminalVisitorPage(raw)), timing);
-  }
   if (resource === "export") {
     const query = new URLSearchParams(request.nextUrl.searchParams);
     query.delete("resource");

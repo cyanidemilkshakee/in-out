@@ -3,7 +3,9 @@ from datetime import datetime, timedelta, timezone
 from calendar import monthrange
 import re
 from fastapi import HTTPException
-from facility_zones import CHECKPOINT_IDS, FACILITY_ZONES, canonical_checkpoint_id, normalize_zones
+from facility_zones import FACILITY_ZONES, canonical_checkpoint_id, normalize_zones
+from models import Checkpoint, OrganizationZone
+from sqlalchemy import select
 
 FACILITY_TIMEZONE = timezone(timedelta(hours=5, minutes=30))
 ACCESS_START_GRACE = timedelta(minutes=5)
@@ -61,9 +63,12 @@ def validate_window(start, end):
 
 def validate_zones(zones, *, known_zone_ids=None):
     if not isinstance(zones, list) or len(zones) > 100 or any(not isinstance(zone, str) or not zone.strip() or len(zone) > 128 for zone in zones):
-        raise HTTPException(422, "Zones must be a list of non-empty zone names")
+        raise HTTPException(422, "Zones must be a list of valid organization zone IDs")
     try:
-        normalized = normalize_zones(zones)
+        return normalize_zones(
+            zones,
+            known_zones=FACILITY_ZONES if known_zone_ids is None else known_zone_ids,
+        )
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
     allowed = set(FACILITY_ZONES if known_zone_ids is None else known_zone_ids)
@@ -73,13 +78,29 @@ def validate_zones(zones, *, known_zone_ids=None):
 
 
 async def validate_registered_zones(db, zones):
-    """Validate against the facility's fixed public and secure areas."""
-    return validate_zones(zones)
+    """Validate branch IDs against the active organization-zone registry."""
+    result = await db.scalars(select(OrganizationZone.id).where(OrganizationZone.active.is_(True)))
+    return validate_zones(zones, known_zone_ids=tuple(result.all()))
 
 
 async def require_registered_checkpoint(db, value):
-    """Validate a checkpoint against the fixed facility configuration."""
-    checkpoint_id = canonical_checkpoint_id(value.strip()) if isinstance(value, str) else None
-    if checkpoint_id not in CHECKPOINT_IDS:
-        raise HTTPException(422, "Choose Main Entrance or Server Room")
+    """Validate a checkpoint reference against PostgreSQL's current registry."""
+    if not isinstance(value, str):
+        raise HTTPException(422, "Choose a registered checkpoint")
+    checkpoint_id = canonical_checkpoint_id(value.strip())
+    if (not checkpoint_id or len(checkpoint_id) > 64
+            or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", checkpoint_id)):
+        raise HTTPException(422, "Choose a registered checkpoint")
+    checkpoint = await db.get(Checkpoint, checkpoint_id)
+    if checkpoint is None or getattr(checkpoint, "active", True) is False:
+        raise HTTPException(422, "Checkpoint not registered")
+    zone_id = getattr(checkpoint, "zone_id", None)
+    if zone_id:
+        # Keep the zone row shared-locked through the caller's transaction.
+        # Zone retirement takes an exclusive lock before checking assignments,
+        # pending requests and active visits, closing the scan/delete race.
+        zone = await db.scalar(select(OrganizationZone).where(
+            OrganizationZone.id == zone_id).with_for_update(read=True))
+        if zone is None or getattr(zone, "active", True) is False:
+            raise HTTPException(422, "Checkpoint is in an inactive organization zone")
     return checkpoint_id

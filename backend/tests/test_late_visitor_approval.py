@@ -27,7 +27,7 @@ class LateVisitorApprovalTests(unittest.IsolatedAsyncioTestCase):
             request.created_at = datetime.now(timezone.utc) - timedelta(minutes=45)
             await db.commit()
 
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "late-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "late-admin"}
         approved = await self.client.post(f"/v1/permission-requests/{request_id}/decide", json={
             "decision": "approved", "reason": "Verified while the workflow worker was unavailable",
         })

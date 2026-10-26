@@ -17,7 +17,6 @@ import type {
   MovementEvent,
   PermissionRequest,
   TerminalVisitor,
-  TerminalVisitorPage,
 } from "./types";
 import type { DataScope } from "./types";
 import { canonicalCheckpointId, normalizeFacilityCheckpoints, normalizeFacilityZones, normalizeSubjectZones } from "./facilityZones";
@@ -462,7 +461,6 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
     movements?: unknown[];
     permissionRequests?: unknown[];
     terminalVisitors?: unknown[];
-    terminalVisitorsHasMore?: boolean;
     adminAvailability?: AppDataSnapshot["adminAvailability"];
     terminalAssignment?: AppDataSnapshot["terminalAssignment"];
     terminalReplayPolicy?: AppDataSnapshot["terminalReplayPolicy"];
@@ -498,7 +496,6 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
         status,
       };
     }).filter((visitor) => visitor.id),
-    terminalVisitorsHasMore: r.terminalVisitorsHasMore === true,
     checkpoints: normalizeFacilityCheckpoints(r.checkpoints).filter(checkpoint => !terminalAssignment || checkpoint.id === terminalAssignment.checkpointId),
     terminalAssignment,
     terminalReplayPolicy: r.terminalReplayPolicy,

@@ -40,17 +40,7 @@ class AssignmentStore:
         pass  # Per-account advisory lock SQL; real locking is in PostgreSQL tests.
 
     async def get(self, model, identity, **kwargs):
-        if model is Checkpoint:
-            if identity not in {"cp-main", "server-room"}:
-                return None
-            return Checkpoint(id=identity, data={"id": identity})
         return SimpleNamespace(checkpoint_id=self.pending) if self.pending else None
-
-    async def flush(self):
-        return None
-
-    async def scalar(self, *args, **kwargs):
-        return 1
 
     async def assign(self, db, identity, checkpoint, actor):
         self.pending = checkpoint
@@ -126,7 +116,7 @@ class KeycloakAdminRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[get_db] = lambda: self.db
         self.app.dependency_overrides[keycloak_admin._admin_context] = lambda: "isolated-token"
         self.app.dependency_overrides[verify_admin_request] = lambda: {
-            "sub": "admin", "realm_access": {"roles": ["admin"]}}
+            "sub": "admin", "realm_access": {"roles": ["master-admin", "admin"]}}
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(self.app), base_url="http://test")
         self.provider_patch = patch("routers.keycloak_admin._request", side_effect=self.identity.request)
         self.assignment_patch = patch("routers.keycloak_admin.set_checkpoint_assignment", side_effect=self.db.assign)
@@ -147,7 +137,7 @@ class KeycloakAdminRecoveryTests(unittest.IsolatedAsyncioTestCase):
             "checkpointId": "server-room", **overrides})
 
     async def create(self, **overrides):
-        return await self.client.post("/v1/keycloak/users", json={"username": "created", "password": "Isolated9-password",
+        return await self.client.post("/v1/keycloak/users", json={"username": "created", "password": "isolated-password",
             "roles": ["operator"], "checkpointId": "server-room", **overrides})
 
     async def test_combined_save_commits_profile_roles_assignment_and_preserves_other_roles(self):
@@ -295,17 +285,14 @@ class KeycloakAdminRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(provider.await_count, 1)
         self.assertFalse(self.identity.deleted)
 
-    async def test_admin_can_change_operator_profile_and_checkpoint(self):
+    async def test_regular_admin_can_only_change_operator_enabled_state_and_checkpoint(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {
             "sub": "admin", "realm_access": {"roles": ["admin"]}}
         self.identity.roles = {"operator"}
 
-        profile_edit = await self.client.patch("/v1/keycloak/users/existing", json={"firstName": "Updated"})
-        self.assertEqual(profile_edit.status_code, 200, profile_edit.text)
-        self.assertEqual(profile_edit.json()["firstName"], "Updated")
-        profile_updates = [payload for method, path, payload in self.identity.calls
-            if method == "PUT" and path == "users/existing"]
-        self.assertEqual(profile_updates[-1]["firstName"], "Updated")
+        profile_edit = await self.client.patch("/v1/keycloak/users/existing", json={"firstName": "Not allowed"})
+        self.assertEqual(profile_edit.status_code, 403, profile_edit.text)
+        self.assertFalse(any(method in {"PUT", "POST", "DELETE"} for method, _, _ in self.identity.calls))
 
         self.identity.calls.clear()
         access_edit = await self.client.patch("/v1/keycloak/users/existing", json={
@@ -317,7 +304,7 @@ class KeycloakAdminRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.identity.user["enabled"], False)
         provider_updates = [payload for method, path, payload in self.identity.calls
             if method == "PUT" and path == "users/existing"]
-        self.assertEqual(provider_updates[-1]["enabled"], False)
+        self.assertEqual(provider_updates, [{"enabled": False}])
 
         self.identity.calls.clear()
         checkpoint_only = await self.client.patch("/v1/keycloak/users/existing", json={"checkpointId": "cp-main"})
@@ -325,25 +312,28 @@ class KeycloakAdminRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(checkpoint_only.json()["checkpointId"], "cp-main")
         self.assertFalse(any(method == "PUT" and path == "users/existing" for method, path, _ in self.identity.calls))
 
-    async def test_admin_can_create_accounts_and_manage_security(self):
+    async def test_regular_admin_cannot_create_or_manage_admin_accounts_or_security(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {
             "sub": "admin", "realm_access": {"roles": ["admin"]}}
         create = await self.create()
-        self.assertEqual(create.status_code, 201, create.text)
+        self.assertEqual(create.status_code, 403, create.text)
+        self.assertEqual(self.identity.calls, [])
 
         update = await self.client.patch("/v1/keycloak/users/existing", json={"enabled": False})
-        self.assertEqual(update.status_code, 200, update.text)
+        self.assertEqual(update.status_code, 403, update.text)
         self.identity.calls.clear()
         password = await self.client.put("/v1/keycloak/users/existing/password", json={
-            "password": "Synthetic9-password", "temporary": True})
-        self.assertEqual(password.status_code, 200, password.text)
+            "password": "synthetic-password", "temporary": True})
+        self.assertEqual(password.status_code, 403, password.text)
+        self.assertEqual(self.identity.calls, [])
         sessions = await self.client.post("/v1/keycloak/users/existing/logout")
-        self.assertEqual(sessions.status_code, 200, sessions.text)
+        self.assertEqual(sessions.status_code, 403, sessions.text)
+        self.assertEqual(self.identity.calls, [])
 
-    async def test_accounts_without_an_application_role_are_not_managed(self):
-        self.identity.roles = {"unrelated-role"}
+    async def test_master_admin_cannot_mutate_another_master_admin_account(self):
+        self.identity.roles = {"master-admin", "admin"}
         result = await self.client.patch("/v1/keycloak/users/existing", json={"enabled": False})
-        self.assertEqual(result.status_code, 404, result.text)
+        self.assertEqual(result.status_code, 403, result.text)
         self.assertFalse(any(method in {"PUT", "POST", "DELETE"} for method, _, _ in self.identity.calls))
 
 
@@ -383,14 +373,17 @@ class KeycloakAdminPostgresRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[get_db] = session
         self.app.dependency_overrides[keycloak_admin._admin_context] = lambda: "isolated-token"
         self.app.dependency_overrides[verify_admin_request] = lambda: {
-            "sub": "admin", "realm_access": {"roles": ["admin"]}}
+            "sub": "admin", "realm_access": {"roles": ["master-admin", "admin"]}}
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(self.app), base_url="http://test")
         self.provider = patch("routers.keycloak_admin._request", side_effect=self.identity.request)
         self.provider.start()
+        self.publication = patch("routers.keycloak_admin.publish_checkpoint_assignment", new=AsyncMock())
+        self.publish = self.publication.start()
 
     async def asyncTearDown(self):
         await self.client.aclose()
         self.provider.stop()
+        self.publication.stop()
         async with self.engine.begin() as conn:
             await conn.execute(text(f'DROP SCHEMA "{self.schema}" CASCADE'))
         await self.engine.dispose()
@@ -407,6 +400,7 @@ class KeycloakAdminPostgresRecoveryTests(unittest.IsolatedAsyncioTestCase):
             audit = await db.scalar(select(AuditEvent))
             self.assertEqual(audit.data["actor"], "admin")
             self.assertEqual(audit.data["checkpointId"], "server-room")
+        self.publish.assert_not_awaited()
         async with self.sessions() as db:
             events = (await db.scalars(select(EventOutbox))).all()
             self.assertEqual(len(events), 1)
@@ -424,6 +418,7 @@ class KeycloakAdminPostgresRecoveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 0)
         self.assertEqual(self.identity.user, old)
         self.assertEqual(self.identity.roles, {"admin", "unrelated-role"})
+        self.publish.assert_not_awaited()
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(EventOutbox)), 0)
 

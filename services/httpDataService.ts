@@ -32,7 +32,6 @@ import type {
   RecordScanInput,
   RecordScanResult,
   RegistryPage, RegistryPageQuery, RegistrySubjectPage, RegistrySubjectQuery, SubjectProfile,
-  TerminalVisitorPage,
 } from "../lib/types";
 
 type Command =
@@ -113,17 +112,26 @@ function resourceParams(
 
 export class HttpDataService implements DataService {
   async queryDashboardAnalytics(query: DashboardAnalyticsQuery, signal?: AbortSignal): Promise<DashboardAnalytics> {
-    const params = resourceParams("dashboardAnalytics", query);
+    const params = new URLSearchParams({ resource: "dashboardAnalytics" });
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
     return readResponse<DashboardAnalytics>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async queryEmployeeActivity(query: EmployeeActivityQuery, signal?: AbortSignal): Promise<EmployeeActivity> {
-    const params = resourceParams("employeeActivity", query);
+    const params = new URLSearchParams({ resource: "employeeActivity" });
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
     return readResponse<EmployeeActivity>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async queryEmployeeActivitySummary(query: EmployeeActivitySummaryQuery, signal?: AbortSignal): Promise<EmployeeActivitySummary> {
-    const params = resourceParams("employeeActivitySummary", query);
+    const params = new URLSearchParams({ resource: "employeeActivitySummary" });
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
     return readResponse<EmployeeActivitySummary>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
@@ -140,7 +148,8 @@ export class HttpDataService implements DataService {
   }
 
   async queryMovements(query: MovementQuery, signal?: AbortSignal) {
-    const params = resourceParams("movements", query, {
+    const params = new URLSearchParams({
+      resource: "movements",
       page: String(query.page),
       pageSize: String(query.pageSize),
     }, ["page", "pageSize"]);
@@ -152,19 +161,31 @@ export class HttpDataService implements DataService {
   }
 
   async queryAuditEvents(query: AuditEventQuery, signal?: AbortSignal) {
-    const params = resourceParams("auditEvents", query, {
+    const params = new URLSearchParams({
+      resource: "auditEvents",
       limit: String(query.limit),
       offset: String(query.offset),
-    }, ["limit", "offset"]);
+    });
+    for (const [key, value] of Object.entries(query)) {
+      if (key !== "limit" && key !== "offset" && value !== undefined && value !== "") {
+        params.set(key, String(value));
+      }
+    }
     const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store", signal });
     return readResponse<AuditEventPage>(response, signal);
   }
 
   async queryAlerts(query: AlertQuery, signal?: AbortSignal) {
-    const params = resourceParams("alerts", query, {
+    const params = new URLSearchParams({
+      resource: "alerts",
       limit: String(query.limit),
       offset: String(query.offset),
-    }, ["limit", "offset"]);
+    });
+    for (const [key, value] of Object.entries(query)) {
+      if (key !== "limit" && key !== "offset" && value !== undefined && value !== "") {
+        params.set(key, String(value));
+      }
+    }
     const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store", signal });
     return readResponse<AlertPage>(response, signal);
   }
@@ -263,24 +284,20 @@ export class HttpDataService implements DataService {
   }
 
   async queryRegistryPage(query: RegistryPageQuery, signal?: AbortSignal) {
-    const params = resourceParams("registryPage", query);
+    const params = new URLSearchParams({ resource: "registryPage" });
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
     return readResponse<RegistryPage>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async queryRegistrySubjects(query: RegistrySubjectQuery, signal?: AbortSignal) {
-    const params = resourceParams("registrySubjects", query);
+    const params = new URLSearchParams({ resource: "registrySubjects" });
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
     return readResponse<RegistrySubjectPage>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async querySubjectProfile(subjectId: string, signal?: AbortSignal) {
     const params = new URLSearchParams({ resource: "subjectProfile", subjectId });
     return readResponse<SubjectProfile>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
-  }
-
-  async queryTerminalVisitors(cursor?: string, signal?: AbortSignal) {
-    const params = new URLSearchParams({ resource: "terminalVisitors" });
-    if (cursor) params.set("cursor", cursor);
-    return readResponse<TerminalVisitorPage>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
 }

@@ -74,12 +74,12 @@ test("API audience repair does not silently replace conflicting custom settings"
 
 const appRealmRoles = ["admin", "operator"].map((name) => ({ id: `realm-${name}`, name, clientRole: false, composite: true }));
 
-test("application client templates expose only the supported application roles", () => {
+test("application client templates scope master-admin only to the frontend", () => {
   const realm = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
   for (const clientId of ["inout-frontend", "inout-postman"]) {
     assert.equal(realm.clients.find((client) => client.clientId === clientId).fullScopeAllowed, false);
     assert.deepEqual(realm.scopeMappings.find((mapping) => mapping.client === clientId).roles,
-      ["admin", "operator"]);
+      clientId === "inout-frontend" ? ["admin", "operator", "master-admin"] : ["admin", "operator"]);
   }
 });
 

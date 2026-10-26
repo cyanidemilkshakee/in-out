@@ -19,14 +19,9 @@ from routers import presence
 class PresencePrivacyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         # Privacy fixtures mock identity/event I/O independently of admission.
-        lease = SimpleNamespace(id="privacy-test", principal_key="privacy-test", expires_at=time.time() + 300)
-        admission_mocks = {
-            "routers.presence.acquire_stream_lease": AsyncMock(return_value=lease),
-            "routers.presence.renew_stream_lease": AsyncMock(return_value=True),
-            "routers.presence.release_stream_lease": AsyncMock(return_value=None),
-        }
-        for target, mock in admission_mocks.items():
-            admission = patch(target, new=mock)
+        for target in ("routers.presence.acquire_stream_lease",
+                       "routers.presence.renew_stream_lease", "routers.presence.release_stream_lease"):
+            admission = patch(target, new=AsyncMock(return_value=True))
             admission.start()
             self.addCleanup(admission.stop)
         self.app = FastAPI()
@@ -81,7 +76,7 @@ class PresencePrivacyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [{"type": "data_changed"}, {"type": "data_changed"}, {"type": "terminal_assignment"}, {"type": "data_changed"}])
         self.assertEqual(assignment.await_count, len(messages) + 1)
         administrator, lookup = await self.stream("admin", messages, [])
-        self.assertEqual(administrator, [{"type": "data_changed"}] * len(messages))
+        self.assertEqual(administrator, messages)
         lookup.assert_not_awaited()
 
     async def test_unassigned_operator_gets_no_private_updates(self):

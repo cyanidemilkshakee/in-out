@@ -220,35 +220,6 @@ test("BFF GET cancellation reaches both movement reads and retains the existing 
   });
 });
 
-test("movement BFF converts checkpoint records to labels before rendering movement filters", async () => {
-  await withTransportFixture(async (_api, bff) => {
-    const { NextRequest } = require("next/server") as typeof import("next/server");
-    globalThis.fetch = async input => {
-      const path = new URL(String(input)).pathname;
-      return path.endsWith("/analytics")
-        ? Response.json({
-            items: [],
-            checkpoints: [{ id: "cp-main", name: "Main Entrance", mode: "auto", zone: "public", online: true }],
-            summary: {},
-            buckets: [],
-          })
-        : Response.json({
-            items: [{ id: "scan-1", checkpoint_id: "cp-main", data: { checkpoint: {
-              id: "cp-main", name: "Main Entrance", mode: "auto", zone: "public", online: true,
-            } } }],
-            total: 1,
-            page: 1,
-            pageSize: 25,
-          });
-    };
-    const response = await bff.handleGet(new NextRequest(
-      "https://app.invalid/api/data?resource=movements&page=1&pageSize=25"), new ServerTiming());
-    const data = (await response.json()).data;
-    assert.deepEqual(data.checkpoints, ["Main Entrance"]);
-    assert.equal(data.items[0].checkpoint, "Main Entrance");
-  });
-});
-
 test("upstream timeouts retain 504 while successful BFF reads report parsing and normalization", async () => {
   await withTransportFixture(async (api, bff) => {
     globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
@@ -620,16 +591,16 @@ test("live movement revisions replace automatic denials and preserve history aga
 
 test("zone-access requests retain their type and access snapshot in manager and dashboard", () => {
   const request = { id: "req-zone", type: "zone_access", status: "pending", subjectId: "p1", subjectName: "Alice",
-    requestedZones: ["public", "secure"], previousZones: ["public"], previousValidTo: "2026-10-04T12:00:00Z" };
+    requestedZones: ["a", "b"], previousZones: ["a"], previousValidTo: "2026-10-04T12:00:00Z" };
   const manager = normalizePermissionsSnapshot({ requests: [request], people: [{ id: "perm", subjectId: "p1" }],
     subjects: [{ id: "p1", type: "employee", name: "Alice" }, { id: "h1", type: "hardware", name: "Laptop" }],
-    checkpoints: [{ id: "cp-main", name: "Main Entrance", zone: "public", buildingId: "main-building", mode: "auto", online: true }] });
+    checkpoints: [{ id: "a-1", name: "1", zone: "a", zoneId: "a", number: 1, gateType: "front_gate", required: true }] });
   assert.equal(manager.permissionRequests[0].type, "zone_access");
-  assert.deepEqual(manager.permissionRequests[0].previousZones, ["public"]);
+  assert.deepEqual(manager.permissionRequests[0].previousZones, ["a"]);
   assert.equal(manager.permissions[0].subjectId, "p1");
   assert.equal(manager.people[0].name, "Alice");
   assert.equal(manager.hardwareAssets[0].name, "Laptop");
-  assert.equal(manager.checkpoints[0].id, "cp-main");
+  assert.equal(manager.checkpoints[0].id, "a-1");
   assert.equal(normalizeDashboardSnapshot({ pendingDecisions: [request] }).permissionRequests[0].type, "zone_access");
 });
 
@@ -800,70 +771,58 @@ test("alert counts use the dedicated uncached resource and preserve zero", async
   } finally { globalThis.fetch = original; }
 });
 
-test("the two fixed facility checkpoints normalize to their stable identities", () => {
+test("numbered branch checkpoints and custom checkpoints survive normalization", () => {
   const checkpoints = normalizeFacilityCheckpoints([
-    { id: "cp-main", name: "Main Entrance", zone: "public", mode: "auto", online: true },
-    { id: "server-room", name: "Server Room", zone: "secure", mode: "auto", online: true },
-    { id: "unknown-gate", name: "Unknown gate", zone: "public", mode: "auto", online: true },
+    { id: "a-1", name: "1", zoneId: "a", mode: "auto", number: 1, gateType: "front_gate", required: true },
+    { id: "a-2", name: "2", zoneId: "a", mode: "auto", number: 2, gateType: "back_gate" },
+    { id: "b-1", name: "1", zoneId: "b", mode: "manual", number: 1, gateType: "front_gate", required: true },
+    { id: "a-3", name: "Loading Bay", zoneId: "a", mode: "auto", number: 3, gateType: "custom" },
+    { id: "bad id", name: "Invalid", zoneId: "a" },
   ]);
   assert.deepEqual(checkpoints.map((item) => [item.id, item.name, item.zone]), [
-    ["cp-main", "Main Entrance", "public"], ["server-room", "Server Room", "secure"],
+    ["a-1", "1", "a"], ["a-2", "2", "a"], ["b-1", "1", "b"], ["a-3", "Loading Bay", "a"],
   ]);
   assert.equal(checkpoints[0].mode, "auto");
+  assert.equal(checkpoints[3].number, 3);
+  assert.equal(checkpoints[3].active, true);
   assert.deepEqual(normalizeFacilityCheckpoints(checkpoints), checkpoints);
   assert.equal(FACILITY_ZONES.length, 2);
-  const event = normalizeDashboardMovement({ id: "scan-main", checkpoint_id: "cp-main", data: { checkpoint: "Main Entrance" } });
-  assert.equal(event.checkpointId, "cp-main");
+  const event = normalizeDashboardMovement({ id: "scan-a1", checkpoint_id: "a-1", data: { checkpoint: "1" } });
+  assert.equal(event.checkpointId, "a-1");
 });
 
-test("permission requests render checkpoint records as a label instead of a React child object", () => {
-  const request = normalizePermissionRequest({
-    id: "request-1",
-    checkpoint: {
-      id: "cp-main",
-      mode: "auto",
-      name: "Main Entrance",
-      zone: "public",
-      online: true,
-      createdAt: "2026-10-25T12:00:00Z",
-      buildingId: "main-building",
-    },
-  });
-  assert.equal(request.checkpoint, "Main Entrance");
-});
-
-test("fixed public and secure zones normalize across snapshots and live updates", () => {
-  assert.deepEqual(normalizeFacilityZones(["public", "secure"]), ["public", "secure"]);
-  assert.deepEqual(normalizeFacilityZones(["All Zones"]), ["public", "secure"]);
+test("branch zone IDs normalize across snapshots and live updates", () => {
+  assert.deepEqual(normalizeFacilityZones(["a", "b"]), ["a", "b"]);
+  assert.deepEqual(normalizeFacilityZones(["All Zones"]), ["a", "b"]);
   assert.deepEqual(normalizeFacilityZones(["IT Lab", 42, null]), []);
-  assert.deepEqual(normalizeFacilityZones(["a", "north-branch"]), []);
-  assert.equal(formatFacilityZones(["public", "secure"]), "All zones");
+  assert.deepEqual(normalizeFacilityZones(["c", "north-branch"]), ["c", "north-branch"]);
+  assert.equal(formatFacilityZones(["a", "b"]), "Zone A / Zone B");
   const snapshot = normalizeTerminalSnapshot({ subjects: [{ id: "p1", type: "employee", allowedZones: ["All Zones"] }] });
-  assert.deepEqual(snapshot.people[0].allowedZones, ["public", "secure"]);
+  assert.deepEqual(snapshot.people[0].allowedZones, ["a", "b"]);
   const initial: DataState = { ...emptyData, isLoading: false, error: null };
   const received = applyPresenceUpdate(initial, {
     people: snapshot.people,
-    request: normalizePermissionRequest({ id: "r1", type: "visitor", checkpointId: "cp-main", requestedZones: ["public"] }),
+    request: normalizePermissionRequest({ id: "r1", type: "visitor", checkpointId: "a-1", requestedZones: ["a"] }),
   });
-  assert.equal(received.permissionRequests[0].checkpointId, "cp-main");
-  assert.deepEqual(received.permissionRequests[0].requestedZones, ["public"]);
+  assert.equal(received.permissionRequests[0].checkpointId, "a-1");
+  assert.deepEqual(received.permissionRequests[0].requestedZones, ["a"]);
 });
 
 test("terminal snapshots expose only the assigned checkpoint and preserve an unassigned account", () => {
   const checkpoints = [
-    { id: "cp-main", name: "Main Entrance", zone: "public", mode: "auto", online: true },
-    { id: "server-room", name: "Server Room", zone: "secure", mode: "auto", online: true },
+    { id: "a-1", name: "1", zone: "a", zoneId: "a", number: 1 },
+    { id: "b-1", name: "1", zone: "b", zoneId: "b", number: 1 },
   ];
-  const assigned = normalizeTerminalSnapshot({ checkpoints, terminalAssignment: { operatorSubject: "operator", checkpointId: "server-room" } });
-  assert.deepEqual(assigned.checkpoints.map(checkpoint => checkpoint.id), ["server-room"]);
+  const assigned = normalizeTerminalSnapshot({ checkpoints, terminalAssignment: { operatorSubject: "operator", checkpointId: "b-1" } });
+  assert.deepEqual(assigned.checkpoints.map(checkpoint => checkpoint.id), ["b-1"]);
   assert.equal(assigned.terminalAssignment?.operatorSubject, "operator");
   const unassigned = normalizeTerminalSnapshot({ checkpoints, terminalAssignment: { operatorSubject: "other", checkpointId: null } });
   assert.deepEqual(unassigned.checkpoints, []);
   assert.deepEqual(unassigned.terminalAssignment, { operatorSubject: "other", checkpointId: null });
   const historicalId = normalizeTerminalSnapshot({
-    checkpoints: [{ id: "historical-checkpoint", name: "Retired Gate", zone: "public", mode: "auto", online: true }],
+    checkpoints: [{ id: "historical-checkpoint", name: "Retired Gate", zone: "a" }],
     terminalAssignment: { operatorSubject: "operator", checkpointId: "historical-checkpoint" },
   });
-  assert.deepEqual(historicalId.checkpoints, []);
+  assert.deepEqual(historicalId.checkpoints.map(checkpoint => checkpoint.id), ["historical-checkpoint"]);
   assert.deepEqual(historicalId.terminalAssignment, { operatorSubject: "operator", checkpointId: "historical-checkpoint" });
 });

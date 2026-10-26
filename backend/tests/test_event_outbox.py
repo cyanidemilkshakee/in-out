@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, select, text, update
 import event_outbox as outbox
-from models import EventOutbox, PermissionRequestModel, Person
+from models import EventOutbox, EventStreamState, PermissionRequestModel, Person
 import test_database as fixture
 
 

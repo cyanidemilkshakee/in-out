@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, ForeignKey, DateTime, Integer, BigInteger, Boolean, CheckConstraint, Index, case, func, literal, text
+from sqlalchemy import Column, String, ForeignKey, DateTime, Integer, BigInteger, Boolean, CheckConstraint, Index, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
@@ -44,11 +44,48 @@ class HardwareAsset(Base):
     subject = relationship("Subject", back_populates="hardware")
 
 
+class OrganizationZone(Base):
+    """A branch of the organization; inactive zones retain their history."""
+    __tablename__ = "organization_zones"
+
+    id: str = Column(String, primary_key=True)
+    name: str = Column(String(80), nullable=False, unique=True)
+    active: bool = Column(Boolean, nullable=False, default=True, server_default=text("true"))
+    created_by: str | None = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ZoneAdminAssignment(Base):
+    """Database-owned zone scope for Keycloak administrator identities."""
+    __tablename__ = "zone_admin_assignments"
+
+    admin_subject: str = Column(String, primary_key=True)
+    zone_id: str = Column(String, ForeignKey("organization_zones.id", ondelete="RESTRICT"), primary_key=True)
+    assigned_by: str = Column(String, nullable=False)
+    assigned_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    __table_args__ = (
+        Index("idx_zone_admin_assignments_zone", "zone_id", "admin_subject"),
+    )
+
+
+
 class Checkpoint(Base):
     __tablename__ = "checkpoints"
 
     id: str = Column(String, primary_key=True)
+    zone_id: str = Column(String, ForeignKey("organization_zones.id", ondelete="RESTRICT"), nullable=False)
+    number: int = Column(Integer, nullable=False)
+    gate_type: str = Column(String, nullable=False, default="custom", server_default="custom")
+    required: bool = Column(Boolean, nullable=False, default=False, server_default=text("false"))
+    active: bool = Column(Boolean, nullable=False, default=True, server_default=text("true"))
     data = Column(JSONB, nullable=False)
+    __table_args__ = (
+        UniqueConstraint("zone_id", "number", name="uq_checkpoint_zone_number"),
+        CheckConstraint("number > 0", name="ck_checkpoint_number_positive"),
+        CheckConstraint("gate_type IN ('front_gate', 'back_gate', 'custom')", name="ck_checkpoint_gate_type"),
+        Index("idx_checkpoints_zone_active", "zone_id", "active", "number"),
+        Index("uq_checkpoint_required_per_zone", "zone_id", unique=True, postgresql_where=text("required")),
+    )
 
     @hybrid_property
     def zone_id(self):

@@ -67,14 +67,7 @@ export function DataProvider({
       // that the database snapshot already contains.
       const updates = bufferedUpdates.current.filter(item => item.revision > revisionAtStart);
       const base: DataState = { ...emptyData, ...snapshot, isLoading: false, error: null };
-      setState(current => {
-        const scopedBase = scope === "terminal" && current.terminalAssignment?.checkpointId === base.terminalAssignment?.checkpointId
-          ? { ...base, terminalVisitors: current.terminalVisitors,
-              terminalVisitorsCursor: current.terminalVisitorsCursor,
-              terminalVisitorsHasMore: current.terminalVisitorsHasMore }
-          : base;
-        return updates.reduce((next, item) => applyPresenceUpdate(next, item.update), scopedBase);
-      });
+      setState(updates.reduce((next, item) => applyPresenceUpdate(next, item.update), base));
       setSnapshotCursor(previous => ({ revision: snapshot.eventRevision, generation: previous.generation + 1 }));
       bufferedUpdates.current = [];
     } catch (error) {

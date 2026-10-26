@@ -14,7 +14,7 @@ from config import settings
 from request_admission import RequestAdmissionMiddleware
 from request_observability import RequestObservabilityMiddleware, configure_request_logging
 from behavior_limits import enforce_behavior_admission
-from data_limits import DataLimitsMiddleware, precharge_mutation_response
+from data_limits import DataLimitsMiddleware
 from database import get_db, get_read_db, engine, read_engine, is_database_timeout, rollback_after_error
 from keycloak_http import close_keycloak_admin_client
 from schemas import ScanPayload, ScanResponse
@@ -23,9 +23,8 @@ from event_outbox import enqueue_presence
 from terminal_assignments import require_checkpoint
 from redis_client import get_redis_pool, close_redis_pool
 from routers import presence, movements, registry, permissions
-from routers import dashboard, alerts, audit, checkpoints, terminal, admin_profile, keycloak_admin
+from routers import dashboard, alerts, audit, checkpoints, terminal, admin_profile, keycloak_admin, zones
 from routers import user_management_auth, exports
-from routers import auth_sessions
 from temporal_worker import get_temporal_client, close_temporal_client
 
 logger = logging.getLogger(__name__)
@@ -99,11 +98,11 @@ app.include_router(dashboard.router, dependencies=[Depends(verify_admin_request)
 app.include_router(alerts.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(audit.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(checkpoints.router, dependencies=[Depends(verify_admin_request)])
+app.include_router(zones.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(keycloak_admin.router)
 app.include_router(terminal.router, dependencies=[Depends(verify_terminal_access_request)])
 app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(exports.router)
-app.include_router(auth_sessions.router)
 
 
 @app.post("/internal/gateway/identity", include_in_schema=False)
@@ -162,7 +161,6 @@ async def process_scan(
                 "people": raw_response.get("updatedPeople", []),
                 "hardwareAssets": raw_response.get("updatedHardwareAssets", []),
             })
-        await precharge_mutation_response(db, response)
         await db.commit()
         return response
     except HTTPException:

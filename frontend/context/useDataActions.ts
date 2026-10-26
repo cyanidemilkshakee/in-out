@@ -32,17 +32,6 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   const queryRegistryPage = useCallback<DataActions["queryRegistryPage"]>((query, signal) => service.queryRegistryPage(query, signal), [service]);
   const queryRegistrySubjects = useCallback<DataActions["queryRegistrySubjects"]>((query, signal) => service.queryRegistrySubjects(query, signal), [service]);
   const querySubjectProfile = useCallback<DataActions["querySubjectProfile"]>((subjectId, signal) => service.querySubjectProfile(subjectId, signal), [service]);
-  const loadMoreTerminalVisitors = useCallback<DataActions["loadMoreTerminalVisitors"]>(async (cursor) => {
-    const page = await service.queryTerminalVisitors(cursor);
-    setState((current) => ({
-      ...current,
-      terminalVisitors: cursor
-        ? mergeById(current.terminalVisitors, page.items)
-        : page.items,
-      terminalVisitorsCursor: page.nextCursor,
-      terminalVisitorsHasMore: page.hasMore,
-    }));
-  }, [service, setState]);
   const queryDashboardAnalytics = useCallback(
     (query: DashboardAnalyticsQuery, signal?: AbortSignal) => service.queryDashboardAnalytics(query, signal), [service]
   );
@@ -289,7 +278,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
   return useMemo(
     () => ({
       loadTerminalReplayPolicy,
-      queryRegistryPage, queryRegistrySubjects, querySubjectProfile, loadMoreTerminalVisitors,
+      queryRegistryPage, queryRegistrySubjects, querySubjectProfile,
       refresh,
       queryMovements,
       queryDashboardAnalytics,
@@ -317,7 +306,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     }),
     [
       loadTerminalReplayPolicy,
-      queryRegistryPage, queryRegistrySubjects, querySubjectProfile, loadMoreTerminalVisitors,
+      queryRegistryPage, queryRegistrySubjects, querySubjectProfile,
       createEmployee,
       createVisitor,
       createHardwareAsset,

@@ -12,7 +12,7 @@ from models import Subject, Person, HardwareAsset, PermissionRequestModel, Acces
 from schemas import PermissionRequestCreate, ManualReviewPayload, PermissionDecision
 from routers.permissions import create_permission_request
 from routers.terminal import create_manual_review
-from permission_decisions import apply_permission_decision, decision_event, zone_permission_version, custody_version
+from permission_decisions import apply_permission_decision, publish_decision, zone_permission_version, custody_version
 
 
 def scalar_result(value):
@@ -189,7 +189,7 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         db.add.assert_not_called()
 
     async def test_publication_carries_request_access_permission_and_presence(self):
-        event = decision_event({"request": {"id": "req", "subjectId": "visitor"}, "permission": {"id": "permission"}, "person": {"id": "visitor"}})
+        event = await publish_decision({"request": {"id": "req", "subjectId": "visitor"}, "permission": {"id": "permission"}, "person": {"id": "visitor"}})
         self.assertEqual(set(event), {"type", "requestId", "subject_id", "movement", "request", "permission", "people", "hardwareAssets"})
         self.assertEqual(event["permission"], {"id": "permission"})
         self.assertEqual(event["people"], [{"id": "visitor"}])
@@ -201,6 +201,8 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
             None,
         ]
         db.get.return_value = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"})
+        temporal = Mock()
+        temporal.start_workflow = AsyncMock()
         source = Mock(
             subject_id=None,
             occurred_at=datetime.now(timezone.utc),
@@ -211,7 +213,10 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
             barcode="unknown", checkpointId="cp-main", eventId="denied-scan",
             operatorNote="Checked photo ID",
         )
-        with patch("routers.terminal.review_source", new=AsyncMock(return_value=source)), patch("routers.terminal.pending_manual_review", new=AsyncMock(return_value=None)), patch("routers.terminal.enqueue_presence", new=AsyncMock()) as enqueue:
+        with patch("routers.terminal.review_source", new=AsyncMock(return_value=source)), \
+             patch("routers.terminal.pending_manual_review", new=AsyncMock(return_value=None)), \
+             patch("routers.terminal.get_temporal_client", new=AsyncMock(return_value=temporal)), \
+             patch("routers.terminal.enqueue_presence", new=AsyncMock()) as enqueue:
             request = await create_manual_review(payload, db, {"sub": "operator"})
         db.add.assert_called_once()
         db.commit.assert_awaited_once()

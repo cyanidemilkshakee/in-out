@@ -16,7 +16,7 @@ from sqlalchemy import select, func, delete
 import test_database as database_fixture
 from auth import verify_admin_request, verify_terminal_access_request
 from models import (Alert, AlertRule, AlertReview, WarningReset, Subject, Person,
-    AuditEvent, CriticalEntryRestriction, PresenceState, Movement, AlertRuleAssignment, EventOutbox)
+    AuditEvent, CriticalEntryRestriction, PresenceState, Movement, AlertRuleAssignment)
 from alert_reviews import AlertReviewInput, WarningResetInput, review_alert, reset_subject_warnings
 from critical_entry_restrictions import activate_critical_entry_restrictions
 
@@ -73,6 +73,10 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def acknowledge(self, alert_id):
         return await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
+
+    async def acknowledge(self, alert_id):
+        with patch("routers.alerts.publish_presence_update", new=AsyncMock()):
+            return await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
 
     async def reset(self, subject_id="p1", reason="Warnings checked and entry may resume"):
         return await self.client.post(f"/v1/alert-warnings/{subject_id}/reset", json={"reason": reason})
@@ -319,9 +323,10 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         await self.create_alert(severity="critical")
         async def scan():
-            return await self.client.post("/v1/terminal/scans",
-                json={"barcode": "p1", "checkpointId": "cp-main"},
-                headers={"Idempotency-Key": str(uuid.uuid4())})
+            with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
+                return await self.client.post("/v1/terminal/scans",
+                    json={"barcode": "p1", "checkpointId": "cp-main"},
+                    headers={"Idempotency-Key": str(uuid.uuid4())})
         blocked = await scan()
         self.assertFalse(blocked.json()["allowed"], blocked.text)
         async with self.sessions() as db:

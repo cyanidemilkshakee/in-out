@@ -41,79 +41,6 @@
 .sections { display: grid; min-height: 0; flex: 1 1 auto; gap: 0; padding: 0 24px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-border) transparent; }
 .rules, .warnings { display: grid; min-width: 0; gap: 16px; padding-block: 24px; }
 .rules { border-bottom: 1px solid var(--admin-border); }
-.profileRules {
-  box-sizing: border-box;
-  display: flex;
-  height: 128px;
-  min-height: 128px;
-  flex-direction: column;
-  gap: 12px;
-  padding: 0;
-  overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-.profileRules > * { flex-shrink: 0; }
-.profileRules > .sectionHeading { min-height: 32px; flex-wrap: wrap; gap: 6px 10px; }
-.profileRules > .sectionHeading h3 { font-size: 17px; }
-.profileRules .ruleList { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-.profileRules .rule { min-height: 32px; gap: 8px; padding: 5px 0; border: 0; border-radius: 0; background: transparent; }
-.profileRules .rule[data-checked="true"] { border: 0; background: transparent; }
-.profileRules .rule > input { flex-basis: 16px; width: 16px; height: 16px; }
-.profileRules .rule strong { font-size: 14px; }
-.profileRules .rule small { font-size: 14px; }
-.profileRules .warnings { gap: 10px; padding: 0 0 10px; border-bottom: 1px solid var(--profile-border); }
-.profileRules .warningOverview { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-.profileRules .warningCount { gap: 8px; }
-.profileRules .warningCount strong { font-size: 22px; }
-.profileRules .warningCount > span { font-size: 14px; white-space: normal; }
-.profileRules .warningList { max-height: 120px; }
-.profileRules .warningList strong { font-size: 14px; }
-.profileRules .resetPanel { padding-top: 0; border-top: 0; }
-.profileRules .resetControls { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.profileRules .resetControls input { min-height: 36px; padding: 7px 10px; border-radius: 6px; font-size: 14px; }
-.profileRules .holdBadge { padding: 0; background: transparent; font-size: 14px; }
-.profileRules .empty, .profileRules .lastReset { font-size: 14px; }
-.profileRules .button, .profileSkipCard .button { min-width: 0; min-height: 32px; padding: 6px 10px; border-radius: 6px; font-size: 14px; box-shadow: none; }
-.profileSkipCard .button { min-height: 36px; }
-.profileRules .button.saveButton:disabled, .profileSkipCard .button.saveButton:disabled { border-color: transparent; background: transparent; color: var(--ui-text-secondary); opacity: 1; box-shadow: none; }
-.profileSkipCard {
-  box-sizing: border-box;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  flex-direction: column;
-  gap: 14px;
-  padding: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  scrollbar-width: thin;
-  scrollbar-color: var(--profile-border) transparent;
-}
-.profileSkipCard > .skipDates { flex: 0 0 auto; min-height: 0; }
-.profileSkipCard .skipDates { gap: 10px; }
-.profileSkipCard .skipDates h4 { display: flex; min-height: 32px; align-items: center; font-size: 17px; font-weight: 700; }
-.profileSkipCard .dateField { flex: 1 1 135px; min-width: 0; }
-.profileSkipCard .dateField input { width: 100%; min-height: 36px; padding: 7px 9px; border-radius: 6px; background: transparent; font-size: 14px; }
-.profileSkipCard .skipDateControls { gap: 8px; }
-.profileSkipCard .skipDateControls > .button { flex: 0 0 auto; }
-.profileSkipCard .skipDateFooter { margin-top: 0; }
-.profileScheduleColumn { box-sizing: border-box; min-width: 0; min-height: 0; background: transparent; }
-.profileScheduleColumn > .skipScheduleProfile { max-height: none; gap: 10px; padding: 0; border: 0; border-radius: 0; }
-.profileScheduleColumn > .skipScheduleProfile:hover { border: 0; }
-.profileScheduleColumn .skipScheduleHeading { min-height: 32px; align-items: center; }
-.profileScheduleColumn .skipScheduleHeading h3 { font-size: 17px; }
-.profileScheduleColumn .skipScheduleEmpty { font-size: 14px; }
-.profileScheduleColumn .skipScheduleDates time { padding: 2px 0; border-radius: 0; background: transparent; font-size: 14px; }
-.profileSkipCard .skipDateList { gap: 4px 8px; }
-.profileSkipCard .skipDateList li { min-height: 28px; padding: 0; border: 0; border-radius: 0; font-size: 14px; }
-.profileScheduleColumn .skipScheduleList { max-height: 160px; }
 .employeeControlsGrid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); align-items: stretch; gap: 24px; margin-top: 12px; }
 .employeeControlsSingle { grid-template-columns: minmax(0, 1fr); }
 .employeeControlsGrid > .warnings { padding-block: 0; }
@@ -142,11 +69,10 @@
 .skipDateList button { display: grid; width: 26px; height: 26px; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ui-text-secondary); cursor: pointer; }
 .skipDateList button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-text-primary) 7%, var(--admin-bg)); color: var(--ui-text-primary); }
 .skipSchedule { display: flex; max-height: min(58dvh, 600px); flex-direction: column; gap: 14px; min-width: 0; padding: 16px; overflow: hidden; border: 1px solid transparent; border-radius: 10px; background: transparent; transition: border-color 150ms ease; }
-.skipScheduleProfile { max-height: none; gap: 10px; padding: 0; overflow: visible; border-color: transparent; background: transparent; }
 .skipSchedule:hover { border-color: var(--ui-border-hover); }
 .skipScheduleHeading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
 .skipScheduleHeading h3 { margin: 0; color: var(--ui-text-primary); font-size: 17px; font-weight: 700; line-height: 1.4; }
-.skipScheduleHeading > span { color: var(--ui-text-secondary); font-size: 14px; font-weight: 600; white-space: nowrap; }
+.skipScheduleHeading > span { color: var(--ui-text-secondary); font-size: 13px; font-weight: 600; white-space: nowrap; }
 .skipScheduleList { display: grid; min-height: 0; gap: 0; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-border) transparent; list-style: none; }
 .skipScheduleList li { display: grid; grid-template-columns: minmax(130px, .35fr) minmax(0, 1fr); align-items: start; gap: 10px 18px; padding: 12px 0; border-bottom: 1px solid var(--admin-border); }
 .skipScheduleList li:first-child { padding-top: 0; }

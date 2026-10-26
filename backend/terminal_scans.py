@@ -8,14 +8,12 @@ from sqlalchemy import select, func, tuple_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert
 
-from models import Subject, PresenceState, ScanRequest, Movement, Checkpoint, AccessPermission, PermissionRequestModel, Alert as AlertModel
+from models import Subject, PresenceState, ScanRequest, Movement, Checkpoint, OrganizationZone, AccessPermission, PermissionRequestModel, Alert as AlertModel
 from movement_logic import evaluate_scan, apply_movement_state, _current_date, _current_time
 from alert_rule_assignments import alert_rule_catalog
 from access_validation import parse_validity, require_registered_checkpoint
 from facility_zones import (
     CHECKPOINTS,
-    BUILDING_NAMES,
-    building_for_checkpoint,
     canonical_checkpoint_id,
     compatible_request_fingerprints,
     normalize_facility_document,
@@ -27,7 +25,6 @@ from critical_entry_restrictions import (
 from subject_metadata import current_subject_metadata
 from behavior_limits import consume_unknown_barcode_quota
 from manual_review_policy import manual_access_snapshot
-from terminal_response import project_terminal_scan_response
 
 _MANUAL_REVIEW_PAGE_SIZE = 50
 _MAX_MANUAL_REVIEW_CANDIDATES = 500
@@ -198,7 +195,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
         response["replayed"] = True
         response["authorizeMovement"] = False
         response["decision"] = {**replay_decision, "replayed": True, "authorizeMovement": False}
-        return project_terminal_scan_response(response)
+        return response
 
     # Check only after receipt lookup: an existing receipt is authoritative and
     # can safely replay without another movement. A miss must respect today's
@@ -264,7 +261,6 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
         result = {"allowed": False, "reason": event["reason"], "subject_id": None,
             "decision": decision, "updatedPeople": [], "updatedHardwareAssets": [],
             "replayed": False, "authorizeMovement": False}
-        result = project_terminal_scan_response(result)
         db.add(ScanRequest(idempotency_key=key, subject_id=None, terminal_id=terminal_id,
             status_code=200, response_body=result, request_fingerprint=fingerprint))
         await db.flush()
@@ -346,19 +342,31 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
         data["entryOverride"] = presence.entry_override
 
     canonical_checkpoint = next((item for item in CHECKPOINTS if item["id"] == checkpoint.id), {})
-    building_id = building_for_checkpoint(checkpoint.id)
     cp = {**(checkpoint.data or {}), **canonical_checkpoint, "id": checkpoint.id,
-        "buildingId": building_id}
+        "zone": checkpoint.zone_id, "zoneId": checkpoint.zone_id, "buildingId": checkpoint.zone_id,
+        "checkpointNumber": checkpoint.number, "gateType": checkpoint.gate_type,
+        "gateLabel": (checkpoint.data or {}).get("gateLabel", ""),
+        "required": checkpoint.required, "active": checkpoint.active}
     if payload.direction:
         cp["mode"] = payload.direction
+    building_id = checkpoint.zone_id
     subjects_by_id = {data["id"]: data for data in [*people, *hardware]}
     location_conflict = next((
         (sub, states[sub.id].entry_building_id)
         for sub in [subject, *(item for item in subjects if item.id != subject.id)]
         if states[sub.id].state == "inside" and states[sub.id].entry_building_id != building_id
     ), None)
-    def zone_label(building_id):
-        return BUILDING_NAMES.get(building_id, building_id or "an unrecorded location")
+    zone_names = {}
+    if location_conflict:
+        source_zone_id = location_conflict[1]
+        zone_ids = {building_id}
+        if isinstance(source_zone_id, str) and source_zone_id:
+            zone_ids.add(source_zone_id)
+        zone_rows = await db.scalars(select(OrganizationZone).where(OrganizationZone.id.in_(zone_ids)))
+        zone_names = {zone.id: zone.name for zone in zone_rows}
+
+    def zone_label(zone_id):
+        return zone_names.get(zone_id, f"zone {zone_id}" if zone_id else "an unrecorded zone")
 
     decision = evaluate_scan(barcode=payload.barcode, checkpoint=cp, people=people,
         hardware=hardware, selected_hardware_ids=payload.selected_hardware_ids,
@@ -471,8 +479,8 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
     if (event.get("denialCode") == "cross_building_access"
             and subject.kind in {"employee", "visitor"}
             and person_presence.state == "inside"
-            and person_presence.entry_building_id in BUILDING_NAMES
-            and building_id in BUILDING_NAMES
+            and person_presence.entry_building_id in zone_names
+            and building_id in zone_names
             and person_presence.entry_building_id != building_id):
         cross_building_rule = next((rule for rule in await alert_rule_catalog(db)
             if rule.get("conditionKey") == "cross_building_scan" and rule.get("enabled")), None)
@@ -493,7 +501,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
             "barcode": subject.barcode,
             "checkpoint": cp.get("gateLabel") or cp.get("name", checkpoint.id),
             "checkpointId": checkpoint.id,
-            "zoneId": checkpoint.zone_id,
+            "zoneId": building_id,
             "date": event["date"],
             "time": event["time"],
             "category": cross_building_rule.get("category", "presence_anomaly"),
@@ -512,7 +520,6 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
     result["replayed"] = False
     result["authorizeMovement"] = result["allowed"]
     decision.update(replayed=False, authorizeMovement=result["allowed"])
-    result = project_terminal_scan_response(result)
     db.add(ScanRequest(idempotency_key=key, subject_id=subject.id, terminal_id=terminal_id,
         status_code=200, response_body=result, request_fingerprint=fingerprint))
     await db.flush()

@@ -1,7 +1,7 @@
 import { Fragment, Suspense, lazy, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from 'lucide-react';
 import { ActivityBar } from './ActivityBar';
-import type { Alert, MovementEvent, Person, RegistrySortKey, SortDirection } from '../../../../lib/types';
+import type { AccessPermission, Alert, MovementEvent, Person, RegistrySortKey, SortDirection } from '../../../../lib/types';
 import type { PersonSessionIndex } from '../../../../lib/analyticsUtils';
 import type { TimeRange } from '../../../../lib/dateRanges';
 import { eventTimestamp } from '../../../../lib/dateRanges';
@@ -22,6 +22,7 @@ export function EmployeeTable({
   timeRange,
   averageHoursByPerson,
   averageHoursLoading,
+  permissions,
   alerts,
   sort,
 }: {
@@ -31,6 +32,7 @@ export function EmployeeTable({
   timeRange: TimeRange;
   averageHoursByPerson: Record<string, number | null> | null;
   averageHoursLoading: boolean;
+  permissions: AccessPermission[];
   alerts: Alert[];
   sort?: { key: RegistrySortKey; direction: SortDirection; onChange: (key: RegistrySortKey) => void };
 }) {

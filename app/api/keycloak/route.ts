@@ -6,7 +6,7 @@ import { requireObject } from "../data/bff";
 import { isActiveUserManagementStepUp, USER_MANAGEMENT_STEP_UP_LOCK_COOKIE } from "../../../lib/userManagementStepUp";
 import { identityCommandTimeoutMs } from "../../../lib/identityRequestPolicy";
 import { userManagementWindowUnlocked } from "../../../lib/serverUserManagement";
-import { hasAdminAccess } from "../../../lib/applicationRoles";
+import { hasAdminAccess, hasMasterAdminAccess } from "../../../lib/applicationRoles";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -51,6 +51,9 @@ async function identityRequest(request: NextRequest) {
     const body = requireObject(await readJsonBody(request), "Identity command");
     const action = body.action;
     if (typeof action !== "string") return NextResponse.json({ error: "Identity action is required." }, { status: 400 });
+    if (["createUser", "setRoles", "resetPassword", "endSessions"].includes(action) && !hasMasterAdminAccess(session.roles)) {
+      return NextResponse.json({ error: "Only a master-admin may create accounts, change roles, reset passwords, or end sessions." }, { status: 403 });
+    }
     const userId = typeof body.userId === "string" ? body.userId : "";
     const options = { timeoutMs: identityCommandTimeoutMs(action) };
     let result: unknown;

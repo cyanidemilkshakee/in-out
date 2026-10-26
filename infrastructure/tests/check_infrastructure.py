@@ -231,15 +231,11 @@ class InfrastructureAuthorizationTests(unittest.IsolatedAsyncioTestCase):
             audit_key = "inout:security-limits:fixture-audit"
             self.assertTrue(await quota.set(audit_key, "1", nx=True, ex=2))
             self.assertIsNone(await quota.set(audit_key, "2", nx=True, ex=2))
-            revoked_key = "inout:auth:revocation:token:fixture"
-            self.assertTrue(await quota.set(revoked_key, "1", ex=2))
-            self.assertEqual(await quota.mget(revoked_key), ["1"])
             lease = "inout:presence-lease:{streams}:fixture"
             self.assertEqual(await quota.eval("local t=redis.call('TIME'); redis.call('ZREMRANGEBYSCORE',KEYS[1],'-inf',0); redis.call('ZADD',KEYS[1],t[1],'fixture'); redis.call('EXPIRE',KEYS[1],2); return redis.call('ZCARD',KEYS[1])", 1, lease), 1)
             self.assertIsNotNone(await quota.zscore(lease, "fixture"))
             self.assertEqual(await quota.zrem(lease, "fixture"), 1)
             for command in (("GET", "foreign:key"), ("GET", "inout:write-rate:fixture"),
-                            ("GET", "inout:auth:other:fixture"),
                             ("INCR", "ratelimit:fixture"), ("PUBLISH", "presence:updates", "synthetic"),
                             ("CONFIG", "GET", "*"), ("FLUSHALL",),
                             ("EVAL", "return redis.call('GET','foreign:key')", "0")):

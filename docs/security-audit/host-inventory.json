@@ -1,0 +1,178 @@
+{
+  "listeners": [
+    {
+      "LocalAddress": "::",
+      "LocalPort": 135,
+      "ProcessName": "svchost"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 135,
+      "ProcessName": "svchost"
+    },
+    {
+      "LocalAddress": "172.31.96.1",
+      "LocalPort": 139,
+      "ProcessName": "System"
+    },
+    {
+      "LocalAddress": "192.168.88.12",
+      "LocalPort": 139,
+      "ProcessName": "System"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 445,
+      "ProcessName": "System"
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 1001,
+      "ProcessName": "System"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 2869,
+      "ProcessName": "System"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 3000,
+      "ProcessName": "grafana"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 5040,
+      "ProcessName": "svchost"
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 5354,
+      "ProcessName": "mDNSResponder"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 7680,
+      "ProcessName": "svchost"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 8080,
+      "ProcessName": "java"
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 27017,
+      "ProcessName": "mongod"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 30002,
+      "ProcessName": "ToolkitService"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 49664,
+      "ProcessName": "lsass"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 49664,
+      "ProcessName": "lsass"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 49665,
+      "ProcessName": "wininit"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 49665,
+      "ProcessName": "wininit"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 49666,
+      "ProcessName": "svchost"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 49666,
+      "ProcessName": "svchost"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 49667,
+      "ProcessName": "svchost"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 49667,
+      "ProcessName": "svchost"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 49668,
+      "ProcessName": "spoolsv"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 49668,
+      "ProcessName": "spoolsv"
+    },
+    {
+      "LocalAddress": "::1",
+      "LocalPort": 49669,
+      "ProcessName": "jhi_service"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 49670,
+      "ProcessName": "SeagateSecureService"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 49670,
+      "ProcessName": "SeagateSecureService"
+    },
+    {
+      "LocalAddress": "::",
+      "LocalPort": 49673,
+      "ProcessName": "services"
+    },
+    {
+      "LocalAddress": "0.0.0.0",
+      "LocalPort": 49673,
+      "ProcessName": "services"
+    },
+    {
+      "LocalAddress": "127.0.0.1",
+      "LocalPort": 61474,
+      "ProcessName": "explorer"
+    }
+  ],
+  "firewall": [
+    {
+      "Name": "Domain",
+      "Enabled": 1
+    },
+    {
+      "Name": "Private",
+      "Enabled": 1
+    },
+    {
+      "Name": "Public",
+      "Enabled": 1
+    }
+  ],
+  "defender": {
+    "AMServiceEnabled": true,
+    "AntivirusEnabled": true,
+    "RealTimeProtectionEnabled": true,
+    "NISEnabled": true,
+    "IsTamperProtected": true,
+    "AntivirusSignatureLastUpdated": "2026-10-10T01:26:15+05:30",
+    "QuickScanAge": 1,
+    "FullScanAge": 1446
+  }
+}

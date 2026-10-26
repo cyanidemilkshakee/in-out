@@ -78,8 +78,10 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
 
         db.commit.side_effect = commit
         db.refresh.side_effect = refresh
+        temporal = Mock(start_workflow=AsyncMock())
         with patch("routers.registry.enqueue_decision", new=AsyncMock(side_effect=enqueue)), \
-             patch("routers.registry.enqueue_workflow_start", new=AsyncMock()) as start:
+             patch("routers.registry.enqueue_workflow_start", new=AsyncMock()) as start, \
+             patch("routers.registry.get_temporal_client", new=AsyncMock(return_value=temporal)):
             result = await create_subject(self.visitor(), db, {"sub": "operator", "realm_access": {"roles": ["operator"]}})
 
         subject = next(row for row in added if isinstance(row, Subject))
@@ -93,11 +95,12 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(permission.subject_id, subject.id)
         self.assertEqual(permission.data["state"], "pending_approval")
         self.assertEqual(request.subject_id, subject.id)
-        self.assertEqual(request.data["requestedZones"], ["public"])
+        self.assertEqual(request.data["requestedZones"], ["public", "secure"])
         self.assertEqual(request.data["validTo"], subject.person.data["validTo"])
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
         start.assert_awaited_once_with(db, request.id, visitor=True)
+        temporal.start_workflow.assert_not_awaited()
         self.assertEqual(events, ["enqueue", "commit", "refresh"])
 
     async def test_duplicate_barcode_rolls_back_registration_without_publication(self):

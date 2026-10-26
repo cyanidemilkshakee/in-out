@@ -12,9 +12,15 @@ from sqlalchemy.dialects.postgresql import insert
 from access_validation import require_registered_checkpoint
 from database import AsyncSessionLocal, engine
 from models import AuditEvent, Checkpoint, TerminalCheckpointAssignment
+from redis_client import publish_presence_update
 from event_outbox import enqueue_presence
 
 logger = logging.getLogger(__name__)
+
+
+async def publish_checkpoint_assignment(identity):
+    """Compatibility event builder; callers enqueue inside their transaction."""
+    return {"type": "terminal_assignment", "terminalIdentity": identity}
 
 
 async def enqueue_checkpoint_assignment(db, identity):

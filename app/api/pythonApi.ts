@@ -16,10 +16,6 @@ const responseRequestIds = new WeakMap<Response, string>();
 type PythonApiOptions = { signal?: AbortSignal; timeoutMs?: number; session?: AppSession };
 
 export async function fetchPythonApi(path: string, method: string, body?: unknown, idempotencyKey?: string, options: PythonApiOptions = {}) {
-  if (path.split("?", 1)[0] === "/v1/checkpoints" && method.toUpperCase() !== "GET") {
-    throw new PythonApiError("Facility checkpoints are fixed and cannot be changed through the application.", 405);
-  }
-
   const base = process.env.PYTHON_API_URL ?? 'http://127.0.0.1:1002';
   const url = base + path;
 
@@ -46,7 +42,8 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
     headers["Authorization"] = `Bearer ${accessToken}`
   }
 
-  if (/^\/v1\/keycloak\/users(?:\/|\?|$)/.test(path) || /^\/v1\/user-management\/(?:window|lock)$/.test(path)) {
+  if (/^\/v1\/keycloak\/users(?:\/|\?|$)/.test(path) || /^\/v1\/user-management\/(?:window|lock)$/.test(path) ||
+      (method === "POST" && path === "/v1/checkpoints")) {
     if (!isActiveUserManagementStepUp(session)) throw new PythonApiError("Fresh re-authentication is required to manage users.", 403);
     const secret = process.env.AUTH_SECRET;
     if (!secret) throw new PythonApiError("Authentication is not configured.", 503);

@@ -68,6 +68,7 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def _evaluate(self, now=NOW):
         with patch("workflows.activities.async_session", new=self.sessions), \
+             patch("workflows.activities.publish_presence_update", new=AsyncMock()), \
              patch("workflows.activities.datetime", wraps=datetime) as clock:
             clock.now.return_value = now
             return await run_alert_rule_evaluation()

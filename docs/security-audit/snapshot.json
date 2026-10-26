@@ -1,0 +1,1024 @@
+{
+  "date": "2026-10-10",
+  "revision": "ee79c2c5505e5ae8d91768cc5b90e306f41b8862",
+  "includesUncommittedChanges": true,
+  "excludesSecrets": true,
+  "files": [
+    {
+      "path": ".github/workflows/verify.yml",
+      "sha256": "ea6beb4685a095db8be18b83ab6c85243f82463ce981a56241d336dec100c827"
+    },
+    {
+      "path": "app/account/page.tsx",
+      "sha256": "9f756e4be81c30c4ef994e1302eb598e8e439f8dbe3f5abb9b603958f62c7f80"
+    },
+    {
+      "path": "app/admin/alerts/layout.tsx",
+      "sha256": "ef7b0b99d5571951342410b041f783f4cbf3546f4ccb60785b0affd006b29b57"
+    },
+    {
+      "path": "app/admin/alerts/page.tsx",
+      "sha256": "0c5f27dcbba63b372b06dba21b55b6ae1f722a2175716f277b0b9213f9d4ee8e"
+    },
+    {
+      "path": "app/admin/dashboard/layout.tsx",
+      "sha256": "1e859cc43d5965ac87c50b346cabfab8cdc3356a8cafdfc019b616bf8a1c6b7a"
+    },
+    {
+      "path": "app/admin/dashboard/page.tsx",
+      "sha256": "586ed1606988304de1d137316f26a6acad7b9faa12468f8a28b88caaf0092ccb"
+    },
+    {
+      "path": "app/admin/layout.tsx",
+      "sha256": "b9d2341d11e52dad97a606bdc52ff89d51d5254e3195acd4942dec52c5047278"
+    },
+    {
+      "path": "app/admin/logs/layout.tsx",
+      "sha256": "76471953d4d1bcafaf5f1f89f2444df84b231aa45bd3ccb9e82835c1d5412079"
+    },
+    {
+      "path": "app/admin/logs/page.tsx",
+      "sha256": "a701dfa44760cee859929ee4a977bae7328307f7a48df068ec755c0a9bda62a6"
+    },
+    {
+      "path": "app/admin/page.tsx",
+      "sha256": "c530bc54de08e7b8787f341d1b2f8d1fe3885a4d1da3bad1ffe6e3d18bffbccb"
+    },
+    {
+      "path": "app/admin/permissions/layout.tsx",
+      "sha256": "71c119750d9f4032593f683c89cf1e274b111aad22f8e48186d14e1161e38b11"
+    },
+    {
+      "path": "app/admin/permissions/page.tsx",
+      "sha256": "76ee227781822089830fa23ad91cbec565660dd854fdf8aa81449abc3236a708"
+    },
+    {
+      "path": "app/admin/profile/page.tsx",
+      "sha256": "0c27d5fcdef24e695ee84fbee013229f50f38ee0d3a58787c4e73a8a236de5c5"
+    },
+    {
+      "path": "app/admin/registry/layout.tsx",
+      "sha256": "86e52e3ea55e7ca73b9853bad3c805c83ce8fd4df7f358442d44fa6a7ef7ae2f"
+    },
+    {
+      "path": "app/admin/registry/page.tsx",
+      "sha256": "286f5c33e8ed9d893d014404588a2ace2945977f3162ba33f08afc1eabca9d4b"
+    },
+    {
+      "path": "app/admin/users/page.tsx",
+      "sha256": "b38915977414cdb95ac40ed5db6c4407c3720541b51f9b4ff58ce6c48a0de392"
+    },
+    {
+      "path": "app/api/auth/[...nextauth]/route.ts",
+      "sha256": "d7ac63d448f0446db72822b8fb01c85da9ab7d92a26d0d921b8d1ba316837f9a"
+    },
+    {
+      "path": "app/api/auth/step-up/route.ts",
+      "sha256": "5d46fb2c2896789d74a9500a9e2ecdce90cf96ea60401c5a3158d51491e953cb"
+    },
+    {
+      "path": "app/api/authSession.ts",
+      "sha256": "dbe0115ce2fa374c9fd41705f562860589d6ab8ad640834b47bdd74b64c8e0e6"
+    },
+    {
+      "path": "app/api/data/bff.ts",
+      "sha256": "bac2d56c0a9a4e22748ce40eef52b5d0d4a16a93b97f7ac17bc165194c0f93ca"
+    },
+    {
+      "path": "app/api/data/commands.ts",
+      "sha256": "26b6caf7fdd08d0fe25b4b466d5684b0f0575c6ac637e4c88d8e49e6764997da"
+    },
+    {
+      "path": "app/api/data/route.ts",
+      "sha256": "19b007fa703943086e8fd2311fa5f558c95add26b77a3060adc6e1425dd8477a"
+    },
+    {
+      "path": "app/api/data/serverQueries.ts",
+      "sha256": "0d2517fed151206684bfe0d048760359241e010c87f015a69166942e9d6bdd90"
+    },
+    {
+      "path": "app/api/health/route.ts",
+      "sha256": "e509e633a5b3f3b9a4ea573f4a41a241c8630b06b5d7b04fc8385bf04f4088ac"
+    },
+    {
+      "path": "app/api/keycloak/route.ts",
+      "sha256": "264218dd2b1e93192f6e004280e9abdd0aab3775b2a6b155454c1050d4390140"
+    },
+    {
+      "path": "app/api/presence/route.ts",
+      "sha256": "58eda97947ef2beff7f509b7169f63ae9b5b530a9a82d0ff94c1b6d5fb3046e5"
+    },
+    {
+      "path": "app/api/profile/route.ts",
+      "sha256": "02efe8fc1244e39d5a4d0fac3d5c935b1042c315f5af67ddcb5e9f2b8f92b5e4"
+    },
+    {
+      "path": "app/api/pythonApi.ts",
+      "sha256": "8c4ae5ae92d0ae15b03058ebddf44c4c22a57afd0a1113d770059d2c5f4ce453"
+    },
+    {
+      "path": "app/layout.tsx",
+      "sha256": "b111cc082df9e97867aceac0aec898249239dd5b9ba4b9a0c75c65e1512728b9"
+    },
+    {
+      "path": "app/login/page.tsx",
+      "sha256": "836fe44d559357b0caba24ed1ea781d401e6c4477d52e33a08f95c6def50cfe3"
+    },
+    {
+      "path": "app/logout/complete/route.ts",
+      "sha256": "add7153b35151edff2a490443a642c92a0d2c1272c6a22df4fbe2aaf3ecd9fd1"
+    },
+    {
+      "path": "app/logout/route.ts",
+      "sha256": "2721e889d232a400145559ba07f83fd535aa4054d56c3592c214e01afa30e794"
+    },
+    {
+      "path": "app/page.tsx",
+      "sha256": "5a3fc590aea2f849adfbca6d46d4449e3edc45212875db091a00bb009df2226f"
+    },
+    {
+      "path": "app/terminal/layout.tsx",
+      "sha256": "25b4dc7d0a12cdf91ba5ab63b1f156e6563627a540fa1e8a3014df1bc38caa73"
+    },
+    {
+      "path": "app/terminal/page.tsx",
+      "sha256": "cf624af7bace8ca6753aab84c7234cc7789195dccd335bd713e00b0029bd0a94"
+    },
+    {
+      "path": "auth.ts",
+      "sha256": "0dd4c0bc2c810c0d1afebc683d585b58b6c3cfa2033740e3a859c991297048ad"
+    },
+    {
+      "path": "backend/access_validation.py",
+      "sha256": "d688172a4e9508651cc846a560306f3f7dc6e7d481c262105ede216726f10904"
+    },
+    {
+      "path": "backend/alembic/env.py",
+      "sha256": "d15aee530c5b7a03b5e28dae3d1b8e2d95a7f8078c889f940daa66080784d83d"
+    },
+    {
+      "path": "backend/alembic/versions/b4e1548478d0_initial_schema.py",
+      "sha256": "eceeb8f1b133552d94e37ea600783a70dabe6bf7bdc45a689d7c0d2cfbc62406"
+    },
+    {
+      "path": "backend/alembic/versions/c91b6d7e8f2a_allow_unregistered_denied_scans.py",
+      "sha256": "1e6fe345786caf8378e531e329f1d7bf7e2c6acb725f798c5a8a63f0b5f04d0a"
+    },
+    {
+      "path": "backend/alembic/versions/d2e8a3f4b1c9_remove_profile_password_hash.py",
+      "sha256": "ecd24e875d309949c0b8b96288448b99e0ed8b3e01b49d62d041805971b48f88"
+    },
+    {
+      "path": "backend/alembic/versions/e3f4a5b6c7d8_unique_permission_per_subject.py",
+      "sha256": "41e1326dfb681cd5fe81fa295d28f61355eb3fdadd71642c007ab40e01d23d06"
+    },
+    {
+      "path": "backend/alembic/versions/f4a5b6c7d8e9_allow_unregistered_permission_reviews.py",
+      "sha256": "73c9ce368cc27175e1303e6cf2ba078a5c932404ab245360890e1f2f582345fd"
+    },
+    {
+      "path": "backend/alembic/versions/g5h6i7j8k9l0_remove_unknown_barcode_alert_rule.py",
+      "sha256": "d5718d26f29d9557778532f011c9f3851d8629dda498b1f132729d5639f583f6"
+    },
+    {
+      "path": "backend/alembic/versions/h6i7j8k9l0m1_manual_entry_exit.py",
+      "sha256": "af28205391c3d015c3c534b60cb12f04187b1878a4da0fa74ebc7992beee7006"
+    },
+    {
+      "path": "backend/alembic/versions/i7j8k9l0m1n2_profile_identity.py",
+      "sha256": "b1c33e6bb78cc5476ca7f46d074cfe84eb12c70bba3ce24d001121247a8a06bc"
+    },
+    {
+      "path": "backend/alembic/versions/j8k9l0m1n2o_remove_decorative_profile_fields.py",
+      "sha256": "f207c6cfc57d092abbb3428234ece56bb57c333713915f754b1c15415e918099"
+    },
+    {
+      "path": "backend/alembic/versions/k9l0m1n2o3_query_and_retention_indexes.py",
+      "sha256": "a6cd6be23681c6b5ba855908f766095d42259d69e704d33eb4616905085b4798"
+    },
+    {
+      "path": "backend/alembic/versions/l0m1n2o3p4_admin_availability.py",
+      "sha256": "86ce4b16fb59e5a53ca7ce84f2b1980dd4bba7cc9e666b05e2d6d15b28c0e779"
+    },
+    {
+      "path": "backend/alembic/versions/m1n2o3p4q5_retire_legacy_alert_rules.py",
+      "sha256": "e949534d67773659da637c1f7ec0bf350c90765c4732739513b0621e3f7eb538"
+    },
+    {
+      "path": "backend/alembic/versions/n2o3p4q5r6_remove_admin_notifications.py",
+      "sha256": "a5141888eb4256f52c46a2d4cbe7a8db284599d158ade522c8f03117ded3d732"
+    },
+    {
+      "path": "backend/alembic/versions/o3p4q5r6s7_consolidate_facility_zones.py",
+      "sha256": "6d10590103aad7e7644a1e41a3eb756607c6b3c327f6ba740e465998610f1763"
+    },
+    {
+      "path": "backend/alembic/versions/p4q5r6s7t8_bind_terminal_checkpoints.py",
+      "sha256": "f6b564d557ef9b7bd7d693ace0023fa7b71feb1be6d27fe27108f2f06a705e75"
+    },
+    {
+      "path": "backend/alembic/versions/q5r6s7t8u9_classify_reviewed_scans_as_manual.py",
+      "sha256": "3395d96a9b9eb0e9d81384a6b5c025cc0bad81d71af90e58c8af7e122fad7148"
+    },
+    {
+      "path": "backend/alembic/versions/r6s7t8u9v0_optional_terminal_notifications.py",
+      "sha256": "2a84d11b167763e1179104a42cf822af4349a9ba0b0ca1dfbe4f0f7847d61f25"
+    },
+    {
+      "path": "backend/alembic/versions/s7t8u9v0w1_critical_entry_restrictions.py",
+      "sha256": "3fde4f2516a8d8aaf6618064a9a4ebc06f3a2e11c28645aa0f353e00328363c0"
+    },
+    {
+      "path": "backend/alembic/versions/t8u9v0w1x2_alert_reviews.py",
+      "sha256": "9b53bfede5f89b975389ad72258f1cccee5a657e7d34e6210ea2dd696bf91d84"
+    },
+    {
+      "path": "backend/alembic/versions/u9v0w1x2y3_alert_rule_assignments.py",
+      "sha256": "c2b952d5aeb5d8c691f978b9e8bc0ea0aeed9c9c2cbb4690d222ef40a1752bd5"
+    },
+    {
+      "path": "backend/alembic/versions/v0w1x2y3z4_remove_employee_descriptive_access.py",
+      "sha256": "83a1a727168b5879762462f4670df48c297c9a285e93ec61f8632a99d69a703b"
+    },
+    {
+      "path": "backend/alembic/versions/w1x2y3z4a5_employee_irregularity_skip_dates.py",
+      "sha256": "548bac978df1fff7aab4af287f2352e3460bcbefd333ccae31af195d81f60ee3"
+    },
+    {
+      "path": "backend/alembic/versions/x2y3z4a5b6_track_presence_building.py",
+      "sha256": "5401125ae8a1ee6914660c3a4c21f4d2180f33534e60cadc0f05a96b7d26af7c"
+    },
+    {
+      "path": "backend/alembic/versions/y3z4a5b6c7_user_management_window_locks.py",
+      "sha256": "fe584203584225bd9752c50de4dac4539107b36116670a015eed447398899d67"
+    },
+    {
+      "path": "backend/alert_reviews.py",
+      "sha256": "294418bf2afd2df0a78ab6f35bf2fc6be7fe7467055a2d4a54e283e3885bba92"
+    },
+    {
+      "path": "backend/alert_rule_assignments.py",
+      "sha256": "47947b2e8d84a2b42529415c0225ecbf520727a305ce7cca1f7b51a60a0a8d66"
+    },
+    {
+      "path": "backend/auth.py",
+      "sha256": "8e196e7e362c45e36c9d5fb26ffbbfe8bef0fc11f5dc25e561554f3fa13efff7"
+    },
+    {
+      "path": "backend/config.py",
+      "sha256": "af91806038d384fecf84e36e41f01ec6fa6480f82c4c859a43251993d96bcb83"
+    },
+    {
+      "path": "backend/critical_entry_restrictions.py",
+      "sha256": "8f0478bca5c88ccadb8a5ac32d27a4a19aa84b6827037be14083e6dffdc68306"
+    },
+    {
+      "path": "backend/database.py",
+      "sha256": "810500a27b299c2b1a73dea5af61adbdeeabcf10d9ddfbea5a52076a32811587"
+    },
+    {
+      "path": "backend/Dockerfile",
+      "sha256": "95b250f4ac64226b33550a8387be78297033af4451200aba85ddad2e06b00275"
+    },
+    {
+      "path": "backend/facility_zones.py",
+      "sha256": "783b07c5179235a5c9769212b139f07f9da7788a1a7913a31f39c1d67afc5d53"
+    },
+    {
+      "path": "backend/main.py",
+      "sha256": "766d3ea4eeb610324ca32a25f6047582e3a993ab552c2cbc057d22c63f2cee68"
+    },
+    {
+      "path": "backend/maintenance.py",
+      "sha256": "facdada4defd5048be902a05dfe6723e1e5c94ec1a05c8510cd29ea44f937c4b"
+    },
+    {
+      "path": "backend/manual_review_policy.py",
+      "sha256": "0df5cbb522f32c29bfd82efa606715c3fe289831be7383abd8cad260ab3fb413"
+    },
+    {
+      "path": "backend/models.py",
+      "sha256": "41502bc954c5ec8421ab0431d93cb91486638b3d8d183abc58ea51a7c3acc6ea"
+    },
+    {
+      "path": "backend/movement_analytics.py",
+      "sha256": "f491eb8b4949c0981d5c66fc93cdb4d8170dc3f858005331d2167c4fcd847713"
+    },
+    {
+      "path": "backend/movement_logic.py",
+      "sha256": "9020116575bebe4cbf500e2559a84418998f0abac740dafa06f194007417fa0e"
+    },
+    {
+      "path": "backend/permission_decisions.py",
+      "sha256": "f70d7e1c4dab30f210dd70f04abd9bafad363be3be7669b230d79a0b6f41c748"
+    },
+    {
+      "path": "backend/permission_grants.py",
+      "sha256": "5d0ea3acdafe90ab3e0c0187b001d0826cbde081ab23adc13f30d3abd0a838dc"
+    },
+    {
+      "path": "backend/pyproject.toml",
+      "sha256": "68b748cd28b89fbda223236744199e35d7785520715c120c0900e26cbf1e6742"
+    },
+    {
+      "path": "backend/redis_client.py",
+      "sha256": "3207aa26065e774c5d094487f77a1f839b5c435d6112cd258912881f6769ceca"
+    },
+    {
+      "path": "backend/repair_manual_entries.py",
+      "sha256": "5a90e3116c82c459587f9a411a1c04469a0e90e1ac7ef41dd3a8e846e44d68bb"
+    },
+    {
+      "path": "backend/request_limits.py",
+      "sha256": "a4bccb88dcd2c775b7db6a24e1e2cbde3c5125d80b02a1c599bd1a3fef7d42e3"
+    },
+    {
+      "path": "backend/routers/__init__.py",
+      "sha256": "9c0c10c2d6a11fd783c81a2cc3fc9033d228f1ca55e57cbfd5f24838f4ab30e8"
+    },
+    {
+      "path": "backend/routers/admin_profile.py",
+      "sha256": "b293f804bb8ff31fe906b58b25dbe5c54d61e7a31029dd4671fa030a78f45945"
+    },
+    {
+      "path": "backend/routers/alerts.py",
+      "sha256": "574a5ce4361234d89c6a9d1f1b1abe89b8f6af827a277da7767621a9d2b5f60c"
+    },
+    {
+      "path": "backend/routers/audit.py",
+      "sha256": "06ed9d90d2406ef182d8a692e3c57e5f37b153146fc5bc327008d5b0aba91bc7"
+    },
+    {
+      "path": "backend/routers/checkpoints.py",
+      "sha256": "fd79af5322da0712e2a78ea186634419c6d6486ac834fc92a783f1eff03a6b39"
+    },
+    {
+      "path": "backend/routers/dashboard.py",
+      "sha256": "5ce2d351ee52df4d9e2b393bd03318760d271b600d2595d721b86143b298ed7b"
+    },
+    {
+      "path": "backend/routers/keycloak_admin.py",
+      "sha256": "06f41ba0c5179bdb29656d5ae4925f31977035f7d4b1eba0057b4b64cc4b3e17"
+    },
+    {
+      "path": "backend/routers/movements.py",
+      "sha256": "17f4a80cc5d10fa638ba2d1eb11f8464c08b22a0a4e93ada27f60cca89155492"
+    },
+    {
+      "path": "backend/routers/permissions.py",
+      "sha256": "88b78ce338d7c1d5f4c59b776d974fb924cc1db1642fe6decbd177d470cd3b1a"
+    },
+    {
+      "path": "backend/routers/presence.py",
+      "sha256": "5d8554cf469428907b3b0be87dbdabbfcb70df53cea1d5d4acb510c97cd01d1c"
+    },
+    {
+      "path": "backend/routers/registry.py",
+      "sha256": "fd0d7ee5db22c433d899a2eae20a6d9566dab5f2c6a21a940b4fc066c58d4c87"
+    },
+    {
+      "path": "backend/routers/terminal.py",
+      "sha256": "53f3c0c82ac47ee0bf1bdfef58076506f224eb2d60bbeb10e7d10557893aeac8"
+    },
+    {
+      "path": "backend/routers/user_management_auth.py",
+      "sha256": "a87a33f28cd453d61865afb5bc092d90f369961a151e1fad8b92398e84f1e5ab"
+    },
+    {
+      "path": "backend/rule_engine.py",
+      "sha256": "5962f36e7fadf6e030dc5403241e19d8ffbe7a4dacecf067988966986ba15a83"
+    },
+    {
+      "path": "backend/scheduler.py",
+      "sha256": "eba2b9d1c0c27d17dd3b992bebe306ea5e0e2643fdf22832aa6087ee83d55736"
+    },
+    {
+      "path": "backend/schemas.py",
+      "sha256": "230843475e82d5521cdb5960e651b0efb64ffde840d9d63b00406f1e99c0a85e"
+    },
+    {
+      "path": "backend/seed.py",
+      "sha256": "5a337688a5cc9361a9d3dff4069d8dd0b89a62118c34af861097cb191b803fae"
+    },
+    {
+      "path": "backend/subject_metadata.py",
+      "sha256": "9b66ca16f025601aa70aa8b0b072d8ad507019f101b8174e0116d874e9acc7b4"
+    },
+    {
+      "path": "backend/temporal_worker.py",
+      "sha256": "4544bcce103810b3542a0127419d819b9448371eee968ac0a05953cfa27f841c"
+    },
+    {
+      "path": "backend/terminal_assignments.py",
+      "sha256": "f83e69436537a16a62d2303109a9c3e6f59926beafc419291e697c1f5ccfc58d"
+    },
+    {
+      "path": "backend/terminal_scans.py",
+      "sha256": "790529e82ef515fcb7bfa5325b35f26eedb0ba4f0c037bed853a6536e8427449"
+    },
+    {
+      "path": "backend/tests/test_access_policy.py",
+      "sha256": "29c93c3cc0072f3099b7537659eeca507c7c58a93c186c2e7920d406fb5dea92"
+    },
+    {
+      "path": "backend/tests/test_alert_reviews.py",
+      "sha256": "43f4f283757472c0d249aa65d5382ad099cd1e4fca4926c5dada12b1efef239b"
+    },
+    {
+      "path": "backend/tests/test_alert_rule_assignments.py",
+      "sha256": "d2bc754d6658e1c675ad25a2679a7c3eb55595f0630b39010be38b7ecfeaf719"
+    },
+    {
+      "path": "backend/tests/test_analytics.py",
+      "sha256": "b2462afb2e5ed2e3190b5c5c009bc44b15dc23043e2a8ecd48bd4e961c9fc53c"
+    },
+    {
+      "path": "backend/tests/test_approval_workflows.py",
+      "sha256": "dfbbdc2b257c40c245e007ca91be37401ff28cfb56cd7eb9c4553fb86738d335"
+    },
+    {
+      "path": "backend/tests/test_auth.py",
+      "sha256": "8314a5be929e1c4d71bde320baa6fb3c0f2b194232c6cdec0e547f85823cede1"
+    },
+    {
+      "path": "backend/tests/test_contracts.py",
+      "sha256": "d58818105dcc15fd690bc3ae384590d0cbd5821a1dcd87ffbbcdeca963b37728"
+    },
+    {
+      "path": "backend/tests/test_critical_entry_restrictions.py",
+      "sha256": "9800021d69a39fd16c17a134eb1edad7b9497d8988bf8dc4b6f3b546266b30d9"
+    },
+    {
+      "path": "backend/tests/test_database.py",
+      "sha256": "8370ab2992c791476f2073dba0ed06bf2b490964dd11dfd2939fd9c75dcb12a1"
+    },
+    {
+      "path": "backend/tests/test_facility_zones.py",
+      "sha256": "2f904168e2675f222294ab6a58515dcd2efa4b043eef8d1a3e30c4e827bd4891"
+    },
+    {
+      "path": "backend/tests/test_gateway.py",
+      "sha256": "ba924cf078493bdf0461e73f8a3a2fa9394e1d46c5aa48796242cdd9d1bc705b"
+    },
+    {
+      "path": "backend/tests/test_keycloak_admin_recovery.py",
+      "sha256": "36a4003b61062ce9b8dc9779d73e917276a08c20bec23197c916082fdb017f91"
+    },
+    {
+      "path": "backend/tests/test_permission_windows.py",
+      "sha256": "308af3af3d7764f7806825653dc53fe8be20380d3ebec9879410f1f73b07f346"
+    },
+    {
+      "path": "backend/tests/test_presence_privacy.py",
+      "sha256": "92e1ee14d6b9aa90909bb11d65d5869ec93fb1d956d18016edffb404404863fc"
+    },
+    {
+      "path": "backend/tests/test_profile_preferences.py",
+      "sha256": "6cbbd94eec6126a623798c6874346498bfd78451e049459710d8975126bf5508"
+    },
+    {
+      "path": "backend/tests/test_registration_approvals.py",
+      "sha256": "e019a94659254ae1f82e7d46e79eab0f093fc7fbd241d07bcf1e0427172ca925"
+    },
+    {
+      "path": "backend/tests/test_registry_creation_workflows.py",
+      "sha256": "5038ef0ea78c99c85a7500532f7d3f8ebb9072a1580134113d9243ff43e77f6e"
+    },
+    {
+      "path": "backend/tests/test_request_limits.py",
+      "sha256": "66d822358155468c36f5a8d228b0359652b63723181882e040b83e3f9279af54"
+    },
+    {
+      "path": "backend/tests/test_robustness.py",
+      "sha256": "ed24f844ae50eb984d012130131954f844f0c5b783802dc02d3a500f5d8df9e2"
+    },
+    {
+      "path": "backend/tests/test_rule_engine.py",
+      "sha256": "a324eef7d33f264d1c253edbc9fd3122d4b4faf4b7dcbf50306e2ff9a2ceaafa"
+    },
+    {
+      "path": "backend/tests/test_subject_metadata.py",
+      "sha256": "3d5f2c6b8116229f53b3ef1f5f6e67247abd6e3ba7061d993d168f38b9950d9a"
+    },
+    {
+      "path": "backend/tests/test_terminal_assignments.py",
+      "sha256": "0001f2ac0c1bffec1167d34fa8de9ed76eb6a9c4b99ae7fd250a166a13471d76"
+    },
+    {
+      "path": "backend/tests/test_terminal_hardware_context.py",
+      "sha256": "fad9646f44b4f7410f3b28c16669aef802bc1be57f8eabfb4d969eadc8c36d25"
+    },
+    {
+      "path": "backend/tests/test_typed_permission_requests.py",
+      "sha256": "618eb9af49ed426b966e4085b280c084542b11be7e73cfab1810e1602711630a"
+    },
+    {
+      "path": "backend/tests/test_user_management_locks.py",
+      "sha256": "74fc68eefe01566af0e0682c11a3b0e39d8878e9a2ca360e5918c6f1a9efaf82"
+    },
+    {
+      "path": "backend/tests/test_user_management_step_up.py",
+      "sha256": "0d8727cba93281e80a384c8bb6df2e32816c6615142876e0d69e7a53cb061054"
+    },
+    {
+      "path": "backend/tests/test_workflow_edges.py",
+      "sha256": "664c50be2894eadb2096e7fbc7dd8b8c44f8c456e22609a3d84bed89f3efdc93"
+    },
+    {
+      "path": "backend/user_management_locks.py",
+      "sha256": "9f4f902650819946bba1243ed89ea5dc46f862b409715e6f8c73f34666c1266b"
+    },
+    {
+      "path": "backend/user_management_step_up.py",
+      "sha256": "d8563e93c840f50d7775d6a60792dc7fa464ac2508b6f7d88a5e3a56f293a4f6"
+    },
+    {
+      "path": "backend/uv.lock",
+      "sha256": "a75813086c985f8359e13626b4108255f028d62c40a4ea6da43afb0837f6bd9b"
+    },
+    {
+      "path": "backend/workflows/activities.py",
+      "sha256": "772147ae323de23d0bf50265cc8c6d354a570d345ecd8eae32abe28c98d95deb"
+    },
+    {
+      "path": "backend/workflows/alert_rule_cron.py",
+      "sha256": "228eaca688195d8b4eb442eaefde30ce7ec959b0b8e4581186a5591627d4905b"
+    },
+    {
+      "path": "backend/workflows/permission_override.py",
+      "sha256": "519c7b6cb5e31144bc9129f8408bd6ec84c5a7763eb82a699ca268e92eebbad0"
+    },
+    {
+      "path": "backend/workflows/visitor_approval.py",
+      "sha256": "91ded828d9e55c848d15b69bc1d124afe0cc53bda44b0478aceaf30215618853"
+    },
+    {
+      "path": "compose.keycloak-admin.yaml",
+      "sha256": "10262fc0a0172bee50ca5d05aa7479db8737e393b0220262cb4c20a7c26393ae"
+    },
+    {
+      "path": "compose.mtls.yaml",
+      "sha256": "07c1bed759ecf9268d0139abcb0b0055c1846cadd469a063a24be1cd3724c3e6"
+    },
+    {
+      "path": "compose.yaml",
+      "sha256": "04de7aeea7392848a513349b6370a9706fcaae72d845cf7336d1de757e49463f"
+    },
+    {
+      "path": "Dockerfile",
+      "sha256": "4624271b12b345657c1303034525e2c056d1d6ab417f4bf7dc798ad84d3c273e"
+    },
+    {
+      "path": "frontend/components/AccountActions.tsx",
+      "sha256": "7a2e82a5bdd2d8998a811047b74bd4b92761e0925966da1a768f5ba865f7ef4d"
+    },
+    {
+      "path": "frontend/components/admin/AdminLiveProvider.tsx",
+      "sha256": "50685786b3da6d14f8e93425fbd323170ac5970988930b0ddbb1b9db0209f170"
+    },
+    {
+      "path": "frontend/components/admin/AdminNavRail.tsx",
+      "sha256": "4e7c466b3ba6cedf3f475addd937d5d6bf135ee085c09036d3143bac2778f3fe"
+    },
+    {
+      "path": "frontend/components/admin/alerts/AlertActivity.tsx",
+      "sha256": "740ef84c1f0bc9dbfc95f78ba9c89346d96eb12d2a40d447b29a9ea4813628c4"
+    },
+    {
+      "path": "frontend/components/admin/alerts/alertPresentation.ts",
+      "sha256": "ee48f840be0a5c772e338fd06e41a323854e518a9f2e209962955af08f2713dd"
+    },
+    {
+      "path": "frontend/components/admin/alerts/AlertsHistoryTable.tsx",
+      "sha256": "a85bfe0ca4be2b9b315e0a8d36cf263d6d08efa4aba882d5dd2e8e8fe3755a05"
+    },
+    {
+      "path": "frontend/components/admin/alerts/AlertSubjectPicker.tsx",
+      "sha256": "3ff9495507b3148032e8469734a847e19436393b1f8c8d20562c56d62f411b9c"
+    },
+    {
+      "path": "frontend/components/admin/alerts/AutomatedRules.tsx",
+      "sha256": "7bfc87ce8bc6203093a658a07b1e6737724df3a2553bc06203ba74ef8d962614"
+    },
+    {
+      "path": "frontend/components/admin/alerts/EmployeeAlertManagement.tsx",
+      "sha256": "b712bc95d394ac8bb81d9a52a4c980b32d2a22d905b1d3468e6cfb1e632e2301"
+    },
+    {
+      "path": "frontend/components/admin/alerts/RuleAssignments.tsx",
+      "sha256": "a604fecdcf55da374c9c251eea1b4f2ee187ca60c2f37fdbd1a6f9e9356f377e"
+    },
+    {
+      "path": "frontend/components/admin/alerts/ScheduledIrregularitySkips.tsx",
+      "sha256": "81e2cbe6946604cdbe1d5d07a8fbce08e54e96ddb538ffceee269dd826c966c6"
+    },
+    {
+      "path": "frontend/components/admin/alerts/WarningSummary.tsx",
+      "sha256": "14c5c7b3169fede724ed3dca1dbb545a7c626f75481b56f5d2404ee8861ff366"
+    },
+    {
+      "path": "frontend/components/admin/EmployeeProfileCard.tsx",
+      "sha256": "24e5b35b870b6e68179d8bb4f9fd45c1d077075fc7de83c2d3c282d6ed7d01cd"
+    },
+    {
+      "path": "frontend/components/admin/EmployeeStatusLabel.tsx",
+      "sha256": "86c66d2afc21e527db4efc64c965fd314563a8f8b8a36290bbcf349cdf812f58"
+    },
+    {
+      "path": "frontend/components/admin/ManagedUserForm.tsx",
+      "sha256": "601613b7aada057b5117061dcfdf11c39386e9190f50f851be054c746e03ad8a"
+    },
+    {
+      "path": "frontend/components/admin/permissions/AccessDirectory.tsx",
+      "sha256": "45226777989010069ff036b5dd7f36683c661101f08691963edd44575fa5f9b2"
+    },
+    {
+      "path": "frontend/components/admin/permissions/AcknowledgedPermissionRequestsTable.tsx",
+      "sha256": "bc3ed7316eda7d9fc78206f1cc8926dcb5f1b0364c28bdfdd863ec6e82fe4ed9"
+    },
+    {
+      "path": "frontend/components/admin/permissions/FacilityZoneSelection.tsx",
+      "sha256": "38bc042d9af80043a3c54cd5703ceafd7a63c6e087c2cdfff4861a52331a84d8"
+    },
+    {
+      "path": "frontend/components/admin/permissions/ManualReviewCard.tsx",
+      "sha256": "23823b813cbc4901b345ed3fb75b8eff44231118f44eea0e1f3ed7dfe6c00e37"
+    },
+    {
+      "path": "frontend/components/admin/permissions/RequestDialog.tsx",
+      "sha256": "c232b399d1270f4b1f4f52748c3148da65e650c16fc7206248afc1b9dd66fa0c"
+    },
+    {
+      "path": "frontend/components/admin/permissions/requestPresentation.ts",
+      "sha256": "f0315067ad453c8d851396df4ec3a38b0b97b0853d05faad885db0750b8e6bd3"
+    },
+    {
+      "path": "frontend/components/admin/reports/ReportBuilder.tsx",
+      "sha256": "92bf1e417c3a31f58ad63928b74332db8232b69bc8ad58f2d87e14c18d9df7d4"
+    },
+    {
+      "path": "frontend/components/admin/StepUpDurationSelect.tsx",
+      "sha256": "dcb44881e97f503bd822fbffaabf141fa3f531d1e7df7f31c3807df49ae28d88"
+    },
+    {
+      "path": "frontend/components/admin/tables/ActivityBar.tsx",
+      "sha256": "a210a00035549243c466e8d23776e1a889e70fbbfabefebd1f24f57af48ac2be"
+    },
+    {
+      "path": "frontend/components/admin/tables/AdminPageFrame.tsx",
+      "sha256": "4447244b41b227c9140b509a54ee45d580328c808e6b1e81fa435ac560f74caa"
+    },
+    {
+      "path": "frontend/components/admin/tables/CreationDialog.tsx",
+      "sha256": "157cc019453e09b85df88e27e144cac152c473f01585a1b1e86c8e9102de1ff6"
+    },
+    {
+      "path": "frontend/components/admin/tables/EmployeeCreator.tsx",
+      "sha256": "a623f287f8fd3140c229c536fa35d5d5162446faed0af64db985bc1691e31d7e"
+    },
+    {
+      "path": "frontend/components/admin/tables/EmployeeTable.tsx",
+      "sha256": "b50ba8d49845f02b04914a771850514829abc0590ff9b815290de5c3bfc7abef"
+    },
+    {
+      "path": "frontend/components/admin/tables/HardwareCreator.tsx",
+      "sha256": "89b39d1488498a78871d84b405a68b2cbacd50e6b4be5626594d4104bbf16d53"
+    },
+    {
+      "path": "frontend/components/admin/tables/HardwareTable.tsx",
+      "sha256": "bad6e742531a98dd3ce4002a7d2811aa0d1887ea4fe537f06d8f87d0afac0109"
+    },
+    {
+      "path": "frontend/components/admin/tables/MovementTable.tsx",
+      "sha256": "da8549ef17c0dfb51338923e2109e23b1ceb835f56052abd3603d16de9ca61e1"
+    },
+    {
+      "path": "frontend/components/admin/tables/PeopleTable.tsx",
+      "sha256": "86d1e55a9fc3ed519b54de014b13f0617f8795e1ecdcaea4698a5a56226b0006"
+    },
+    {
+      "path": "frontend/components/admin/UserManagement.tsx",
+      "sha256": "06895c4476e76083c622dfdc7f1a21e8328a6c981901c005656b4bdb8ffb67b7"
+    },
+    {
+      "path": "frontend/components/admin/WorkPatternChart.tsx",
+      "sha256": "6541ce02ee2a6c300b61fc7aeffeac9ee6958310e74cf143b7a3e4fb4394fbf1"
+    },
+    {
+      "path": "frontend/components/analytics/CalendarDatePicker.tsx",
+      "sha256": "ca0e1700cf3a1c9ec4db4c46454e6eae6607ae503ecf28aa8e81c730f47f9c65"
+    },
+    {
+      "path": "frontend/components/analytics/DashboardCharts.tsx",
+      "sha256": "0c4a2ca53d290dd2a460f049859d4482e236deacaff2efa82da7b62b49fc8c9b"
+    },
+    {
+      "path": "frontend/components/analytics/DrillDownDoughnut.tsx",
+      "sha256": "8d68e935fcd8572bf3f4b562062d2de0d396db35949387638144639edf00cd4a"
+    },
+    {
+      "path": "frontend/components/analytics/KPICards.tsx",
+      "sha256": "c013263a42140cca2f0e7c523df6237500a124f8fd2fa0faaf0e218474596f8b"
+    },
+    {
+      "path": "frontend/components/analytics/MetricTrendChart.tsx",
+      "sha256": "492c070533782ccfa40a7f40e69ffb161dca815438ed1d27eed60819cf766be1"
+    },
+    {
+      "path": "frontend/components/analytics/PendingDecisionsWidget.tsx",
+      "sha256": "df0efb80fa53741f3efbc99b4ba62d8c609f1857f373a3dcabe3ce94856fb4e4"
+    },
+    {
+      "path": "frontend/components/analytics/TimeRangeSelector.tsx",
+      "sha256": "c026fc8d4482f3e2b451049dec6981f3f3fd807fff63fce2b6470b75b13d18e0"
+    },
+    {
+      "path": "frontend/components/analytics/TrendChart.tsx",
+      "sha256": "5a68216d722d5a4501190829f417d6c4314e3c372e1cf1a263ab052b8fc8adb6"
+    },
+    {
+      "path": "frontend/components/AppChrome.tsx",
+      "sha256": "86a344edea1aa6297c49c4311e578d24dce4a17a05082a09d0401dc3736de342"
+    },
+    {
+      "path": "frontend/components/AppProviders.tsx",
+      "sha256": "6e0c530797666c5a072a0ae73cfe76e4a50544262a8b4903c69629f718adce94"
+    },
+    {
+      "path": "frontend/components/ManualReviewCountdown.tsx",
+      "sha256": "294308634574bc1d4d195c6baaee9b94e2a87c0944bbca80a4d5581ff42ba43b"
+    },
+    {
+      "path": "frontend/components/ScopedDataProvider.tsx",
+      "sha256": "7c9c3e03e10a5b576cabe3a6ef166e0a01481c9a0650c39b60091e72e2803e60"
+    },
+    {
+      "path": "frontend/components/terminal/SecurityTerminal.tsx",
+      "sha256": "4afde255ee12d401de576de0f25c5094593f72a17e20eee1e4caddbf136dde86"
+    },
+    {
+      "path": "frontend/components/terminal/TerminalPanels.tsx",
+      "sha256": "e24fc72dc5222f33c74ee30b3eb4b623dcc365c93b72ee2da1a061fc28c46310"
+    },
+    {
+      "path": "frontend/components/visitors/VisitorRegistrationDialog.tsx",
+      "sha256": "34ae85c7a3f4141d042b52aac40873bbd626d100598e188eff631f936a0ef7f6"
+    },
+    {
+      "path": "frontend/context/activityEvents.ts",
+      "sha256": "fb058d358c306abb13a613417c51f7fb6822ff38331a7cfc5491751af9bc87c0"
+    },
+    {
+      "path": "frontend/context/DataContext.tsx",
+      "sha256": "3dfbcb37d3421ba3d7cd51eabea82acd6b15183068e904c5fd7bd621f793c1a8"
+    },
+    {
+      "path": "frontend/context/dataDefaults.ts",
+      "sha256": "30b297f04845e5be705373e74d91a536acd6d32fb37ae85df0db88efbf1a2931"
+    },
+    {
+      "path": "frontend/context/dataHelpers.ts",
+      "sha256": "07ad2dedf1d124de732dbb9a3397b39b0b22c6bf7571f939797ba8c9b871ba4d"
+    },
+    {
+      "path": "frontend/context/dataTypes.ts",
+      "sha256": "0117ece54f12ba218bbc6eab223c9cf88d25cbcd0afab00e5d3b5ee83a272ed4"
+    },
+    {
+      "path": "frontend/context/presenceUpdates.ts",
+      "sha256": "cd67b8c38ae01612db5d7539be5a830258bec30b0fbfaef98ac558828641fa12"
+    },
+    {
+      "path": "frontend/context/useDataActions.ts",
+      "sha256": "bef88717f4747a6105668606dc80bb30053beaa45e693b160fb3b7263a36f6e5"
+    },
+    {
+      "path": "frontend/hooks/useAdminTheme.ts",
+      "sha256": "96cc1a74bc598c126ac33ca14705a1a90bc95c036ce12286a6e1de42ea324c67"
+    },
+    {
+      "path": "frontend/hooks/useDateTimeNow.ts",
+      "sha256": "e688a9ac270b9254d5b67133f19505cf4d14fe32128a8a035a0eb538851d76d9"
+    },
+    {
+      "path": "frontend/lib/offlineTerminalQueue.ts",
+      "sha256": "1fffd8bb2df0c1b0fb531f1fbdc384fc47db8ad23fddb9f084f276a198d081f3"
+    },
+    {
+      "path": "gateway/compose.test.yaml",
+      "sha256": "b9d06561c4b4aa54ecac00b10fb4627ee5f22152f5948396cf89df4d9e6e24a4"
+    },
+    {
+      "path": "gateway/kong.yml",
+      "sha256": "555a73c1e6f44b202a98688b63de5d8245a2d865f675f803a2da4f27c2e6bede"
+    },
+    {
+      "path": "gateway/plugins/inout-terminal-identity/handler.lua",
+      "sha256": "eb579a4bde9a82ee1b4884d1e6b8641c4cf98e1036c570d1b579043a3959f419"
+    },
+    {
+      "path": "gateway/plugins/inout-terminal-identity/schema.lua",
+      "sha256": "e0f5ae651d844dc54c177db75b5a4f7103f27319f18e4c065199cb5b8e0f6d89"
+    },
+    {
+      "path": "gateway/tests/certificates.py",
+      "sha256": "06c3030084b333c154ea55b90a5e13d8208f777bd7639754cb4bbb574403dc99"
+    },
+    {
+      "path": "gateway/tests/check_gateway.py",
+      "sha256": "27a3beb8fb7e462955a879484dad1ac4f84882972e7461a378b50ae9f7c15079"
+    },
+    {
+      "path": "gateway/tests/upstream.py",
+      "sha256": "0ae78dd84e6bd7305c20e657ef0fad35f07154f67990e3748ca188130bc38d2a"
+    },
+    {
+      "path": "keycloak/compose.test.yaml",
+      "sha256": "770df39f90a84560f89f341decd6429abe3010395e75314263873ba6e5b9ff56"
+    },
+    {
+      "path": "keycloak/realm-inout.json",
+      "sha256": "a9e0aa27071302dd0239c2976b018070b6e49e58e91ab15d57ef823adc99d647"
+    },
+    {
+      "path": "keycloak/tests/check_keycloak.py",
+      "sha256": "af59127f8380f7e2f8e257e7c900de126900665ee0674db9f83544ee60f4e731"
+    },
+    {
+      "path": "lib/alertAssignmentDraft.ts",
+      "sha256": "5327c1b7a9ddd699658193d91a6d7e7574e3f03c8ce71b50aad31d97e89c7d9c"
+    },
+    {
+      "path": "lib/alertRevisions.ts",
+      "sha256": "370cddd1c093a1bc83074c25b15079c832379c32b3a87321260fe9047d481af7"
+    },
+    {
+      "path": "lib/analyticsQueries.ts",
+      "sha256": "c6502b69dd032c84e40628213939b5b3eb61adf426eca04d06230a0a088ea80f"
+    },
+    {
+      "path": "lib/analyticsUtils.ts",
+      "sha256": "01f7340537057a57c2591fdb302389704b3900c9aeb5f31bf59e7a73f6528f9e"
+    },
+    {
+      "path": "lib/csv.ts",
+      "sha256": "4a998e2a6af72b29010441d2e103adec5741659a6fe7b7fb374da8ece41a38d8"
+    },
+    {
+      "path": "lib/dataScopes.ts",
+      "sha256": "c4c1ccd87f5129e1e7048d9c857cb2baebc730e259318e79e9c04b0dc640c72d"
+    },
+    {
+      "path": "lib/dateRanges.ts",
+      "sha256": "60e5261cd19f1ba677fefb58a277c6c3e673fefc793985018bbf71c697118991"
+    },
+    {
+      "path": "lib/dateTimeValidation.ts",
+      "sha256": "f082baec446845cc49ea11a0a5ebfa6407c367a8bd9aaeb5ac98de800837eb7b"
+    },
+    {
+      "path": "lib/facilityZones.ts",
+      "sha256": "39e101f2357c16c3ad59e6eb0fa075aae62a539199cb557db670faada93f8305"
+    },
+    {
+      "path": "lib/identityRequestPolicy.ts",
+      "sha256": "919ab6c964f85446c88823ab415123ef431f1cfa1de6a4e2f0c3f95a11b90dec"
+    },
+    {
+      "path": "lib/irregularitySkipDates.ts",
+      "sha256": "f6d242eed96a93946f784db3d02658b4c83217f39802d6f48967b53600469f53"
+    },
+    {
+      "path": "lib/keycloakRefresh.ts",
+      "sha256": "240944a5448e0ed1132ca8e2c0ccac0eee81471d6b1fe783fe62b7ce805f7855"
+    },
+    {
+      "path": "lib/keycloakSession.ts",
+      "sha256": "4f5e98f56745f3c836fa58635ec868cc4c7a40d8f3d39709a7cd1839bf00510f"
+    },
+    {
+      "path": "lib/logoutIntent.ts",
+      "sha256": "ee729bfec93daa5198589bd911aefe5f658df34e690565946335143ea2bb5f92"
+    },
+    {
+      "path": "lib/manualReviewDuration.ts",
+      "sha256": "4c88a83bc4822422f04d9c5a70903352805991e4dda3afc22c08afa67fd276af"
+    },
+    {
+      "path": "lib/manualReviewTimeout.ts",
+      "sha256": "1e6f6248f5d9ff6d0190277d6c7479d6ba028fe60c746e4e60eddcd356c22ada"
+    },
+    {
+      "path": "lib/movementReferences.ts",
+      "sha256": "fa0b1ac0f54cd9e2ecfca0b963b604e0a1983927b7923ceefc1981ceb24d149f"
+    },
+    {
+      "path": "lib/movementRevisions.ts",
+      "sha256": "53b7d1f77083a3d520b03310ede93943338cdae86aec9f3d547d06805e264ee4"
+    },
+    {
+      "path": "lib/normalizeDashboard.ts",
+      "sha256": "2e832da5505e912912df1da72e4cb0ed4f672849e6b1749ff4809839af1f938d"
+    },
+    {
+      "path": "lib/permissionRequestRevisions.ts",
+      "sha256": "c081b2baa688663f4bd6e3b7585acc9242e0b84af6d20d9026fbd9760d20f713"
+    },
+    {
+      "path": "lib/requestJson.ts",
+      "sha256": "1ec0a0cca955e3eb4608cbb62bdfc9e9a475e07b4745ddfec8cbdf0fd0e12ad6"
+    },
+    {
+      "path": "lib/serverUserManagement.ts",
+      "sha256": "3ece7e06ba60c26c42f39e7fc77c7a853040827ac5b2c7d781689d2da9f65271"
+    },
+    {
+      "path": "lib/types.ts",
+      "sha256": "ff2d42f882a7df6f8f58ab46336d3b5bea7d6f661d9c30fa376fa163e4d296bf"
+    },
+    {
+      "path": "lib/userManagementStepUp.ts",
+      "sha256": "80971cea29ea2a060a750481b9a183a54605361f3df30ead9dd9633b827f0104"
+    },
+    {
+      "path": "middleware.ts",
+      "sha256": "cdaeadb48cdb5db751eb7922b6ddf8dd7d6e0997087e364cd41c00bce7f61a4b"
+    },
+    {
+      "path": "next.config.mjs",
+      "sha256": "95c6394682c92de9806030f72723291c5b66ffa7504b72df0309dc971c15f247"
+    },
+    {
+      "path": "package-lock.json",
+      "sha256": "34c3123aa3e9a3f9ed30370151d5c28d02ea17f8ec2cd88b2822fd888f64fc1a"
+    },
+    {
+      "path": "package.json",
+      "sha256": "a0fa7aad0a6da68b62643b9060e4f71ceb330257afcdafb55c6910c191118417"
+    },
+    {
+      "path": "scripts/keycloak-account-access.mjs",
+      "sha256": "b2fd66da48153a7ae6d65ef75a97102d9020f8e18f7794c334da8d9056029c20"
+    },
+    {
+      "path": "scripts/run-with-timeout.mjs",
+      "sha256": "6b7d64211a58aa8268cc31ad1ee0e47b182bd57e167a908efb1eea8191423b75"
+    },
+    {
+      "path": "scripts/test-keycloak-account.mjs",
+      "sha256": "90074940b41d713fc316d003347e29866ed45f1819c688d3178389eab0733e7c"
+    },
+    {
+      "path": "scripts/test-keycloak-http.mjs",
+      "sha256": "6132654c3b04d43d6b3b10259c7fb9747b120cbd5ea6b8d627c02ffbcce226c4"
+    },
+    {
+      "path": "services/httpDataService.ts",
+      "sha256": "e8e74c2adb6e5f8dcfb198bedb0d5445a611b4533f69d415ae31613836ea84a3"
+    },
+    {
+      "path": "services/keycloakUserService.ts",
+      "sha256": "45c15260d065daef14ec44b677c2af53faf03c0bdf5a6f5ba4109708c64b94f3"
+    },
+    {
+      "path": "services/profileService.ts",
+      "sha256": "ac4e1d942cbd53c0fa4b9c0aa01def05ff0bca5420b1c343ced7ff67f07b3b2a"
+    },
+    {
+      "path": "tests/accountWorkflows.test.ts",
+      "sha256": "20f1ccd8dcdd5e4e1097b8833b25cb0e27412c6311379e0b337b935af1a11537"
+    },
+    {
+      "path": "tests/analyticsQueries.test.ts",
+      "sha256": "2b93d9d68c9645f8893060271a1aa91c12e59448283488bed0c49a3331ad408c"
+    },
+    {
+      "path": "tests/buttonWorkflows.test.ts",
+      "sha256": "b8e946537952addf4f8abcd8d040f6537eae0ab4475f5dcd73694ce57fc7695c"
+    },
+    {
+      "path": "tests/contracts.test.ts",
+      "sha256": "03bd3c5010bd0a87f8f4bb7377b1c02dad281b8c50b85b692717c730d0358b4b"
+    },
+    {
+      "path": "tests/dateTimeValidation.test.ts",
+      "sha256": "f2c29e6ffad5fa60ab5c239bfd9b84f69d79a7b681340a4d2a9cca4014683df1"
+    },
+    {
+      "path": "tests/keycloak-account.test.mjs",
+      "sha256": "d1776620fbda33193c19cac6171a9d309be645cb64d42df5236123afa9d49120"
+    },
+    {
+      "path": "tests/keycloak.test.ts",
+      "sha256": "57b65acdea089b669bf18ce88893c9435e5bcdf68bc2fbdfce0047ef8b3b46b0"
+    },
+    {
+      "path": "tests/logoutIntent.test.ts",
+      "sha256": "c645e3b95317e1b037c2a7024cc64452d0802c2c9266863a3b1d6517640319b7"
+    },
+    {
+      "path": "tests/offlineQueue.test.ts",
+      "sha256": "2db7ddea3576700b4bbe16d9413cee72bd9c91f09f685ba8475b9f10670fc514"
+    }
+  ]
+}

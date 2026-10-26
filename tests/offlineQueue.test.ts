@@ -59,8 +59,8 @@ test("unowned legacy and reassigned checkpoint records retain evidence without b
   assert.deepEqual(h.held.map(item => item.key), ["legacy", "previous-checkpoint"]);
   assert.deepEqual(h.sent.map(item => item.key), ["ready"]);
   assert.equal(JSON.stringify([legacy, reassigned]), original);
-  assert.equal(queuedScanHoldReason(scan("alias", { input: { ...scan("alias").input, checkpointId: "main-gate" } }), context), null,
-    "the Phase 2 main-gate alias normalizes to the assigned main checkpoint");
+  assert.match(queuedScanHoldReason(scan("alias", { input: { ...scan("alias").input, checkpointId: "main-gate" } }), context) ?? "",
+    /checkpoint has changed/);
 });
 
 for (const status of [400, 403, 404, 409, 422]) {

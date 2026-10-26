@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import test_database as fixture
 from auth import verify_admin_request
 from config import settings
-from models import AccessPermission, Alert, AuditEvent, Movement, Person, PresenceState, Subject
+from models import AccessPermission, Alert, AuditEvent, HardwareAsset, Movement, Person, PresenceState, Subject
 from movement_analytics import FACILITY_ZONE
 from registry_reads import trend_summary
 
@@ -36,7 +36,7 @@ class RegistryReadDatabaseTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "registry-read-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "registry-read-admin"}
 
     async def seed_employees(self, count):
         async with self.sessions() as db:

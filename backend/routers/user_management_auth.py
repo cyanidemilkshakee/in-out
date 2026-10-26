@@ -5,7 +5,6 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from auth import verify_admin_request
 from database import get_db
-from data_limits import precharge_mutation_response
 from user_management_step_up import verified_user_management_window
 from user_management_locks import lock_window, window_is_locked
 
@@ -36,7 +35,5 @@ async def revoke_window(
     proof: Annotated[str | None, Header(alias="X-InOut-Step-Up")] = None,
     db: AsyncSession = Depends(get_db),
 ):
-    response = {"locked": True}
-    await precharge_mutation_response(db, response)
     await lock_window(db, claims, _window(credentials, claims, proof))
-    return response
+    return {"locked": True}

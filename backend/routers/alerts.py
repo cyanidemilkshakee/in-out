@@ -20,7 +20,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from auth import verify_admin_request
 from database import get_db, get_read_db
-from data_limits import bounded_rows, precharge_mutation_response
+from data_limits import bounded_rows
 from event_outbox import enqueue_changed, enqueue_presence
 from models import AccessPermission, Alert, AlertReview, Checkpoint, HardwareAsset, Person, Subject
 from critical_entry_restrictions import release_critical_entry_restriction
@@ -31,7 +31,9 @@ from alert_rule_assignments import (
     AlertRuleAssignmentInput, alert_rule_catalog, list_alert_rule_assignments, replace_alert_rule_assignment,
 )
 from alert_queries import command_center_assignments, confirmed_people_warning_total, focused_alert_people, current_subject_warning_documents
+from redis_client import publish_data_changed, publish_presence_update
 from zone_access import admin_zone_ids, require_alert_scope, require_subject_scope, subject_zone_condition
+import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -85,7 +87,6 @@ async def update_alert_rule_assignment(
         admin.get("sub", "unknown"), payload.expectedRevision, payload.irregularitySkipDates)
     if changed:
         await enqueue_changed(db)
-    await precharge_mutation_response(db, assignment)
     await db.commit()
     return assignment
 
@@ -132,16 +133,11 @@ async def list_alerts(
     from event_outbox import read_event_revision
     event_revision = await read_event_revision(db)
     zone_ids = await admin_zone_ids(db, actor)
-    visible_subject_query = (select(Subject.id)
+    visible_subject_ids = list((await db.scalars(select(Subject.id)
         .outerjoin(Person, Person.subject_id == Subject.id)
         .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
         .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
-        .where(subject_zone_condition(zone_ids)).distinct())
-    if view == "count":
-        visible_subject_ids = None
-    else:
-        visible_subject_ids = list((await db.scalars(
-            visible_subject_query.order_by(Subject.id))).all())
+        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id))).all())
     # -- Alerts query --
     # Retained reviews appear once, including after their source alert is purged.
     archived_status = case(
@@ -162,18 +158,10 @@ async def list_alerts(
         | records.c.data["title"].astext.ilike("Unknown barcode%")
         | records.c.data["title"].astext.ilike("Access decision denied")
     )
-    subject_scope = (records.c.data["subjectId"].astext.in_(visible_subject_query)
-        if view == "count" else records.c.data["subjectId"].astext.in_(visible_subject_ids))
-    unscoped_alert = and_(
-        records.c.data["zoneId"].astext.is_(None),
-        records.c.data["checkpointId"].astext.is_(None),
-        records.c.data["subjectId"].astext.is_(None),
-    )
     branch_filter = or_(
         records.c.data["zoneId"].astext.in_(zone_ids),
         records.c.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
-        subject_scope,
-        unscoped_alert,
+        records.c.data["subjectId"].astext.in_(visible_subject_ids),
     )
     alerts_q = select(records).outerjoin(AlertReview, AlertReview.alert_id == records.c.id).where(
         ~func.coalesce(excluded_alert, False), branch_filter)
@@ -257,13 +245,8 @@ async def list_alerts(
     if subject_history is not None:
         recent_res = await db.execute(subject_history.order_by(records.c.created_at.desc(), records.c.id.asc()).limit(5))
         recent_alerts = [SimpleNamespace(**row) for row in recent_res.mappings().all()]
-    # The command view is paginated, so its warning summaries should be limited
-    # to subjects represented by this page. The separate summary count below
-    # remains global to the administrator's visible scope.
-    warning_subject_ids = ([subjectId.strip()] if view == "subject" else
-        [] if view == "command" else visible_subject_ids)
     enriched = await enrich_alert_documents(db, alerts + recent_alerts, focused=True,
-        subject_ids=warning_subject_ids)
+        subject_ids=[subjectId.strip()] if view == "subject" else visible_subject_ids)
 
     # Share the evaluator's canonical row identities and global rule catalog.
     # Retained serialized IDs must not redirect a rule's displayed trigger count.
@@ -327,7 +310,6 @@ async def update_alert(
     await require_alert_scope(db, _admin, alert_id)
     response = await acknowledge_alert(db, alert_id)
     await enqueue_presence(db, {"type": "alert_acknowledged", "alerts": [response]})
-    await precharge_mutation_response(db, response)
     await db.commit()
     return response
 
@@ -343,7 +325,6 @@ async def submit_alert_review(
     result = await review_alert(db, alert_id, payload.decision, admin.get("sub", "unknown"), payload.reason)
     if "auditEvent" in result:
         await enqueue_changed(db)
-    await precharge_mutation_response(db, result)
     await db.commit()
     return result
 
@@ -359,7 +340,6 @@ async def reset_alert_warnings(
     result = await reset_subject_warnings(db, subject_id, admin.get("sub", "unknown"), payload.reason)
     if "auditEvent" in result:
         await enqueue_changed(db)
-    await precharge_mutation_response(db, result)
     await db.commit()
     return result
 
@@ -375,7 +355,6 @@ async def release_entry_restriction(
     await require_alert_scope(db, admin, alert_id)
     result = await release_critical_entry_restriction(db, alert_id, admin.get("sub", "unknown"), payload.reason)
     await enqueue_changed(db)
-    await precharge_mutation_response(db, result)
     await db.commit()
     return result
 

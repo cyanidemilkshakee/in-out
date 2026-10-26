@@ -15,7 +15,6 @@ import { parseDateInput } from "../../../../lib/dateRanges";
 import { escapeCsv } from "../../../../lib/csv";
 import { assertCsvBound, readExport } from "../../../../lib/exportRead";
 import { facilityToday, validateHistoricalDateRange } from "../../../../lib/dateTimeValidation";
-import { normalizeCheckpointLabel } from "../../../../lib/normalizeDashboard";
 import styles from "./ReportBuilder.module.css";
 
 const RESTRICTED_DENIAL_CODES = new Set([
@@ -135,7 +134,7 @@ export function ReportBuilder({
           time: movement.time,
           subject: movement.subjectName,
           outcome: movement.result,
-          details: `${movement.direction} / ${normalizeCheckpointLabel(movement.checkpoint)}${movement.carrierName ? ` / Carried by ${movement.carrierName}` : ""}${movement.sourceEventId ? ` / Scan ${movement.sourceEventId}` : ""}${movement.reason && movement.reason !== "-" ? ` / ${movement.reason}` : ""}`,
+          details: `${movement.direction} / ${movement.checkpoint}${movement.carrierName ? ` / Carried by ${movement.carrierName}` : ""}${movement.sourceEventId ? ` / Scan ${movement.sourceEventId}` : ""}${movement.reason && movement.reason !== "-" ? ` / ${movement.reason}` : ""}`,
           reference: movement.id,
           timestamp: parseReportDate(movement.date, movement.time, movement.createdAt),
         });
@@ -367,10 +366,7 @@ export function ReportBuilder({
                     <span>Checkpoint</span>
                     <select value={movementCheckpoint} disabled={isGenerating} onChange={(event) => updateFilter(setMovementCheckpoint, event.target.value)}>
                       <option value="all">All checkpoints</option>
-                      {checkpoints.map((checkpoint) => {
-                        const label = normalizeCheckpointLabel(checkpoint);
-                        return label ? <option value={label} key={label}>{label}</option> : null;
-                      })}
+                      {checkpoints.map((checkpoint) => <option value={checkpoint} key={checkpoint}>{checkpoint}</option>)}
                     </select>
                   </label>
                   <label className={styles.filterField}>

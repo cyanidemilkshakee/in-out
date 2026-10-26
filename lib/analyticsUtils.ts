@@ -44,6 +44,151 @@ export interface DayPattern {
 }
 
 export type PersonSessionIndex = Map<string, DayPattern[]>;
+
+const MAX_BREAK_DURATION_MS = 2 * 60 * 60 * 1000;
+
+function facilityDateParts(timestamp: number) {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Kolkata",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "numeric",
+    minute: "numeric",
+    second: "numeric",
+    hour12: false,
+  }).formatToParts(new Date(timestamp));
+  const value = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value ?? 0);
+  return {
+    year: value("year"),
+    month: value("month"),
+    day: value("day"),
+    hour: value("hour") % 24,
+    minute: value("minute"),
+    second: value("second"),
+  };
+}
+
+function facilityDayKey(timestamp: number) {
+  const parts = facilityDateParts(timestamp);
+  return `${parts.year}-${String(parts.month).padStart(2, "0")}-${String(parts.day).padStart(2, "0")}`;
+}
+
+function facilityDateObject(timestamp: number) {
+  const parts = facilityDateParts(timestamp);
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day));
+}
+
+function facilityDecimalHour(timestamp: number) {
+  const parts = facilityDateParts(timestamp);
+  return parts.hour + parts.minute / 60 + parts.second / 3600;
+}
+// Main function to calculate a person's exact worked hours and sessions per day
+function buildSessions(movements: MovementEvent[]): DayPattern[] {
+  // Sort chronologically
+  const sorted = [...movements].sort((a, b) => {
+    return movementTimestamp(a) - movementTimestamp(b);
+  });
+
+  // Group by the facility's calendar day rather than the browser's local day.
+  const grouped = new Map<string, { dateObj: Date; events: MovementEvent[] }>();
+  for (const m of sorted) {
+    const timestamp = movementTimestamp(m);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) continue;
+    const key = facilityDayKey(timestamp);
+    const group = grouped.get(key);
+    if (group) {
+      group.events.push(m);
+    } else {
+      grouped.set(key, { dateObj: facilityDateObject(timestamp), events: [m] });
+    }
+  }
+
+  const result: DayPattern[] = [];
+
+  for (const { dateObj, events } of grouped.values()) {
+    const date = facilityDayKey(dateObj.getTime());
+    const sessions: Session[] = [];
+    let currentEntry: number | null = null;
+    let workedHours = 0;
+
+    for (let i = 0; i < events.length; i++) {
+      const e = events[i];
+      const decTime = facilityDecimalHour(movementTimestamp(e));
+      if (!Number.isFinite(decTime)) continue;
+      
+      if (e.direction === "entry" && currentEntry === null) {
+        currentEntry = decTime;
+        
+        // Only a short same-day exit-to-entry gap is considered a break.
+        if (i > 0) {
+          const prevExit = events[i - 1];
+          if (prevExit.direction === "exit") {
+            const gapMs = movementTimestamp(e) - movementTimestamp(prevExit);
+            if (gapMs >= 0 && gapMs <= MAX_BREAK_DURATION_MS) {
+              const prevExitTime = facilityDecimalHour(movementTimestamp(prevExit));
+              sessions.push({ start: prevExitTime, end: currentEntry, type: "break", zIndex: 2 });
+            }
+          }
+        }
+      } else if (e.direction === "exit" && currentEntry !== null) {
+        sessions.push({ start: currentEntry, end: decTime, type: "work", zIndex: 1 });
+        workedHours += (decTime - currentEntry);
+        currentEntry = null;
+      }
+    }
+
+    // Only extend an open session to the real current time, and only for today.
+    if (currentEntry !== null) {
+      const now = Date.now();
+      if (date === facilityDayKey(now)) {
+        const end = facilityDecimalHour(now);
+        if (end > currentEntry) {
+          sessions.push({ start: currentEntry, end, type: "work", zIndex: 1 });
+          workedHours += end - currentEntry;
+        }
+      }
+    }
+
+    const percentage = Math.round((workedHours / 8) * 100);
+    result.push({
+      dateStr: `${dateObj.getUTCDate()} ${MONTH_NAMES[dateObj.getUTCMonth()]}`,
+      dateObj,
+      percentage: Math.min(percentage, 100),
+      sessions,
+      workedHours
+    });
+  }
+
+  // Return sorted descending by date so most recent is first
+  return result.sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime());
+}
+
+export function getPersonSessionIndex(
+  movements: MovementEvent[]
+): PersonSessionIndex {
+  const approvedByPerson = new Map<string, MovementEvent[]>();
+  for (const movement of movements) {
+    if (movement.result !== "approved" || movement.subjectType !== "employee") {
+      continue;
+    }
+    const existing = approvedByPerson.get(movement.subjectId);
+    if (existing) {
+      existing.push(movement);
+    } else {
+      approvedByPerson.set(movement.subjectId, [movement]);
+    }
+  }
+
+  return new Map(
+    [...approvedByPerson.entries()].map(([personId, personMovements]) => [
+      personId,
+      buildSessions(personMovements),
+    ])
+  );
+}
+
 // Function to get the overall Dashboard KPIs
 export const getDashboardKPIs = (
   movements: MovementEvent[],
