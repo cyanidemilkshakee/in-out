@@ -41,13 +41,16 @@ class BrowserScanPayload(APIModel):
     scan_type: str = Field("auto", alias="scanType", pattern="^(auto|manual)$")
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
     captured_offline_at: Optional[datetime] = Field(None, alias="capturedOfflineAt")
+    expected_operator_subject: Optional[str] = Field(None, alias="expectedOperatorSubject", min_length=1, max_length=128)
+    # Retry-only transport evidence; excluded from the original scan fingerprint.
+    queue_captured_at: Optional[datetime] = Field(None, alias="queueCapturedAt")
 
 
 class ManualReviewPayload(APIModel):
     barcode: str = Field(min_length=1, max_length=64, pattern=BARCODE_PATTERN)
     checkpoint_id: str = Field(alias="checkpointId", min_length=1, max_length=128)
     direction: Optional[str] = Field(None, pattern="^(entry|exit)$")
-    event_id: Optional[str] = Field(None, alias="eventId", min_length=1, max_length=128)
+    event_id: str = Field(..., alias="eventId", min_length=1, max_length=128)
     operator_note: str = Field(..., alias="operatorNote", min_length=1, max_length=1000)
 
 
@@ -55,6 +58,8 @@ class ScanResponse(BaseModel):
     allowed: bool
     reason: Optional[str] = None
     subject_id: Optional[str] = None
+    replayed: bool = False
+    authorizeMovement: bool = False
 
 
 # ── Phase 2 schemas ────────────────────────────────────────────────────────────

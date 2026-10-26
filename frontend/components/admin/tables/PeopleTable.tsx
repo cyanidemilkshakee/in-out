@@ -1,13 +1,9 @@
 import { useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
-import type { Person } from '../../../../lib/types';
+import type { Person, RegistrySortKey, SortDirection } from '../../../../lib/types';
 import Link from 'next/link';
 import { useDateTimeNow } from '../../../hooks/useDateTimeNow';
-
-const STATUS_LABELS: Record<Person["status"], string> = {
-  active: "Active", inactive: "Inactive", pre_approved: "Pre-approved",
-  pending_approval: "Pending approval", restricted: "Restricted", expired: "Expired",
-};
+import { PERSON_STATUS_LABELS } from '../../../../lib/personStatus';
 
 function visitorStatus(person: Person, now: number): Person["status"] {
   if (person.status === "pending_approval") return "pending_approval";
@@ -20,25 +16,30 @@ function visitorStatus(person: Person, now: number): Person["status"] {
 export function PeopleTable({
   title,
   people: rows,
+  sort,
 }: {
   title: string;
   people: Person[];
+  sort?: { key: RegistrySortKey; direction: SortDirection; onChange: (key: RegistrySortKey) => void };
 }) {
-  const [sortKey, setSortKey] = useState<keyof Person>("name");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [localSortKey, setSortKey] = useState<keyof Person>("name");
+  const [localSortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const sortKey = sort?.key ?? localSortKey;
+  const sortDirection = sort?.direction ?? localSortDirection;
   const now = useDateTimeNow().getTime();
   const sortedRows = useMemo(() => {
     return [...rows].sort((a, b) => {
+      if (sort) return 0;
       if (sortKey === "status") {
-        const comparison = STATUS_LABELS[visitorStatus(a, now)].localeCompare(STATUS_LABELS[visitorStatus(b, now)]);
+        const comparison = PERSON_STATUS_LABELS[visitorStatus(a, now)].localeCompare(PERSON_STATUS_LABELS[visitorStatus(b, now)]);
         return sortDirection === "asc" ? comparison : -comparison;
       }
       const comparison = sortKey === "createdAt" || sortKey === "validTo"
         ? (Date.parse(String(a[sortKey] ?? "")) || 0) - (Date.parse(String(b[sortKey] ?? "")) || 0)
-        : String(a[sortKey] ?? "").localeCompare(String(b[sortKey] ?? ""));
+        : String(a[sortKey as keyof Person] ?? "").localeCompare(String(b[sortKey as keyof Person] ?? ""));
       return sortDirection === "asc" ? comparison : -comparison;
     });
-  }, [now, rows, sortDirection, sortKey]);
+  }, [now, rows, sortDirection, sortKey, sort]);
 
   function sortHeader(column: keyof Person, label: string) {
     const active = sortKey === column;
@@ -51,6 +52,7 @@ export function PeopleTable({
           className="sort-button"
           type="button"
           onClick={() => {
+            if (sort) { sort.onChange(column as RegistrySortKey); return; }
             setSortDirection(active && sortDirection === "asc" ? "desc" : "asc");
             setSortKey(column);
           }}
@@ -63,7 +65,7 @@ export function PeopleTable({
   }
 
   return (
-      <div className="admin-table-wrap table-wrap">
+      <div className="admin-table-wrap table-wrap scrollable-content">
         <table className="data-table people-table registry-table registry-table--people">
           <caption className="sr-only">{title}</caption>
           <thead>
@@ -95,7 +97,7 @@ export function PeopleTable({
                   <td className="column-host" data-label="Host">{person.host ?? "-"}</td>
                   <td className="column-validTo" data-label="Valid until">{person.validTo && Number.isFinite(Date.parse(person.validTo)) ? <time dateTime={person.validTo}>{new Date(person.validTo).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" })}</time> : "Not set"}</td>
                   <td className="column-status" data-label="Status">
-                    <span className={`registry-presence ${status === "pre_approved" ? "is-inside" : status === "expired" ? "is-outside" : ""}`}>{STATUS_LABELS[status]}</span>
+                    <span className={`registry-presence ${status === "pre_approved" ? "is-inside" : status === "expired" ? "is-outside" : ""}`}>{PERSON_STATUS_LABELS[status]}</span>
                   </td>
                   <td className="column-inside" data-label="Inside">
                     <span className={`registry-presence ${person.inside ? "is-inside" : "is-outside"}`}>

@@ -1,0 +1,36 @@
+{
+  "scope": "Isolated backend-tests container; synthetic RSA keys, fake Redis, no operational requests or data",
+  "command": "docker compose --profile test run --rm --no-deps -v C:/Users/movva/Documents/GitHub/in-out/docs/security-audit:/security:ro backend-tests python /security/backend-auth-resource-poc.py",
+  "exit_code": 0,
+  "cases": [
+    {
+      "case": "forged signatures continue consuming RSA verification after ingress limit",
+      "requests": 20,
+      "ingress_quota": 10,
+      "statuses": {"401": 10, "429": 10},
+      "actual_rsa_verifications": 20
+    },
+    {
+      "case": "operator GET streams allocate one Redis subscription each with no admission quota",
+      "requests": 12,
+      "statuses": {"200": 12},
+      "allocated_subscriptions": 12,
+      "closed_synthetic_subscriptions": 12,
+      "quota_evaluations": 0
+    },
+    {
+      "case": "body timeout resets for each unauthenticated chunk; no total receive deadline",
+      "simulated_seconds_before_authentication": 56,
+      "idle_timeout_per_chunk": [15, 15, 15, 15],
+      "buffered_bytes": 4,
+      "actual_sleep_seconds": 0
+    },
+    {
+      "case": "unknown kid holds global JWKS lock across refresh, delaying valid cached-key authentication",
+      "mocked_remote_fetches": 1,
+      "valid_cached_key_blocked": true,
+      "bounded_demonstration_seconds": 0.1,
+      "configured_http_timeout_seconds": 10
+    }
+  ]
+}

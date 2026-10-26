@@ -129,6 +129,16 @@ a {
   background: var(--bg);
 }
 
+.scrollable-content {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--admin-line, var(--border-strong)) transparent;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
 .brand {
   font-size: var(--type-18);
   font-weight: var(--weight-extrabold);

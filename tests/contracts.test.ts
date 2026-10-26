@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { normalizeDashboardMovement, normalizeTerminalSnapshot, normalizePermissionsSnapshot, normalizeDashboardSnapshot, normalizePermissionRequest, normalizeAuditEvent } from "../lib/normalizeDashboard";
+import { normalizeDataScope, normalizeDashboardMovement, normalizeTerminalSnapshot, normalizePermissionsSnapshot, normalizeDashboardSnapshot, normalizePermissionRequest, normalizeAuditEvent, normalizeAlertsSnapshot } from "../lib/normalizeDashboard";
 import { HttpDataService } from "../services/httpDataService";
-import { isMovementEventId, movementLogHref } from "../lib/movementReferences";
+import { isMovementEventId } from "../lib/movementReferences";
 import { applyPresenceUpdate, parsePresenceUpdate } from "../frontend/context/presenceUpdates";
 import { emptyData } from "../frontend/context/dataDefaults";
 import { queuedScanInput } from "../frontend/lib/offlineTerminalQueue";
@@ -12,9 +12,370 @@ import type { RecordScanInput } from "../lib/types";
 import { escapeCsv } from "../lib/csv";
 import { FACILITY_ZONES, formatFacilityZones, normalizeFacilityCheckpoints, normalizeFacilityZones } from "../lib/facilityZones";
 import { getDashboardKPIs } from "../lib/analyticsUtils";
-import { mergeMovementRevisions } from "../lib/movementRevisions";
 import { DEFAULT_MANUAL_REVIEW_MINUTES, isManualReviewDuration } from "../lib/manualReviewDuration";
 import { mergePermissionRequests } from "../lib/permissionRequestRevisions";
+import { currentServerTiming, ServerTiming, withServerTiming } from "../lib/serverTiming";
+import { assertCsvBound, readExport } from "../lib/exportRead";
+
+test("snapshot cursors survive normalization and replay cannot double-count an accepted revision", () => {
+  const initial: DataState = { ...normalizeDataScope("dashboard", { eventRevision: 8 }), isLoading: false, error: null };
+  assert.equal(initial.eventRevision, 8);
+  assert.equal(normalizeDataScope("dashboard", { eventRevision: -1 }).eventRevision, undefined);
+  const incoming = { type: "data_changed", revision: 9, people: [] };
+  const next = applyPresenceUpdate(initial, incoming);
+  assert.equal(next.eventRevision, 9);
+  assert.equal(applyPresenceUpdate(next, incoming), next);
+  assert.equal(applyPresenceUpdate(next, { ...incoming, revision: 8 }), next);
+  assert.equal(parsePresenceUpdate('{"revision":-1}'), null);
+});
+
+test("complete export uses one request, preserves cancellation and rejects errors and oversized CSV", async () => {
+  const originalFetch = globalThis.fetch;
+  const controller = new AbortController();
+  const calls: string[] = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push(String(url));
+    assert.equal(options?.signal, controller.signal);
+    return Response.json({ data: { items: Array.from({ length: 220 }, (_, id) => ({ id })), total: 220 } });
+  };
+  try {
+    const result = await readExport<{ items: unknown[] }>("movements", { subject_id: "p1" }, controller.signal);
+    assert.equal(result.items.length, 220);
+    assert.deepEqual(calls, ["/api/data?resource=export&source=movements&subject_id=p1"]);
+    globalThis.fetch = async () => Response.json({ error: "Narrow the filters" }, { status: 422 });
+    await assert.rejects(readExport("movements"), /Narrow the filters/);
+    assert.throws(() => assertCsvBound("x".repeat(16 * 1024 * 1024 + 1)), /export limit/);
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("server timings remain isolated across overlapping requests and contain only safe stage names", async () => {
+  const first = new ServerTiming();
+  const second = new ServerTiming();
+  await Promise.all([
+    withServerTiming(first, async () => {
+      await new Promise(resolve => setTimeout(resolve, 5));
+      currentServerTiming()!.add("upstream", 11);
+      currentServerTiming()!.authenticated();
+    }),
+    withServerTiming(second, async () => {
+      currentServerTiming()!.add("upstream", 22);
+      await Promise.resolve();
+      assert.equal(currentServerTiming(), second);
+    }),
+  ]);
+  first.add("secret;desc=unsafe", 100);
+  first.add("invalid", Number.NaN);
+  first.add("total", 99_999);
+  assert.match(first.header(), /(?:^|, )upstream;dur=11\.00(?:,|$)/);
+  assert.match(first.header(), /(?:^|, )auth;dur=\d+\.\d{2}(?:,|$)/);
+  assert.match(first.header(), /(?:^|, )total;dur=\d+\.\d{2}$/);
+  assert.doesNotMatch(first.header(), /secret|invalid|99999/);
+  assert.match(second.header(), /(?:^|, )upstream;dur=22\.00(?:,|$)/);
+  assert.doesNotMatch(second.header(), /auth;|11\.00/);
+  assert.equal(currentServerTiming(), undefined);
+});
+
+async function withTransportFixture(work: (api: typeof import("../app/api/pythonApi"), bff: typeof import("../app/api/data/bff")) => Promise<void>) {
+  const paths = ["../app/api/authSession", "../app/api/pythonApi", "../app/api/data/serverQueries", "../app/api/data/bff", "../app/api/data/commands", "../app/api/data/route"].map(path => require.resolve(path));
+  const originals = paths.map(path => require.cache[path]);
+  const originalFetch = globalThis.fetch;
+  const [sessionPath, apiPath, , bffPath] = paths;
+  require.cache[sessionPath] = { ...module, id: sessionPath, filename: sessionPath, loaded: true,
+    exports: {
+      apiSession: async () => ({ access_token: "fixture-access-token" }),
+      apiRequestId: async () => "4db02688-3b58-4e78-8e23-1571ba6ad167",
+      withApiSession: (handler: unknown) => handler,
+    } };
+  for (const path of paths.slice(1)) delete require.cache[path];
+  try { await work(require(apiPath), require(bffPath)); }
+  finally {
+    globalThis.fetch = originalFetch;
+    paths.forEach((path, index) => {
+      if (originals[index]) require.cache[path] = originals[index];
+      else delete require.cache[path];
+    });
+  }
+}
+
+function dataRouteFixture() {
+  const wrapped: typeof import("../app/api/data/route") = require("../app/api/data/route");
+  // This fixture replaces Auth.js's two-argument wrapper with the handler itself.
+  return wrapped as unknown as Record<"GET" | "POST", (request: import("next/server").NextRequest) => Promise<Response>>;
+}
+
+test("data routes distinguish expected input failures from safe unexpected failures", async () => {
+  await withTransportFixture(async () => {
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    const route = dataRouteFixture();
+    const logs: unknown[][] = [];
+    const originalConsoleError = console.error;
+    const originalAuthUrl = process.env.AUTH_URL;
+    delete process.env.AUTH_URL;
+    console.error = (...values: unknown[]) => { logs.push(values); };
+    let upstreamCalls = 0;
+    globalThis.fetch = async () => {
+      upstreamCalls += 1;
+      return Response.json({ id: "visitor-1", barcode: "visitor", data: {} });
+    };
+    const post = (body: unknown, contentType = "application/json") => route.POST(new NextRequest(
+      "https://app.invalid/api/data?search=private-query", {
+        method: "POST", headers: { "Content-Type": contentType }, body: JSON.stringify(body),
+      }));
+    try {
+      for (const body of [[], { action: "private-unsupported-command" },
+        { action: "updatePerson", personId: "../private-person", patch: {} },
+        { action: "decidePermissionRequest", requestId: "REQ-1", decision: "invalid" },
+        { action: "decidePermissionRequest", requestId: "REQ-1", decision: "denied" },
+        { action: "decidePermissionRequest", requestId: "REQ-1", decision: "approved", validForMinutes: 31 }]) {
+        const invalid = await post(body);
+        assert.equal(invalid.status, 400);
+        assert.equal(typeof (await invalid.json()).error, "string");
+      }
+      assert.equal((await post({ action: "createVisitor" }, "text/plain")).status, 415);
+      assert.equal(upstreamCalls, 0);
+
+      const unexpected = await post({ action: "createVisitor", input: { name: "private-person" } });
+      assert.equal(unexpected.status, 500);
+      assert.deepEqual(await unexpected.json(), { error: "Command failed." });
+      assert.equal(upstreamCalls, 1);
+
+      globalThis.fetch = async () => Response.json({});
+      const failedRead = await route.GET(new NextRequest(
+        "https://app.invalid/api/data?resource=registrySubjects&search=private-query"));
+      assert.equal(failedRead.status, 500);
+      assert.deepEqual(await failedRead.json(), { error: "Unable to load application data." });
+      assert.doesNotMatch(JSON.stringify(logs), /private-|permission request|TypeError|\.map/);
+      assert.ok(logs.every(values => Object.keys(values[1] as object).every(key => key === "status" || key === "request_id")));
+    } finally {
+      console.error = originalConsoleError;
+      if (originalAuthUrl === undefined) delete process.env.AUTH_URL;
+      else process.env.AUTH_URL = originalAuthUrl;
+    }
+  });
+});
+
+test("data routes preserve upstream status and retry headers", async () => {
+  await withTransportFixture(async () => {
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    const route = dataRouteFixture();
+    const originalConsoleError = console.error;
+    console.error = () => {};
+    globalThis.fetch = async () => Response.json({ detail: "Try again later." }, {
+      status: 503, headers: { "Retry-After": "7" },
+    });
+    try {
+      for (const response of [
+        await route.GET(new NextRequest("https://app.invalid/api/data?resource=openAlertCount")),
+        await route.POST(new NextRequest("https://app.invalid/api/data", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "evaluateAlertRules" }),
+        })),
+      ]) {
+        assert.equal(response.status, 503);
+        assert.equal(response.headers.get("Retry-After"), "7");
+        assert.deepEqual(await response.json(), { error: "Try again later." });
+      }
+    } finally { console.error = originalConsoleError; }
+  });
+});
+
+test("chrome counts and exports each make a single focused upstream read", async () => {
+  await withTransportFixture(async (_api, bff) => {
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    const paths: string[] = [];
+    globalThis.fetch = async input => {
+      const url = new URL(String(input));
+      paths.push(url.pathname + url.search);
+      return Response.json(url.pathname === "/v1/exports" ? { items: [], total: 0, eventRevision: 3 } : { total: 7 });
+    };
+    const count = await bff.handleGet(new NextRequest("https://app.invalid/api/data?resource=openAlertCount"), new ServerTiming());
+    assert.equal((await count.json()).data, 7);
+    const exported = await bff.handleGet(new NextRequest("https://app.invalid/api/data?resource=export&source=movements&subject_id=p1"), new ServerTiming());
+    assert.equal((await exported.json()).data.eventRevision, 3);
+    assert.deepEqual(paths, ["/v1/alerts?view=count&status=active", "/v1/exports?source=movements&subject_id=p1"]);
+  });
+});
+
+test("BFF GET cancellation reaches both movement reads and retains the existing aborted-call status", async () => {
+  await withTransportFixture(async (api, bff) => {
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    const controller = new AbortController();
+    const upstreamSignals: AbortSignal[] = [];
+    globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
+      const signal = init!.signal!;
+      upstreamSignals.push(signal);
+      signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      if (signal.aborted) reject(signal.reason);
+    });
+    const request = new NextRequest("https://app.invalid/api/data?resource=movements&page=1&pageSize=25", { signal: controller.signal });
+    const timing = new ServerTiming();
+    const pending = withServerTiming(timing, () => bff.handleGet(request, timing));
+    await Promise.resolve();
+    await Promise.resolve();
+    controller.abort();
+    await assert.rejects(pending, error => error instanceof api.PythonApiError && error.status === 502);
+    assert.equal(upstreamSignals.length, 2);
+    assert.ok(upstreamSignals.every(signal => signal.aborted));
+    assert.match(timing.header(), /upstream;dur=/);
+  });
+});
+
+test("upstream timeouts retain 504 while successful BFF reads report parsing and normalization", async () => {
+  await withTransportFixture(async (api, bff) => {
+    globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
+      init!.signal!.addEventListener("abort", () => reject(init!.signal!.reason), { once: true });
+    });
+    const timeout = api.fetchPythonApi("/v1/movements", "GET", undefined, undefined, { timeoutMs: 10 });
+    await Promise.all([
+      assert.rejects(timeout, error => error instanceof api.PythonApiError && error.status === 504),
+      new Promise(resolve => setTimeout(resolve, 20)),
+    ]);
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    globalThis.fetch = async () => Response.json({ items: [], total: 0 });
+    const timing = new ServerTiming();
+    const response = await withServerTiming(timing, () => bff.handleGet(
+      new NextRequest("https://app.invalid/api/data?resource=auditEvents&limit=25&offset=0"), timing));
+    assert.equal(response.status, 200);
+    assert.deepEqual(await response.json(), { data: { items: [], total: 0 } });
+    for (const stage of ["upstream", "upstream_parse", "normalize", "serialize", "total"]) {
+      assert.match(response.headers.get("Server-Timing")!, new RegExp(`(?:^|, )${stage};dur=\\d+\\.\\d{2}(?:,|$)`));
+    }
+  });
+});
+
+test("invalid upstream JSON retains the outbound request ID without an active request context", async () => {
+  await withTransportFixture(async (api) => {
+    const { currentRequestId } = require("../lib/requestContext") as typeof import("../lib/requestContext");
+    assert.equal(currentRequestId(), undefined);
+    let outboundId: string | null = null;
+    const logs: unknown[][] = [];
+    const originalConsoleError = console.error;
+    console.error = (...values: unknown[]) => { logs.push(values); };
+    globalThis.fetch = async (_input, init) => {
+      outboundId = new Headers(init?.headers).get("X-Request-ID");
+      return new Response('{"private-body":not-json', {
+        status: 200, headers: { "Content-Type": "application/json" },
+      });
+    };
+    try {
+      await assert.rejects(
+        api.callPythonApi("/v1/movements/private-movement/notes?note=private-query", "GET"),
+        error => error instanceof api.PythonApiError && error.status === 502 &&
+          error.message === "Backend returned an invalid response.",
+      );
+      assert.equal(outboundId, "4db02688-3b58-4e78-8e23-1571ba6ad167");
+      assert.deepEqual(logs, [["[python-api] upstream returned invalid JSON", {
+        method: "GET", route: "/v1/movements", request_id: outboundId, error_type: "SyntaxError",
+      }]]);
+      assert.doesNotMatch(JSON.stringify(logs), /private-|notes|Unexpected token|JSON at position/);
+      assert.equal(currentRequestId(), undefined);
+    } finally { console.error = originalConsoleError; }
+  });
+});
+
+test("carried hardware history preserves distinct asset rows and their canonical source scan", () => {
+  const sourceEventId = "315d7602-1d79-439f-9e51-a92998a15e58";
+  const snapshots = [
+    { id: "8d6536e4-9cb1-5d2d-92f8-a3d61651e212", assetId: "laptop", name: "Laptop", barcode: "HW-1" },
+    { id: "af520cb8-9e5e-50da-9f17-777ab3018f12", assetId: "monitor", name: "Monitor", barcode: "HW-2" },
+  ];
+  const events = snapshots.map((asset, index) => {
+    const data = { id: asset.id, subjectId: asset.assetId, subjectName: asset.name, barcode: asset.barcode,
+      subjectType: "hardware", sourceEventId, carrierId: "employee", carrierName: "Alice",
+      direction: "exit", result: "approved", hardwareIds: [], createdAt: "2026-10-15T11:00:00Z" };
+    return normalizeDashboardMovement(index === 0 ? data : {
+      id: asset.id, subject_id: asset.assetId, subject_type: "hardware", occurred_at: data.createdAt, data,
+    });
+  });
+  assert.equal(new Set(events.map((event) => event.id)).size, 2);
+  assert.deepEqual(events.map((event) => ({ id: event.subjectId, name: event.subjectName, barcode: event.barcode })), [
+    { id: "laptop", name: "Laptop", barcode: "HW-1" }, { id: "monitor", name: "Monitor", barcode: "HW-2" },
+  ]);
+  for (const event of events) {
+    assert.equal(event.subjectType, "hardware");
+    assert.equal(event.sourceEventId, sourceEventId);
+    assert.equal(event.carrierId, "employee");
+    assert.equal(event.carrierName, "Alice");
+    assert.equal(event.direction, "exit");
+    assert.equal(event.result, "approved");
+    assert.deepEqual(event.hardwareIds, []);
+  }
+  const malformed = normalizeDashboardMovement({ sourceEventId: 42, carrierId: {}, carrierName: [] });
+  assert.equal(malformed.sourceEventId, undefined);
+  assert.equal(malformed.carrierId, undefined);
+  assert.equal(malformed.carrierName, undefined);
+});
+
+test("alert rules retain visitor coverage and distinguish automatic presence conditions", () => {
+  const snapshot = normalizeAlertsSnapshot({ rules: [
+    { id: "rule-cross-building-scan", conditionKey: "cross_building_scan", eligibleSubjectTypes: ["employee", "visitor"] },
+    { id: "rule-visitor-overstay", conditionKey: "visitor_overstay", eligibleSubjectTypes: ["visitor", "invalid"] },
+    { id: "rule-no-break", conditionKey: "no_break" },
+  ] });
+  assert.deepEqual(snapshot.alertRules.map(({ id, conditionKey, eligibleSubjectTypes }) => ({ id, conditionKey, eligibleSubjectTypes })), [
+    { id: "rule-cross-building-scan", conditionKey: "cross_building_scan", eligibleSubjectTypes: ["employee", "visitor"] },
+    { id: "rule-visitor-overstay", conditionKey: "visitor_overstay", eligibleSubjectTypes: ["visitor"] },
+    { id: "rule-no-break", conditionKey: "no_break", eligibleSubjectTypes: ["employee"] },
+  ]);
+});
+
+test("alert snapshots load one command page and preserve global rules and counts without directory/history fanout", async () => {
+  const sessionPath = require.resolve("../app/api/authSession");
+  const apiPath = require.resolve("../app/api/pythonApi");
+  const queriesPath = require.resolve("../app/api/data/serverQueries");
+  const originalSession = require.cache[sessionPath];
+  const originalApi = require.cache[apiPath];
+  const originalQueries = require.cache[queriesPath];
+  const originalFetch = globalThis.fetch;
+  const rules = [
+    { id: "rule-no-break", conditionKey: "no_break", eligibleSubjectTypes: ["employee"], recentTriggers: 2 },
+    { id: "rule-irregularity", conditionKey: "irregularity", eligibleSubjectTypes: ["employee"], recentTriggers: 1 },
+    { id: "rule-cross-building-scan", conditionKey: "cross_building_scan", eligibleSubjectTypes: ["employee", "visitor"], recentTriggers: 3 },
+    { id: "rule-visitor-overstay", conditionKey: "visitor_overstay", eligibleSubjectTypes: ["visitor"], recentTriggers: 4 },
+  ];
+  const assignments = [{ subjectId: "employee-1", subjectType: "employee", ruleIds: ["rule-no-break"] }];
+  const calls: string[] = [];
+  require.cache[sessionPath] = { ...module, id: sessionPath, filename: sessionPath, loaded: true,
+    exports: {
+      apiSession: async () => ({ access_token: "fixture-access-token" }),
+      apiRequestId: async () => "4db02688-3b58-4e78-8e23-1571ba6ad167",
+    } };
+  delete require.cache[apiPath];
+  delete require.cache[queriesPath];
+  globalThis.fetch = async (input) => {
+    const url = new URL(String(input));
+    calls.push(`${url.pathname}${url.search}`);
+    if (url.pathname === "/v1/alerts") {
+      assert.equal(url.searchParams.get("view"), "command");
+      assert.equal(url.searchParams.get("limit"), "50");
+      return Response.json({ rules, assignments, total: 5000, limit: 50, offset: 0,
+        summary: { openCount: 5000, confirmedWarnings: 18 },
+        items: [{ id: "alert-1" }, { id: "alert-2" }] });
+    }
+    throw new Error("Unexpected snapshot route");
+  };
+  try {
+    const { loadAllAlerts } = require(queriesPath) as typeof import("../app/api/data/serverQueries");
+    const raw = await loadAllAlerts();
+    const snapshot = normalizeAlertsSnapshot(raw);
+    assert.deepEqual(raw.rules, rules);
+    assert.deepEqual(raw.assignments, assignments);
+    assert.deepEqual(raw.items.map((item: { id: string }) => item.id), ["alert-1", "alert-2"]);
+    assert.equal(snapshot.alertRules.length, 4);
+    assert.deepEqual(snapshot.alertRules[3].eligibleSubjectTypes, ["visitor"]);
+    assert.equal(snapshot.alertRules[3].recentTriggers, 4);
+    assert.deepEqual(snapshot.alertSummary, { openCount: 5000, confirmedWarnings: 18, limit: 50, offset: 0 });
+    assert.deepEqual(calls, ["/v1/alerts?view=command&limit=50&offset=0&sortDirection=asc"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalSession) require.cache[sessionPath] = originalSession;
+    else delete require.cache[sessionPath];
+    if (originalApi) require.cache[apiPath] = originalApi;
+    else delete require.cache[apiPath];
+    if (originalQueries) require.cache[queriesPath] = originalQueries;
+    else delete require.cache[queriesPath];
+  }
+});
 
 test("delayed pending live events cannot reopen a completed permission or resurrect its notification", () => {
   const pending = normalizePermissionRequest({ id: "permission", status: "pending", createdAt: "2026-10-06T10:00:00Z" });
@@ -92,13 +453,10 @@ test("full movement references support scan, manual, and legacy IDs without shor
   for (const id of ["5a62bc23-45d6-4789-abcd-123456789abc", "MAN-0123456789abcdef0123456789abcdef", "EVT-000123"]) {
     assert.equal(isMovementEventId(id), true);
     assert.equal(isMovementEventId(` ${id.toLowerCase()} `), true);
-    assert.equal(new URL(movementLogHref(id), "http://localhost").searchParams.get("eventId"), id);
   }
   for (const value of ["Alice", "MAN-123", "EVT-", "5a62bc23", ""]) {
     assert.equal(isMovementEventId(value), false);
   }
-  const legacyId = "legacy event?source=gate&index=1";
-  assert.equal(new URL(movementLogHref(legacyId), "http://localhost").searchParams.get("eventId"), legacyId);
 });
 
 test("flat chart movements retain their names and barcodes", () => {
@@ -192,34 +550,40 @@ test("manual denial reclassifies one automatic scan without changing presence or
   assert.deepEqual(stale.movements, [manual]);
 });
 
-test("dashboard chart revisions replace automatic denials and preserve fetched history against stale refreshes", () => {
+test("live movement revisions replace automatic denials and preserve history against stale updates", () => {
   const automatic = normalizeDashboardMovement({ id: "chart-review", subjectType: "visitor", result: "denied",
     direction: "entry", scanType: "auto", createdAt: "2026-10-06T10:00:00Z" });
   const manual = normalizeDashboardMovement({ ...automatic, scanType: "manual", reason: "ID mismatch",
     manualReviewedAt: "2026-10-06T10:01:00Z", overrideRequestId: "chart-request" });
-  let chart = mergeMovementRevisions([], [automatic]);
+  let state: DataState = { ...emptyData, isLoading: false, error: null };
+  const revise = (movement: typeof automatic) => {
+    state = applyPresenceUpdate(state, { movement });
+    return state.movements;
+  };
+  let chart = revise(automatic);
   assert.equal(getDashboardKPIs(chart).totalAutomatic, 1);
   assert.equal(getDashboardKPIs(chart).totalManual, 0);
-  chart = mergeMovementRevisions(chart, [manual]);
+  chart = revise(manual);
   assert.equal(chart.length, 1);
   assert.equal(getDashboardKPIs(chart).totalAutomatic, 0);
   assert.equal(getDashboardKPIs(chart).totalManual, 1);
   assert.equal(getDashboardKPIs(chart).totalDenied, 1);
-  chart = mergeMovementRevisions(chart, [manual, automatic]);
+  revise(manual);
+  chart = revise(automatic);
   assert.deepEqual(chart, [manual]);
   const history = normalizeDashboardMovement({ id: "earlier-range", subjectType: "employee", result: "approved",
     direction: "entry", scanType: "auto", createdAt: "2026-10-05T08:00:00Z" });
-  // A range request started before the decision can return its old scan row.
-  chart = mergeMovementRevisions(chart, [history, automatic]);
+  revise(history);
+  chart = revise(automatic);
   assert.deepEqual(chart.map((movement) => movement.id), [history.id, manual.id]);
   assert.equal(chart.find((movement) => movement.id === manual.id)?.scanType, "manual");
   const olderReview = { ...manual, reason: "Older response", manualReviewedAt: "2026-10-06T10:00:30Z" };
-  chart = mergeMovementRevisions(chart, [olderReview]);
+  chart = revise(olderReview);
   assert.equal(chart.find((movement) => movement.id === manual.id)?.reason, "ID mismatch");
   const persisted = normalizeDashboardMovement({ id: manual.id, scan_type: "manual", result: "denied",
     data: { ...manual, scanType: "auto" } });
   assert.equal(persisted.scanType, "manual", "Reloads use the authoritative movement column");
-  chart = mergeMovementRevisions(chart, [persisted]);
+  chart = revise(persisted);
   assert.equal(chart.length, 2);
   assert.equal(getDashboardKPIs(chart).totalAutomatic, 1);
   assert.equal(getDashboardKPIs(chart).totalManual, 1);
@@ -227,16 +591,16 @@ test("dashboard chart revisions replace automatic denials and preserve fetched h
 
 test("zone requests retain their type and access snapshot in manager and dashboard", () => {
   const request = { id: "req-zone", type: "zone_access", status: "pending", subjectId: "p1", subjectName: "Alice",
-    requestedZones: ["public", "secure"], previousZones: ["Main Entrance"], previousValidTo: "2026-10-04T12:00:00Z" };
+    requestedZones: ["a", "b"], previousZones: ["a"], previousValidTo: "2026-10-04T12:00:00Z" };
   const manager = normalizePermissionsSnapshot({ requests: [request], people: [{ id: "perm", subjectId: "p1" }],
     subjects: [{ id: "p1", type: "employee", name: "Alice" }, { id: "h1", type: "hardware", name: "Laptop" }],
-    checkpoints: [{ id: "cp-main", name: "Main Entrance", zone: "public" }] });
+    checkpoints: [{ id: "a-1", name: "1", zone: "a", zoneId: "a", number: 1, gateType: "front_gate", required: true }] });
   assert.equal(manager.permissionRequests[0].type, "zone_access");
-  assert.deepEqual(manager.permissionRequests[0].previousZones, ["public"]);
+  assert.deepEqual(manager.permissionRequests[0].previousZones, ["a"]);
   assert.equal(manager.permissions[0].subjectId, "p1");
   assert.equal(manager.people[0].name, "Alice");
   assert.equal(manager.hardwareAssets[0].name, "Laptop");
-  assert.equal(manager.checkpoints[0].id, "cp-main");
+  assert.equal(manager.checkpoints[0].id, "a-1");
   assert.equal(normalizeDashboardSnapshot({ pendingDecisions: [request] }).permissionRequests[0].type, "zone_access");
 });
 
@@ -407,48 +771,58 @@ test("alert counts use the dedicated uncached resource and preserve zero", async
   } finally { globalThis.fetch = original; }
 });
 
-test("legacy Main Entrance checkpoints collapse into two canonical choices without losing mode", () => {
+test("numbered branch checkpoints and custom checkpoints survive normalization", () => {
   const checkpoints = normalizeFacilityCheckpoints([
-    { id: "main-gate", name: "Main Entrance", zone: "public", mode: "auto" },
-    { id: "server-room", name: "Server Room", zone: "secure", mode: "manual" },
-    { id: "cp-main", name: "Main Entrance", zone: "Main Entrance", mode: "manual" },
-    { id: "old-lab", name: "IT Lab", zone: "IT Lab" },
+    { id: "a-1", name: "1", zoneId: "a", mode: "auto", number: 1, gateType: "front_gate", required: true },
+    { id: "a-2", name: "2", zoneId: "a", mode: "auto", number: 2, gateType: "back_gate" },
+    { id: "b-1", name: "1", zoneId: "b", mode: "manual", number: 1, gateType: "front_gate", required: true },
+    { id: "a-3", name: "Loading Bay", zoneId: "a", mode: "auto", number: 3, gateType: "custom" },
+    { id: "bad id", name: "Invalid", zoneId: "a" },
   ]);
   assert.deepEqual(checkpoints.map((item) => [item.id, item.name, item.zone]), [
-    ["cp-main", "Main Entrance", "public"], ["server-room", "Server Room", "secure"],
+    ["a-1", "1", "a"], ["a-2", "2", "a"], ["b-1", "1", "b"], ["a-3", "Loading Bay", "a"],
   ]);
-  assert.equal(checkpoints[0].mode, "manual");
+  assert.equal(checkpoints[0].mode, "auto");
+  assert.equal(checkpoints[3].number, 3);
+  assert.equal(checkpoints[3].active, true);
   assert.deepEqual(normalizeFacilityCheckpoints(checkpoints), checkpoints);
   assert.equal(FACILITY_ZONES.length, 2);
-  const event = normalizeDashboardMovement({ id: "old", checkpoint_id: "main-gate", data: { checkpoint: "Main Entrance" } });
-  assert.equal(event.checkpointId, "cp-main");
+  const event = normalizeDashboardMovement({ id: "scan-a1", checkpoint_id: "a-1", data: { checkpoint: "1" } });
+  assert.equal(event.checkpointId, "a-1");
 });
 
-test("zone aliases normalize across snapshots and live updates without creating extra zones", () => {
-  assert.deepEqual(normalizeFacilityZones(["Main Entrance", "public", "Server Room", "secure"]), ["public", "secure"]);
-  assert.deepEqual(normalizeFacilityZones(["All Zones"]), ["public", "secure"]);
+test("branch zone IDs normalize across snapshots and live updates", () => {
+  assert.deepEqual(normalizeFacilityZones(["a", "b"]), ["a", "b"]);
+  assert.deepEqual(normalizeFacilityZones(["All Zones"]), ["a", "b"]);
   assert.deepEqual(normalizeFacilityZones(["IT Lab", 42, null]), []);
-  assert.equal(formatFacilityZones(["public", "secure"]), "Main Entrance / Server Room");
+  assert.deepEqual(normalizeFacilityZones(["c", "north-branch"]), ["c", "north-branch"]);
+  assert.equal(formatFacilityZones(["a", "b"]), "Zone A / Zone B");
   const snapshot = normalizeTerminalSnapshot({ subjects: [{ id: "p1", type: "employee", allowedZones: ["All Zones"] }] });
-  assert.deepEqual(snapshot.people[0].allowedZones, ["public", "secure"]);
+  assert.deepEqual(snapshot.people[0].allowedZones, ["a", "b"]);
   const initial: DataState = { ...emptyData, isLoading: false, error: null };
   const received = applyPresenceUpdate(initial, {
     people: snapshot.people,
-    request: normalizePermissionRequest({ id: "r1", type: "visitor", checkpointId: "main-gate", requestedZones: ["Main Entrance"] }),
+    request: normalizePermissionRequest({ id: "r1", type: "visitor", checkpointId: "a-1", requestedZones: ["a"] }),
   });
-  assert.equal(received.permissionRequests[0].checkpointId, "cp-main");
-  assert.deepEqual(received.permissionRequests[0].requestedZones, ["public"]);
+  assert.equal(received.permissionRequests[0].checkpointId, "a-1");
+  assert.deepEqual(received.permissionRequests[0].requestedZones, ["a"]);
 });
 
 test("terminal snapshots expose only the assigned checkpoint and preserve an unassigned account", () => {
   const checkpoints = [
-    { id: "cp-main", name: "Main Entrance", zone: "public" },
-    { id: "server-room", name: "Server Room", zone: "secure" },
+    { id: "a-1", name: "1", zone: "a", zoneId: "a", number: 1 },
+    { id: "b-1", name: "1", zone: "b", zoneId: "b", number: 1 },
   ];
-  const assigned = normalizeTerminalSnapshot({ checkpoints, terminalAssignment: { operatorSubject: "operator", checkpointId: "server-room" } });
-  assert.deepEqual(assigned.checkpoints.map(checkpoint => checkpoint.id), ["server-room"]);
+  const assigned = normalizeTerminalSnapshot({ checkpoints, terminalAssignment: { operatorSubject: "operator", checkpointId: "b-1" } });
+  assert.deepEqual(assigned.checkpoints.map(checkpoint => checkpoint.id), ["b-1"]);
   assert.equal(assigned.terminalAssignment?.operatorSubject, "operator");
   const unassigned = normalizeTerminalSnapshot({ checkpoints, terminalAssignment: { operatorSubject: "other", checkpointId: null } });
   assert.deepEqual(unassigned.checkpoints, []);
   assert.deepEqual(unassigned.terminalAssignment, { operatorSubject: "other", checkpointId: null });
+  const historicalId = normalizeTerminalSnapshot({
+    checkpoints: [{ id: "historical-checkpoint", name: "Retired Gate", zone: "a" }],
+    terminalAssignment: { operatorSubject: "operator", checkpointId: "historical-checkpoint" },
+  });
+  assert.deepEqual(historicalId.checkpoints.map(checkpoint => checkpoint.id), ["historical-checkpoint"]);
+  assert.deepEqual(historicalId.terminalAssignment, { operatorSubject: "operator", checkpointId: "historical-checkpoint" });
 });

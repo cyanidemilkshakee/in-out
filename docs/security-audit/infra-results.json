@@ -1,0 +1,50 @@
+{
+  "phase": "pre-remediation baseline; see infra-remediation-results.json for subsequent fixes",
+  "client_audit_date": "2026-10-10",
+  "client_timezone": "Asia/Calcutta",
+  "gateway_version_under_test": "3.9.3",
+  "existing_gateway_tests": {"passed": 9, "seconds": 40.536},
+  "extra_raw_admin_scim_paths": {"blocked": 24, "unexpected_upstream_contacts": 0},
+  "socket_header_spoof_probes": {"passed": 3, "reserved_headers_removed": true},
+  "synthetic_temporal_signal": {
+    "unverified_actor_selected_approval_activity": true,
+    "activities": ["approve_override", "approve_visitor"],
+    "actual_temporal_rpc_sent": false,
+    "actual_database_decision_executed": false
+  },
+  "keycloak_version_under_test": "26.8.0",
+  "existing_keycloak_tests": {"passed": 3, "seconds": 8.082},
+  "fixture_password_policy_probe": {
+    "realm_policy_present": false,
+    "one_character_password_required_action_accepted": true,
+    "subsequent_oidc_login_succeeded": true,
+    "fixture_users_deleted": true,
+    "real_installation_changed": false
+  },
+  "redis_test_readonly_observations": {
+    "unauthenticated_cross_container_ping": true,
+    "default_user_flags": ["on", "nopass", "sanitize-payload"],
+    "commands": "+@all",
+    "keys": "~*",
+    "channels": "&*",
+    "protected_mode": "no",
+    "test_key_or_acl_changes_by_audit": false
+  },
+  "built_backend_runtime": {
+    "python": "3.10.22",
+    "python_openssl": "3.5.7",
+    "cryptography": "50.0.1",
+    "cryptography_openssl": "4.0.2",
+    "os": "Debian GNU/Linux 13 (trixie), reported 13.7",
+    "upstream_python_310_end_of_life": "2026-10-01"
+  },
+  "container_os_image_cve_scan": {
+    "completed": false,
+    "scout_installed_version": "1.24.0",
+    "reason": "Docker Scout required account authentication; no login attempted",
+    "trivy_grype_syft_executables_found": false
+  },
+  "secret_output_policy": "Secret values were excluded from evidence; identifiers/paths/lines only",
+  "application_configuration_changed": false,
+  "live_service_or_os_exploitation_attempted": false
+}

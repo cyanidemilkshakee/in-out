@@ -9,14 +9,16 @@ import { loadAllAlerts } from "../../app/api/data/serverQueries";
 export async function ScopedDataProvider({
   children,
   scope,
+  clientManaged = false,
 }: {
   children: ReactNode;
   scope: DataScope;
+  clientManaged?: boolean;
 }) {
-  let initialData: AppDataSnapshot | undefined;
+  let initialData: AppDataSnapshot | undefined = clientManaged ? normalizeDataScope(scope, {}) : undefined;
   const endpoint = DATA_SCOPE_ENDPOINTS[scope];
   try {
-    if (endpoint) {
+    if (endpoint && !clientManaged) {
       const raw = scope === "alerts"
         ? await loadAllAlerts()
         : await callPythonApi(endpoint, "GET");
@@ -34,7 +36,7 @@ export async function ScopedDataProvider({
   }
 
   return (
-    <AppProviders initialData={initialData} initialScope={scope}>
+    <AppProviders initialData={initialData} initialScope={scope} clientManaged={clientManaged}>
       {children}
     </AppProviders>
   );

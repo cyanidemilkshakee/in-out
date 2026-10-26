@@ -1,0 +1,113 @@
+# Disposable security regression environment: no host ports or named volumes.
+# docker compose -p inout-infra-test -f infrastructure/compose.test.yaml run --build --rm tests
+# docker compose -p inout-infra-test -f infrastructure/compose.test.yaml down --volumes
+x-credentials: &credentials
+  POSTGRES_PASSWORD: isolated-admin-credential-000000000000000000
+  APP_DB_PASSWORD: isolated-app-credential-00000000000000000000
+  MIGRATION_DB_PASSWORD: isolated-migration-credential-0000000000000
+  KEYCLOAK_DB_PASSWORD: isolated-identity-credential-00000000000000
+  TEMPORAL_DB_PASSWORD: isolated-workflow-credential-00000000000000
+  REDIS_QUOTA_PASSWORD: isolated-quota-credential-000000000000000000
+  REDIS_EVENTS_PASSWORD: isolated-events-credential-00000000000000000
+  REDIS_GATEWAY_PASSWORD: isolated-gateway-credential-0000000000000000
+services:
+  postgres-primary:
+    networks: [app-db, identity-db, temporal-db]
+    image: inout-postgres:17
+    build: {context: ./postgres}
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    environment:
+      POSTGRES_DB: inout
+      POSTGRES_USER: inout
+      POSTGRES_PASSWORD: isolated-admin-credential-000000000000000000
+    tmpfs: ['/var/lib/postgresql/data:uid=70,gid=70,mode=0700', /tmp, '/var/run/postgresql:uid=70,gid=70,mode=3777']
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U inout -d inout]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  provision:
+    networks: [app-db]
+    image: inout-security-infra-runtime
+    build: {context: ../backend}
+    environment: *credentials
+    volumes: [./postgres:/maintenance:ro]
+    command: [python, /maintenance/provision_database.py, --apply]
+    depends_on:
+      postgres-primary: {condition: service_healthy}
+  migrations:
+    networks: [app-db]
+    image: inout-security-infra-runtime
+    environment:
+      DATABASE_URL: postgresql+asyncpg://inout_migrator:isolated-migration-credential-0000000000000@postgres-primary:5432/inout
+    volumes: [./postgres:/maintenance:ro]
+    command: [sh, -c, "alembic upgrade head && python /maintenance/provision_database.py --runtime-grants-only"]
+    depends_on:
+      provision: {condition: service_completed_successfully}
+  redis:
+    networks: [cache]
+    image: inout-redis:7
+    build: {context: ./redis}
+    user: redis
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    environment: *credentials
+    entrypoint: [sh, /usr/local/bin/inout-start-redis.sh]
+    volumes: [./redis/start-redis.sh:/usr/local/bin/inout-start-redis.sh:ro]
+    tmpfs: ['/run/inout-redis:uid=999,gid=1000,mode=0700']
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_QUOTA_PASSWORD redis-cli --user inout-quota ping | grep -q PONG']
+      interval: 2s
+      timeout: 3s
+      retries: 20
+  temporal:
+    networks: [workflow, temporal-db]
+    profiles: [workflow-compatibility]
+    image: temporalio/auto-setup:1.26.2
+    environment:
+      DB: postgres12
+      DB_PORT: '5432'
+      POSTGRES_USER: inout_temporal
+      POSTGRES_PWD: isolated-workflow-credential-00000000000000
+      POSTGRES_SEEDS: postgres-primary
+      SKIP_DB_CREATE: 'true'
+      BIND_ON_IP: 0.0.0.0
+      TEMPORAL_ADDRESS: temporal:7233
+    healthcheck:
+      test: [CMD-SHELL, 'temporal operator cluster health --address 127.0.0.1:7233 | grep -q SERVING']
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+  tests:
+    networks: [app-db, cache, workflow]
+    image: inout-security-infra-runtime
+    build: {context: ../backend}
+    environment: *credentials
+    volumes: [./tests:/tests:ro, ./postgres:/maintenance:ro]
+    command: [python, /tests/check_infrastructure.py]
+    depends_on:
+      migrations: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+  edge-probe:
+    image: inout-security-infra-runtime
+    profiles: [network-boundary]
+    networks: [web]
+    volumes: [./tests:/tests:ro]
+    command: [python, /tests/check_network_boundary.py]
+  network-control:
+    image: inout-security-infra-runtime
+    profiles: [network-boundary]
+    networks: [app-db, identity-db, temporal-db, cache, workflow]
+    volumes: [./tests:/tests:ro]
+    command: [python, /tests/check_network_boundary.py, --expect-reachable]
+networks:
+  web: {internal: true}
+  app-db: {internal: true}
+  identity-db: {internal: true}
+  temporal-db: {internal: true}
+  cache: {internal: true}
+  workflow: {internal: true}

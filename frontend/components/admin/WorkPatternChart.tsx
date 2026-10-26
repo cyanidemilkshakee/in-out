@@ -4,6 +4,7 @@ import { MONTH_NAMES, type DayPattern } from "../../../lib/analyticsUtils";
 interface WorkPatternChartProps {
   timeRange?: string;
   sessions: DayPattern[];
+  endAt?: string;
 }
 
 type WorkPatternRow = Pick<DayPattern, "dateStr" | "percentage" | "sessions" | "workedHours">;
@@ -11,11 +12,13 @@ type WorkPatternRow = Pick<DayPattern, "dateStr" | "percentage" | "sessions" | "
 export function WorkPatternChart({
   timeRange = "1W",
   sessions,
+  endAt,
 }: WorkPatternChartProps) {
   const days = useMemo(() => {
     const filtered: WorkPatternRow[] = [];
-    const today = new Date();
-    const dayKey = (date: Date) => `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`;
+    const facilityDate = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(endAt ? new Date(endAt) : new Date());
+    const today = new Date(`${facilityDate}T00:00:00Z`);
+    const dayKey = (date: Date) => date.toISOString().slice(0, 10);
     const sessionsByDay = new Map(
       sessions.map((session) => [dayKey(session.dateObj), session])
     );
@@ -23,10 +26,10 @@ export function WorkPatternChart({
     const rangeDays = timeRange === "1Y" ? 365 : timeRange === "1M" ? 30 : 7;
     for (let i = rangeDays - 1; i >= 0; i--) {
       const d = new Date(today);
-      d.setDate(today.getDate() - i);
+      d.setUTCDate(today.getUTCDate() - i);
       const session = sessionsByDay.get(dayKey(d));
       filtered.push(session ?? {
-        dateStr: `${d.getDate()} ${MONTH_NAMES[d.getMonth()]}`,
+        dateStr: `${d.getUTCDate()} ${MONTH_NAMES[d.getUTCMonth()]}`,
         workedHours: 0,
         percentage: 0,
         sessions: []
@@ -34,7 +37,7 @@ export function WorkPatternChart({
     }
     
     return filtered;
-  }, [sessions, timeRange]);
+  }, [sessions, timeRange, endAt]);
 
   const startAxis = 0;
   const endAxis = 24;

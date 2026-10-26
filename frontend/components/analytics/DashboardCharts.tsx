@@ -14,12 +14,12 @@ import { KPICards } from "./KPICards";
 import { TimeRangeSelector } from "./TimeRangeSelector";
 import { PendingDecisionsWidget } from "./PendingDecisionsWidget";
 import { UsersRound, Package } from "lucide-react";
-import type { Alert, MovementEvent } from "../../../lib/types";
-import { getDrillDownData, getDashboardKPIs } from "../../../lib/analyticsUtils";
-import { mergeMovementRevisions } from "../../../lib/movementRevisions";
+import type { Alert, DashboardAnalytics, MovementEvent } from "../../../lib/types";
+import { getAggregateDrillDownData, getDrillDownData, getDashboardKPIs } from "../../../lib/analyticsUtils";
+import { dashboardMovementLogHref } from "../../../lib/analyticsQueries";
+import { createRefreshScheduler } from "../../../lib/refreshScheduler";
 import {
   dashboardRangeBounds,
-  eventTimestamp,
   type DashboardTimeRange,
 } from "../../../lib/dateRanges";
 import { useAdminTheme } from "../../hooks/useAdminTheme";
@@ -46,13 +46,25 @@ export function DashboardCharts({
   pendingRequests,
 }: DashboardChartsProps) {
   const router = useRouter();
-  const { queryMovements } = useDataActions();
+  const { queryDashboardAnalytics } = useDataActions();
   const [timeRange, setTimeRange] = useState<DashboardTimeRange>("Today");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [subjectTypeFilter, setSubjectTypeFilter] = useState<"people" | "hardware">("people");
-  const [availableMovements, setAvailableMovements] = useState(movements);
-  const initialRangeQuery = useRef(true);
+  const [analytics, setAnalytics] = useState<DashboardAnalytics | null>(null);
+  const [analyticsLoading, setAnalyticsLoading] = useState(true);
+  const [analyticsError, setAnalyticsError] = useState("");
+  const [queryRevision, setQueryRevision] = useState(0);
+  const displayedFilters = useRef("");
+  const sourceSnapshot = useRef({ movements, alerts });
+  const activeRead = useRef<AbortController | null>(null);
+  const refreshPending = useRef(false);
+  const refreshScheduler = useMemo(() => createRefreshScheduler(
+    () => {
+      if (activeRead.current) refreshPending.current = true;
+      else setQueryRevision(revision => revision + 1);
+    }
+  ), []);
   const theme = useAdminTheme();
   const themeColors = useMemo(
     () =>
@@ -63,14 +75,21 @@ export function DashboardCharts({
   );
 
   useEffect(() => {
-    setAvailableMovements((current) => mergeMovementRevisions(current, movements));
-  }, [movements]);
+    const reload = () => refreshScheduler.request();
+    window.addEventListener("inout:presence-sync", reload);
+    return () => {
+      window.removeEventListener("inout:presence-sync", reload);
+      refreshScheduler.cancel();
+    };
+  }, [refreshScheduler]);
 
   useEffect(() => {
-    if (initialRangeQuery.current) {
-      initialRangeQuery.current = false;
-      return;
-    }
+    if (sourceSnapshot.current.movements === movements && sourceSnapshot.current.alerts === alerts) return;
+    sourceSnapshot.current = { movements, alerts };
+    refreshScheduler.request();
+  }, [movements, alerts, refreshScheduler]);
+
+  useEffect(() => {
     const { start, end } = dashboardRangeBounds(
       timeRange,
       startDate,
@@ -80,67 +99,70 @@ export function DashboardCharts({
       ...(Number.isFinite(start) ? { startAt: new Date(start).toISOString() } : {}),
       ...(Number.isFinite(end) ? { endAt: new Date(end).toISOString() } : {}),
     };
-    let cancelled = false;
-    void queryMovements({
-      page: 1,
-      pageSize: 200,
+    const controller = new AbortController();
+    activeRead.current = controller;
+    refreshPending.current = false;
+    refreshScheduler.cancel();
+    setAnalyticsLoading(true);
+    setAnalyticsError("");
+    const filters = JSON.stringify([subjectTypeFilter, timeRange, startDate, endDate]);
+    if (displayedFilters.current !== filters) {
+      displayedFilters.current = filters;
+      setAnalytics(null);
+    }
+    void queryDashboardAnalytics({
       subjectGroup: subjectTypeFilter,
       ...rangeQuery,
-      sortKey: "createdAt",
-      sortDirection: "desc",
-    })
+    }, controller.signal)
       .then((result) => {
-        if (!cancelled) {
-          setAvailableMovements((current) => mergeMovementRevisions(current, result.chartItems));
+        if (!controller.signal.aborted) {
+          setAnalytics(result);
         }
       })
-      .catch(() => {
-        // Keep the already-rendered server snapshot if an on-demand range fails.
+      .catch(() => { if (!controller.signal.aborted) setAnalyticsError("Unable to load dashboard totals."); })
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        activeRead.current = null;
+        setAnalyticsLoading(false);
+        if (refreshPending.current) {
+          refreshPending.current = false;
+          refreshScheduler.request();
+        }
       });
     return () => {
-      cancelled = true;
+      controller.abort();
+      if (activeRead.current === controller) activeRead.current = null;
     };
   }, [
     endDate,
-    queryMovements,
+    queryDashboardAnalytics,
     startDate,
     subjectTypeFilter,
     timeRange,
+    queryRevision,
+    refreshScheduler,
   ]);
-
-  const filteredMovements = useMemo(() => {
-    const { start, end } = dashboardRangeBounds(timeRange, startDate, endDate);
-    return availableMovements.filter((movement) => {
-      const typeMatches =
-        subjectTypeFilter === "people"
-          ? movement.subjectType === "employee" || movement.subjectType === "visitor"
-          : movement.subjectType === "hardware";
-      if (!typeMatches) return false;
-      const timestamp = eventTimestamp(movement);
-      return Number.isFinite(timestamp) && timestamp > 0 && timestamp >= start && timestamp <= end;
-    });
-  }, [
-    availableMovements,
-    endDate,
-    startDate,
-    subjectTypeFilter,
-    timeRange,
-  ]);
-
-  const filteredAlerts = useMemo(() => {
-    const { start, end } = dashboardRangeBounds(timeRange, startDate, endDate);
-    return alerts.filter((alert) => {
-      const createdAt = alert.createdAt ? new Date(alert.createdAt).getTime() : NaN;
-      const timestamp = Number.isFinite(createdAt)
-        ? createdAt
-        : new Date(`${alert.date} ${alert.time}`).getTime();
-      return Number.isFinite(timestamp) && timestamp > 0 && timestamp >= start && timestamp <= end;
-    });
-  }, [alerts, endDate, startDate, timeRange]);
 
   function openMovementLogs(params: Record<string, string>) {
-    const query = new URLSearchParams({ subject: subjectTypeFilter, ...params });
-    router.push(`/admin/logs?${query.toString()}`);
+    if (analytics) router.push(dashboardMovementLogHref(subjectTypeFilter, analytics, params));
+  }
+
+  function openMetricLogs(metric: "scans" | "alerts" | "approved" | "denied") {
+    if (metric === "alerts") {
+      const query = new URLSearchParams({ tab: "alerts" });
+      if (analytics?.endAt) query.set("endAt", analytics.endAt);
+      if (analytics?.startAt) query.set("startAt", analytics.startAt);
+      router.push(`/admin/logs?${query}`);
+      return;
+    }
+    const filters: Record<string, string> = metric === "approved" || metric === "denied"
+      ? { result: metric }
+      : {};
+    if (analytics) {
+      openMovementLogs(filters);
+      return;
+    }
+    router.push(`/admin/logs?${new URLSearchParams({ subject: subjectTypeFilter, ...filters })}`);
   }
 
   function openDrillDown(nodeId: string) {
@@ -155,21 +177,17 @@ export function DashboardCharts({
       autoExit: { result: "approved", scanType: "auto", direction: "exit" },
       manualEntry: { result: "approved", scanType: "manual", direction: "entry" },
       manualExit: { result: "approved", scanType: "manual", direction: "exit" },
-      restrictedAuto: { result: "denied", scanType: "auto", reason: "restricted" },
-      expiredAuto: { result: "denied", scanType: "auto", reason: "expired" },
-      restrictedManual: { result: "denied", scanType: "manual", reason: "restricted" },
-      expiredManual: { result: "denied", scanType: "manual", reason: "expired" },
-      otherAuto: { result: "denied", scanType: "auto" },
-      otherManual: { result: "denied", scanType: "manual" },
+      restrictedAuto: { result: "denied", scanType: "auto", denialCategory: "restricted" },
+      restrictedManual: { result: "denied", scanType: "manual", denialCategory: "restricted" },
+      otherAuto: { result: "denied", scanType: "auto", denialCategory: "other" },
+      otherManual: { result: "denied", scanType: "manual", denialCategory: "other" },
     };
     openMovementLogs(queryByNode[nodeId] ?? {});
   }
 
-  const activeScanAnalytics = useMemo(() => {
-    return getDashboardKPIs(filteredMovements);
-  }, [filteredMovements]);
-
-  const drillDownData = useMemo(() => getDrillDownData(filteredMovements), [filteredMovements]);
+  const activeScanAnalytics = analytics?.current.scanAnalytics ?? getDashboardKPIs([]);
+  const drillDownData = useMemo(() => analytics
+    ? getAggregateDrillDownData(analytics.current) : getDrillDownData([]), [analytics]);
 
   const sharedPlugins = useMemo(() => ({
     legend: {
@@ -232,7 +250,7 @@ export function DashboardCharts({
   }), [activeScanAnalytics, themeColors.border]);
 
   return (
-    <section className="dashboard-analytics" aria-label="Dashboard analytics">
+    <section className="dashboard-analytics" aria-label="Dashboard analytics" aria-busy={analyticsLoading}>
       <TimeRangeSelector
         timeRange={timeRange}
         timeRanges={TIME_RANGES}
@@ -251,16 +269,12 @@ export function DashboardCharts({
       />
 
       <KPICards
-        alerts={filteredAlerts}
-        movements={filteredMovements}
-        allAlerts={alerts}
-        allMovements={availableMovements}
-        scanAnalytics={activeScanAnalytics}
-        timeRange={timeRange}
-        startDate={startDate}
-        endDate={endDate}
-        subjectType={subjectTypeFilter}
+        current={analytics?.current ?? null}
+        previous={analytics?.previous ?? null}
+        loading={analyticsLoading}
+        onSelect={openMetricLogs}
       />
+      {analyticsError ? <p role="status">{analyticsError} <button type="button" className="admin-button" onClick={() => setQueryRevision(revision => revision + 1)}>Retry</button></p> : null}
 
       {/* Top Left — Scan Status */}
       <div className="analytics-donut dashboard-donut dashboard-donut-quality">
@@ -411,7 +425,7 @@ export function DashboardCharts({
               if (!elements.length) return;
               openMovementLogs({
                 result: "denied",
-                ...(elements[0].index === 0 ? { reason: "restricted" } : {}),
+                denialCategory: ["restricted", "other"][elements[0].index],
               });
             },
             plugins: { ...sharedPlugins, legend: { display: false } }

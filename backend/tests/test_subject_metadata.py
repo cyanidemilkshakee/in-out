@@ -13,7 +13,7 @@ from models import AccessPermission, Checkpoint, Person, PresenceState, ScanRequ
 from schemas import BrowserScanPayload, SubjectCreate, SubjectUpdate
 from routers.registry import create_subject, get_subject, list_subjects, registry_bundle, update_subject
 from routers.permissions import list_permissions
-from permission_decisions import apply_permission_decision, publish_decision
+from permission_decisions import apply_permission_decision, publish_decision, zone_permission_version
 from terminal_scans import record_scan
 
 
@@ -44,6 +44,12 @@ def legacy_employee():
 
 
 class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        for target in ("routers.registry.enqueue_changed", "routers.registry.enqueue_decision", "routers.registry.enqueue_workflow_start"):
+            item = patch(target, new=AsyncMock(return_value=1))
+            item.start()
+            self.addCleanup(item.stop)
+
     def assert_retired_absent(self, data):
         self.assertNotIn("department", data)
         self.assertNotIn("accessLevel", data)
@@ -103,12 +109,12 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         db.execute.side_effect = [rows(scalar=1), rows([subject])]
         listed = await list_subjects(None, 50, 0, db, ADMIN)
         self.assert_retired_absent(listed.items[0].data)
-        db.execute.side_effect = [rows([subject]), *[rows() for _ in range(7)]]
+        db.execute.side_effect = [rows([(subject,)]), *[rows() for _ in range(7)]]
         with patch("critical_entry_restrictions.entry_restrictions_for_subjects", new=AsyncMock(return_value={})):
             bundle = await registry_bundle(db)
         self.assert_retired_absent(bundle["people"][0])
         self.assertEqual(bundle["people"][0]["type"], "employee")
-        db.execute.side_effect = [rows(), rows(), rows(), rows([subject]), rows()]
+        db.execute.side_effect = [rows(), rows(), rows(), rows([(subject,)]), rows()]
         with patch("critical_entry_restrictions.entry_restrictions_for_subjects", new=AsyncMock(return_value={})):
             permissions = await list_permissions(db, ADMIN)
         self.assert_retired_absent(permissions["subjects"][0])
@@ -125,8 +131,9 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
                 presence = PresenceState(subject_id=subject.id, state="outside", last_scan_timestamp=None)
                 db = session()
                 db.get.side_effect = [None, checkpoint]
-                db.execute.side_effect = [rows(), rows(scalar=subject), rows([subject]), rows(), rows(), rows(scalar=presence)]
+                db.execute.side_effect = [rows(), rows(scalar=subject), rows([subject]), rows(), rows(), rows([presence])]
                 with patch("terminal_scans.entry_restrictions_for_subjects", new=AsyncMock(return_value={})), \
+                     patch("terminal_scans.entry_restrictions_for_locked_subjects", new=AsyncMock(return_value={})), \
                      patch("terminal_scans._approved_manual_review", new=AsyncMock(return_value=None)):
                     result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode=subject.barcode, checkpointId="cp-main"), "operator")
                 self.assertEqual(result["allowed"], not restricted)
@@ -158,6 +165,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
             "requestedZones": ["secure"], "validFrom": start, "validTo": end,
         })
         permission = AccessPermission(id="perm", subject_id=subject.id, data={"zones": ["public"]})
+        request.data["permissionVersion"] = zone_permission_version(permission, subject.person.data)
         db = session()
         db.scalar.side_effect = [request, None, subject, permission]
         with patch("permission_decisions.entry_restrictions_for_subjects", new=AsyncMock(return_value={})):
@@ -166,9 +174,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assert_retired_absent(subject.person.data)
         self.assertEqual(result["person"]["allowedZones"], ["secure"])
         self.assertEqual(result["permission"]["validTo"], end)
-        with patch("permission_decisions.publish_presence_update", new=AsyncMock()) as publish:
-            await publish_decision(result)
-        event = json.loads(publish.await_args.args[0])
+        event = await publish_decision(result)
         self.assert_retired_absent(event["people"][0])
 
 

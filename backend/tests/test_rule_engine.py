@@ -1,6 +1,6 @@
 import sys
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -10,6 +10,7 @@ from rule_engine import (  # noqa: E402
     default_alert_rules,
     eligible_alert_subject_types,
     evaluate_scheduled_rules,
+    evaluate_visitor_overstay_rules,
     with_default_alert_rules,
 )
 
@@ -17,8 +18,10 @@ from rule_engine import (  # noqa: E402
 class RuleEngineTests(unittest.TestCase):
     def test_assignment_eligibility_never_offers_hardware_or_retired_conditions(self):
         for rule in default_alert_rules():
-            self.assertEqual(eligible_alert_subject_types(rule), ("employee",))
-            self.assertEqual(eligible_alert_subject_types({**rule, "enabled": False}), ("employee",))
+            expected = {"cross_building_scan": ("employee", "visitor"), "visitor_overstay": ("visitor",)}.get(
+                rule["conditionKey"], ("employee",))
+            self.assertEqual(eligible_alert_subject_types(rule), expected)
+            self.assertEqual(eligible_alert_subject_types({**rule, "enabled": False}), expected)
         for rule in (
             {"id": "rule-no-break", "conditionKey": "unauthorized_hardware_carrier"},
             {"id": "rule-exit-balance", "conditionKey": "no_break"},
@@ -66,15 +69,45 @@ class RuleEngineTests(unittest.TestCase):
 
     def test_default_rules_only_include_supported_conditions(self):
         rules = default_alert_rules()
-        self.assertEqual({rule["id"] for rule in rules}, {"rule-no-break", "rule-irregularity"})
-        self.assertEqual({rule["conditionKey"] for rule in rules}, {"no_break", "irregularity"})
+        self.assertEqual({rule["id"] for rule in rules}, {
+            "rule-no-break", "rule-irregularity", "rule-cross-building-scan", "rule-visitor-overstay"})
+        self.assertEqual({rule["conditionKey"] for rule in rules}, {
+            "no_break", "irregularity", "cross_building_scan", "visitor_overstay"})
 
         legacy = [
             {"id": "rule-exit-balance", "conditionKey": "exit_balance", "enabled": True},
             {"id": "rule-no-break", "conditionKey": "no_break", "enabled": True},
         ]
         normalized = with_default_alert_rules(legacy)
-        self.assertEqual({rule["conditionKey"] for rule in normalized}, {"no_break", "irregularity"})
+        self.assertEqual({rule["conditionKey"] for rule in normalized}, {
+            "no_break", "irregularity", "cross_building_scan", "visitor_overstay"})
+
+    def test_visitor_threshold_is_strict_continuous_and_independent_of_calendar_days(self):
+        now = datetime(2026, 10, 12, 9, tzinfo=timezone.utc)
+        visit = {"subjectId": "visitor", "subjectType": "visitor", "subjectName": "Guest",
+            "barcode": "VIS-1", "state": "inside", "buildingId": "zone-b", "buildingName": "Branch B",
+            "entryStartedAt": now - timedelta(hours=12)}
+        self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=now), [])
+        first = evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=now + timedelta(microseconds=1))
+        self.assertEqual(len(first), 1)
+        self.assertEqual((first[0]["subjectId"], first[0]["checkpoint"], first[0]["severity"]),
+            ("visitor", "Branch B", "medium"))
+        self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(),
+            [{**visit, "alertedEntryAt": visit["entryStartedAt"]}], now=now + timedelta(days=1)), [])
+        later = evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=now + timedelta(days=1))
+        self.assertEqual(first[0]["id"], later[0]["id"])
+
+    def test_visitor_rule_rejects_unknown_visit_times_and_nonvisitor_or_outside_presence(self):
+        now = datetime(2026, 10, 12, 9, tzinfo=timezone.utc)
+        visit = {"subjectId": "visitor", "subjectType": "visitor", "state": "inside",
+            "entryStartedAt": now - timedelta(hours=13)}
+        for changes in ({"entryStartedAt": None}, {"entryStartedAt": now + timedelta(days=1)},
+                        {"entryStartedAt": (now - timedelta(hours=13)).replace(tzinfo=None)},
+                        {"subjectType": "employee"}, {"state": "outside"}):
+            with self.subTest(changes=changes):
+                self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(), [{**visit, **changes}], now=now), [])
+        disabled = [{**rule, "enabled": False} for rule in default_alert_rules()]
+        self.assertEqual(evaluate_visitor_overstay_rules(disabled, [visit], now=now), [])
 
     def test_irregularity_alerts_active_employee_missing_entry_after_cutoff(self):
         now = datetime(2026, 9, 29, 13, 30, tzinfo=timezone.utc)  # 7:00 PM (Asia/Kolkata)

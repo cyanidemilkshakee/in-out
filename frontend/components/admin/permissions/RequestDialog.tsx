@@ -1,47 +1,50 @@
 "use client";
 
 import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ArrowRight, Boxes, Loader2, MapPin, ShieldCheck, UserPlus, Users, X } from "lucide-react";
+import { ArrowRight, Boxes, Loader2, MapPin, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { useDataActions, useDataState } from "../../../context/DataContext";
-import type { PermissionRequest, PermissionRequestInput } from "../../../../lib/types";
-import { FACILITY_ZONES, formatFacilityZones, normalizeFacilityZones } from "../../../../lib/facilityZones";
+import type { AccessPermission, PermissionRequest, PermissionRequestInput } from "../../../../lib/types";
+import { facilityZoneLabel, formatFacilityZones, normalizeFacilityZones } from "../../../../lib/facilityZones";
 import { accessDateTimeLimits, accessWindowBounds, parseFacilityDateTime, validateAccessWindow, type DateRangeErrors } from "../../../../lib/dateTimeValidation";
 import { useDateTimeNow } from "../../../hooks/useDateTimeNow";
+import { useOrganizationZones } from "../../../hooks/useOrganizationZones";
 import { FacilityZoneSelection } from "./FacilityZoneSelection";
 import { facilityDateInput, facilityDateIso, permissionWindowLabels, REQUEST_LABELS } from "./requestPresentation";
 import styles from "./PermissionForm.module.css";
 
-type FormPermissionType = "visitor_access" | "new_visitor" | "zone_access" | "hardware_custody";
+type FormPermissionType = "new_visitor" | "zone_access" | "hardware_custody";
 type BackendPermissionType = Exclude<PermissionRequest["type"], "manual_override">;
 
 export type RequestContext = { type?: PermissionRequest["type"]; subjectId?: string };
 
 const NEW_REQUEST_TYPES = [
-  { value: "visitor_access", label: "Visitor access", icon: Users },
-  { value: "new_visitor", label: "New visitor", icon: UserPlus },
   { value: "zone_access", label: REQUEST_LABELS.zone_access, icon: MapPin },
   { value: "hardware_custody", label: REQUEST_LABELS.hardware_custody, icon: Boxes },
-] satisfies Array<{ value: FormPermissionType; label: string; icon: typeof Users }>;
+] satisfies Array<{ value: FormPermissionType; label: string; icon: typeof MapPin }>;
 
 function contextType(context: RequestContext): FormPermissionType {
-  if (context.type === "visitor") return context.subjectId ? "visitor_access" : "new_visitor";
+  if (context.type === "visitor") return context.subjectId ? "zone_access" : "new_visitor";
   if (context.type === "hardware_custody" || context.type === "zone_access") return context.type;
   return "zone_access";
 }
 
-function backendType(type: FormPermissionType): BackendPermissionType {
-  return type === "visitor_access" || type === "new_visitor" ? "visitor" : type;
+function backendType(type: FormPermissionType, visitorSubject: boolean): BackendPermissionType {
+  return type === "new_visitor" || visitorSubject ? "visitor" : type;
 }
 
-export function RequestDialog({ context, mode = "request", onClose, onSubmitted, onReview }: {
+export function RequestDialog({ context, mode = "request", onClose, onSubmitted, onReview, onRevokeAccess }: {
   context: RequestContext;
   mode?: "request" | "grant";
   onClose: () => void;
   onSubmitted: (request: PermissionRequest) => void;
   onReview: (requestId: string) => void;
+  onRevokeAccess: (permission: AccessPermission) => Promise<boolean>;
 }) {
   const { people, hardwareAssets, checkpoints, permissions, permissionRequests } = useDataState();
-  const { submitPermissionRequest, createVisitor, grantPermission } = useDataActions();
+  const { submitPermissionRequest, createVisitor, grantPermission, releaseEntryRestriction } = useDataActions();
+  const { zones: organizationZones } = useOrganizationZones();
+  const zoneChoices = organizationZones.length ? organizationZones : [...new Set(checkpoints.map((item) => item.zoneId ?? item.zone))]
+    .filter(Boolean).map((id) => ({ id, name: facilityZoneLabel(id), active: true, checkpoints: [] }));
   const isGrant = mode === "grant";
   const now = useDateTimeNow();
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -51,41 +54,53 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
   const [carrierId, setCarrierId] = useState("");
   const [reason, setReason] = useState("");
   const [visitorDraft, setVisitorDraft] = useState({ name: "", barcode: "", host: "", company: "" });
-  const [zones, setZones] = useState(() => normalizeFacilityZones(permissions.find((item) => item.subjectId === context.subjectId)?.zones ?? (context.type === "visitor" && mode === "grant" ? [checkpoints[0]?.zone] : [])));
+  const [zones, setZones] = useState(() => normalizeFacilityZones(permissions.find((item) => item.subjectId === context.subjectId)?.zones ?? []));
   const [validFrom, setValidFrom] = useState(() => accessWindowBounds().defaultStart);
   const [validTo, setValidTo] = useState(() => facilityDateInput(new Date(parseFacilityDateTime(accessWindowBounds().defaultStart)! + 60 * 60_000)));
   const [startTouched, setStartTouched] = useState(false);
   const [endTouched, setEndTouched] = useState(false);
-  const [permanentAccess, setPermanentAccess] = useState(() => mode === "grant" && contextType(context) === "zone_access");
+  const [permanentAccess, setPermanentAccess] = useState(() => mode === "grant" && contextType(context) === "zone_access" && context.type !== "visitor");
   const [dateErrors, setDateErrors] = useState<DateRangeErrors>({});
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [revoking, setRevoking] = useState(false);
+  const [releasingRestriction, setReleasingRestriction] = useState(false);
+  const [restrictionReason, setRestrictionReason] = useState("");
+  const [restrictionReasonInvalid, setRestrictionReasonInvalid] = useState(false);
   const [error, setError] = useState("");
 
   const selectablePeople = people.filter((person) => person.name.trim().toLowerCase() !== "unregistered barcode");
-  const isVisitorAccess = type === "visitor_access";
   const isNewVisitor = type === "new_visitor";
-  const isVisitorType = isVisitorAccess || isNewVisitor;
-  const requestType = backendType(type);
-  const permanentZoneAccess = isGrant && type === "zone_access" && permanentAccess;
-  const subjectOptions = type === "hardware_custody"
+  const subjectOptionsFor = (selectedType: FormPermissionType) => selectedType === "hardware_custody"
     ? hardwareAssets
-    : isVisitorAccess
-      ? selectablePeople.filter((person) => person.type === "visitor")
-      : [...selectablePeople, ...hardwareAssets];
+    : selectedType === "new_visitor" ? [] : [...selectablePeople, ...hardwareAssets];
+  const subjectOptions = subjectOptionsFor(type);
   const subject = [...selectablePeople, ...hardwareAssets].find((item) => item.id === subjectId);
   const asset = hardwareAssets.find((item) => item.id === subjectId);
-  const validSubject = Boolean(subject && (!isVisitorAccess || ("type" in subject && subject.type === "visitor")) && (type !== "hardware_custody" || asset));
+  const currentCustodianId = asset?.assignedEmployeeId || asset?.ownerId;
+  const isVisitorSubject = Boolean(subject && "type" in subject && subject.type === "visitor");
+  const isVisitorAccess = type === "zone_access" && isVisitorSubject;
+  const isVisitorType = isVisitorAccess || isNewVisitor;
+  const requestType = backendType(type, isVisitorAccess);
+  const permanentZoneAccess = isGrant && type === "zone_access" && !isVisitorAccess && permanentAccess;
+  const validSubject = Boolean(subject && (type !== "hardware_custody" || asset));
   const employee = people.find((person) => person.id === carrierId && person.type === "employee");
   const checkpoint = checkpoints.find((item) => item.id === checkpointId);
   const currentPermission = permissions.find((item) => item.subjectId === subjectId);
+  const canRevokeAccess = isGrant && currentPermission
+    && currentPermission.state !== "pending_approval"
+    && currentPermission.state !== "restricted"
+    && currentPermission.state !== "revoked";
   const entryRestriction = currentPermission?.entryRestriction ?? subject?.entryRestriction;
   const dateLimits = accessDateTimeLimits(validFrom, validTo, now);
   const needsZones = type === "zone_access" || isVisitorType;
   const needsDateWindow = isVisitorType || type === "zone_access";
   const needsCheckpointField = !isGrant && !isVisitorType;
+  const selectedZoneIds = normalizeFacilityZones(zones);
+  const visitorCheckpoint = checkpoints.find((item) => (item.zoneId ?? item.zone) === selectedZoneIds[0] && (item.required || item.number === 1))
+    ?? checkpoints.find((item) => (item.zoneId ?? item.zone) === selectedZoneIds[0]);
   const permissionCheckpointId = isVisitorType
-    ? FACILITY_ZONES.find((zone) => zone.id === normalizeFacilityZones(zones)[0])?.checkpointId ?? checkpoints[0]?.id ?? "cp-main"
+    ? visitorCheckpoint?.id ?? ""
     : checkpointId;
   const visitorBarcode = visitorDraft.barcode.trim();
   const visitorBarcodeValid = Boolean(visitorBarcode && visitorBarcode.length <= 64 && /^[A-Za-z0-9._:/-]+$/.test(visitorBarcode));
@@ -107,8 +122,14 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
   }, []);
 
   useEffect(() => {
-    if (!checkpointId && checkpoints.length) setCheckpointId(checkpoints[0].id);
+    if ((!checkpointId || !checkpoints.some((item) => item.id === checkpointId)) && checkpoints.length) setCheckpointId(checkpoints[0].id);
   }, [checkpointId, checkpoints]);
+
+  useEffect(() => {
+    if (!zones.length && zoneChoices.length && (isNewVisitor || (context.type === "visitor" && isGrant))) {
+      setZones([zoneChoices[0].id]);
+    }
+  }, [zones, zoneChoices, isNewVisitor, context.type, isGrant]);
 
   useEffect(() => {
     const bounds = accessWindowBounds(now);
@@ -130,17 +151,14 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
 
     if (next === "new_visitor") {
       setSubjectId("");
-    } else if (next === "visitor_access") {
-      const currentIsVisitor = selectablePeople.some((item) => item.id === subjectId && item.type === "visitor");
-      if (!currentIsVisitor) setSubjectId(selectablePeople.find((item) => item.type === "visitor")?.id ?? "");
     } else if (next === "hardware_custody") {
       if (!hardwareAssets.some((item) => item.id === subjectId)) setSubjectId("");
-    } else if (!subjectOptions.some((item) => item.id === subjectId)) {
+    } else if (!subjectOptionsFor(next).some((item) => item.id === subjectId)) {
       setSubjectId("");
     }
 
-    if ((next === "visitor_access" || next === "new_visitor") && !zones.length) {
-      setZones([FACILITY_ZONES[0].id]);
+    if (next === "new_visitor" && !zones.length) {
+      if (zoneChoices.length) setZones([zoneChoices[0].id]);
     }
   }
 
@@ -157,9 +175,9 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
     const visitorBarcodeMissing = isNewVisitor && !visitorBarcodeValid;
     const subjectMissing = !isNewVisitor && !validSubject;
     const carrierMissing = type === "hardware_custody" && !employee;
-    const duplicateCustodian = type === "hardware_custody" && Boolean(asset?.assignedEmployeeId && asset.assignedEmployeeId === carrierId);
+    const duplicateCustodian = type === "hardware_custody" && Boolean(currentCustodianId && currentCustodianId === carrierId);
     const zonesMissing = needsZones && !normalizeFacilityZones(zones).length;
-    const checkpointMissing = needsCheckpointField && !checkpoint;
+    const checkpointMissing = needsCheckpointField ? !checkpoint : isVisitorType && !permissionCheckpointId;
 
     if (checkpointMissing) { setError("Choose a checkpoint."); return; }
     if (nextDateErrors.start || nextDateErrors.end) { setError(nextDateErrors.start ?? nextDateErrors.end ?? "Choose a valid access window."); return; }
@@ -167,7 +185,7 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
       setError(!visitorDraft.name.trim() ? "Add the visitor name." : !visitorDraft.host.trim() ? "Add the visitor host." : "Enter a valid visitor barcode using letters, numbers, dots, underscores, colons, slashes, or hyphens.");
       return;
     }
-    if (subjectMissing) { setError(type === "visitor_access" ? "Choose a registered visitor." : type === "hardware_custody" ? "Choose registered hardware." : "Choose a registered subject."); return; }
+    if (subjectMissing) { setError(isVisitorAccess ? "Choose a registered visitor." : type === "hardware_custody" ? "Choose registered hardware." : "Choose a registered subject."); return; }
     if (carrierMissing) { setError("Choose an employee to receive custody."); return; }
     if (duplicateCustodian) { setError("This employee already has custody of this asset."); return; }
     if (zonesMissing) { setError("Choose at least one zone."); return; }
@@ -241,15 +259,54 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
     }
   }
 
+  async function revokeCurrentAccess() {
+    if (!currentPermission || busy || revoking) return;
+    setRevoking(true);
+    setError("");
+    let closed = false;
+    try {
+      const revoked = await onRevokeAccess(currentPermission);
+      if (!revoked) setError("Unable to revoke access. Please try again.");
+      else {
+        closed = true;
+        onClose();
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to revoke access. Please try again.");
+    } finally {
+      if (!closed) setRevoking(false);
+    }
+  }
+
   const invalidSubject = attemptedSubmit && !isNewVisitor && !validSubject;
   const invalidCheckpoint = attemptedSubmit && needsCheckpointField && !checkpoint;
   const invalidCarrier = attemptedSubmit && type === "hardware_custody" && !employee;
   const invalidZones = attemptedSubmit && needsZones && !normalizeFacilityZones(zones).length;
   const visitorBarcodeError = attemptedSubmit && isNewVisitor && !visitorBarcodeValid;
 
-  return <dialog ref={dialogRef} className={styles.dialog} aria-labelledby="new-request-title" onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
+  async function liftEntryRestriction() {
+    const trimmedReason = restrictionReason.trim();
+    const triggerAlertId = entryRestriction?.active ? entryRestriction.triggerAlertId : "";
+    if (!triggerAlertId || !trimmedReason || busy || releasingRestriction) {
+      if (!trimmedReason) setRestrictionReasonInvalid(true);
+      return;
+    }
+    setReleasingRestriction(true);
+    setError("");
+    try {
+      await releaseEntryRestriction(triggerAlertId, trimmedReason);
+      setRestrictionReason("");
+      setRestrictionReasonInvalid(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to lift the entry restriction. Please try again.");
+    } finally {
+      setReleasingRestriction(false);
+    }
+  }
+
+  return <dialog ref={dialogRef} className={`${styles.dialog} scrollable-content`} aria-labelledby="new-request-title" onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
     <form onSubmit={submit} noValidate className={styles.form}>
-      <header className={styles.header}><span className={styles.headerIcon} aria-hidden="true"><ShieldCheck size={23} strokeWidth={1.7} /></span><div><h2 id="new-request-title">{isGrant ? "New permission" : "New request"}</h2><p>{isGrant ? "Grant access or reassign custody directly." : "Choose the approval you need."}</p></div><button type="button" className={styles.close} aria-label={isGrant ? "Close new permission" : "Close new request"} disabled={busy} onClick={onClose}><X size={19} /></button></header>
+      <header className={styles.header}><div><h2 id="new-request-title">{isGrant ? "New permission" : "New request"}</h2><p>{isGrant ? "Grant access or reassign custody directly." : "Choose the approval you need."}</p></div><button type="button" className={styles.close} aria-label={isGrant ? "Close new permission" : "Close new request"} disabled={busy} onClick={onClose}><X size={19} /></button></header>
 
       <fieldset className={styles.typeSelector} disabled={busy}>
         <legend>{isGrant ? "Permission type" : "Request type"}</legend>
@@ -262,17 +319,40 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
         })}</div>
       </fieldset>
 
-      <div className={styles.body}>
+      <div className={`${styles.body} scrollable-content`}>
 
       {!isNewVisitor && <label className={styles.field}>
         <span>{type === "hardware_custody" ? "Asset" : isVisitorAccess ? "Visitor" : "Subject"}</span>
-        <select className="admin-surface" aria-invalid={invalidSubject || undefined} value={subjectId} disabled={busy} required onChange={(event) => { setSubjectId(event.target.value); setCarrierId(""); setZones(normalizeFacilityZones(permissions.find((item) => item.subjectId === event.target.value)?.zones ?? (isGrant && isVisitorType ? [checkpoint?.zone ?? "public"] : []))); setError(""); }}>
+        <select className="admin-surface" aria-invalid={invalidSubject || undefined} value={subjectId} disabled={busy} required onChange={(event) => {
+          const nextSubjectId = event.target.value;
+          const selectedSubject = [...selectablePeople, ...hardwareAssets].find((item) => item.id === nextSubjectId);
+          const selectedVisitor = Boolean(selectedSubject && "type" in selectedSubject && selectedSubject.type === "visitor");
+          const savedZones = normalizeFacilityZones(permissions.find((item) => item.subjectId === nextSubjectId)?.zones ?? []);
+          setSubjectId(nextSubjectId);
+          setCarrierId("");
+          setZones(savedZones.length ? savedZones : selectedVisitor && zoneChoices.length ? [zoneChoices[0].id] : []);
+          if (selectedVisitor) setPermanentAccess(false);
+          setError("");
+        }}>
           <option value="">Choose {type === "hardware_custody" ? "an asset" : isVisitorAccess ? "a visitor" : "a subject"}</option>
           {subjectOptions.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.barcode}</option>)}
         </select>
       </label>}
 
-      {isGrant && entryRestriction?.active && <div className={`${styles.notice} ${styles.restriction}`}><strong>Entry restriction remains active</strong><p>This grant will not restore entry. Lift the entry restriction in the access directory and add a reason after review.</p></div>}
+      {isGrant && entryRestriction?.active && <div className={`${styles.notice} ${styles.restriction}`}>
+        <strong>Entry restriction remains active</strong>
+        <p>This permission will not restore entry. Review the restriction and record a reason before lifting it.</p>
+        {entryRestriction?.active && <>
+          <label className={styles.field}>
+            <span>Reason to lift restriction</span>
+            <input value={restrictionReason} disabled={busy || releasingRestriction} maxLength={1000} aria-label={`Reason to lift entry restriction for ${currentPermission?.subjectName ?? subject?.name ?? "this subject"}`} aria-invalid={restrictionReasonInvalid} placeholder="Explain why entry can be restored." onChange={(event) => { setRestrictionReason(event.target.value); if (event.target.value.trim()) setRestrictionReasonInvalid(false); }} />
+          </label>
+          <button type="button" disabled={busy || releasingRestriction} className={styles.revokeAction} onClick={() => void liftEntryRestriction()}>
+            {releasingRestriction ? <Loader2 className={styles.spinner} size={16} aria-hidden="true" /> : <ShieldCheck size={16} aria-hidden="true" />}
+            {releasingRestriction ? "Lifting restriction…" : "Lift entry restriction"}
+          </button>
+        </>}
+      </div>}
 
       {isNewVisitor && <div className={styles.visitorFields}>
         <label className={styles.field}><span>Visitor name</span><input className="admin-surface" aria-invalid={attemptedSubmit && !visitorDraft.name.trim() || undefined} required maxLength={100} value={visitorDraft.name} disabled={busy} onChange={(event) => setVisitorDraft((current) => ({ ...current, name: event.target.value }))} /></label>
@@ -281,11 +361,11 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
         <label className={styles.field}><span>Company</span><input className="admin-surface" maxLength={120} value={visitorDraft.company} disabled={busy} onChange={(event) => setVisitorDraft((current) => ({ ...current, company: event.target.value }))} /></label>
       </div>}
 
-      {needsCheckpointField && <label className={styles.field}><span>Checkpoint</span><select className="admin-surface" aria-invalid={invalidCheckpoint || undefined} required disabled={busy} value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)}><option value="">Choose a checkpoint</option>{checkpoints.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>}
+      {needsCheckpointField && <label className={styles.field}><span>Checkpoint</span><select className="admin-surface" aria-invalid={invalidCheckpoint || undefined} required disabled={busy} value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)}><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((item) => <option key={item.id} value={item.id}>{facilityZoneLabel(item.zoneId ?? item.zone)} · {item.name}{item.gateLabel ? ` · ${item.gateLabel}` : ""}</option>)}</select></label>}
 
-      {type === "hardware_custody" && <label className={styles.field}><span>{isGrant ? "New custodian" : "Requested custodian"}</span><select className="admin-surface" aria-invalid={invalidCarrier || undefined} required disabled={busy} value={carrierId} onChange={(event) => setCarrierId(event.target.value)}><option value="">Choose an employee</option>{people.filter((person) => person.type === "employee").map((person) => <option key={person.id} value={person.id} disabled={person.id === asset?.assignedEmployeeId}>{person.name} · {person.barcode}{person.id === asset?.assignedEmployeeId ? " · Current custodian" : ""}</option>)}</select></label>}
+      {type === "hardware_custody" && <label className={styles.field}><span>{isGrant ? "New custodian" : "Requested custodian"}</span><select className="admin-surface" aria-invalid={invalidCarrier || undefined} required disabled={busy} value={carrierId} onChange={(event) => setCarrierId(event.target.value)}><option value="">Choose an employee</option>{people.filter((person) => person.type === "employee").map((person) => <option key={person.id} value={person.id} disabled={person.id === currentCustodianId}>{person.name} · {person.barcode}{person.id === currentCustodianId ? " · Current custodian" : ""}</option>)}</select></label>}
 
-      {needsZones && <FacilityZoneSelection label={type === "zone_access" ? "Zone access" : "Allowed zones"} value={zones} onChange={(next) => { setZones(next); setError(""); }} disabled={busy} invalid={invalidZones} />}
+      {needsZones && <FacilityZoneSelection label={type === "zone_access" ? "Zone access" : "Allowed zones"} value={zones} onChange={(next) => { setZones(next); setError(""); }} zones={zoneChoices} disabled={busy || !zoneChoices.length} invalid={invalidZones} />}
 
       {isVisitorAccess && visitorRequest && <div className={styles.notice}><strong>Approval already pending</strong><p>{isGrant ? `Grant permission will approve ${visitorRequest.subjectName}'s pending visitor request using the dates and zones selected here.` : `${visitorRequest.subjectName} is already awaiting review.`}</p>{!isGrant && <button type="button" className={styles.reviewAction} onClick={() => onReview(visitorRequest.id)}>Review pending permission <ArrowRight size={16} /></button>}</div>}
 
@@ -295,7 +375,7 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
           <label htmlFor="permission-valid-to">Ends</label>
           <input className="admin-surface" id="permission-valid-to" name="validTo" type="datetime-local" required={!permanentZoneAccess} {...dateLimits.end} step={60} value={permanentZoneAccess ? "" : validTo} disabled={busy || permanentZoneAccess} aria-invalid={Boolean(attemptedSubmit && invalidDateErrors.end)} aria-describedby={dateErrors.end ? "permission-end-error" : undefined} onChange={(event) => { setEndTouched(true); setValidTo(event.target.value); setDateErrors((current) => ({ ...current, end: undefined })); }} />
           {dateErrors.end && <small id="permission-end-error" className={styles.dateError}>{dateErrors.end}</small>}
-          {type === "zone_access" && isGrant && <label className={styles.permanentToggle}><input type="checkbox" checked={permanentAccess} disabled={busy} onChange={(event) => { setPermanentAccess(event.target.checked); setDateErrors((current) => ({ ...current, end: undefined })); }} /><span>Until further notice</span></label>}
+          {type === "zone_access" && !isVisitorAccess && isGrant && <label className={styles.permanentToggle}><input type="checkbox" checked={permanentAccess} disabled={busy} onChange={(event) => { setPermanentAccess(event.target.checked); setDateErrors((current) => ({ ...current, end: undefined })); }} /><span>Until further notice</span></label>}
         </div>
       </div>}
 
@@ -310,12 +390,13 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
               {type === "hardware_custody" && <p><strong>Current custodian:</strong> {asset?.assignedEmployeeName || "Unassigned"}</p>}
               <p><strong>Zones:</strong> {formatFacilityZones(currentZones) || "No zones assigned"}</p>
               {type !== "hardware_custody" && <p className={styles.currentAccessWindow}><span>{currentWindow.start}</span><span>{currentWindow.end}</span></p>}
+              {canRevokeAccess && <button type="button" className={styles.revokeAction} disabled={busy || revoking} onClick={() => void revokeCurrentAccess()}><ShieldAlert size={16} aria-hidden="true" />{revoking ? "Revoking…" : "Revoke access"}</button>}
             </>}
       </section>}
 
       </div>
 
-      <footer className={styles.footer}><button type="button" className={styles.cancelButton} disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className={styles.submitButton} disabled={busy || (type === "hardware_custody" && asset?.assignedEmployeeId === carrierId) || Boolean(!isGrant && visitorRequest)}>{busy ? <><Loader2 size={16} className={styles.spinner} />{isGrant ? "Granting…" : "Submitting…"}</> : <>{isGrant ? "Grant permission" : isNewVisitor ? "Register & request approval" : "Submit request"}<ArrowRight size={16} aria-hidden="true" /></>}</button></footer>
+      <footer className={styles.footer}><button type="button" className={styles.cancelButton} disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className={styles.submitButton} disabled={busy || (type === "hardware_custody" && currentCustodianId === carrierId) || Boolean(!isGrant && visitorRequest)}>{busy ? <><Loader2 size={16} className={styles.spinner} />{isGrant ? "Granting…" : "Submitting…"}</> : <>{isGrant ? "Grant permission" : isNewVisitor ? "Register & request approval" : "Submit request"}<ArrowRight size={16} aria-hidden="true" /></>}</button></footer>
     </form>
   </dialog>;
 }

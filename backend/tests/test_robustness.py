@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
-from request_limits import RequestLimitsMiddleware
+from request_admission import RequestAdmissionMiddleware
 from routers import keycloak_admin
 
 
@@ -21,19 +21,19 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
                 closed.append(True)
         request = AsyncMock()
         with patch("routers.presence.subscribe_presence", messages):
-            self.assertEqual([event async for event in _sse_event_generator(request, 0)], [])
+            self.assertEqual([event async for event in _sse_event_generator(request, 0, {"realm_access": {"roles": ["admin"]}})], [])
         self.assertEqual(closed, [True])
 
     async def test_chunked_body_limits_and_payload_delivery(self):
         app = FastAPI()
-        app.add_middleware(RequestLimitsMiddleware)
+        app.add_middleware(RequestAdmissionMiddleware)
         @app.post("/echo")
         async def echo(request: Request):
             return {"size": len(await request.body())}
         async def oversized():
             yield b"x" * 700
             yield b"x" * 700
-        with patch("request_limits.settings.MAX_REQUEST_BODY_BYTES", 1024):
+        with patch("request_admission.settings.MAX_REQUEST_BODY_BYTES", 1024):
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
                 self.assertEqual((await client.post("/echo", content=oversized())).status_code, 413)
                 response = await client.post("/echo", content=b"abc")

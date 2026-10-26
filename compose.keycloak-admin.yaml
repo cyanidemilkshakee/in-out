@@ -1,0 +1,45 @@
+# Temporary local Keycloak administration. Enable only for bootstrap/maintenance:
+# docker compose -f compose.yaml -f compose.keycloak-admin.yaml up -d keycloak-admin
+# Stop it afterward using the same files and: stop keycloak-admin
+# This separate gateway leaves the app/API/terminal listeners untouched.
+services:
+  keycloak-admin:
+    networks: [edge, web]
+    image: inout-kong:${KONG_VERSION:-3.9.3}
+    build:
+      context: ./gateway
+      args:
+        KONG_VERSION: ${KONG_VERSION:-3.9.3}
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      KONG_PROXY_LISTEN: "0.0.0.0:8006"
+      KONG_ADMIN_LISTEN: "off"
+      KONG_STATUS_LISTEN: "127.0.0.1:8100"
+      KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity,inout-ingress-limit
+      KONG_NGINX_MAIN_ENV: "INOUT_GATEWAY_REDIS_PASSWORD"
+      INOUT_GATEWAY_REDIS_PASSWORD: ${REDIS_GATEWAY_PASSWORD:?Generate REDIS_GATEWAY_PASSWORD}
+      KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: 1m
+      KONG_NGINX_HTTP_CLIENT_HEADER_BUFFER_SIZE: 16k
+      KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 64k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: "8 64k"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+    volumes:
+      - ./gateway/kong.yml:/etc/kong/kong.yml:ro
+      - ./gateway/plugins/inout-terminal-identity:/usr/local/share/lua/5.1/kong/plugins/inout-terminal-identity:ro
+      - ./gateway/plugins/inout-rate-identity:/usr/local/share/lua/5.1/kong/plugins/inout-rate-identity:ro
+      - ./gateway/plugins/inout-ingress-limit:/usr/local/share/lua/5.1/kong/plugins/inout-ingress-limit:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_ADMIN_PORT:-1009}:8006"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s

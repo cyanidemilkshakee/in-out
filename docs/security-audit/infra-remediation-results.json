@@ -1,0 +1,66 @@
+{
+  "phase": "authorized infrastructure remediation",
+  "client_audit_date": "2026-10-10",
+  "scope": "in-out repository and exact disposable in-out fixture projects only",
+  "database_redis_regressions": {
+    "passed": 8,
+    "seconds": 21.371,
+    "fresh_postgres_provisioning_and_all_alembic_migrations": true,
+    "runtime_dml_allowed_ddl_and_migration_metadata_denied": true,
+    "identity_application_schema_and_temporal_database_boundaries": true,
+    "actual_fixture_administrator_and_application_password_rotation": true,
+    "old_fixture_application_password_rejected": true,
+    "synthetic_rows_preserved_and_ownership_transferred": true,
+    "active_writer_unmarked_existing_data_and_privilege_drift_guards": true,
+    "anonymous_redis_denied": true,
+    "quota_lua_key_acl_and_event_channel_acl_positive_negative_checks": true
+  },
+  "keycloak_regressions": {
+    "version": "26.8.0",
+    "passed": 4,
+    "seconds": 19.915,
+    "scoped_non_superuser_database_account": true,
+    "short_password_admin_reset_rejected_http": 400,
+    "short_password_required_browser_action_rejected_http": 200,
+    "strong_required_update_and_subsequent_pkce_login": true,
+    "exact_dedicated_callback_origin_and_logout_allowlists": true,
+    "role_refresh_logout_public_admin_boundaries": true
+  },
+  "network_fixture": {
+    "production_equivalent_private_segments": true,
+    "web_only_container_isolated_from_database_redis_temporal_dns": true,
+    "web_only_container_blocked_from_all_exact_fixture_service_ips": true,
+    "real_temporal_1_26_2_scoped_db_auto_setup_healthy": true,
+    "fixture_host_ports_published": false
+  },
+  "compose_validation": {
+    "main_config_quiet": "passed",
+    "main_with_mtls_and_keycloak_admin_overlays_quiet": "passed using fixture TLS-directory/terminal-secret process values",
+    "sensitive_environment_values_printed": false,
+    "database_redis_temporal_rpc_and_ui_host_ports_removed": true
+  },
+  "new_backend_runtime": {
+    "python": "3.13.16",
+    "frozen_uv_lock_build_passed": true,
+    "uid": 10001,
+    "python_openssl": "3.5.7",
+    "cryptography": "50.0.1",
+    "cryptography_openssl": "4.0.2"
+  },
+  "ignored_local_environment": {
+    "seven_independent_database_redis_secrets_generated": true,
+    "random_bits_per_secret": 256,
+    "unrelated_identity_auth_secrets_preserved": true,
+    "dedicated_app_localhost_origin": true,
+    "actual_existing_database_or_realm_credentials_rotated": false
+  },
+  "operational_limits": {
+    "real_deployment_started": false,
+    "existing_volumes_modified_or_removed": false,
+    "existing_database_maintenance_and_realm_policy_origin_migration_required": true,
+    "container_os_embedded_library_cve_scan_completed_locally": false,
+    "safe_accountless_ci_scanner_pin_verified_from_official_sources": true,
+    "unrelated_projects_services_or_host_settings_modified": false,
+    "http_local_development_does_not_isolate_browser_cookies_against_hostile_same_hostname_other_port": true
+  }
+}

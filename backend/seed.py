@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
 from facility_zones import CHECKPOINTS, normalize_facility_document, normalize_zones
 from subject_metadata import current_subject_metadata
+from rule_engine import default_alert_rules
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:1003/inout"
@@ -18,26 +19,32 @@ async def seed_reference_data(engine) -> None:
     """Production-safe reference data required for the app to operate."""
     print("→ Seeding reference data...")
     async with engine.begin() as conn:
+        await conn.execute(text("""
+            INSERT INTO organization_zones (id, name) VALUES ('a', 'A'), ('b', 'B')
+            ON CONFLICT (id) DO NOTHING
+        """))
         for checkpoint in CHECKPOINTS:
             await conn.execute(text("""
-                INSERT INTO checkpoints (id, data) VALUES (:id, CAST(:data AS jsonb))
-                ON CONFLICT (id) DO UPDATE SET data = checkpoints.data || EXCLUDED.data
-                """), {"id": checkpoint["id"], "data": json.dumps(checkpoint)})
+                INSERT INTO checkpoints (id, data, zone_id, number, gate_type, required, active)
+                VALUES (:id, CAST(:data AS jsonb), :zone_id, :number, :gate_type, :required, true)
+                ON CONFLICT (id) DO NOTHING
+            """), {"id": checkpoint["id"], "data": json.dumps({**checkpoint, "online": True}),
+                "zone_id": checkpoint["zone"], "number": checkpoint["number"],
+                "gate_type": checkpoint["gateType"], "required": checkpoint["required"]})
         await conn.execute(
             text(
                 """
-                INSERT INTO alert_rules (id, data) VALUES
-                  (:id1, CAST(:data1 AS jsonb)),
-                  (:id2, CAST(:data2 AS jsonb))
+                INSERT INTO alert_rules (id, data)
+                SELECT :id, CAST(:data AS jsonb)
+                WHERE NOT :automatic OR NOT EXISTS (
+                    SELECT 1 FROM alert_rules WHERE data->>'conditionKey' = :condition
+                )
                 ON CONFLICT (id) DO NOTHING
                 """
             ),
-            {
-                "id1": "rule-no-break",
-                "data1": '{"id":"rule-no-break","name":"No break recorded","description":"Alert when an employee works six hours without a break.","category":"operational","severity":"medium","enabled":true,"scope":"Employee workdays","conditionKey":"no_break","recentTriggers":0}',
-                "id2": "rule-irregularity",
-                "data2": '{"id":"rule-irregularity","name":"Irregularity","description":"Alert when an active employee has no approved entry by the end of the day.","category":"presence_anomaly","severity":"medium","enabled":true,"scope":"Employee attendance","conditionKey":"irregularity","recentTriggers":0}',
-            },
+            [{"id": rule["id"], "data": json.dumps(rule), "condition": rule["conditionKey"],
+              "automatic": rule["conditionKey"] in {"cross_building_scan", "visitor_overstay"}}
+             for rule in default_alert_rules()],
         )
 
 
@@ -49,7 +56,7 @@ async def seed_demo_data(engine) -> None:
     async with engine.begin() as conn:
         await _seed_registered_subject(conn, subject_id="seed-demo-employee", kind="employee",
             barcode="DEMO-BARCODE-123", permission_id="seed-demo-permission",
-            data={"name": "Demo Employee", "status": "active", "allowedZones": ["public", "secure"], "inside": False})
+            data={"name": "Demo Employee", "status": "active", "allowedZones": ["a", "b"], "inside": False})
 
 
 async def _seed_registered_subject(
@@ -175,7 +182,7 @@ async def seed_additional_data(engine) -> None:
                         "name": employee["name"],
                         "status": "active",
                         "phone": employee["phone"],
-                        "allowedZones": ["public", "secure"],
+                        "allowedZones": ["a", "b"],
                         "inside": False,
                         "validFrom": now,
                         "validTo": "",
@@ -216,7 +223,7 @@ async def seed_additional_data(engine) -> None:
                     "assignedEmployeeId": asset["employee_id"],
                     "assignedEmployeeName": asset["owner"],
                     "status": "active",
-                    "allowedZones": ["public", "secure"],
+                    "allowedZones": ["a", "b"],
                     "inside": False,
                     "createdAt": now,
                 },
@@ -249,7 +256,7 @@ async def seed_test_data(engine) -> None:
                 "INSERT INTO access_permissions (id, subject_id, data) VALUES (:id, :sid, :data) "
                 "ON CONFLICT (id) DO NOTHING"
             ),
-            {"id": "test-perm-1", "sid": "test-subject-1", "data": '{"zones": ["public"], "type": "permanent"}'},
+            {"id": "test-perm-1", "sid": "test-subject-1", "data": '{"zones": ["a"], "type": "permanent"}'},
         )
 
 

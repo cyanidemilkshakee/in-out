@@ -5,6 +5,7 @@ _transform: true
 # Kong's Admin API is disabled; this file is the source of truth.
 services:
   - name: inout-web
+    id: 8c07b156-e8f2-4a30-a967-4c09c8df5945
     url: http://app:3000
     retries: 0
     read_timeout: 60000
@@ -20,8 +21,53 @@ services:
         priority: 10
         strip_path: false
         preserve_host: true
+    plugins:
+      # Count anonymous pages, assets and login callbacks before body work,
+      # using a separate shared socket-peer budget for the browser app.
+      - name: inout-ingress-limit
+        config:
+          minute: 1800
+          limit_by: ip
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: &gateway-redis
+            host: redis
+            port: 6379
+            database: 0
+            timeout: 2000
+            username: inout-gateway
+            password: "{vault://env/inout-gateway-redis-password}"
+
+  # Sign-in actions and callback POSTs have one independent peer allowance.
+  # GET CSRF/provider requests, OAuth callbacks and ordinary pages remain above.
+  - name: inout-login-actions
+    id: ec743912-240d-464d-9b1e-491e44d2058a
+    url: http://app:3000
+    retries: 0
+    read_timeout: 60000
+    routes:
+      - name: login-actions
+        expression: >-
+          http.headers.inoutlistener == "8000" && http.method == "POST" &&
+          (http.path ~ r#"^/api/auth/(callback|signin)(/.*)?$"# ||
+           http.path ~ r#"^/login/?$"#)
+        priority: 250
+        strip_path: false
+        preserve_host: true
+    plugins:
+      - name: inout-ingress-limit
+        config:
+          second: 3
+          minute: 10
+          limit_by: ip
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
 
   - name: inout-api
+    id: 49fa490b-bd8a-48d2-9655-5b2bf09cbe20
     url: http://python-api:1102
     retries: 0
     read_timeout: 60000
@@ -41,19 +87,110 @@ services:
         priority: 120
         strip_path: false
     plugins:
-      - name: request-size-limiting
+      - &api-body-limit
+        name: request-size-limiting
         config:
           allowed_payload_size: 256
           size_unit: kilobytes
           require_content_length: false
       - name: rate-limiting
         config:
-          minute: 1200
-          policy: local
-          limit_by: ip
-          hide_client_headers: false
+          minute: 300
+          limit_by: credential
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
+
+  # One service per operation group shares its allowance across every matching
+  # endpoint. Selecting another permission/review route cannot reset the budget.
+  - name: inout-permission-actions
+    id: c3eabdbc-72fa-457d-aedb-351a75c44f0a
+    url: http://python-api:1102
+    retries: 0
+    read_timeout: 60000
+    routes:
+      - name: permission-actions
+        expression: >-
+          http.headers.inoutlistener == "8002" &&
+          (http.method == "POST" || http.method == "PUT" || http.method == "PATCH" || http.method == "DELETE") &&
+          (http.path ~ r#"^/v1/permissions/grant/?$"# ||
+           http.path ~ r#"^/v1/permission-requests/?$"# ||
+           http.path ~ r#"^/v1/registry/subjects/?$"# ||
+           http.path ~ r#"^/v1/registry/subjects/[^/]+/?$"# ||
+           http.path ~ r#"^/v1/alerts/[^/]+/review/?$"# ||
+           http.path ~ r#"^/v1/permission-requests/[^/]+/decide/?$"# ||
+           http.path ~ r#"^/v1/terminal/manual-reviews/?$"#)
+        priority: 200
+        strip_path: false
+    plugins:
+      - *api-body-limit
+      - name: rate-limiting
+        config:
+          second: 10
+          minute: 60
+          limit_by: credential
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
+
+  - name: inout-user-actions
+    id: 452acb5b-8f4a-4bd9-a9d2-efb05daa72a4
+    url: http://python-api:1102
+    retries: 0
+    read_timeout: 60000
+    routes:
+      - name: user-actions
+        expression: >-
+          http.headers.inoutlistener == "8002" &&
+          (http.method == "POST" || http.method == "PUT" || http.method == "PATCH" || http.method == "DELETE") &&
+          (http.path ~ r#"^/v1/keycloak/users(/.*)?$"# ||
+           http.path ~ r#"^/v1/checkpoints/?$"#)
+        priority: 200
+        strip_path: false
+    plugins:
+      - *api-body-limit
+      - name: rate-limiting
+        config:
+          second: 5
+          minute: 20
+          limit_by: credential
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
+
+  - name: inout-alert-actions
+    id: 3db460ad-6e07-4b7b-9715-af0ab387f494
+    url: http://python-api:1102
+    retries: 0
+    read_timeout: 60000
+    routes:
+      - name: alert-actions
+        expression: >-
+          http.headers.inoutlistener == "8002" &&
+          (http.method == "POST" || http.method == "PUT" || http.method == "PATCH" || http.method == "DELETE") &&
+          (http.path ~ r#"^/v1/alerts/evaluate/?$"# ||
+           http.path ~ r#"^/v1/alert-warnings/[^/]+/reset/?$"# ||
+           http.path ~ r#"^/v1/alerts/[^/]+/release-entry-restriction/?$"# ||
+           http.path ~ r#"^/v1/alert-rule-assignments/[^/]+/?$"#)
+        priority: 200
+        strip_path: false
+    plugins:
+      - *api-body-limit
+      - name: rate-limiting
+        config:
+          second: 5
+          minute: 20
+          limit_by: credential
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
 
   - name: inout-identity
+    id: 73f42aab-f727-4a18-9440-8c420bac460c
     url: http://keycloak:1105
     retries: 0
     routes:
@@ -62,11 +199,74 @@ services:
         priority: 30
         strip_path: false
         preserve_host: true
+      # This socket is absent unless the operator enables the maintenance
+      # overlay. The plugin uses the actual socket, never a supplied header.
+      - name: identity-maintenance
+        expression: http.headers.inoutlistener == "8006"
+        priority: 40
+        strip_path: false
+        preserve_host: true
+    plugins:
+      # Independent public login/OIDC/asset budget; the wrapper excludes the
+      # explicitly enabled maintenance socket sharing this service.
+      - name: inout-ingress-limit
+        config:
+          minute: 600
+          limit_by: ip
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
+
+  # Actual password, OTP, recovery and other stock Keycloak form submissions.
+  # Realm/action/query changes share one socket-peer budget across gateways.
+  - name: inout-identity-login-actions
+    id: 15a4c2f8-2a8f-4ae9-a244-3fe92d8bb670
+    url: http://keycloak:1105
+    retries: 0
+    routes:
+      - name: identity-login-actions
+        expression: >-
+          http.headers.inoutlistener == "8005" && http.method == "POST" &&
+          http.path ~ r#"^/realms/[^/]+/login-actions(/.*)?$"#
+        priority: 250
+        strip_path: false
+        preserve_host: true
+    plugins:
+      - name: inout-ingress-limit
+        config:
+          second: 5
+          minute: 60
+          limit_by: ip
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
 
 plugins:
+  # API admission precedes body buffering and identity verification. Web,
+  # sign-in and public identity overrides select independent IP budgets.
+  - name: inout-ingress-limit
+    config:
+      minute: 6000
+      limit_by: ip
+      policy: redis
+      sync_rate: -1
+      fault_tolerant: false
+      redis: *gateway-redis
   - name: inout-terminal-identity
+  - name: inout-rate-identity
+    config:
+      identity_url: http://python-api:1102/internal/gateway/identity
+      cache_ttl: 30
   - name: correlation-id
     config:
       header_name: X-Request-ID
       generator: uuid
       echo_downstream: true
+  # Scraped through the private Status API, never through a public proxy route.
+  - name: prometheus
+    config:
+      status_code_metrics: true
+      latency_metrics: true
+      per_consumer: false

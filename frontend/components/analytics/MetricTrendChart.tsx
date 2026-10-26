@@ -12,7 +12,8 @@ import {
 } from "chart.js";
 import { Line } from "react-chartjs-2";
 import { compactRangeBounds } from "../../../lib/dateRanges";
-import type { TimeRange } from "./TrendChart";
+import type { TimeRange } from "../../../lib/dateRanges";
+import type { RegistryTrend } from "../../../lib/types";
 
 export type MetricTrendPoint = {
   timestamp: string;
@@ -28,6 +29,7 @@ type MetricTrendChartProps = {
   aggregation?: "sum" | "average";
   color?: string;
   unit?: string;
+  summary?: RegistryTrend;
 };
 
 const chartFont = {
@@ -59,9 +61,10 @@ export function MetricTrendChart({
   aggregation = "sum",
   color = "#0b63e5",
   unit = "",
+  summary,
 }: MetricTrendChartProps) {
   const { labels, values, average, percentage, isUp } = useMemo(() => {
-    const now = new Date();
+    const now = summary ? new Date(summary.endAt) : new Date();
     const { start, end, duration } = compactRangeBounds(timeRange, now);
     const bucketCount = timeRange === "1W" ? 7 : timeRange === "1M" ? 10 : 12;
     const bucketDuration = duration / bucketCount;
@@ -126,12 +129,12 @@ export function MetricTrendChart({
 
     return {
       labels,
-      values,
-      average,
-      percentage,
-      isUp: difference >= 0,
+      values: summary?.values ?? values,
+      average: summary?.value ?? average,
+      percentage: summary?.percentage ?? percentage,
+      isUp: summary?.isUp ?? difference >= 0,
     };
-  }, [aggregation, points, timeRange]);
+  }, [aggregation, points, timeRange, summary]);
 
   const chartData = useMemo(
     () => ({

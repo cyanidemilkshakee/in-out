@@ -1,8 +1,9 @@
 /* Keep the existing alert layout; scope its spacing and type to this page. */
 :global(.role-admin) :global(.admin-page-frame):has(.stack) {
+  min-height: 100%;
   gap: 28px;
   padding-top: 28px;
-  padding-bottom: 56px;
+  padding-bottom: 80px;
 }
 
 :global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.admin-hero-copy) {
@@ -15,6 +16,16 @@
   min-width: 0;
   align-items: center;
 }
+
+.stack {
+  min-width: 0;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
+}
+
+.pagination { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--admin-border); }
+.pagination span { margin-right: auto; color: var(--ui-text-secondary); font-size: 14px; }
 
 .headerSkips > section {
   flex: 1;
@@ -68,6 +79,7 @@
 
 :global(.role-admin) .stack :global(.alert-activity-section--open) :global(.permission-section-heading),
 :global(.role-admin) .stack :global(.alert-rules-section) :global(.permission-section-heading) {
+  flex-shrink: 0;
   padding-bottom: 6px;
 }
 
@@ -77,13 +89,68 @@
   padding: 0 16px 16px;
 }
 
+:global(.role-admin) .stack :global(.alert-activity-section--open),
+:global(.role-admin) .stack :global(.alert-rules-section) {
+  display: flex;
+  min-height: 0;
+  max-height: min(82dvh, 900px);
+  flex-direction: column;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-section--open) :global(.alert-activity-list),
+:global(.role-admin) .stack :global(.alert-rule-list) {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--admin-line-strong) transparent;
+}
+
 :global(.role-admin) .stack :global(.alert-activity-list) article {
+  grid-template-columns: 96px 12px minmax(0, 1fr) max-content;
+  grid-template-areas:
+    "time dot copy warning"
+    ". . controls controls";
+  min-width: 0;
   gap: 16px;
   padding: 20px;
 }
 
+:global(.role-admin) .stack :global(.alert-activity-list) {
+  /* Scrolling must preserve each card's content height rather than shrink rows. */
+  grid-auto-rows: max-content;
+  align-content: start;
+  container: open-alerts / inline-size;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-list) time {
+  grid-area: time;
+  min-width: 0;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-list) time strong {
+  white-space: nowrap;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-dot) {
+  grid-area: dot;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-dot)::after {
+  /* A fixed-length connector cannot follow cards with variable content. */
+  display: none;
+}
+
+:global(.role-admin) .stack :global(.alert-activity-marker) {
+  grid-area: warning;
+  align-self: start;
+}
+
 :global(.role-admin) .stack :global(.alert-activity-copy) {
+  grid-area: copy;
+  min-width: 0;
   gap: 6px;
+  overflow-wrap: anywhere;
 }
 
 :global(.role-admin) .stack :global(.alert-activity-title-row) > strong {
@@ -117,6 +184,7 @@
 }
 
 :global(.role-admin) .stack :global(.alert-review-controls) {
+  grid-area: controls;
   gap: 12px;
 }
 :global(.role-admin) .stack :global(.alert-review-controls) input{
@@ -127,6 +195,8 @@
 }
 
 :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) {
+  justify-self: stretch;
+  width: 100%;
   gap: 10px;
 }
 :global(.role-admin) .stack :global(.alert-activity-actions) button{
@@ -161,11 +231,47 @@
   font-weight: 400;
 }
 
+@container open-alerts (max-width: 700px) {
+  :global(.role-admin) .stack :global(.alert-activity-list) article {
+    grid-template-columns: 12px minmax(0, 1fr) max-content;
+    grid-template-areas:
+      "dot time warning"
+      "dot copy copy"
+      "dot controls controls";
+  }
+
+  :global(.role-admin) .stack :global(.alert-activity-list) time {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+  }
+}
+
+@container open-alerts (max-width: 420px) {
+  :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) button {
+    width: 100%;
+    min-width: 0;
+  }
+}
+
+@container open-alerts (max-width: 380px) {
+  :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
 @media (max-width: 767px) {
   :global(.role-admin) :global(.admin-page-frame):has(.stack) {
+    min-height: 100%;
     gap: 22px;
     padding-top: 20px;
-    padding-bottom: calc(28px + var(--mobile-admin-nav-height));
+    padding-bottom: calc(64px + var(--mobile-admin-nav-height));
   }
 
   :global(.role-admin) .stack :global(.permission-section-heading) {
@@ -181,6 +287,11 @@
     padding: 0 12px 12px;
   }
 
+  :global(.role-admin) .stack :global(.alert-activity-section--open),
+  :global(.role-admin) .stack :global(.alert-rules-section) {
+    max-height: 75dvh;
+  }
+
   :global(.role-admin) .stack :global(.alert-activity-list) article {
     gap: 12px;
     padding: 16px;
@@ -190,8 +301,12 @@
     padding: 16px;
   }
 
+  :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) {
+    align-items: stretch;
+  }
+
   :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) button {
-    /* The existing mobile actions stack vertically; keep their height compact. */
+    width: 100%;
     flex-basis: auto;
   }
 

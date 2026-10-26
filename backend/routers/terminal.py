@@ -8,22 +8,25 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
 import uuid
 import json
 from auth import verify_terminal_access_request
 from database import get_db
+from data_limits import bounded_rows
+from config import settings
 from schemas import BrowserScanPayload, ManualReviewPayload
 from terminal_scans import record_scan
+from event_outbox import enqueue_presence, enqueue_workflow_start
 from redis_client import publish_presence_update
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import AdminAccount, Checkpoint, HardwareAsset, Subject, PermissionRequestModel, Movement
+from models import AccessPermission, AdminAccount, Checkpoint, HardwareAsset, Subject, Person, PermissionRequestModel, Movement
 from temporal_worker import get_temporal_client, TASK_QUEUE
-from workflows.permission_override import PermissionOverrideWorkflow
-from permission_decisions import review_source, pending_manual_review
-from access_validation import validate_zones
+from permission_decisions import review_source, require_recent_review_source, pending_manual_review
+from access_validation import validate_registered_zones
+from facility_zones import normalize_facility_document
 from terminal_assignments import assigned_checkpoint, browser_identity, require_checkpoint
 from critical_entry_restrictions import entry_restrictions_for_subjects
 
@@ -35,16 +38,23 @@ router = APIRouter(prefix="/v1/terminal", tags=["terminal"])
 @router.post("/scans")
 async def scan(payload: BrowserScanPayload,
     idempotency_key: uuid.UUID = Header(alias="Idempotency-Key"),
-    db: AsyncSession = Depends(get_db), operator: dict = Depends(verify_terminal_access_request)):
+    db: AsyncSession = Depends(get_db), operator: dict = Depends(verify_terminal_access_request),
+    request: Request = None):
     identity = browser_identity(operator)
-    await require_checkpoint(db, identity, payload.checkpoint_id)
-    result = await record_scan(db, idempotency_key, payload, identity)
-    await db.commit()
-    if db.info.get("scan_replayed"):
-        return result
-    try:
+    checkpoint_id = await require_checkpoint(db, identity, payload.checkpoint_id)
+    checkpoint = await db.get(Checkpoint, checkpoint_id)
+    if not checkpoint:
+        raise HTTPException(status_code=422, detail="Checkpoint not registered")
+    mode = checkpoint.data.get("mode", "auto")
+    if mode == "manual" and payload.direction is None:
+        raise HTTPException(status_code=422, detail="Choose entry or exit for this manual checkpoint")
+    if mode != "manual" and payload.direction is not None:
+        raise HTTPException(status_code=422, detail="Scan direction is controlled by the assigned checkpoint")
+    result = await record_scan(db, idempotency_key, payload, identity,
+                               request_scope=request.scope if request is not None else None)
+    if not db.info.get("scan_replayed"):
         event = result["decision"]["event"]
-        await publish_presence_update(json.dumps({
+        await enqueue_presence(db, {
             "type": "manual_review_consumed" if result.get("manualApprovalRequest") else "scan",
             "subject_id": result.get("subject_id"),
             "state": ("inside" if event["direction"] == "entry" else "outside") if result["allowed"] else None,
@@ -53,9 +63,8 @@ async def scan(payload: BrowserScanPayload,
             "people": result.get("updatedPeople", []),
             "hardwareAssets": result.get("updatedHardwareAssets", []),
             "request": result.get("manualApprovalRequest"),
-        }))
-    except Exception:
-        logger.exception("Presence publication failed after scan commit")
+        })
+    await db.commit()
     return result
 
 
@@ -73,6 +82,12 @@ async def create_manual_review(
     now = datetime.now(timezone.utc)
     barcode = payload.barcode.strip()
     source = await review_source(db, payload.event_id, barcode, checkpoint.id, payload.direction)
+    require_recent_review_source(source, now=now)
+    if source.subject_id:
+        raise HTTPException(422, "Registered subjects must use the permission request flow")
+    registered_subject = await db.scalar(select(Subject.id).where(func.lower(Subject.barcode) == barcode.lower()))
+    if registered_subject:
+        raise HTTPException(409, "This barcode is now registered; scan it again before requesting review")
     direction = payload.direction or (source.direction if source else None) or ("exit" if checkpoint.data.get("mode") == "exit" else "entry")
     existing = await pending_manual_review(db, barcode, checkpoint.id, direction)
     if existing:
@@ -81,13 +96,13 @@ async def create_manual_review(
     request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
     data = {
         "id": request_id,
-        "subjectId": source.subject_id if source and source.subject_id else "",
+        "subjectId": "",
         "subjectType": "visitor",
         "subjectName": "Unregistered barcode",
         "barcode": barcode,
         "requester": _operator.get("sub", "Terminal Operator"),
         "purpose": "Barcode was denied and requires manual permission review.",
-        "requestedZones": validate_zones([checkpoint.data.get("zone", checkpoint.id)]),
+        "requestedZones": await validate_registered_zones(db, [checkpoint.zone_id]),
         "validFrom": now.isoformat(),
         "validTo": (now + timedelta(hours=1)).isoformat(),
         "status": "pending",
@@ -99,32 +114,13 @@ async def create_manual_review(
         "time": now.strftime("%H:%M:%S"),
         "createdAt": now.isoformat(),
     }
-    if payload.event_id:
-        data["eventId"] = payload.event_id
+    data["eventId"] = payload.event_id
     if payload.operator_note:
         data["operatorNote"] = payload.operator_note
     db.add(PermissionRequestModel(id=request_id, subject_id=data["subjectId"] or None, created_at=now, data=data))
+    await enqueue_workflow_start(db, request_id)
+    await enqueue_presence(db, {"type": "manual_review", "requestId": request_id, "request": data})
     await db.commit()
-
-    try:
-        client = await get_temporal_client()
-        await client.start_workflow(
-            PermissionOverrideWorkflow.run,
-            args=[request_id],
-            id=f"override-{request_id}",
-            task_queue=TASK_QUEUE,
-        )
-    except Exception:
-        logger.exception("Failed to start PermissionOverrideWorkflow for barcode review")
-
-    try:
-        await publish_presence_update(json.dumps({
-            "type": "manual_review",
-            "requestId": request_id,
-            "request": data,
-        }))
-    except Exception:
-        logger.exception("Manual review presence publication failed")
     return data
 
 
@@ -134,24 +130,39 @@ async def get_terminal_bundle(
     operator: dict = Depends(verify_terminal_access_request),
 ) -> dict[str, Any]:
     """
-    Return the data a terminal needs at bootstrap. People and their presence
-    are deliberately excluded: scan decisions are always made by the server,
-    while the terminal needs hardware metadata for its selector and offline
-    queue configuration.
+    Return the data a terminal needs at bootstrap, including visitors with an
+    approval or access record for the assigned checkpoint. Scan decisions
+    remain server-authoritative; the visitor list is for operator awareness.
     """
 
+    from event_outbox import read_event_revision
+    event_revision = await read_event_revision(db)
     checkpoint_id = await assigned_checkpoint(db, browser_identity(operator))
 
+    checkpoint_record = await db.get(Checkpoint, checkpoint_id)
+    checkpoint_config = checkpoint_record.data if checkpoint_record else None
+    checkpoint_zone = checkpoint_record.zone_id if checkpoint_record and checkpoint_record.active else None
+
     async def fetch_hardware_assets() -> list[dict[str, Any]]:
-        hw_res = await db.execute(
-            select(HardwareAsset, Subject)
+        if checkpoint_zone is None:
+            return []
+        hw_rows = await bounded_rows(db,
+            select(HardwareAsset, Subject, AccessPermission)
             .join(Subject, Subject.id == HardwareAsset.subject_id)
+            .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
         )
-        hw_rows = hw_res.all()
-        restrictions = await entry_restrictions_for_subjects(db, [subject.id for _, subject in hw_rows])
+        visible_rows = []
+        for hw, subject, permission in hw_rows:
+            entry = normalize_facility_document(dict(hw.data or {}))
+            permission_data = normalize_facility_document(dict(permission.data or {})) if permission else {}
+            zones = permission_data.get("zones") if isinstance(permission_data.get("zones"), list) else entry.get("allowedZones")
+            if not isinstance(zones, list) and isinstance(entry.get("allowedZone"), str):
+                zones = [entry["allowedZone"]]
+            if checkpoint_zone in (zones or []):
+                visible_rows.append((entry, subject))
+        restrictions = await entry_restrictions_for_subjects(db, [subject.id for _, subject in visible_rows])
         assets: list[dict[str, Any]] = []
-        for hw, subject in hw_rows:
-            entry = dict(hw.data or {})
+        for entry, subject in visible_rows:
             entry.update(id=subject.id, kind=subject.kind, barcode=subject.barcode)
             entry["entryRestriction"] = restrictions.get(subject.id)
             assets.append(entry)
@@ -159,10 +170,99 @@ async def get_terminal_bundle(
 
     async def fetch_checkpoints() -> list[dict[str, Any]]:
         result = await db.execute(select(Checkpoint).where(Checkpoint.id == checkpoint_id))
-        return [{**c.data, "id": c.id} for c in result.scalars().all()]
+        return [{**(c.data or {}), "id": c.id, "zone": c.zone_id, "zoneId": c.zone_id,
+            "number": c.number, "gateType": c.gate_type, "required": c.required,
+            "active": c.active} for c in result.scalars().all()]
 
     hardware_assets = await fetch_hardware_assets()
     checkpoints = await fetch_checkpoints()
+    visitor_request_rows = await bounded_rows(db,
+        select(PermissionRequestModel)
+        .where(PermissionRequestModel.data["type"].astext == "visitor")
+        .where(PermissionRequestModel.data["checkpointId"].astext == checkpoint_id)
+        .order_by(PermissionRequestModel.created_at.desc()))
+    visitor_requests: dict[str, dict[str, Any]] = {}
+    for request_row in visitor_request_rows:
+        request_data = dict(request_row[0].data or {})
+        visitor_id = str(request_row[0].subject_id or request_data.get("subjectId") or "")
+        if visitor_id:
+            visitor_requests.setdefault(visitor_id, request_data)
+
+    visitor_eligibility = []
+    if visitor_requests:
+        visitor_eligibility.append(Subject.id.in_(visitor_requests))
+    if checkpoint_zone:
+        visitor_eligibility.extend((
+            and_(
+                AccessPermission.data["state"].astext == "active",
+                AccessPermission.data["zones"].contains([checkpoint_zone]),
+            ),
+            Person.data["allowedZones"].contains([checkpoint_zone]),
+        ))
+    visitor_rows = await bounded_rows(db,
+        select(Subject, Person, AccessPermission)
+        .join(Person, Person.subject_id == Subject.id)
+        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
+        .where(Subject.kind == "visitor")
+        .where(or_(*visitor_eligibility) if visitor_eligibility else False)
+        .order_by(Subject.id))
+    terminal_visitors: list[dict[str, Any]] = []
+    now = datetime.now(timezone.utc)
+    for subject, person, permission in visitor_rows:
+        metadata = normalize_facility_document(dict(person.data or {}))
+        permission_data = normalize_facility_document(dict(permission.data or {})) if permission else {}
+        registration_request = visitor_requests.get(subject.id)
+        request_zones = registration_request.get("requestedZones") if registration_request else []
+        permission_zones = permission_data.get("zones") if isinstance(permission_data.get("zones"), list) else []
+        zones = permission_zones or metadata.get("allowedZones") or request_zones
+        if not isinstance(zones, list):
+            zones = []
+        zones = [zone for zone in zones if isinstance(zone, str)]
+        permission_state = permission_data.get("state")
+        if not registration_request and not (permission_state == "active" and checkpoint_zone in zones):
+            continue
+
+        valid_from = permission_data.get("validFrom") or metadata.get("validFrom") or (registration_request or {}).get("validFrom")
+        valid_to = permission_data.get("validTo") or metadata.get("validTo") or (registration_request or {}).get("validTo")
+        expired = False
+        if isinstance(valid_to, str) and valid_to:
+            try:
+                expiry = datetime.fromisoformat(valid_to.replace("Z", "+00:00"))
+                if expiry.tzinfo is None:
+                    expiry = expiry.replace(tzinfo=timezone(timedelta(hours=5, minutes=30)))
+                expired = expiry <= now
+            except ValueError:
+                pass
+        request_status = (registration_request or {}).get("status")
+        if request_status == "pending" or permission_state == "pending_approval":
+            visitor_status = "pending"
+        elif request_status == "denied" and permission_state != "active":
+            visitor_status = "denied"
+        elif permission_state == "restricted":
+            visitor_status = "restricted"
+        elif permission_state == "revoked":
+            visitor_status = "inactive"
+        elif permission_state == "expired" or expired:
+            visitor_status = "expired"
+        elif permission_state == "active" or request_status == "approved":
+            visitor_status = "approved"
+        else:
+            visitor_status = "inactive"
+
+        terminal_visitors.append({
+            "id": subject.id,
+            "name": str(metadata.get("name") or subject.barcode),
+            "barcode": subject.barcode,
+            "host": metadata.get("host") if isinstance(metadata.get("host"), str) else "",
+            "company": metadata.get("company") if isinstance(metadata.get("company"), str) else "",
+            "allowedZones": zones,
+            "validFrom": valid_from if isinstance(valid_from, str) else "",
+            "validTo": valid_to if isinstance(valid_to, str) else "",
+            "createdAt": metadata.get("createdAt") if isinstance(metadata.get("createdAt"), str) else "",
+            "status": visitor_status,
+        })
+    terminal_visitors.sort(key=lambda visitor: visitor.get("createdAt") or "", reverse=True)
+
     review_result = await db.execute(
         select(PermissionRequestModel)
         .where(PermissionRequestModel.data["checkpointId"].astext == checkpoint_id)
@@ -203,7 +303,13 @@ async def get_terminal_bundle(
     )
 
     return {
+        "eventRevision": event_revision,
+        "terminalReplayPolicy": {
+            "receiptRetentionDays": settings.IDEMPOTENCY_RETENTION_DAYS,
+            "serverTime": datetime.now(timezone.utc).isoformat(),
+        },
         "hardwareAssets": hardware_assets,
+        "terminalVisitors": terminal_visitors,
         "checkpoints": checkpoints,
         "terminalAssignment": {"operatorSubject": operator["sub"], "checkpointId": checkpoint_id},
         "movements":   movements,

@@ -113,7 +113,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
         <div
           id="admin-scroll-container"
           ref={scrollRef}
-          className={`admin-scroll-surface ${scrolled ? "scrolled-main-content" : "top-main-content"}`}
+          className={`admin-scroll-surface scrollable-content ${scrolled ? "scrolled-main-content" : "top-main-content"}`}
           tabIndex={0}
           aria-label="Admin content"
         >

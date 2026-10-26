@@ -20,13 +20,19 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from auth import verify_admin_request
 from database import get_db, get_read_db
-from models import Alert, AlertRule, AlertReview, Subject
-from critical_entry_restrictions import entry_restrictions_for_subjects, release_critical_entry_restriction
+from data_limits import bounded_rows
+from event_outbox import enqueue_changed, enqueue_presence
+from models import AccessPermission, Alert, AlertReview, Checkpoint, HardwareAsset, Person, Subject
+from critical_entry_restrictions import release_critical_entry_restriction
 from alert_reviews import (
-    AlertReviewInput, WarningResetInput, enrich_alert_documents, review_alert, reset_subject_warnings,
+    AlertReviewInput, WarningResetInput, acknowledge_alert, enrich_alert_documents, review_alert, reset_subject_warnings,
 )
-from alert_rule_assignments import AlertRuleAssignmentInput, list_alert_rule_assignments, replace_alert_rule_assignment
+from alert_rule_assignments import (
+    AlertRuleAssignmentInput, alert_rule_catalog, list_alert_rule_assignments, replace_alert_rule_assignment,
+)
+from alert_queries import command_center_assignments, confirmed_people_warning_total, focused_alert_people, current_subject_warning_documents
 from redis_client import publish_data_changed, publish_presence_update
+from zone_access import admin_zone_ids, require_alert_scope, require_subject_scope, subject_zone_condition
 import json
 import logging
 
@@ -37,11 +43,20 @@ router = APIRouter(tags=["alerts"])
 
 @router.get("/v1/alert-rule-assignments")
 async def alert_rule_assignment_directory(
+    subjectId: Optional[str] = Query(None, min_length=1, max_length=200),
     db: AsyncSession = Depends(get_read_db),
     _admin: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """List default/custom rule selections for registered employees and hardware."""
-    return await list_alert_rule_assignments(db)
+    zone_ids = await admin_zone_ids(db, _admin)
+    visible_ids = list((await db.scalars(select(Subject.id)
+        .outerjoin(Person, Person.subject_id == Subject.id)
+        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
+        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
+        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id))).all())
+    if subjectId:
+        await require_subject_scope(db, _admin, subjectId)
+    return await list_alert_rule_assignments(db, subjectId, subject_ids=visible_ids)
 
 
 @router.put("/v1/alert-rule-assignments/{subject_id}")
@@ -51,14 +66,12 @@ async def update_alert_rule_assignment(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
+    await require_subject_scope(db, admin, subject_id)
     assignment, changed = await replace_alert_rule_assignment(db, subject_id, payload.ruleIds,
         admin.get("sub", "unknown"), payload.expectedRevision, payload.irregularitySkipDates)
-    await db.commit()
     if changed:
-        try:
-            await publish_data_changed()
-        except Exception:
-            logger.exception("Alert rule assignments saved; live publication failed")
+        await enqueue_changed(db)
+    await db.commit()
     return assignment
 
 
@@ -84,16 +97,31 @@ async def list_alerts(
     status: Optional[str] = Query(None, pattern="^(active|open|acknowledged|warned|resolved)$"),
     limit: int = Query(50, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    sortKey: str = Query("createdAt", pattern="^(createdAt|title|subjectName|subjectType|severity|status)$"),
+    sortDirection: str = Query("desc", pattern="^(asc|desc)$"),
     startAt: Optional[str] = Query(None),
     endAt: Optional[str] = Query(None),
     subjectId: Optional[str] = Query(None, min_length=1, max_length=200),
     search: Optional[str] = Query(None, max_length=200),
+    view: Optional[str] = Query(None, pattern="^(command|subject|count)$"),
+    reviewState: Optional[str] = Query(None, pattern="^(needs_review|reviewed)$"),
     db: AsyncSession = Depends(get_read_db),
+    actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """
     Return paginated alerts and all alert rules.
     Optional ?status= filters alerts by data->>'status'.
     """
+    if view == "subject" and (not subjectId or not subjectId.strip()):
+        raise HTTPException(422, "A registered subject is required for this view")
+    from event_outbox import read_event_revision
+    event_revision = await read_event_revision(db)
+    zone_ids = await admin_zone_ids(db, actor)
+    visible_subject_ids = list((await db.scalars(select(Subject.id)
+        .outerjoin(Person, Person.subject_id == Subject.id)
+        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
+        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
+        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id))).all())
     # -- Alerts query --
     # Retained reviews appear once, including after their source alert is purged.
     archived_status = case(
@@ -113,14 +141,33 @@ async def list_alerts(
         | records.c.data["title"].astext.ilike("Unknown barcode%")
         | records.c.data["title"].astext.ilike("Access decision denied")
     )
-    alerts_q = select(records).outerjoin(AlertReview, AlertReview.alert_id == records.c.id).where(~func.coalesce(excluded_alert, False))
+    branch_filter = or_(
+        records.c.data["zoneId"].astext.in_(zone_ids),
+        records.c.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
+        records.c.data["subjectId"].astext.in_(visible_subject_ids),
+    )
+    alerts_q = select(records).outerjoin(AlertReview, AlertReview.alert_id == records.c.id).where(
+        ~func.coalesce(excluded_alert, False), branch_filter)
     count_q = select(func.count()).select_from(records).outerjoin(AlertReview,
-        AlertReview.alert_id == records.c.id).where(~func.coalesce(excluded_alert, False))
+        AlertReview.alert_id == records.c.id).where(~func.coalesce(excluded_alert, False), branch_filter)
+
+    if view == "command" or reviewState == "needs_review":
+        # Acknowledgement does not create a final review. Keep those unreviewed
+        # records actionable while excluding every immutable ledger decision.
+        unreviewed = AlertReview.alert_id.is_(None) & or_(
+            records.c.data["status"].astext.in_(("open", "acknowledged")),
+            records.c.data["status"].astext.is_(None))
+        alerts_q, count_q = alerts_q.where(unreviewed), count_q.where(unreviewed)
+    elif reviewState == "reviewed":
+        reviewed = or_(AlertReview.alert_id.is_not(None), records.c.data["status"].astext.in_(("warned", "resolved")))
+        alerts_q, count_q = alerts_q.where(reviewed), count_q.where(reviewed)
 
     if subjectId:
         subject_id = subjectId.strip()
         if not subject_id:
             raise HTTPException(422, "Subject filter must not be blank")
+        if subject_id not in visible_subject_ids:
+            raise HTTPException(404, "Subject not found")
         barcode = await db.scalar(select(Subject.barcode).where(Subject.id == subject_id))
         legacy_identity = func.btrim(records.c.data["subjectId"].astext) == subject_id
         if barcode:
@@ -131,6 +178,10 @@ async def list_alerts(
         subject_filter = or_(AlertReview.subject_id == subject_id,
             AlertReview.alert_id.is_(None) & legacy_identity)
         alerts_q, count_q = alerts_q.where(subject_filter), count_q.where(subject_filter)
+    subject_history = None
+    if view == "subject":
+        subject_history = (select(records).outerjoin(AlertReview, AlertReview.alert_id == records.c.id)
+            .where(~func.coalesce(excluded_alert, False), subject_filter))
     if search and search.strip():
         literal = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = "%" + literal + "%"
@@ -167,43 +218,75 @@ async def list_alerts(
 
     total_res = await db.execute(count_q)
     total = total_res.scalar_one()
+    if view == "count":
+        return {"total": total, "eventRevision": event_revision}
 
-    alerts_res = await db.execute(alerts_q.order_by(records.c.created_at.desc(), records.c.id).limit(limit).offset(offset))
+    sort_columns = {
+        "createdAt": records.c.created_at,
+        "title": func.lower(func.coalesce(records.c.data["title"].astext, "")),
+        "subjectName": func.lower(func.coalesce(records.c.data["subjectName"].astext, "")),
+        "subjectType": func.lower(func.coalesce(records.c.data["subjectType"].astext, "")),
+        "severity": case(
+            (records.c.data["severity"].astext == "critical", 3),
+            (records.c.data["severity"].astext == "high", 2),
+            else_=1,
+        ),
+        "status": func.lower(func.coalesce(records.c.data["status"].astext, "")),
+    }
+    sort_column = sort_columns[sortKey]
+    ordered = sort_column.asc() if sortDirection == "asc" else sort_column.desc()
+    alerts_res = await db.execute(alerts_q.order_by(ordered, records.c.id.asc()).limit(limit).offset(offset))
     alerts = [SimpleNamespace(**row) for row in alerts_res.mappings().all()]
-    enriched = await enrich_alert_documents(db, alerts)
+    recent_alerts = []
+    if subject_history is not None:
+        recent_res = await db.execute(subject_history.order_by(records.c.created_at.desc(), records.c.id.asc()).limit(5))
+        recent_alerts = [SimpleNamespace(**row) for row in recent_res.mappings().all()]
+    enriched = await enrich_alert_documents(db, alerts + recent_alerts, focused=True,
+        subject_ids=[subjectId.strip()] if view == "subject" else visible_subject_ids)
 
+    # Share the evaluator's canonical row identities and global rule catalog.
+    # Retained serialized IDs must not redirect a rule's displayed trigger count.
+    rule_data = await alert_rule_catalog(db)
     recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    recent_res = await db.execute(
-        select(records.c.data).where(records.c.created_at >= recent_cutoff)
-    )
-    recent_triggers: dict[str, int] = {}
-    for data in recent_res.scalars().all():
-        rule_id = str((data or {}).get("ruleId") or "")
-        if rule_id:
-            recent_triggers[rule_id] = recent_triggers.get(rule_id, 0) + 1
-
-    # -- Rules query (all) --
-    rules_res = await db.execute(select(AlertRule).order_by(AlertRule.id))
-    rules = rules_res.scalars().all()
-    if not rules:
-        from rule_engine import default_alert_rules
-        rule_data = default_alert_rules()
-    else:
-        from rule_engine import with_default_alert_rules
-        rule_data = with_default_alert_rules([r.data for r in rules])
+    rule_id_column = records.c.data["ruleId"].astext
+    # Count triggers in SQL rather than loading every recent JSON document.
+    # Only catalog IDs can appear in the response, bounding grouped rows even
+    # when retained alert history contains many retired or invalid rules.
+    recent_rows = await bounded_rows(db, select(rule_id_column, func.count())
+        .where(records.c.created_at >= recent_cutoff, branch_filter,
+               rule_id_column.in_([rule["id"] for rule in rule_data]))
+        .group_by(rule_id_column))
+    recent_triggers = {rule_id: int(count) for rule_id, count in recent_rows}
     rule_data = [
         {**rule, "recentTriggers": recent_triggers.get(str(rule.get("id")), 0)}
         for rule in rule_data
     ]
 
-    return {
-        "items":  enriched["items"],
+    result = {
+        "items":  enriched["items"][:len(alerts)],
         "warnings": enriched["warnings"],
         "rules":  rule_data,
         "total":  total,
         "limit": limit,
         "offset": offset,
+        "eventRevision": event_revision,
     }
+    if view:
+        page_subject_ids = [warning["subjectId"] for warning in enriched["warnings"]]
+        result["people"] = await focused_alert_people(db, page_subject_ids)
+        result["assignments"] = await command_center_assignments(db, rule_data,
+            subject_id=subjectId.strip() if view == "subject" else None,
+            subject_ids=visible_subject_ids if view == "command" else None)
+        if view == "command":
+            result["summary"] = {"openCount": total,
+                "confirmedWarnings": await confirmed_people_warning_total(db, visible_subject_ids)}
+        else:
+            selected_id = subjectId.strip()
+            result["totalSubjectAlerts"] = int(await db.scalar(select(func.count()).select_from(subject_history.subquery())) or 0)
+            result["recentAlerts"] = enriched["items"][len(alerts):]
+            summary = next((warning for warning in enriched["warnings"] if warning["subjectId"] == selected_id), None)
+            result["currentWarnings"] = await current_subject_warning_documents(db, selected_id, summary)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -220,23 +303,10 @@ async def update_alert(
     """Acknowledge an alert while preserving its stored record."""
     if payload != {"status": "acknowledged"}:
         raise HTTPException(status_code=422, detail="Alerts can only be acknowledged")
-    result = await db.execute(select(Alert).where(Alert.id == alert_id).with_for_update())
-    alert = result.scalar_one_or_none()
-    if not alert:
-        raise HTTPException(status_code=404, detail="Alert not found")
-    if await db.get(AlertReview, alert_id):
-        raise HTTPException(409, "Reviewed alerts are final; reset the subject warnings to clear accepted warnings")
-    merged = {**(alert.data or {}), **payload, "id": alert.id}
-    alert.data = merged
+    await require_alert_scope(db, _admin, alert_id)
+    response = await acknowledge_alert(db, alert_id)
+    await enqueue_presence(db, {"type": "alert_acknowledged", "alerts": [response]})
     await db.commit()
-    await db.refresh(alert)
-    restrictions = await entry_restrictions_for_subjects(db, [(alert.data or {}).get("subjectId")]
-        if (alert.data or {}).get("subjectId") else [])
-    response = {**alert.data, "entryRestriction": restrictions.get(alert.data.get("subjectId"))}
-    try:
-        await publish_presence_update(json.dumps({"type": "alert_acknowledged", "alerts": [response]}))
-    except Exception:
-        logger.exception("Alert acknowledgement saved; live publication failed")
     return response
 
 
@@ -247,13 +317,11 @@ async def submit_alert_review(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
+    await require_alert_scope(db, admin, alert_id)
     result = await review_alert(db, alert_id, payload.decision, admin.get("sub", "unknown"), payload.reason)
-    await db.commit()
     if "auditEvent" in result:
-        try:
-            await publish_data_changed()
-        except Exception:
-            logger.exception("Alert review saved; live publication failed")
+        await enqueue_changed(db)
+    await db.commit()
     return result
 
 
@@ -264,13 +332,11 @@ async def reset_alert_warnings(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
+    await require_subject_scope(db, admin, subject_id)
     result = await reset_subject_warnings(db, subject_id, admin.get("sub", "unknown"), payload.reason)
-    await db.commit()
     if "auditEvent" in result:
-        try:
-            await publish_data_changed()
-        except Exception:
-            logger.exception("Warning reset saved; live publication failed")
+        await enqueue_changed(db)
+    await db.commit()
     return result
 
 
@@ -282,12 +348,10 @@ async def release_entry_restriction(
     admin: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """Lift a critical hold explicitly, without changing normal access or presence."""
+    await require_alert_scope(db, admin, alert_id)
     result = await release_critical_entry_restriction(db, alert_id, admin.get("sub", "unknown"), payload.reason)
+    await enqueue_changed(db)
     await db.commit()
-    try:
-        await publish_data_changed()
-    except Exception:
-        logger.exception("Entry restriction release saved; live publication failed")
     return result
 
 

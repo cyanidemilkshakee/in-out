@@ -1,11 +1,12 @@
 import { auth } from "./auth"
 import { NextResponse } from "next/server"
+import { hasAdminAccess } from "./lib/applicationRoles"
 
 export default auth((req) => {
   const session = req.auth as { access_token?: string; roles?: unknown } | null
   const isLoggedIn = !!session?.access_token
   const roles = Array.isArray(session?.roles) ? session.roles.filter((role): role is string => typeof role === "string") : []
-  const isAdmin = roles.includes("admin")
+  const isAdmin = hasAdminAccess(roles)
   const isOperator = roles.includes("operator")
   const canUseTerminal = isAdmin || isOperator
   const isAuthPage = req.nextUrl.pathname.startsWith('/login')
@@ -54,5 +55,8 @@ export default auth((req) => {
 })
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+  // The logout return validates its own signed, single-purpose state cookie.
+  // Running Auth.js on this public callback can refresh/delete session cookies
+  // before that validation, so let the route handle it directly.
+  matcher: ['/((?!api|_next/static|_next/image|favicon.ico|logout/complete).*)'],
 }

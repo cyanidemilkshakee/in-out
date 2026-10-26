@@ -2,7 +2,8 @@
 
 import { useId, useState, type FormEventHandler } from "react";
 import { Check, Eye, EyeOff, ScanLine, ShieldCheck } from "lucide-react";
-import { FACILITY_ZONES } from "../../../lib/facilityZones";
+import type { Checkpoint } from "../../../lib/types";
+import type { OrganizationZone } from "../../../lib/types";
 import type { ManagedUser } from "../../../services/keycloakUserService";
 import styles from "./ManagedUserForm.module.css";
 
@@ -16,6 +17,7 @@ export type ManagedUserFormValue = {
   enabled: boolean;
   roles: Array<"admin" | "operator">;
   checkpointId: ManagedUser["checkpointId"];
+  zoneIds: string[];
 };
 
 type FormProps = {
@@ -23,6 +25,8 @@ type FormProps = {
   onChange: (form: ManagedUserFormValue) => void;
   busy: boolean;
   onSubmit: FormEventHandler<HTMLFormElement>;
+  checkpoints: Checkpoint[];
+  zones: OrganizationZone[];
 };
 
 function IdentityFields({ form, onChange, creating }: Pick<FormProps, "form" | "onChange"> & { creating: boolean }) {
@@ -38,8 +42,9 @@ function IdentityFields({ form, onChange, creating }: Pick<FormProps, "form" | "
   );
 }
 
-function AccessFields({ form, onChange, showEnabled = true }: Pick<FormProps, "form" | "onChange"> & { showEnabled?: boolean }) {
+function AccessFields({ form, onChange, checkpoints, zones, showEnabled = true }: Pick<FormProps, "form" | "onChange" | "checkpoints" | "zones"> & { showEnabled?: boolean }) {
   const operator = form.roles.includes("operator");
+  const admin = form.roles.includes("admin");
   const roles = [
     { value: "admin", title: "Admin", icon: ShieldCheck },
     { value: "operator", title: "Operator", icon: ScanLine },
@@ -63,13 +68,23 @@ function AccessFields({ form, onChange, showEnabled = true }: Pick<FormProps, "f
             })}
           </div>
         </fieldset>
-        <label className={`${styles.field} ${styles.checkpointField}`}><span>Checkpoint</span><select required={operator} value={form.checkpointId ?? ""} onChange={(event) => onChange({ ...form, checkpointId: (event.target.value || null) as ManagedUser["checkpointId"] })}><option value="">Unassigned</option>{FACILITY_ZONES.map((zone) => <option key={zone.checkpointId} value={zone.checkpointId}>{zone.name}</option>)}</select></label>
+        <label className={`${styles.field} ${styles.checkpointField}`}><span>Checkpoint</span><select required={operator} value={form.checkpointId ?? ""} onChange={(event) => onChange({ ...form, checkpointId: event.target.value || null })}><option value="">Unassigned</option>{checkpoints.map((checkpoint) => <option key={checkpoint.id} value={checkpoint.id}>{zones.find((zone) => zone.id === checkpoint.zoneId)?.name ?? `Zone ${checkpoint.zone.toUpperCase()}`} · {checkpoint.name}{checkpoint.gateLabel ? ` — ${checkpoint.gateLabel}` : ""}</option>)}</select></label>
       </div>
+      {admin ? <fieldset className={styles.zoneFieldset}>
+        <legend>Assigned zones</legend>
+        <div className={styles.zoneOptions}>{zones.map((zone, index) => <label key={zone.id} className={styles.zoneOption}>
+          <input type="checkbox" required={index === 0 && form.zoneIds.length === 0}
+            checked={form.zoneIds.includes(zone.id)}
+            onChange={(event) => onChange({ ...form, zoneIds: event.target.checked
+              ? [...form.zoneIds, zone.id] : form.zoneIds.filter((id) => id !== zone.id) })} />
+          <span>{zone.name}</span>
+        </label>)}</div>
+      </fieldset> : null}
     </section>
   );
 }
 
-export function CreateUserForm({ form, onChange, busy, onSubmit, onCancel }: FormProps & { onCancel: () => void }) {
+export function CreateUserForm({ form, onChange, busy, onSubmit, onCancel, checkpoints, zones }: FormProps & { onCancel: () => void }) {
   const id = useId();
   const [showPassword, setShowPassword] = useState(false);
 
@@ -77,7 +92,7 @@ export function CreateUserForm({ form, onChange, busy, onSubmit, onCancel }: For
     <fieldset className={styles.fields} disabled={busy}>
       <div className={styles.creationGrid}>
         <IdentityFields form={form} onChange={onChange} creating />
-        <AccessFields form={form} onChange={onChange} />
+        <AccessFields form={form} onChange={onChange} checkpoints={checkpoints} zones={zones} />
         <section className={`${styles.section} ${styles.passwordSection}`} aria-label="Password settings">
           <label className={styles.field} htmlFor={`${id}-new-password`}><span>Password</span></label>
           <div className={styles.passwordInput}><input id={`${id}-new-password`} required minLength={12} maxLength={128} type={showPassword ? "text" : "password"} autoComplete="new-password" value={form.password} onChange={(event) => onChange({ ...form, password: event.target.value })} placeholder="12+ characters" /><button type="button" aria-label={showPassword ? "Hide password" : "Show password"} title={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((current) => !current)}>{showPassword ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}</button></div>
@@ -89,11 +104,22 @@ export function CreateUserForm({ form, onChange, busy, onSubmit, onCancel }: For
   </form>;
 }
 
-export function UserDetailsForm({ form, onChange, busy, onSubmit }: FormProps) {
+export function UserDetailsForm({ form, onChange, busy, onSubmit, accessOnly = false, checkpoints, zones }: FormProps & { accessOnly?: boolean }) {
+  if (accessOnly) {
+    return <form className={styles.form} aria-busy={busy} onSubmit={onSubmit}>
+      <fieldset className={styles.fields} disabled={busy}>
+        <section className={styles.section} aria-label="Operator access">
+          <label className={styles.toggle}><input type="checkbox" checked={form.enabled} onChange={(event) => onChange({ ...form, enabled: event.target.checked })} /><strong>Enabled</strong></label>
+          <label className={`${styles.field} ${styles.checkpointField}`}><span>Assigned checkpoint</span><select required value={form.checkpointId ?? ""} onChange={(event) => onChange({ ...form, checkpointId: event.target.value || null })}><option value="" disabled>Select checkpoint</option>{checkpoints.map((checkpoint) => <option key={checkpoint.id} value={checkpoint.id}>{zones.find((zone) => zone.id === checkpoint.zoneId)?.name ?? `Zone ${checkpoint.zone.toUpperCase()}`} · {checkpoint.name}{checkpoint.gateLabel ? ` — ${checkpoint.gateLabel}` : ""}</option>)}</select></label>
+        </section>
+        <div className={styles.footer}><button className={styles.submitButton} type="submit">Save operator access</button></div>
+      </fieldset>
+    </form>;
+  }
   return <form className={styles.form} aria-busy={busy} onSubmit={onSubmit}>
     <fieldset className={styles.fields} disabled={busy}>
       <IdentityFields form={form} onChange={onChange} creating={false} />
-      <AccessFields form={form} onChange={onChange} showEnabled={false} />
+      <AccessFields form={form} onChange={onChange} checkpoints={checkpoints} zones={zones} showEnabled={false} />
       <div className={styles.footer}><button className={styles.submitButton} type="submit">Save changes</button></div>
     </fieldset>
   </form>;

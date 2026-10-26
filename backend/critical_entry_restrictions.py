@@ -157,6 +157,23 @@ async def ensure_legacy_warning_threshold_restrictions(db, subject_ids):
     return await entry_restrictions_for_subjects(db, ids)
 
 
+async def entry_restrictions_for_locked_subjects(db, subjects):
+    """Read materialized holds, repairing only subjects not yet backfilled.
+
+    The migration publishes each subject's gate in the same transaction as its
+    warning hold. New warning reviews already update holds atomically. A legacy
+    importer can explicitly clear this server-owned gate before writing ledger
+    rows; the next scan repairs them while holding the same Subject lock.
+    """
+    legacy = [subject for subject in subjects if not subject.warning_hold_materialized]
+    if legacy:
+        await ensure_legacy_warning_threshold_restrictions(db, [subject.id for subject in legacy])
+        for subject in legacy:
+            subject.warning_hold_materialized = True
+        await db.flush()
+    return await entry_restrictions_for_subjects(db, [subject.id for subject in subjects])
+
+
 def _binding(data):
     subject_id = data.get("subjectId")
     if isinstance(subject_id, str) and subject_id.strip():

@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import type { PermissionRequest, Person } from "../../../../lib/types";
 import { formatFacilityZones } from "../../../../lib/facilityZones";
 import { formatRequestDate, REQUEST_LABELS } from "./requestPresentation";
-import { EmployeeStatusLabel } from "../EmployeeStatusLabel";
+import { PersonStatusLabel } from "../PersonStatusLabel";
 
 type RegistrySortKey = "type" | "subjectName" | "checkpoint" | "access" | "status" | "decidedAt" | "notes";
 
@@ -71,7 +71,7 @@ export function AcknowledgedPermissionRequestsTable({ permissions, people }: {
   }
 
   return (
-    <div className="admin-table-wrap table-wrap">
+    <div className="admin-table-wrap table-wrap scrollable-content">
       <table className="data-table registry-table registry-table--permissions">
         <caption className="sr-only">Permission requests and decisions</caption>
         <thead>
@@ -104,7 +104,7 @@ export function AcknowledgedPermissionRequestsTable({ permissions, people }: {
                 <td className="column-subject" data-label="Subject">
                   <span className="registry-permission-cell__primary" title={permission.subjectName}>{permission.subjectName}</span>
                   {employeeStatuses.has(permission.subjectId) && " "}
-                  <EmployeeStatusLabel status={employeeStatuses.get(permission.subjectId)} />
+                  <PersonStatusLabel status={employeeStatuses.get(permission.subjectId)} />
                   <span className="registry-permission-cell__secondary" title={permission.barcode || "—"}>{permission.barcode || "—"}</span>
                 </td>
                 <td className="column-checkpoint" data-label="Checkpoint">

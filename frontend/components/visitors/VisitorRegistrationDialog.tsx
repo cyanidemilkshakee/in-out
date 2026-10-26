@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { Loader2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
-import type { Checkpoint, CreateVisitorInput, CreateVisitorResult, Person } from "../../../lib/types";
+import type { Checkpoint, CreateVisitorInput, CreateVisitorResult, Person, TerminalVisitorStatus } from "../../../lib/types";
 import { DataServiceError } from "../../../services/httpDataService";
 import { facilityDateInput, facilityDateIso } from "../admin/permissions/requestPresentation";
 import { accessDateTimeLimits, accessWindowBounds, validateAccessWindow } from "../../../lib/dateTimeValidation";
@@ -23,12 +23,22 @@ function newDraft(checkpoints: Checkpoint[]) {
   };
 }
 
-export function VisitorRegistrationNotice({ visitor, canManagePermissions = false }: { visitor: Person; canManagePermissions?: boolean }) {
+export function VisitorRegistrationNotice({ visitor, status, canManagePermissions = false }: { visitor: Person; status?: TerminalVisitorStatus; canManagePermissions?: boolean }) {
+  const currentStatus = status ?? (visitor.status === "pre_approved" || visitor.status === "active" ? "approved" : visitor.status === "restricted" ? "restricted" : visitor.status === "expired" ? "expired" : visitor.status === "inactive" ? "inactive" : "pending");
+  const messages: Record<TerminalVisitorStatus, { title: string; detail: string }> = {
+    pending: { title: "is registered. Approval is pending.", detail: "The request has been sent to Permission Manager. Access is not active yet." },
+    approved: { title: "has been approved for visitor access.", detail: "The visitor can scan at this checkpoint during the approved access window." },
+    denied: { title: "was denied visitor access.", detail: "This visitor cannot enter with the requested access." },
+    expired: { title: "'s visitor access has expired.", detail: "Submit a new permission request before allowing entry." },
+    restricted: { title: "'s visitor access is restricted.", detail: "An administrator must review the restriction before entry." },
+    inactive: { title: "'s visitor access is inactive.", detail: "An administrator must grant new access before entry." },
+  };
+  const message = messages[currentStatus];
   return (
     <div className={styles.notice} role="status">
-      <strong>{visitor.name} is registered. Approval is pending.</strong>
-      <span>The request has been sent to Permission Manager. Access is not active yet.</span>
-      {canManagePermissions && <Link href={`/admin/permissions?subject=${encodeURIComponent(visitor.id)}`}>View approval request</Link>}
+      <strong>{visitor.name} {message.title}</strong>
+      <span>{message.detail}</span>
+      {canManagePermissions && currentStatus === "pending" && <Link href={`/admin/permissions?subject=${encodeURIComponent(visitor.id)}`}>View approval request</Link>}
     </div>
   );
 }
@@ -168,7 +178,7 @@ export function VisitorRegistrationDialog({ open, onClose, onCreate, onCreated, 
     : null;
 
   return (
-    <dialog ref={dialogRef} className={styles.dialog} aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
+    <dialog ref={dialogRef} className={`${styles.dialog} scrollable-content`} aria-labelledby={`${id}-title`} aria-describedby={`${id}-description`}
       onCancel={(event) => { event.preventDefault(); close(); }} onClose={close}>
       <form className={styles.form} onSubmit={submit} noValidate aria-busy={submitting}>
         <header className={styles.header}>

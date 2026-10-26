@@ -1,0 +1,24 @@
+{
+  "scope": "Built Next.js app on ephemeral loopback port with synthetic sessions and isolated API stub",
+  "date": "2026-10-10",
+  "command": "node docs/security-audit/frontend-security-poc.mjs",
+  "exit_code": 0,
+  "authenticated_pages": [
+    {"path": "/admin/permissions", "status": 200, "content_security_policy": null, "x_frame_options": null},
+    {"path": "/admin/registry", "status": 200, "content_security_policy": null, "x_frame_options": null},
+    {"path": "/terminal", "status": 200, "content_security_policy": null, "x_frame_options": null}
+  ],
+  "protected_controls": {
+    "operator_admin_page": "307 redirect to terminal",
+    "public_session_omits_access_refresh_tokens_and_window_id": true,
+    "cross_origin_write": "403 without upstream call",
+    "identity_write_without_step_up": "403 without upstream call"
+  },
+  "hardening_observation": {
+    "command": "updatePerson",
+    "synthetic_person_id": "../../keycloak/users/synthetic",
+    "observed_upstream_path": "/v1/keycloak/users/synthetic",
+    "observed_upstream_method": "PUT",
+    "authorization_bypass_proven": false
+  }
+}

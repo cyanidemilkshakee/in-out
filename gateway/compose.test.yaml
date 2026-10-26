@@ -4,32 +4,67 @@ services:
     build:
       context: ../backend
     user: "0:0"
-    command: [python, /tests/certificates.py]
+    command: [python, /tests/configure_gateway.py]
     volumes:
       - ./tests:/tests:ro
+      - ./kong.yml:/source/kong.yml:ro
       - test-certificates:/certificates
+      - test-config:/config
 
   fixture:
     build:
       context: ../backend
     command: [python, /tests/upstream.py]
+    environment:
+      INOUT_GATEWAY_IDENTITY_SECRET: fixture-identity-secret-not-for-production-12345
     volumes:
       - ./tests:/tests:ro
     networks:
       default:
         aliases: [app, python-api, keycloak]
 
-  kong:
-    image: kong:${KONG_VERSION:-3.9.3}
+  redis:
+    image: inout-redis:7
+    build: {context: ../infrastructure/redis}
+    user: redis
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    environment:
+      REDIS_QUOTA_PASSWORD: fixture-quota-credential-000000000000000000000
+      REDIS_EVENTS_PASSWORD: fixture-events-credential-0000000000000000000
+      REDIS_GATEWAY_PASSWORD: fixture-gateway-credential-000000000000000000
+    entrypoint: [sh, /usr/local/bin/inout-start-redis.sh]
+    volumes:
+      - ../infrastructure/redis/start-redis.sh:/usr/local/bin/inout-start-redis.sh:ro
+    tmpfs: ['/run/inout-redis:uid=999,gid=1000,mode=0700']
+    healthcheck:
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_GATEWAY_PASSWORD redis-cli --user inout-gateway ping | grep -q PONG']
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  kong: &gateway
+    image: inout-kong:${KONG_VERSION:-3.9.3}
+    build:
+      context: .
+      args:
+        KONG_VERSION: ${KONG_VERSION:-3.9.3}
     environment:
       KONG_DATABASE: "off"
+      # Two gateways exercise shared quotas without spawning a worker per host CPU.
+      KONG_NGINX_WORKER_PROCESSES: "1"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_ROUTER_FLAVOR: expressions
-      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8002, 0.0.0.0:8005, 0.0.0.0:8443 ssl"
+      KONG_TRUSTED_IPS: ""
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8002, 0.0.0.0:8005, 0.0.0.0:8006, 0.0.0.0:8443 ssl"
       KONG_ADMIN_LISTEN: "off"
-      KONG_STATUS_LISTEN: "127.0.0.1:8100"
-      KONG_PLUGINS: bundled,inout-terminal-identity
-      KONG_NGINX_MAIN_ENV: INOUT_TERMINAL_SECRET
+      KONG_STATUS_LISTEN: "0.0.0.0:8100"
+      KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity,inout-ingress-limit
+      KONG_NGINX_MAIN_ENV: "INOUT_TERMINAL_SECRET; env INOUT_UPLOAD_DEADLINE_SECONDS; env INOUT_GATEWAY_IDENTITY_SECRET; env INOUT_GATEWAY_REDIS_PASSWORD"
+      INOUT_GATEWAY_IDENTITY_SECRET: fixture-identity-secret-not-for-production-12345
+      INOUT_GATEWAY_REDIS_PASSWORD: fixture-gateway-credential-000000000000000000
+      INOUT_UPLOAD_DEADLINE_SECONDS: "1"
       INOUT_TERMINAL_SECRET: gateway-test-secret-not-for-production-12345
       KONG_SSL_CERT: /certificates/server.crt
       KONG_SSL_CERT_KEY: /certificates/server.key
@@ -41,21 +76,29 @@ services:
       KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
       KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 64k
       KONG_NGINX_PROXY_PROXY_BUFFERS: "8 64k"
-      KONG_PROXY_ACCESS_LOG: "off"
+      # Default access logs contain status/request IDs, never bearer headers.
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
     volumes:
-      - ./kong.yml:/etc/kong/kong.yml:ro
+      - test-config:/etc/kong:ro
       - ./plugins/inout-terminal-identity:/usr/local/share/lua/5.1/kong/plugins/inout-terminal-identity:ro
+      - ./plugins/inout-rate-identity:/usr/local/share/lua/5.1/kong/plugins/inout-rate-identity:ro
+      - ./plugins/inout-ingress-limit:/usr/local/share/lua/5.1/kong/plugins/inout-ingress-limit:ro
       - test-certificates:/certificates:ro
     depends_on:
       certificates:
         condition: service_completed_successfully
       fixture:
         condition: service_started
+      redis:
+        condition: service_healthy
     healthcheck:
       test: [CMD, kong, health]
       interval: 2s
       timeout: 5s
       retries: 30
+
+  kong-peer:
+    <<: *gateway
 
   tests:
     build:
@@ -67,6 +110,12 @@ services:
     depends_on:
       kong:
         condition: service_healthy
+      kong-peer:
+        condition: service_healthy
 
 volumes:
   test-certificates:
+  test-config:
+
+networks:
+  default: {internal: true}

@@ -1,19 +1,18 @@
 import type { Checkpoint } from "./types";
 
+/** Bootstrap labels only; the zones API is authoritative for dynamic branches. */
 export const FACILITY_ZONES = [
-  { id: "public", name: "Main Entrance", checkpointId: "cp-main" },
-  { id: "secure", name: "Server Room", checkpointId: "server-room" },
+  { id: "a", name: "Zone A", checkpointId: "a-1" },
+  { id: "b", name: "Zone B", checkpointId: "b-1" },
 ] as const;
 
 function zoneId(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const key = value.trim().toLowerCase();
-  if (["public", "main entrance"].includes(key)) return "public";
-  if (["secure", "server room"].includes(key)) return "secure";
-  return undefined;
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(key) ? key : undefined;
 }
 
-/** Expand legacy labels without treating them as additional facility zones. */
+/** Normalize zone IDs without dropping valid dynamically-created branches. */
 export function normalizeFacilityZones(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const zones = new Set<string>();
@@ -26,11 +25,21 @@ export function normalizeFacilityZones(value: unknown): string[] {
       if (id) zones.add(id);
     }
   }
-  return FACILITY_ZONES.filter((zone) => zones.has(zone.id)).map((zone) => zone.id);
+  return [...zones].sort((left, right) => {
+    const leftRank = FACILITY_ZONES.findIndex((zone) => zone.id === left);
+    const rightRank = FACILITY_ZONES.findIndex((zone) => zone.id === right);
+    if (leftRank >= 0 || rightRank >= 0) {
+      if (leftRank < 0) return 1;
+      if (rightRank < 0) return -1;
+      return leftRank - rightRank;
+    }
+    return left.localeCompare(right);
+  });
 }
 
 export function facilityZoneLabel(value: string): string {
-  return FACILITY_ZONES.find((zone) => zone.id === zoneId(value))?.name ?? value;
+  const id = zoneId(value);
+  return FACILITY_ZONES.find((zone) => zone.id === id)?.name ?? (id ? `Zone ${id.toUpperCase()}` : value);
 }
 
 export function formatFacilityZones(value: readonly string[]): string {
@@ -38,17 +47,33 @@ export function formatFacilityZones(value: readonly string[]): string {
 }
 
 export function canonicalCheckpointId(value: string): string {
-  return value === "main-gate" ? "cp-main" : value;
+  return value;
 }
 
-/** Collapse old checkpoint aliases in API responses and cached configuration. */
+/** Validate checkpoint responses while retaining dynamically-created gates. */
 export function normalizeFacilityCheckpoints(value: unknown): Checkpoint[] {
   if (!Array.isArray(value)) return [];
-  return FACILITY_ZONES.flatMap((zone) => {
-    const checkpoint = value.find((item) => item?.id === zone.checkpointId)
-      ?? value.find((item) => item && typeof item === "object" &&
-        (canonicalCheckpointId(item.id) === zone.checkpointId || zoneId(item.zone) === zone.id || zoneId(item.name) === zone.id));
-    return checkpoint ? [{ ...checkpoint, id: zone.checkpointId, name: zone.name, zone: zone.id } as Checkpoint] : [];
+  return value.flatMap((item): Checkpoint[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const record = item as Partial<Checkpoint>;
+    const id = zoneId(record.id);
+    const zone = zoneId(record.zoneId ?? record.zone);
+    if (!id || !zone || typeof record.name !== "string" || !record.name.trim()) return [];
+    const mode = ["auto", "manual", "entry", "exit"].includes(record.mode ?? "") ? record.mode! : "auto";
+    return [{
+      ...record,
+      id,
+      name: record.name.trim(),
+      zone,
+      zoneId: zone,
+      number: typeof record.number === "number" ? record.number : undefined,
+      gateType: record.gateType ?? "custom",
+      gateLabel: record.gateLabel ?? "",
+      required: record.required === true,
+      active: record.active !== false,
+      mode,
+      online: typeof record.online === "boolean" ? record.online : true,
+    } as Checkpoint];
   });
 }
 

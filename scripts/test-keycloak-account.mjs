@@ -3,7 +3,8 @@
 // Existing users and credentials are never modified. No tokens are printed.
 import assert from "node:assert/strict";
 import { randomBytes, createHash } from "node:crypto";
-import { connectLocalKeycloak } from "./keycloak-account-access.mjs";
+import { createLocalJWKSet, jwtVerify } from "jose";
+import { connectLocalKeycloak, localKeycloakRequest, missingFrontendRoleClaims } from "./keycloak-account-access.mjs";
 
 const { base, api } = await connectLocalKeycloak();
 const realmUrl = `${base}/realms/inout`;
@@ -13,12 +14,15 @@ let userId;
 const apiPort = process.env.PYTHON_API_PORT || "1002";
 if (!/^\d+$/.test(apiPort) || Number(apiPort) < 1 || Number(apiPort) > 65535) throw new Error("Invalid local PYTHON_API_PORT");
 if (!process.env.KEYCLOAK_CLIENT_SECRET) throw new Error("Set KEYCLOAK_CLIENT_SECRET for the frontend integration check");
+const jwksResponse = await localKeycloakRequest(`${realmUrl}/protocol/openid-connect/certs`, { signal: AbortSignal.timeout(15_000) });
+assert.equal(jwksResponse.status, 200);
+const jwks = createLocalJWKSet(await jwksResponse.json());
 
 async function signIn(clientId = "account-console") {
   const cookies = new Map();
   const request = async (url, init = {}) => {
     assert.equal(new URL(url).origin, base, "Test credentials must stay on the local Keycloak origin");
-    const response = await fetch(url, {
+    const response = await localKeycloakRequest(url, {
       ...init, redirect: "manual", signal: AbortSignal.timeout(15_000),
       headers: { ...init.headers, Cookie: [...cookies].map(([key, value]) => `${key}=${value}`).join("; ") },
     });
@@ -57,7 +61,7 @@ async function signIn(clientId = "account-console") {
   assert.equal(callback.searchParams.get("state"), state);
   const code = callback.searchParams.get("code");
   assert.ok(code, "OIDC authorization must issue a code");
-  const response = await fetch(`${realmUrl}/protocol/openid-connect/token`, {
+  const response = await localKeycloakRequest(`${realmUrl}/protocol/openid-connect/token`, {
     method: "POST", signal: AbortSignal.timeout(15_000),
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ grant_type: "authorization_code", client_id: clientId, code,
@@ -83,23 +87,47 @@ try {
   // default-roles-inout assignment to supply account access implicitly.
   const inheritedDefaults = await (await api(`/users/${userId}/role-mappings/realm`)).json();
   if (inheritedDefaults.length) await api(`/users/${userId}/role-mappings/realm`, { method: "DELETE", body: inheritedDefaults });
-  for (const roleName of ["operator", "admin"]) {
+  for (const roleName of ["admin", "operator"]) {
     const role = await (await api(`/roles/${roleName}`)).json();
     await api(`/users/${userId}/role-mappings/realm`, { method: "POST", body: [role] });
     const accessToken = await signIn();
     for (const path of ["/account/supportedLocales", "/account/?userProfileMetadata=true"]) {
-      const response = await fetch(`${realmUrl}${path}`, {
+      const response = await localKeycloakRequest(`${realmUrl}${path}`, {
         signal: AbortSignal.timeout(15_000), headers: { Accept: "application/json", Authorization: `Bearer ${accessToken}` },
       });
       assert.equal(response.status, 200, `${roleName} account API failed: ${path}`);
       await response.json();
       console.log(`${roleName}: ${path} -> HTTP 200`);
     }
-    const adminApi = await fetch(`${base}/admin/realms/inout/users`, {
+    const adminApi = await localKeycloakRequest(`${base}/admin/realms/inout/users`, {
       signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${accessToken}` },
     });
-    assert.ok([401, 403].includes(adminApi.status), "Self-service token must not grant Keycloak administration");
+    assert.equal(adminApi.status, 404, "Public identity listener must block Keycloak administration for every token");
     const frontendToken = await signIn("inout-frontend");
+    const { payload } = await jwtVerify(frontendToken, jwks, {
+      algorithms: ["RS256"], issuer: realmUrl, audience: process.env.KEYCLOAK_AUDIENCE || "inout-frontend",
+    });
+    assert.equal(payload.sub, userId);
+    assert.deepEqual(missingFrontendRoleClaims(payload, [roleName]), [], "Explicit frontend scopes must retain all required application permissions");
+    if (roleName === "operator") {
+      assert.equal(payload.resource_access?.["realm-management"]?.roles?.includes("manage-users") || false, false,
+        "Operator tokens must not contain delegated user administration");
+    }
+    const adminEndpoints = [
+      "/v1/alerts?limit=1", "/v1/registry/subjects?kind=employee&limit=1", "/v1/alert-rule-assignments",
+    ];
+    const requests = roleName === "admin" ? Array.from({ length: 6 }, () => adminEndpoints).flat() : adminEndpoints;
+    const statuses = await Promise.all(requests.map(async (path) => {
+      const response = await fetch(`http://localhost:${apiPort}${path}`, {
+        signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${frontendToken}` },
+      });
+      assert.equal(response.status, roleName === "admin" ? 200 : 403, `${roleName} parallel API check failed: ${path}`);
+      assert.equal(response.headers.get("X-RateLimit-Limit-Minute"), "300",
+        "Real signed account requests must pass Kong's verified-credential limiter");
+      await response.json();
+      return response.status;
+    }));
+    console.log(`${roleName}: scoped signed token and ${statuses.length} parallel admin-page API checks -> HTTP ${roleName === "admin" ? 200 : 403}`);
     for (const [path, expectedStatus] of [
       ["/v1/checkpoints", roleName === "admin" ? 200 : 403],
       // Both supported application roles can operate the terminal.
@@ -109,11 +137,16 @@ try {
         signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${frontendToken}` },
       });
       assert.equal(response.status, expectedStatus, `${roleName} frontend API access failed: ${path}`);
+      assert.equal(response.headers.get("X-RateLimit-Limit-Minute"), "300");
       await response.json();
       console.log(`${roleName}: ${path} -> HTTP ${expectedStatus}`);
     }
     await api(`/users/${userId}/role-mappings/realm`, { method: "DELETE", body: [role] });
   }
+  const privateCallback = await fetch(`http://localhost:${apiPort}/internal/gateway/identity`, {
+    method: "POST", signal: AbortSignal.timeout(15_000),
+  });
+  assert.equal(privateCallback.status, 404, "Kong's identity callback must stay private");
 } finally {
   if (userId) {
     await api(`/users/${userId}`, { method: "DELETE" });

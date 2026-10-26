@@ -1,0 +1,125 @@
+.panel {
+  container-type: inline-size;
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px;
+  border-left: 1px solid var(--profile-border);
+  background: color-mix(in srgb, var(--admin-panel) 50%, var(--admin-bg));
+  scrollbar-width: thin;
+  scrollbar-color: var(--admin-border) transparent;
+}
+
+.panel .activity {
+  width: 100%;
+  border: 0;
+  overflow: visible;
+}
+
+.panel .activity > :global(.permission-section-heading) {
+  padding: 0 0 16px;
+}
+
+.panel .activity :global(.alert-activity-list) {
+  max-height: none;
+  overflow: visible;
+}
+
+.panel .activity :global(.alert-activity-list article) {
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 18px 0;
+}
+
+.panel .activity :global(.alert-activity-list time) {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  align-items: baseline;
+}
+
+.panel .activity :global(.alert-activity-dot) {
+  grid-column: 1;
+  grid-row: 1 / span 3;
+}
+
+.panel .activity :global(.alert-activity-copy) {
+  grid-column: 2 / -1;
+  grid-row: 2;
+  gap: 8px;
+}
+
+.panel .activity :global(.alert-activity-marker) {
+  grid-column: 3;
+  grid-row: 1;
+  align-self: start;
+}
+
+.panel .activity :global(.alert-review-controls) {
+  grid-column: 2 / -1;
+  grid-row: 3;
+  gap: 12px;
+}
+
+.panel .activity :global(.alert-review-controls input) {
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 10px 12px;
+}
+
+.controls {
+  display: grid;
+  padding-top: 12px;
+}
+
+.error {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  margin-bottom: 16px;
+  color: var(--ui-text-danger);
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.error p { margin: 0; }
+.error button {
+  min-height: 40px;
+  padding: 8px 12px;
+  border: 1px solid var(--admin-border);
+  border-radius: var(--radius);
+  background: var(--admin-bg);
+  color: var(--ui-text-primary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.panel :is(input, select, button, a):focus-visible {
+  outline: 2px solid var(--ui-text-info);
+  outline-offset: 3px;
+}
+
+.panel input[aria-invalid="true"]:focus-visible {
+  outline-color: var(--ui-text-danger);
+}
+
+@media (max-width: 1050px) {
+  .panel {
+    overflow: visible;
+    border-left: 0;
+    border-top: 1px solid var(--profile-border);
+  }
+}
+
+@media (max-width: 600px) {
+  .panel { padding: 18px 14px; }
+}
+
+@container (max-width: 350px) {
+  .panel .activity :global(.alert-activity-list article) { grid-template-columns: 10px minmax(0, 1fr); }
+  .panel .activity :global(.alert-activity-marker) { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  .panel .activity :global(.alert-review-controls) { grid-row: 4; }
+}

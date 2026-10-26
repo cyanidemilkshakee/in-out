@@ -2,7 +2,7 @@
 import json
 import sys
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -13,7 +13,7 @@ from models import Subject, Person, HardwareAsset, PermissionRequestModel, Acces
 from schemas import PermissionRequestCreate, ManualReviewPayload, PermissionDecision
 from routers.permissions import create_permission_request
 from routers.terminal import create_manual_review
-from permission_decisions import apply_permission_decision, publish_decision
+from permission_decisions import apply_permission_decision, publish_decision, zone_permission_version, custody_version
 
 
 def scalar_result(value):
@@ -36,6 +36,13 @@ def session():
 
 
 class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        for target in ("routers.permissions.enqueue_decision", "routers.permissions.enqueue_workflow_start",
+                "routers.terminal.enqueue_presence", "routers.terminal.enqueue_workflow_start"):
+            item = patch(target, new=AsyncMock(return_value=1))
+            item.start()
+            self.addCleanup(item.stop)
+
     def test_http_duration_choices_reject_coercion_and_non_menu_values(self):
         for duration in (15, 30, 60, 120, 240):
             self.assertEqual(PermissionDecision(decision="approved", valid_for_minutes=duration).valid_for_minutes, duration)
@@ -54,11 +61,11 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
                     req = PermissionRequestModel(id="req", subject_id=None, data=dict(saved))
                     db = session()
                     db.scalar.return_value = req
-                    with patch("permission_decisions._manual_movement", new=AsyncMock()) as movement:
+                    with patch("permission_decisions._prepare_manual_approval_subject", new=AsyncMock()) as approval:
                         with self.assertRaises(HTTPException) as error:
                             await apply_permission_decision(db, "req", "approved", "admin", "Checked", valid_for_minutes=duration)
                         self.assertEqual(error.exception.status_code, 422)
-                        movement.assert_not_awaited()
+                        approval.assert_not_awaited()
                     self.assertEqual(req.data, saved)
                     db.scalar.assert_awaited_once()
                     db.flush.assert_not_awaited()
@@ -76,6 +83,8 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
                 subject = Subject(id="person", barcode="person", kind="visitor" if kind == "visitor" else "employee",
                     person=Person(data={"name": "Guest", "status": "pending_approval"}))
                 permission = AccessPermission(id="permission", subject_id="person", data={"zones": ["secure"]})
+                if kind == "zone_access":
+                    req.data["permissionVersion"] = zone_permission_version(permission, subject.person.data)
                 db = session()
                 db.scalar.side_effect = [req, None, subject, permission]
                 result = await apply_permission_decision(db, "req", "approved", "admin", "Checked", valid_for_minutes=60)
@@ -88,7 +97,7 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         req = PermissionRequestModel(id="req", subject_id=None, data={
             "id": "req", "type": "manual_override", "status": "pending", "subjectName": "Unknown",
             "validFrom": "2026-01-01T00:00:00Z", "validTo": "2026-01-01T01:00:00Z",
-        })
+        }, created_at=datetime.now(timezone.utc))
         subject = Subject(id="person", barcode="unknown", kind="visitor",
             person=Person(data={"name": "Unknown", "inside": False}))
         db = session()
@@ -116,6 +125,7 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
             "id": "req", "type": "hardware_custody", "status": "pending", "hardwareId": "asset",
             "carrierId": "employee", "carrierName": "Spoofed name", "subjectName": "Laptop", "validFrom": "", "validTo": "",
         })
+        req.data["custodyVersion"] = custody_version(asset.data)
         db = session()
         db.scalar.side_effect = [req, None, subject, asset]
         db.get.side_effect = [carrier, carrier_data]
@@ -136,12 +146,12 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         db.execute.side_effect = [scalar_result(subject), scalar_result(asset)]
         db.get.side_effect = [checkpoint, employee, person]
         payload = PermissionRequestCreate(subject_id="asset", checkpoint_id="cp-main", request_type="hardware_custody", reason="Transfer", carrier_id="employee", carrier_name="Forged")
-        with patch("routers.permissions.publish_decision", new=AsyncMock()) as publish:
+        with patch("routers.permissions.enqueue_decision", new=AsyncMock()) as enqueue:
             result = await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["admin"]}})
         self.assertEqual(result["previousCarrierName"], "Old employee")
         self.assertEqual(result["carrierName"], "New employee")
         self.assertEqual((result["validFrom"], result["validTo"], result["requestedZones"]), ("", "", []))
-        self.assertEqual(publish.await_args.args[0], {"request": result})
+        self.assertEqual(enqueue.await_args.args, (db, {"request": result}))
         db.add.assert_called_once()
         db.commit.assert_awaited_once()
 
@@ -176,28 +186,39 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         db.add.assert_not_called()
 
     async def test_publication_carries_request_access_permission_and_presence(self):
-        with patch("permission_decisions.publish_presence_update", new=AsyncMock()) as publish:
-            await publish_decision({"request": {"id": "req", "subjectId": "visitor"}, "permission": {"id": "permission"}, "person": {"id": "visitor"}})
-        event = json.loads(publish.await_args.args[0])
+        event = await publish_decision({"request": {"id": "req", "subjectId": "visitor"}, "permission": {"id": "permission"}, "person": {"id": "visitor"}})
         self.assertEqual(set(event), {"type", "requestId", "subject_id", "movement", "request", "permission", "people", "hardwareAssets"})
         self.assertEqual(event["permission"], {"id": "permission"})
         self.assertEqual(event["people"], [{"id": "visitor"}])
 
     async def test_terminal_review_persists_before_publishing_pending_request(self):
         db = session()
-        db.scalar.return_value = TerminalCheckpointAssignment(terminal_identity="browser:operator", checkpoint_id="cp-main")
+        db.scalar.side_effect = [
+            TerminalCheckpointAssignment(terminal_identity="browser:operator", checkpoint_id="cp-main"),
+            None,
+        ]
         db.get.return_value = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"})
         temporal = Mock()
         temporal.start_workflow = AsyncMock()
-        payload = ManualReviewPayload(barcode="unknown", checkpointId="cp-main", operatorNote="Checked photo ID")
-        with patch("routers.terminal.review_source", new=AsyncMock(return_value=None)), \
+        source = Mock(
+            subject_id=None,
+            occurred_at=datetime.now(timezone.utc),
+            direction="entry",
+            data={"barcode": "unknown"},
+        )
+        payload = ManualReviewPayload(
+            barcode="unknown", checkpointId="cp-main", eventId="denied-scan",
+            operatorNote="Checked photo ID",
+        )
+        with patch("routers.terminal.review_source", new=AsyncMock(return_value=source)), \
              patch("routers.terminal.pending_manual_review", new=AsyncMock(return_value=None)), \
              patch("routers.terminal.get_temporal_client", new=AsyncMock(return_value=temporal)), \
-             patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
+             patch("routers.terminal.enqueue_presence", new=AsyncMock()) as enqueue:
             request = await create_manual_review(payload, db, {"sub": "operator"})
         db.add.assert_called_once()
         db.commit.assert_awaited_once()
-        message = json.loads(publish.await_args.args[0])
+        self.assertIs(enqueue.await_args.args[0], db)
+        message = enqueue.await_args.args[1]
         self.assertEqual(set(message), {"type", "requestId", "request"})
         self.assertEqual(message["requestId"], request["id"])
         self.assertEqual(message["request"]["operatorNote"], "Checked photo ID")

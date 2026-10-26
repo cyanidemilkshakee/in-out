@@ -9,46 +9,21 @@ import {
   TrendingDown,
   Minus,
 } from "lucide-react";
-import type { ScanAnalytics, Alert, MovementEvent } from "../../../lib/types";
-import {
-  dashboardRangeBounds,
-  eventTimestamp,
-  type DashboardTimeRange,
-} from "../../../lib/dateRanges";
+import type { AnalyticsPeriod } from "../../../lib/types";
+import { comparePeriods, type PeriodComparison } from "../../../lib/analyticsQueries";
 
 type KPICardsProps = {
-  alerts: Alert[];
-  movements: MovementEvent[];
-  allAlerts: Alert[];
-  allMovements: MovementEvent[];
-  scanAnalytics: ScanAnalytics;
-  timeRange: DashboardTimeRange;
-  startDate: string;
-  endDate: string;
-  subjectType: "people" | "hardware";
+  current: AnalyticsPeriod | null;
+  previous: AnalyticsPeriod | null;
+  loading: boolean;
+  onSelect: (metric: "scans" | "alerts" | "approved" | "denied") => void;
 };
-
-type Comparison = {
-  direction: "up" | "down" | "flat";
-  percentage: number | null;
-};
-
-function comparison(current: number, previous: number): Comparison {
-  if (current === previous) return { direction: "flat", percentage: 0 };
-  if (previous === 0) {
-    return { direction: current > 0 ? "up" : "flat", percentage: null };
-  }
-  return {
-    direction: current > previous ? "up" : "down",
-    percentage: Math.round((Math.abs(current - previous) / previous) * 100),
-  };
-}
 
 function TrendBadge({
   value,
   positiveWhenDown = false,
 }: {
-  value?: Comparison;
+  value?: PeriodComparison;
   positiveWhenDown?: boolean;
 }) {
   if (!value) {
@@ -80,106 +55,68 @@ function TrendBadge({
 }
 
 export function KPICards({
-  alerts,
-  movements,
-  allAlerts,
-  allMovements,
-  scanAnalytics,
-  timeRange,
-  startDate,
-  endDate,
-  subjectType,
+  current,
+  previous,
+  loading,
+  onSelect,
 }: KPICardsProps) {
-  const bounds = dashboardRangeBounds(timeRange, startDate, endDate);
-  const finiteRange =
-    Number.isFinite(bounds.start) &&
-    Number.isFinite(bounds.end) &&
-    bounds.end >= bounds.start;
-  const duration = finiteRange ? bounds.end - bounds.start + 1 : 0;
-  const previousStart = bounds.start - duration;
-  const previousEnd = bounds.start - 1;
-  const typeMatches = (movement: MovementEvent) =>
-    subjectType === "hardware"
-      ? movement.subjectType === "hardware"
-      : movement.subjectType === "employee" || movement.subjectType === "visitor";
-  const previousMovements = finiteRange
-    ? allMovements.filter((movement) => {
-        const timestamp = eventTimestamp(movement);
-        return (
-          typeMatches(movement) &&
-          timestamp >= previousStart &&
-          timestamp <= previousEnd
-        );
-      })
-    : [];
-  const previousAlerts = finiteRange
-    ? allAlerts.filter((alert) => {
-        const timestamp = new Date(
-          alert.createdAt ?? `${alert.date} ${alert.time}`
-        ).getTime();
-        return timestamp >= previousStart && timestamp <= previousEnd;
-      })
-    : [];
-
+  const trend = (value: number | undefined, prior: number | undefined) =>
+    value !== undefined && prior !== undefined ? comparePeriods(value, prior) : undefined;
   const metricCards = [
     {
+      id: "scans",
       label: "Total Scans",
       icon: Scan,
-      value: scanAnalytics.totalScans,
-      trend: finiteRange
-        ? comparison(movements.length, previousMovements.length)
-        : undefined,
+      value: current?.scanAnalytics.totalScans,
+      trend: trend(current?.scanAnalytics.totalScans, previous?.scanAnalytics.totalScans),
     },
     {
+      id: "alerts",
       label: "Alerts",
       icon: Bell,
-      value: alerts.length,
-      trend: finiteRange
-        ? comparison(alerts.length, previousAlerts.length)
-        : undefined,
+      value: current?.alertCount,
+      trend: trend(current?.alertCount, previous?.alertCount),
       positiveWhenDown: true,
     },
     {
+      id: "approved",
       label: "Approved",
       icon: CheckCircle,
-      value: scanAnalytics.totalApproved,
-      trend: finiteRange
-        ? comparison(
-            scanAnalytics.totalApproved,
-            previousMovements.filter((movement) => movement.result === "approved").length
-          )
-        : undefined,
+      value: current?.scanAnalytics.totalApproved,
+      trend: trend(current?.scanAnalytics.totalApproved, previous?.scanAnalytics.totalApproved),
     },
     {
+      id: "denied",
       label: "Denied",
       icon: XCircle,
-      value: scanAnalytics.totalDenied,
-      trend: finiteRange
-        ? comparison(
-            scanAnalytics.totalDenied,
-            previousMovements.filter((movement) => movement.result === "denied").length
-          )
-        : undefined,
+      value: current?.scanAnalytics.totalDenied,
+      trend: trend(current?.scanAnalytics.totalDenied, previous?.scanAnalytics.totalDenied),
       positiveWhenDown: true,
     },
   ] as const;
 
   return (
-    <div className="dashboard-kpi-grid">
+    <div className="dashboard-kpi-grid" aria-busy={loading}>
       {metricCards.map((card) => {
         const Icon = card.icon;
         return (
-          <div className="metric-widget-box dashboard-kpi-card" key={card.label}>
+          <button
+            className="metric-widget-box dashboard-kpi-card"
+            key={card.label}
+            type="button"
+            aria-label={`View ${card.id === "alerts" ? "alert" : card.id === "scans" ? "scan" : card.label.toLowerCase()} logs`}
+            onClick={() => onSelect(card.id)}
+          >
             <div className="dashboard-kpi-label">
               <Icon size={18} />
               <span>{card.label}</span>
             </div>
-            <div className="dashboard-kpi-value">{card.value.toLocaleString()}</div>
-            <TrendBadge
+            <div className="dashboard-kpi-value">{card.value?.toLocaleString() ?? "—"}</div>
+            {current ? <TrendBadge
               value={card.trend}
               positiveWhenDown={"positiveWhenDown" in card && card.positiveWhenDown}
-            />
-          </div>
+            /> : <div className="dashboard-kpi-comparison is-neutral">{loading ? "Loading…" : "Unavailable"}</div>}
+          </button>
         );
       })}
     </div>

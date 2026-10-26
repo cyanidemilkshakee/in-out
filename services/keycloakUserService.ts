@@ -7,8 +7,10 @@ export type ManagedUser = {
   enabled: boolean;
   emailVerified: boolean;
   createdTimestamp?: number;
-  roles?: Array<"admin" | "operator">;
-  checkpointId?: "cp-main" | "server-room" | null;
+  roles?: Array<"admin" | "operator" | "master-admin">;
+  checkpointId?: string | null;
+  zoneIds?: string[];
+  canManage: boolean;
 };
 
 async function request<T>(method: "GET" | "POST", body?: unknown, query?: string): Promise<T> {
@@ -23,8 +25,20 @@ async function request<T>(method: "GET" | "POST", body?: unknown, query?: string
   return payload.data;
 }
 
-export function listManagedUsers(search = "") {
-  return request<{ items: ManagedUser[] }>("GET", undefined, `search=${encodeURIComponent(search)}&max=100`);
+export async function listManagedUsers(search = "") {
+  const items = new Map<string, ManagedUser>();
+  const pageSize = 100;
+  for (let first = 0; ; first += pageSize) {
+    const page = await request<{ items: ManagedUser[] }>("GET", undefined,
+      `search=${encodeURIComponent(search.trim())}&first=${first}&max=${pageSize}`);
+    if (!Array.isArray(page.items)) throw new Error("Identity service returned an invalid user directory.");
+    const previousSize = items.size;
+    for (const user of page.items) items.set(user.id, user);
+    if (page.items.length < pageSize) return { items: [...items.values()] };
+    // A provider ignoring its paging offset must fail visibly, not loop forever
+    // or silently present the first page as the entire directory.
+    if (items.size === previousSize) throw new Error("Unable to load the complete user directory. Please search again.");
+  }
 }
 
 export function getManagedUser(userId: string) {
@@ -37,10 +51,6 @@ export function createManagedUser(input: Record<string, unknown>) {
 
 export function updateManagedUser(userId: string, input: Record<string, unknown>) {
   return request<ManagedUser>("POST", { action: "updateUser", userId, input });
-}
-
-export function setManagedUserRoles(userId: string, roles: string[]) {
-  return request<{ roles: string[] }>("POST", { action: "setRoles", userId, input: { roles } });
 }
 
 export function resetManagedUserPassword(userId: string, password: string, temporary: boolean) {

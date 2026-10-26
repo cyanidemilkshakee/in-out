@@ -15,7 +15,6 @@ export const emptyData: AppDataSnapshot = {
     totalAutomatic: 0,
     totalManual: 0,
     totalRestricted: 0,
-    totalExpired: 0,
     totalOtherDenied: 0,
     activeInside: 0,
   },
@@ -26,4 +25,5 @@ export const emptyData: AppDataSnapshot = {
   alertWarnings: [],
   alertRuleAssignments: [],
   auditEvents: [],
+  terminalVisitors: [],
 };

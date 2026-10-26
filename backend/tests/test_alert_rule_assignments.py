@@ -17,7 +17,7 @@ from alert_rule_assignments import (AlertRuleAssignmentInput, replace_alert_rule
     validate_selected_rules)
 from auth import verify_admin_request
 from models import (Alert, AlertRule, AlertRuleAssignment, AuditEvent, CriticalEntryRestriction,
-    HardwareAsset, Person, Subject)
+    HardwareAsset, Person, Subject, EventOutbox)
 from rule_engine import default_alert_rules
 
 
@@ -124,7 +124,12 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json(), first.json())
-        publish.assert_awaited_once()
+        publish.assert_not_awaited()
+        async with self.sessions() as db:
+            events = (await db.scalars(select(EventOutbox).where(EventOutbox.kind == "presence"))).all()
+            self.assertEqual(len(events), 1)
+            self.assertEqual(events[0].payload["type"], "data_changed")
+            self.assertIsNone(events[0].delivered_at)
         stale = await self.save("p1", [], 0)
         self.assertEqual(stale.status_code, 409, stale.text)
         changed = await self.save("p1", [], 1)
@@ -228,7 +233,7 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(Alert)), 1)
             self.assertTrue((await db.get(CriticalEntryRestriction, "p1")).active)
 
-    async def test_evaluation_waits_for_assignment_commit_then_uses_the_new_selection(self):
+    async def test_busy_evaluation_rejects_without_queuing_and_retry_uses_new_selection(self):
         from workflows.activities import run_alert_rule_evaluation
         await self.seed_rule(severity="critical")
         fixed_now = datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc)
@@ -238,16 +243,12 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
             clock.now.return_value = fixed_now
             async with self.sessions() as db:
                 await replace_alert_rule_assignment(db, "p1", [], "assignment-admin", 0)
-                worker = asyncio.create_task(run_alert_rule_evaluation())
-                try:
-                    with self.assertRaises(asyncio.TimeoutError):
-                        await asyncio.wait_for(asyncio.shield(worker), timeout=0.1)
-                    await db.commit()
-                    self.assertEqual(await asyncio.wait_for(worker, timeout=5), 0)
-                finally:
-                    if not worker.done():
-                        worker.cancel()
-                        await asyncio.gather(worker, return_exceptions=True)
+                with self.assertRaises(HTTPException) as error:
+                    await asyncio.wait_for(run_alert_rule_evaluation(), timeout=5)
+                self.assertEqual(error.exception.status_code, 503)
+                self.assertEqual(error.exception.detail["code"], "alert_evaluation_busy")
+                await db.commit()
+                self.assertEqual(await asyncio.wait_for(run_alert_rule_evaluation(), timeout=5), 0)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Alert)), 0)
             self.assertIsNone(await db.get(CriticalEntryRestriction, "p1"))

@@ -6,6 +6,7 @@ import type {
   Alert,
   AlertEvaluationResult,
   AlertRuleAssignment,
+  AlertRuleAssignmentDirectory,
   BarcodeManualReviewInput,
   AppDataSnapshot,
   CreateEmployeeInput,
@@ -14,6 +15,12 @@ import type {
   CreateVisitorResult,
   DataScope,
   DataService,
+  DashboardAnalytics,
+  DashboardAnalyticsQuery,
+  EmployeeActivity,
+  EmployeeActivityQuery,
+  EmployeeActivitySummary,
+  EmployeeActivitySummaryQuery,
   HardwareAsset,
   MovementPage,
   MovementQuery,
@@ -24,6 +31,7 @@ import type {
   EntryRestriction,
   RecordScanInput,
   RecordScanResult,
+  RegistryPage, RegistryPageQuery, RegistrySubjectPage, RegistrySubjectQuery, SubjectProfile,
 } from "../lib/types";
 
 type Command =
@@ -32,7 +40,6 @@ type Command =
   | { action: "createHardwareAsset"; input: CreateHardwareAssetInput }
   | { action: "updatePerson"; personId: string; patch: Partial<Omit<Person, "id">> }
   | { action: "updateHardwareAsset"; assetId: string; patch: Partial<Omit<HardwareAsset, "id">> }
-  | { action: "acknowledgeAlert"; alertId: string }
   | { action: "reviewAlert"; alertId: string; decision: "confirmed" | "excused"; reason?: string }
   | { action: "resetAlertWarnings"; subjectId: string; reason: string }
   | { action: "setAlertRuleAssignments"; subjectId: string; ruleIds: string[]; irregularitySkipDates: string[]; expectedRevision?: number }
@@ -50,8 +57,7 @@ type Command =
   | { action: "dismissPermissionNotification"; requestId: string }
   | { action: "evaluateAlertRules" }
   | { action: "recordScan"; input: RecordScanInput }
-  | { action: "requestBarcodeManualReview"; input: BarcodeManualReviewInput }
-  | { action: "addMovementNote"; eventId: string; note: string };
+  | { action: "requestBarcodeManualReview"; input: BarcodeManualReviewInput };
 
 export class DataServiceError extends Error {
   constructor(message: string, public readonly status: number) {
@@ -60,11 +66,27 @@ export class DataServiceError extends Error {
   }
 }
 
-async function readResponse<T>(response: Response): Promise<T> {
-  const body = (await response.json().catch(() => null)) as
+let authRedirectStarted = false;
+
+function redirectToLoginAfterSessionExpiry() {
+  if (authRedirectStarted || typeof window === "undefined") return;
+  authRedirectStarted = true;
+  const currentPath = `${window.location.pathname}${window.location.search}`;
+  window.location.assign(`/login?from=${encodeURIComponent(currentPath)}`);
+}
+
+async function readResponse<T>(response: Response, signal?: AbortSignal): Promise<T> {
+  const body = (await response.json().catch((error: unknown) => {
+    // A superseded read may be cancelled after its headers have arrived.
+    // Preserve that cancellation rather than reporting malformed JSON.
+    if (signal?.aborted) throw signal.reason;
+    if (error instanceof DOMException && (error.name === "AbortError" || error.name === "TimeoutError")) throw error;
+    return null;
+  })) as
     | { data?: T; error?: string }
     | null;
   if (!response.ok) {
+    if (response.status === 401) redirectToLoginAfterSessionExpiry();
     throw new DataServiceError(body?.error ?? `Backend request failed with status ${response.status}.`, response.status);
   }
   if (!body || !("data" in body)) {
@@ -74,18 +96,43 @@ async function readResponse<T>(response: Response): Promise<T> {
 }
 
 export class HttpDataService implements DataService {
-  async queryOpenAlertCount(): Promise<number> {
-    return readResponse<number>(await fetch("/api/data?resource=openAlertCount", { cache: "no-store" }));
+  async queryDashboardAnalytics(query: DashboardAnalyticsQuery, signal?: AbortSignal): Promise<DashboardAnalytics> {
+    const params = new URLSearchParams({ resource: "dashboardAnalytics" });
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    return readResponse<DashboardAnalytics>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
-  async getSnapshot(scope: DataScope = "all") {
+  async queryEmployeeActivity(query: EmployeeActivityQuery, signal?: AbortSignal): Promise<EmployeeActivity> {
+    const params = new URLSearchParams({ resource: "employeeActivity" });
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    return readResponse<EmployeeActivity>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
+  }
+
+  async queryEmployeeActivitySummary(query: EmployeeActivitySummaryQuery, signal?: AbortSignal): Promise<EmployeeActivitySummary> {
+    const params = new URLSearchParams({ resource: "employeeActivitySummary" });
+    for (const [key, value] of Object.entries(query)) {
+      if (value !== undefined && value !== "") params.set(key, String(value));
+    }
+    return readResponse<EmployeeActivitySummary>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
+  }
+
+  async queryOpenAlertCount(signal?: AbortSignal): Promise<number> {
+    return readResponse<number>(await fetch("/api/data?resource=openAlertCount", { cache: "no-store", signal }), signal);
+  }
+
+  async getSnapshot(scope: DataScope = "all", signal?: AbortSignal) {
     const response = await fetch(`/api/data?scope=${encodeURIComponent(scope)}`, {
       cache: "no-store",
+      signal,
     });
-    return readResponse<AppDataSnapshot>(response);
+    return readResponse<AppDataSnapshot>(response, signal);
   }
 
-  async queryMovements(query: MovementQuery) {
+  async queryMovements(query: MovementQuery, signal?: AbortSignal) {
     const params = new URLSearchParams({
       resource: "movements",
       page: String(query.page),
@@ -103,11 +150,12 @@ export class HttpDataService implements DataService {
     }
     const response = await fetch(`/api/data?${params.toString()}`, {
       cache: "no-store",
+      signal,
     });
-    return readResponse<MovementPage>(response);
+    return readResponse<MovementPage>(response, signal);
   }
 
-  async queryAuditEvents(query: AuditEventQuery) {
+  async queryAuditEvents(query: AuditEventQuery, signal?: AbortSignal) {
     const params = new URLSearchParams({
       resource: "auditEvents",
       limit: String(query.limit),
@@ -118,11 +166,11 @@ export class HttpDataService implements DataService {
         params.set(key, String(value));
       }
     }
-    const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store" });
-    return readResponse<AuditEventPage>(response);
+    const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store", signal });
+    return readResponse<AuditEventPage>(response, signal);
   }
 
-  async queryAlerts(query: AlertQuery) {
+  async queryAlerts(query: AlertQuery, signal?: AbortSignal) {
     const params = new URLSearchParams({
       resource: "alerts",
       limit: String(query.limit),
@@ -133,8 +181,14 @@ export class HttpDataService implements DataService {
         params.set(key, String(value));
       }
     }
-    const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store" });
-    return readResponse<AlertPage>(response);
+    const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store", signal });
+    return readResponse<AlertPage>(response, signal);
+  }
+
+  async queryAlertRuleAssignments(subjectId: string, signal?: AbortSignal): Promise<AlertRuleAssignmentDirectory> {
+    const params = new URLSearchParams({ resource: "alertRuleAssignments", subjectId });
+    const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store", signal });
+    return readResponse<AlertRuleAssignmentDirectory>(response, signal);
   }
 
   private async command<T>(command: Command, idempotencyKey = crypto.randomUUID()) {
@@ -164,10 +218,6 @@ export class HttpDataService implements DataService {
 
   updateHardwareAsset(assetId: string, patch: Partial<Omit<HardwareAsset, "id">>) {
     return this.command<HardwareAsset>({ action: "updateHardwareAsset", assetId, patch });
-  }
-
-  acknowledgeAlert(alertId: string) {
-    return this.command<Alert>({ action: "acknowledgeAlert", alertId });
   }
 
   reviewAlert(alertId: string, decision: "confirmed" | "excused", reason = "") {
@@ -228,7 +278,21 @@ export class HttpDataService implements DataService {
     return this.command<PermissionRequest>({ action: "requestBarcodeManualReview", input });
   }
 
-  addMovementNote(eventId: string, note: string) {
-    return this.command<string[]>({ action: "addMovementNote", eventId, note });
+  async queryRegistryPage(query: RegistryPageQuery, signal?: AbortSignal) {
+    const params = new URLSearchParams({ resource: "registryPage" });
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+    return readResponse<RegistryPage>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
+
+  async queryRegistrySubjects(query: RegistrySubjectQuery, signal?: AbortSignal) {
+    const params = new URLSearchParams({ resource: "registrySubjects" });
+    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+    return readResponse<RegistrySubjectPage>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
+  }
+
+  async querySubjectProfile(subjectId: string, signal?: AbortSignal) {
+    const params = new URLSearchParams({ resource: "subjectProfile", subjectId });
+    return readResponse<SubjectProfile>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
+  }
+
 }

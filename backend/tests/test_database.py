@@ -21,24 +21,46 @@ from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.engine import make_url
 from database import get_db, get_read_db
-from models import Subject, Person, HardwareAsset, Checkpoint, Movement, PresenceState, PermissionRequestModel, AccessPermission, AuditEvent, Alert, ScanRequest, TerminalCheckpointAssignment
+from models import Subject, Person, HardwareAsset, Checkpoint, Movement, PresenceState, PermissionRequestModel, AccessPermission, AuditEvent, Alert, ScanRequest, TerminalCheckpointAssignment, EventOutbox
 from schemas import BrowserScanPayload, ScanPayload
 from terminal_scans import record_scan
 from auth import verify_admin_request, verify_terminal_access_request
+from redis_client import close_redis_pool
 from routers import movements, terminal, permissions, registry, alerts, admin_profile
-from permission_decisions import apply_permission_decision
+from permission_decisions import apply_permission_decision, zone_permission_version, custody_version
 
 TEST_URL = os.getenv("TEST_DATABASE_URL")
 
 
+def replay_receipt(body):
+    return {**body, "replayed": True, "authorizeMovement": False,
+        "decision": {**body.get("decision", {}), "replayed": True, "authorizeMovement": False}}
+
+
 @unittest.skipUnless(TEST_URL, "Set TEST_DATABASE_URL for isolated PostgreSQL integration tests")
 class DatabaseTests(unittest.IsolatedAsyncioTestCase):
+    async def durable_events(self, event_type, *, request_id=None):
+        async with self.sessions() as db:
+            query = select(EventOutbox.payload).where(EventOutbox.kind == "presence",
+                EventOutbox.payload["type"].astext == event_type)
+            if request_id:
+                query = query.where(EventOutbox.payload["requestId"].astext == request_id)
+            return list((await db.scalars(query.order_by(EventOutbox.id))).all())
+
     async def asyncSetUp(self):
+        # Each IsolatedAsyncioTestCase owns a new event loop. Reset any pool
+        # left by another test loop before using Redis in this fixture.
+        await close_redis_pool()
         if not make_url(TEST_URL).database.endswith("_test"):
             raise RuntimeError("Integration tests require a database ending in _test")
         self.schema = "test_" + uuid.uuid4().hex
-        self.engine = create_async_engine(TEST_URL, connect_args={"server_settings": {"search_path": self.schema}})
+        self.engine = create_async_engine(TEST_URL, connect_args={"server_settings": {"search_path": f"{self.schema},public"}})
         async with self.engine.begin() as conn:
+            # Extensions are database-wide. Keep them out of disposable schemas
+            # and serialize migrations so parallel isolated suites cannot race.
+            await conn.execute(text("SELECT pg_advisory_xact_lock(hashtextextended('inout-test-migrations', 0))"))
+            await conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public"))
+            await conn.execute(text("ALTER EXTENSION pg_trgm SET SCHEMA public"))
             await conn.execute(text(f'CREATE SCHEMA "{self.schema}"'))
             def migrate(connection):
                 scripts = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
@@ -75,10 +97,13 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 yield db
         self.app.dependency_overrides[get_db] = session
         self.app.dependency_overrides[get_read_db] = session
+        from user_management_locks import get_window_guard_db
+        self.app.dependency_overrides[get_window_guard_db] = session
         self.client = httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app), base_url="http://test")
 
     async def asyncTearDown(self):
         await self.client.aclose()
+        await close_redis_pool()
         async with self.engine.begin() as conn:
             await conn.execute(text(f'DROP SCHEMA "{self.schema}" CASCADE'))
         await self.engine.dispose()
@@ -109,7 +134,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["permission"]["zones"], ["public", "secure"])
         self.assertEqual(result["request"]["decidedBy"], "grant-admin")
         temporal.assert_not_awaited()
-        publish.assert_awaited_once()
+        publish.assert_not_awaited()
+        self.assertEqual(len(await self.durable_events("manual_review_decision", request_id=result["request"]["id"])), 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(PermissionRequestModel)
                 .where(PermissionRequestModel.data["status"].astext == "pending")), 0)
@@ -262,10 +288,10 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         headers = {"Idempotency-Key": str(uuid.uuid4())}
         forged = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
         self.assertEqual(forged.status_code, 403, forged.text)
-        review = await self.client.post("/v1/terminal/manual-reviews", json={"barcode": "p1", "checkpointId": "cp-main", "operatorNote": "Checked ID"})
+        review = await self.client.post("/v1/terminal/manual-reviews", json={"barcode": "p1", "checkpointId": "cp-main", "eventId": "forged-event", "operatorNote": "Checked ID"})
         self.assertEqual(review.status_code, 403, review.text)
         generic_review = await self.client.post("/v1/permission-requests", json={"subject_id": "p1", "checkpoint_id": "cp-main",
-            "request_type": "manual_override", "reason": "Checked ID", "operator_note": "Checked ID"})
+            "request_type": "manual_override", "source_event_id": "forged-event", "reason": "Checked ID", "operator_note": "Checked ID"})
         self.assertEqual(generic_review.status_code, 403, generic_review.text)
         async with self.sessions() as db:
             for model in (Movement, ScanRequest, PermissionRequestModel, PresenceState):
@@ -292,7 +318,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
             original = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
             self.assertEqual(original.status_code, 200, original.text)
-            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).json(), original.json())
+            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).json(), replay_receipt(original.json()))
             async with self.sessions() as db:
                 await set_checkpoint_assignment(db, "browser:operator", "server-room", "admin")
                 await db.commit()
@@ -304,7 +330,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await set_checkpoint_assignment(db, "browser:operator", None, "admin")
                 await db.commit()
             self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
-            publish.assert_awaited_once()
+            publish.assert_not_awaited()
+            self.assertEqual(len(await self.durable_events("scan")), 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 2)
@@ -326,6 +353,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_admin_creates_operator_with_checkpoint_before_granting_role(self):
         import time
         from routers import keycloak_admin
+        from config import settings
+        from tests.test_user_management_step_up import proof_for, SECRET
         self.app.include_router(keycloak_admin.router)
         user_id = "new-operator-id"
         user = {"id": user_id, "username": "new-operator", "enabled": True}
@@ -350,9 +379,18 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(204)
             return httpx.Response(200, json=user)
 
+        now = int(time.time())
         headers = {"Authorization": "Bearer isolated-test-token"}
-        actor = {"sub": "setup-admin", "realm_access": {"roles": ["admin"]}, "auth_time": time.time()}
-        with patch("auth.verify_keycloak_token", return_value=actor) as token, \
+        actor = {"sub": "setup-admin", "realm_access": {"roles": ["admin"]}, "auth_time": now}
+        step_up = proof_for({
+            "issuedAt": now, "authTime": now, "expiresAt": now + 600,
+            "durationMinutes": 10,
+            "tokenHash": hashlib.sha256(b"isolated-test-token").hexdigest(),
+            "windowId": str(uuid.uuid4()),
+        })
+        headers["X-InOut-Step-Up"] = step_up
+        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), \
+             patch("auth.verify_keycloak_token", return_value=actor) as token, \
              patch("routers.keycloak_admin._request", side_effect=identity), \
              patch("routers.keycloak_admin.publish_checkpoint_assignment", new=AsyncMock()) as publish:
             response = await self.client.post("/v1/keycloak/users", headers=headers, json={
@@ -361,7 +399,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 201, response.text)
             self.assertEqual(response.json()["checkpointId"], "server-room")
             self.assertEqual(response.json()["roles"], ["operator"])
-            publish.assert_awaited_once_with("browser:" + user_id)
+            publish.assert_not_awaited()
+            self.assertEqual((await self.durable_events("terminal_assignment"))[0]["terminalIdentity"], "browser:" + user_id)
             async with self.sessions() as db:
                 audit = await db.scalar(select(AuditEvent))
                 self.assertEqual(audit.data["actor"], "setup-admin")
@@ -381,7 +420,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             key = uuid.uuid4()
             first = await record_scan(db, key, body, "operator")
             await db.commit()
-            self.assertEqual(first, await record_scan(db, key, body, "operator"))
+            self.assertEqual(replay_receipt(first), await record_scan(db, key, body, "operator"))
             self.assertTrue(db.info["scan_replayed"])
             hardware = ScanPayload(barcode="h1", terminal_id="physical", checkpoint_id="cp-main", direction="entry")
             result = await record_scan(db, uuid.uuid4(), hardware, "physical")
@@ -396,7 +435,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             for _ in range(2):
                 response = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
                 self.assertEqual(response.status_code, 200, response.text)
-            publish.assert_awaited_once()
+            publish.assert_not_awaited()
+            self.assertEqual(len(await self.durable_events("scan")), 1)
 
     async def test_approval_window_is_persisted_and_dashboard_excludes_equipment(self):
         from routers.dashboard import get_dashboard
@@ -404,7 +444,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             now = datetime.now(timezone.utc)
             db.add(PermissionRequestModel(id="window", subject_id="p1", created_at=now, data={
                 "id": "window", "subjectId": "p1", "subjectName": "Alice", "status": "pending", "type": "zone_access",
-                "requestedZones": ["public"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=8)).isoformat()}))
+                "requestedZones": ["public"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=8)).isoformat(),
+                "permissionVersion": zone_permission_version(None, (await db.get(Person, "p1")).data)}))
             await db.commit()
             result = await apply_permission_decision(db, "window", "approved", "admin", "Checked", valid_for_minutes=45)
             await db.commit()
@@ -455,7 +496,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(result["updatedPeople"][0]["inside"])
             self.assertTrue(result["updatedHardwareAssets"][0]["inside"])
             retry = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-            self.assertEqual(retry.json(), result)
+            self.assertEqual(retry.json(), replay_receipt(result))
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             # Cooldown has elapsed; auto mode must derive an exit from persisted presence.
@@ -479,7 +520,10 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bundle.status_code, 200, bundle.text)
         self.assertNotIn("subjects", bundle.json())
         self.assertEqual([asset["id"] for asset in bundle.json()["hardwareAssets"]], ["h1"])
-        for params in ({"search": "Missing"}, {"scanType": "manual"}, {"subjectGroup": "hardware"}, {"startAt": "2099-01-01T00:00:00Z"}, {"endAt": "2000-01-01T00:00:00Z"}):
+        hardware_history = (await self.client.get("/v1/movements", params={"subjectGroup": "hardware"})).json()
+        self.assertEqual(hardware_history["total"], 2)
+        self.assertEqual({row["subject_id"] for row in hardware_history["items"]}, {"h1"})
+        for params in ({"search": "Missing"}, {"scanType": "manual"}, {"startAt": "2099-01-01T00:00:00Z"}, {"endAt": "2000-01-01T00:00:00Z"}):
             self.assertEqual((await self.client.get("/v1/movements", params=params)).json()["total"], 0)
 
     async def test_movement_references_search_and_resolve_across_default_filters(self):
@@ -524,12 +568,22 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(denied["decision"]["event"]["denialCode"], "custody_mismatch")
             await db.commit()
             approved = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="h1", checkpointId="cp-main"), "test")
+            self.assertFalse(approved["allowed"], "Assigned hardware must travel with its employee")
+            asset.data = {**asset.data, "assignedEmployeeId": None}
+            await db.commit()
+            approved = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="h1", checkpointId="cp-main"), "test")
             self.assertTrue(approved["allowed"])
             self.assertEqual(approved["decision"]["event"]["subjectType"], "hardware")
             await db.commit()
 
     async def _create_review(self, db, barcode="unknown-1", subject_id=None, event=None, kind="manual_override"):
         now = datetime.now(timezone.utc)
+        if event is None and kind == "manual_override":
+            source_id = str(uuid.uuid4())
+            db.add(Movement(id=source_id, subject_id=subject_id, checkpoint_id="cp-main", occurred_at=now,
+                result="denied", direction="entry", scan_type="auto", subject_type="visitor", sync_state="synced",
+                data={"barcode": barcode, "hardwareIds": []}))
+            event = {"id": source_id}
         req_id = "REQ-" + uuid.uuid4().hex
         req = PermissionRequestModel(id=req_id, subject_id=subject_id, created_at=now, data={
             "id": req_id, "barcode": barcode, "subjectId": subject_id or "", "subjectName": "Reviewed visitor",
@@ -538,6 +592,9 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             "validTo": (now + timedelta(hours=1)).isoformat(),
             **({"eventId": event["id"]} if event else {}),
         })
+        if kind == "hardware_custody":
+            asset = await db.get(HardwareAsset, subject_id)
+            req.data["custodyVersion"] = custody_version(asset.data if asset else {})
         db.add(req)
         await db.commit()
         return req_id
@@ -854,14 +911,15 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(event["createdAt"], source["createdAt"])
             self.assertEqual(event["initialScanType"], "auto")
             self.assertEqual(event["denialCode"], "manual_review")
-            published = json.loads(publish.call_args.args[0])
+            publish.assert_not_awaited()
+            published = (await self.durable_events("manual_review_decision", request_id=review.json()["id"]))[-1]
             self.assertEqual(published["movement"]["scanType"], "manual")
             retry = await self.client.post(url, json=decision)
             self.assertEqual(retry.status_code, 200, retry.text)
             self.assertEqual(retry.json()["movement"], event)
             # An original scan retry retains its immutable response, not a new event.
             replay = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-            self.assertEqual(replay.json(), scan.json())
+            self.assertEqual(replay.json(), replay_receipt(scan.json()))
         for endpoint in ("/v1/movements", "/v1/movements/analytics"):
             manual = await self.client.get(endpoint, params={"scanType": "manual", "result": "denied"})
             automatic = await self.client.get(endpoint, params={"scanType": "auto", "result": "denied"})
@@ -962,7 +1020,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                         self.assertTrue(notice["notificationDismissedAt"])
                         retry = await self.client.post(url + "/dismiss")
                         self.assertEqual(retry.json(), notice)
-                        publish.assert_awaited_once()
+                        publish.assert_not_awaited()
+                        self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
                     bundle = await self.client.get("/v1/terminal/bundle")
                     self.assertEqual(bundle.status_code, 200, bundle.text)
                     self.assertEqual(next(item for item in bundle.json()["permissionRequests"] if item["id"] == req_id), notice)
@@ -996,12 +1055,12 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         with patch("routers.permissions.publish_presence_update", new=AsyncMock()) as publish:
             accepted = await self.client.post(url)
             self.assertEqual(accepted.status_code, 200, accepted.text)
-            self.assertEqual(json.loads(publish.call_args.args[0])["type"], "terminal_notification_dismissed")
+            self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
             async with self.sessions() as db:
                 await db.delete(await db.get(TerminalCheckpointAssignment, "browser:operator"))
                 await db.commit()
             self.assertEqual((await self.client.post(url)).status_code, 403)
-            publish.assert_awaited_once()
+            publish.assert_not_awaited()
         actor = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         pending_id = None
         async with self.sessions() as db:
@@ -1084,7 +1143,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         results = await asyncio.gather(decide(), decide())
         self.assertEqual(results[0]["request"]["subjectId"], results[1]["request"]["subjectId"])
         async with self.sessions() as db:
-            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 0)
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement).where(Movement.result == "approved")), 0)
             self.assertIsNone(await db.get(PresenceState, results[0]["request"]["subjectId"]))
             self.assertFalse((await db.get(Person, results[0]["request"]["subjectId"])).data["inside"])
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 1)
@@ -1139,55 +1199,20 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             self.assertEqual((await db.get(Person, "v1")).data["status"], "pre_approved")
 
-    async def test_historical_manual_entry_repair_is_idempotent_and_keeps_later_exits(self):
-        from repair_manual_entries import repair_manual_entries
-        now = datetime.now(timezone.utc)
-        async with self.sessions() as db:
-            req_id = await self._create_review(db, "legacy")
-            req = await db.get(PermissionRequestModel, req_id)
-            req.data = {**req.data, "status": "approved"}
-            db.add(Movement(id="legacy-entry", subject_id=None, checkpoint_id="cp-main", occurred_at=now,
-                result="approved", direction="entry", scan_type="manual", subject_type="visitor", sync_state="queued",
-                data={"id": "legacy-entry", "barcode": "legacy", "subjectId": "unregistered", "subjectName": "Legacy visitor", "overrideRequestId": req_id}))
-            await db.commit()
-            check = await repair_manual_entries(db)
-            self.assertEqual(check["unlinkedMovements"], 1)
-            self.assertIsNone(await db.scalar(select(Subject).where(Subject.barcode == "legacy")))
-            applied = await repair_manual_entries(db, apply=True)
-            await db.commit()
-            self.assertEqual(applied["unlinkedMovements"], 1)
-        async with self.sessions() as db:
-            movement = await db.get(Movement, "legacy-entry")
-            state = await db.get(PresenceState, movement.subject_id)
-            self.assertEqual(state.state, "inside")
-            self.assertEqual(state.entry_override["requestId"], req_id)
-            repeated = await repair_manual_entries(db, apply=True)
-            await db.commit()
-            self.assertEqual(repeated["unlinkedMovements"], 0)
-            self.assertEqual(repeated["presenceRepairs"], 0)
-            result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="legacy", checkpointId="cp-main"), "test")
-            self.assertTrue(result["allowed"], result)
-            await db.commit()
-        async with self.sessions() as db:
-            repeated = await repair_manual_entries(db, apply=True)
-            await db.commit()
-            self.assertEqual(repeated["presenceRepairs"], 0)
-            subject = await db.scalar(select(Subject).where(Subject.barcode == "legacy"))
-            self.assertEqual((await db.get(PresenceState, subject.id)).state, "outside")
-
     async def test_registry_creates_permissions_and_preserves_selected_zones(self):
         from auth import verify_admin_or_operator_request
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         for kind in ["employee", "hardware"]:
             response = await self.client.post("/v1/registry/subjects", json={"barcode": "  new-" + kind + "  ", "kind": kind,
-                "data": {"name": "New subject", "allowedZone": "public", "category": "Laptop", "status": "active"}})
+                "data": {"name": "New subject", "allowedZone": "public", "category": "Laptop", "status": "active", **({"ownerId": "p1"} if kind == "hardware" else {})}})
             self.assertEqual(response.status_code, 201, response.text)
             subject_id = response.json()["id"]
             async with self.sessions() as db:
                 permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == subject_id))
                 self.assertEqual(permission.data["zones"], ["public"])
                 self.assertEqual(permission.data["state"], "active")
-                scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="new-" + kind, checkpointId="cp-main"), "test")
+                scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1" if kind == "hardware" else "new-" + kind,
+                    checkpointId="cp-main", selectedHardwareIds=[subject_id] if kind == "hardware" else []), "test")
                 self.assertTrue(scan["allowed"], scan)
                 await db.commit()
 
@@ -1394,6 +1419,39 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count(PermissionRequestModel.id))), 0)
             self.assertEqual(await db.scalar(select(func.count(AuditEvent.id))), 0)
 
+    async def test_legacy_manual_denial_preserves_registered_visit_and_does_not_duplicate_history(self):
+        now = datetime.now(timezone.utc)
+        entered_at = now - timedelta(hours=13)
+        request_id = "legacy-manual-denial"
+        async with self.sessions() as db:
+            person = await db.get(Person, "p1")
+            person.data = {**person.data, "inside": True}
+            original_metadata = dict(person.data)
+            db.add(PresenceState(subject_id="p1", state="inside", entry_building_id="main-building",
+                last_scan_timestamp=entered_at, entry_started_at=entered_at,
+                entry_override={"requestId": "previous-entry"}))
+            db.add(PermissionRequestModel(id=request_id, subject_id="p1", created_at=now, data={
+                "id": request_id, "type": "manual_override", "status": "pending", "barcode": "p1",
+                "checkpointId": "cp-main", "direction": "exit", "createdAt": now.isoformat(),
+            }))
+            await db.commit()
+            result = await apply_permission_decision(db, request_id, "denied", "review-admin", "Exit not verified")
+            await db.commit()
+            event = result["movement"]
+            self.assertTrue(event["id"].startswith("MAN-"))
+            self.assertEqual((event["result"], event["direction"], event["denialCode"]),
+                ("denied", "exit", "manual_review"))
+            retry = await apply_permission_decision(db, request_id, "denied", "review-admin", "Retry")
+            await db.commit()
+            self.assertEqual(retry["movement"], event)
+            presence = await db.get(PresenceState, "p1")
+            self.assertEqual((presence.state, presence.entry_building_id, presence.entry_started_at,
+                presence.last_scan_timestamp, presence.entry_override),
+                ("inside", "main-building", entered_at, entered_at, {"requestId": "previous-entry"}))
+            self.assertEqual((await db.get(Person, "p1")).data, original_metadata)
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
+            self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 1)
+
     async def test_notes_persist_and_blank_notes_are_rejected(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
         async with self.sessions() as db:
@@ -1429,29 +1487,6 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["hardwareAsset"]["assignedEmployeeId"], "p1")
             self.assertEqual(result["hardwareAsset"]["assignedEmployeeName"], "Alice")
             self.assertEqual(result["hardwareAsset"]["id"], "h1")
-
-    async def test_incomplete_registry_record_is_repaired_without_granting_access(self):
-        from repair_manual_entries import repair_manual_entries
-        async with self.sessions() as db:
-            db.add(Subject(id="incomplete", barcode="incomplete", kind="visitor"))
-            await db.commit()
-            check = await repair_manual_entries(db)
-            self.assertEqual(check["missingMetadata"], 1)
-            self.assertIsNone(await db.get(Person, "incomplete"))
-            await repair_manual_entries(db, apply=True)
-            await db.commit()
-        async with self.sessions() as db:
-            person = await db.get(Person, "incomplete")
-            self.assertEqual(person.data["status"], "restricted")
-            self.assertTrue(person.data["requiresProfileReview"])
-            permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == "incomplete"))
-            self.assertEqual(permission.data["state"], "restricted")
-            result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="incomplete", checkpointId="cp-main"), "test")
-            self.assertFalse(result["allowed"])
-            await db.commit()
-            check = await repair_manual_entries(db)
-            self.assertEqual(check["missingMetadata"], 0)
-            self.assertEqual(check["missingPermissions"], 0)
 
     async def _consolidate_zones(self):
         async with self.engine.begin() as conn:
@@ -1510,6 +1545,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         key = uuid.uuid4()
         payload = BrowserScanPayload(barcode="p1", checkpointId="main-gate")
         normalized = payload.model_dump(mode="json")
+        normalized.pop("expected_operator_subject", None)
         normalized["barcode"] = payload.barcode.strip().lower()
         normalized["selected_hardware_ids"] = sorted(set(payload.selected_hardware_ids))
         old_hash = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()

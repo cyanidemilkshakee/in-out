@@ -20,7 +20,7 @@ export function ScheduledIrregularitySkips({ assignments }: { assignments: Alert
       <h3 id="scheduled-irregularity-skips-title">Scheduled irregularity skips</h3>
       <span>Next six months</span>
     </header>
-    {scheduled.length ? <ul className={styles.skipScheduleList}>
+    {scheduled.length ? <ul className={`${styles.skipScheduleList} scrollable-content`}>
       {scheduled.map((item) => <li key={item.subjectId}>
         <strong>{item.subjectName}</strong>
         <div className={styles.skipScheduleDates}>{item.dates.map((date) => <time key={date} dateTime={date}>{formatIrregularitySkipDate(date)}</time>)}</div>

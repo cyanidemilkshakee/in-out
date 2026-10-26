@@ -1,22 +1,27 @@
 import { useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
-import type { HardwareAsset } from '../../../../lib/types';
+import type { HardwareAsset, RegistrySortKey, SortDirection } from '../../../../lib/types';
 import Link from 'next/link';
 
 export function HardwareTable({
   assets,
+  sort,
 }: {
   assets: HardwareAsset[];
+  sort?: { key: RegistrySortKey; direction: SortDirection; onChange: (key: RegistrySortKey) => void };
 }) {
-  const [sortKey, setSortKey] = useState<keyof HardwareAsset>("name");
-  const [sortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const [localSortKey, setSortKey] = useState<keyof HardwareAsset>("name");
+  const [localSortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
+  const sortKey = sort?.key ?? localSortKey;
+  const sortDirection = sort?.direction ?? localSortDirection;
   const sortedAssets = useMemo(() => {
     return [...assets].sort((a, b) => {
-      const aValue = String(a[sortKey] ?? "");
-      const bValue = String(b[sortKey] ?? "");
+      if (sort) return 0;
+      const aValue = String(a[sortKey as keyof HardwareAsset] ?? "");
+      const bValue = String(b[sortKey as keyof HardwareAsset] ?? "");
       return sortDirection === "asc" ? aValue.localeCompare(bValue) : bValue.localeCompare(aValue);
     });
-  }, [assets, sortDirection, sortKey]);
+  }, [assets, sortDirection, sortKey, sort]);
 
   function sortHeader(column: keyof HardwareAsset, label: string) {
     const active = sortKey === column;
@@ -29,6 +34,7 @@ export function HardwareTable({
           className="sort-button"
           type="button"
           onClick={() => {
+            if (sort) { sort.onChange(column as RegistrySortKey); return; }
             setSortDirection(active && sortDirection === "asc" ? "desc" : "asc");
             setSortKey(column);
           }}
@@ -41,7 +47,7 @@ export function HardwareTable({
   }
 
   return (
-      <div className="admin-table-wrap table-wrap">
+      <div className="admin-table-wrap table-wrap scrollable-content">
         <table className="data-table hardware-table registry-table registry-table--hardware">
           <thead>
             <tr>

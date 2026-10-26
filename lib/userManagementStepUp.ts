@@ -3,8 +3,8 @@ export const USER_MANAGEMENT_STEP_UP_LOCK_COOKIE = "inout_user_management_step_u
 export const USER_MANAGEMENT_STEP_UP_DURATIONS = [5, 10, 15, 20, 30, 60] as const;
 export const DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES = 5;
 export type StepUpDurationMinutes = typeof USER_MANAGEMENT_STEP_UP_DURATIONS[number];
-export type StepUpIntent = { issuedAt: number; durationMinutes: StepUpDurationMinutes; baseExpiresAt?: number };
-const INTENT_PURPOSE = "inout:user-management-intent:v1.";
+export type StepUpIntent = { issuedAt: number; durationMinutes: StepUpDurationMinutes; subject: string; intentId: string; baseExpiresAt?: number };
+const INTENT_PURPOSE = "inout:user-management-intent:v2.";
 const PROOF_PURPOSE = "inout:user-management-step-up:v1.";
 
 export function formatStepUpCountdown(totalSeconds: number): string {
@@ -41,18 +41,19 @@ async function hmac(value: string, secret: string): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.sign("HMAC", key, encoder.encode(value)));
 }
 
-export async function signStepUpIntent(issuedAt: number, secret: string, durationMinutes: StepUpDurationMinutes = DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES, baseExpiresAt?: number): Promise<string> {
-  if (!Number.isSafeInteger(issuedAt) || !isStepUpDurationMinutes(durationMinutes) ||
+export async function signStepUpIntent(issuedAt: number, secret: string, subject: string, durationMinutes: StepUpDurationMinutes = DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES, baseExpiresAt?: number): Promise<string> {
+  if (!secret || !Number.isSafeInteger(issuedAt) || !isStepUpDurationMinutes(durationMinutes) ||
+      typeof subject !== "string" || !subject || subject.length > 256 ||
       (baseExpiresAt !== undefined && (!Number.isSafeInteger(baseExpiresAt) || baseExpiresAt <= 0))) {
     throw new Error("Invalid re-authentication window.");
   }
-  const intent: StepUpIntent = { issuedAt, durationMinutes, ...(baseExpiresAt === undefined ? {} : { baseExpiresAt }) };
+  const intent: StepUpIntent = { issuedAt, durationMinutes, subject, intentId: crypto.randomUUID(), ...(baseExpiresAt === undefined ? {} : { baseExpiresAt }) };
   const value = base64Url(new TextEncoder().encode(JSON.stringify(intent)));
   return `${value}.${base64Url(await hmac(INTENT_PURPOSE + value, secret))}`;
 }
 
 export async function verifyStepUpIntent(value: string | undefined, secret: string, now = Date.now()): Promise<StepUpIntent | null> {
-  if (!value) return null;
+  if (!value || value.length > 2048 || !secret) return null;
   const separator = value.lastIndexOf(".");
   if (separator < 1) return null;
   const payload = value.slice(0, separator);
@@ -69,19 +70,21 @@ export async function verifyStepUpIntent(value: string | undefined, secret: stri
     if (!bytes) return null;
     const intent = JSON.parse(new TextDecoder().decode(bytes));
     if (!intent || typeof intent !== "object" ||
-        (Object.keys(intent).length !== 2 && Object.keys(intent).length !== 3) ||
+        (Object.keys(intent).length !== 4 && Object.keys(intent).length !== 5) ||
+        typeof intent.subject !== "string" || !intent.subject || intent.subject.length > 256 || !isStepUpWindowId(intent.intentId) ||
         !Number.isSafeInteger(intent.issuedAt) || !isStepUpDurationMinutes(intent.durationMinutes) ||
         (Object.prototype.hasOwnProperty.call(intent, "baseExpiresAt") && (!Number.isSafeInteger(intent.baseExpiresAt) || intent.baseExpiresAt <= 0)) ||
-        Object.keys(intent).some((key) => !["issuedAt", "durationMinutes", "baseExpiresAt"].includes(key))) return null;
+        Object.keys(intent).some((key) => !["issuedAt", "durationMinutes", "baseExpiresAt", "subject", "intentId"].includes(key))) return null;
     return intent.issuedAt > now - 10 * 60_000 && intent.issuedAt <= now + 30_000 ? intent : null;
   } catch {
     return null;
   }
 }
 
-export function completedStepUpWindow(intent: StepUpIntent, authTime: unknown, now = Date.now()) {
+export function completedStepUpWindow(intent: StepUpIntent, authTime: unknown, subject: string, now = Date.now()) {
   // The verified ID token must represent a fresh login after this unlock intent.
-  if (typeof authTime !== "number" || !Number.isSafeInteger(authTime) || authTime <= 0 ||
+  if (!subject || subject !== intent.subject || !isStepUpWindowId(intent.intentId) ||
+      typeof authTime !== "number" || !Number.isSafeInteger(authTime) || authTime <= 0 ||
       authTime * 1_000 < intent.issuedAt - 5_000 || authTime * 1_000 > now + 30_000 ||
       !isStepUpDurationMinutes(intent.durationMinutes) ||
       (intent.baseExpiresAt !== undefined && (!Number.isSafeInteger(intent.baseExpiresAt) || intent.baseExpiresAt <= 0))) return undefined;
@@ -95,7 +98,11 @@ export function completedStepUpWindow(intent: StepUpIntent, authTime: unknown, n
     : undefined;
 }
 
-type StepUpSessionFields = { authTime?: unknown; stepUpExpiresAt?: unknown; stepUpDurationMinutes?: unknown; stepUpExtensionSeconds?: unknown };
+type StepUpSessionFields = { authTime?: unknown; stepUpExpiresAt?: unknown; stepUpDurationMinutes?: unknown; stepUpExtensionSeconds?: unknown; stepUpWindowId?: unknown };
+
+export function isStepUpWindowId(value: unknown): value is string {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+}
 
 export function isActiveUserManagementStepUp(session: StepUpSessionFields, now = Date.now()): boolean {
   const { authTime, stepUpExpiresAt, stepUpDurationMinutes } = session;
@@ -119,12 +126,13 @@ export function userManagementStepUpLockMaxAge(session: StepUpSessionFields, now
 
 // Called only by the server BFF. The secret and proof never enter a public session.
 export async function signStepUpProof(session: StepUpSessionFields, accessToken: string, secret: string, now = Date.now()): Promise<string> {
-  if (!secret || !accessToken || !isActiveUserManagementStepUp(session, now)) throw new Error("Fresh re-authentication is required to manage users.");
+  if (!secret || !accessToken || !isActiveUserManagementStepUp(session, now) || !isStepUpWindowId(session.stepUpWindowId)) throw new Error("Fresh re-authentication is required to manage users.");
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(accessToken)));
   const tokenHash = Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
   const value = base64Url(new TextEncoder().encode(JSON.stringify({
     issuedAt: Math.floor(now / 1_000), authTime: session.authTime, expiresAt: session.stepUpExpiresAt,
     durationMinutes: session.stepUpDurationMinutes, tokenHash,
+    windowId: session.stepUpWindowId,
   })));
   return `${value}.${base64Url(await hmac(PROOF_PURPOSE + value, secret))}`;
 }

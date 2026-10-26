@@ -1,4 +1,17 @@
-import type { MovementEvent, Person, ScanAnalytics } from "./types";
+import type { AnalyticsPeriod, MovementEvent, Person, ScanAnalytics } from "./types";
+
+const RESTRICTED_DENIAL_CODES = new Set([
+  "asset_restricted",
+  "access_restricted",
+  "hardware_restricted",
+  "zone_not_permitted",
+  "cross_building_access",
+  "expired_pass",
+]);
+
+export function isRestrictedDenialCode(code?: string) {
+  return Boolean(code && RESTRICTED_DENIAL_CODES.has(code));
+}
 
 export const MONTH_NAMES = [
   "Jan",
@@ -41,19 +54,6 @@ export interface DayPattern {
 export type PersonSessionIndex = Map<string, DayPattern[]>;
 
 const MAX_BREAK_DURATION_MS = 2 * 60 * 60 * 1000;
-
-// Helper to convert time string (e.g. "5:59:38 PM") to decimal hours
-export const timeToDecimal = (timeStr: string): number => {
-  const match = timeStr.trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i);
-  if (!match) return Number.NaN;
-  const period = match[4].toUpperCase();
-  let hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  const seconds = Number(match[3] ?? 0);
-  if (period === "PM" && hours !== 12) hours += 12;
-  if (period === "AM" && hours === 12) hours = 0;
-  return hours + minutes / 60 + seconds / 3600;
-};
 
 function facilityDateParts(timestamp: number) {
   const parts = new Intl.DateTimeFormat("en-US", {
@@ -209,7 +209,6 @@ export const getDashboardKPIs = (
   let totalAutomatic = 0;
   let totalManual = 0;
   let totalRestricted = 0;
-  let totalExpired = 0;
 
   for (const m of movements) {
     if (m.result === "approved") {
@@ -218,17 +217,7 @@ export const getDashboardKPIs = (
       if (m.direction === "exit") totalExits++;
     } else {
       totalDenied++;
-      if (m.denialCode === "expired_pass") {
-        totalExpired++;
-      } else if (
-        m.denialCode === "asset_restricted" ||
-        m.denialCode === "access_restricted" ||
-        m.denialCode === "hardware_restricted" ||
-        m.denialCode === "zone_not_permitted" ||
-        m.denialCode === "cross_building_access"
-      ) {
-        totalRestricted++;
-      }
+      if (isRestrictedDenialCode(m.denialCode)) totalRestricted++;
     }
 
     if (m.scanType === "auto") {
@@ -247,8 +236,7 @@ export const getDashboardKPIs = (
     totalAutomatic,
     totalManual,
     totalRestricted,
-    totalExpired,
-    totalOtherDenied: Math.max(0, totalDenied - totalRestricted - totalExpired),
+    totalOtherDenied: Math.max(0, totalDenied - totalRestricted),
     activeInside:
       people.length > 0
         ? people.reduce((count, person) => count + (person.inside ? 1 : 0), 0)
@@ -259,8 +247,8 @@ export const getDashboardKPIs = (
 export const getDrillDownData = (movements: MovementEvent[]) => {
   let approvedAutoEntry = 0, approvedAutoExit = 0;
   let approvedManualEntry = 0, approvedManualExit = 0;
-  let deniedAutoRestricted = 0, deniedAutoExpired = 0;
-  let deniedManualRestricted = 0, deniedManualExpired = 0;
+  let deniedAutoRestricted = 0;
+  let deniedManualRestricted = 0;
   let deniedAutoOther = 0, deniedManualOther = 0;
   
   let approved = 0, denied = 0;
@@ -281,22 +269,14 @@ export const getDrillDownData = (movements: MovementEvent[]) => {
       }
     } else {
       denied++;
-      const restricted =
-        m.denialCode === "asset_restricted" ||
-        m.denialCode === "access_restricted" ||
-        m.denialCode === "hardware_restricted" ||
-        m.denialCode === "zone_not_permitted" ||
-        m.denialCode === "cross_building_access";
-      const expired = m.denialCode === "expired_pass";
+      const restricted = isRestrictedDenialCode(m.denialCode);
       if (m.scanType === "auto") {
         autoDen++;
         if (restricted) deniedAutoRestricted++;
-        else if (expired) deniedAutoExpired++;
         else deniedAutoOther++;
       } else {
         manualDen++;
         if (restricted) deniedManualRestricted++;
-        else if (expired) deniedManualExpired++;
         else deniedManualOther++;
       }
     }
@@ -341,7 +321,6 @@ export const getDrillDownData = (movements: MovementEvent[]) => {
             value: autoDen,
             children: [
               { id: "restrictedAuto", label: "Restricted", value: deniedAutoRestricted },
-              { id: "expiredAuto", label: "Expired", value: deniedAutoExpired },
               { id: "otherAuto", label: "Other", value: deniedAutoOther },
             ]
           },
@@ -351,7 +330,6 @@ export const getDrillDownData = (movements: MovementEvent[]) => {
             value: manualDen,
             children: [
               { id: "restrictedManual", label: "Restricted", value: deniedManualRestricted },
-              { id: "expiredManual", label: "Expired", value: deniedManualExpired },
               { id: "otherManual", label: "Other", value: deniedManualOther },
             ]
           }
@@ -360,3 +338,16 @@ export const getDrillDownData = (movements: MovementEvent[]) => {
     ]
   };
 };
+
+/** The same drilldown shape, populated from complete server counters. */
+export function getAggregateDrillDownData(period: AnalyticsPeriod) {
+  const shape = getDrillDownData([]);
+  const values = { ...period.breakdown, approved: period.scanAnalytics.totalApproved,
+    denied: period.scanAnalytics.totalDenied };
+  const assign = (node: (typeof shape.sections)[number]): void => {
+    node.value = values[node.id as keyof typeof values] ?? 0;
+    if ("children" in node) node.children.forEach(child => assign(child as typeof node));
+  };
+  shape.sections.forEach(assign);
+  return { ...shape, totalScans: period.scanAnalytics.totalScans };
+}

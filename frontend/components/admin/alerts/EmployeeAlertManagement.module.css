@@ -1,5 +1,8 @@
 .panel {
   container-type: inline-size;
+  display: flex;
+  max-height: min(82dvh, 900px);
+  flex-direction: column;
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--admin-border);
@@ -14,12 +17,13 @@
 }
 
 .header { justify-content: space-between; flex-wrap: wrap; gap: 8px 20px; padding: 20px 24px; }
+.header, .selector { flex: 0 0 auto; }
 .header h2 { margin: 0; font-size: 21px; font-weight: 700; line-height: 1.35; letter-spacing: -.025em; }
 .historyLink { min-height: 44px; gap: 5px; color: var(--ui-text-secondary); font-size: 15px; font-weight: 600; text-decoration: none; white-space: nowrap; }
 .historyLink:hover { color: var(--ui-text-primary); text-decoration: underline; text-underline-offset: 4px; }
 .selector { padding: 18px 24px; border-block: 1px solid var(--admin-border); background: color-mix(in srgb, var(--admin-bg) 45%, transparent); }
 .employeeField { display: grid; min-width: 0; gap: 9px; font-size: 15px; font-weight: 600; color: var(--ui-text-secondary); }
-.employeeField select, .resetControls input {
+.employeeField select, .employeeField input, .resetControls input {
   box-sizing: border-box;
   width: 100%;
   min-width: 0;
@@ -34,10 +38,11 @@
   font-weight: 500;
   line-height: 1.4;
 }
-.sections { display: grid; gap: 0; padding: 0 24px; }
+.sections { display: grid; min-height: 0; flex: 1 1 auto; gap: 0; padding: 0 24px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-border) transparent; }
 .rules, .warnings { display: grid; min-width: 0; gap: 16px; padding-block: 24px; }
 .rules { border-bottom: 1px solid var(--admin-border); }
-.employeeControlsGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 20px; margin-top: 12px; }
+.employeeControlsGrid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); align-items: stretch; gap: 24px; margin-top: 12px; }
+.employeeControlsSingle { grid-template-columns: minmax(0, 1fr); }
 .employeeControlsGrid > .warnings { padding-block: 0; }
 .sectionHeading { min-height: 44px; justify-content: space-between; gap: 12px; }
 .sectionHeading h3 { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.4; }
@@ -49,23 +54,25 @@
 .rule > span { display: grid; min-width: 0; gap: 4px; }
 .rule strong { font-size: 16px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
 .rule small { color: var(--ui-text-secondary); font-size: 14px; line-height: 1.4; }
-.skipDates { display: grid; align-content: start; gap: 12px; padding: 0; }
+.skipDates { display: flex; min-height: 100%; flex-direction: column; gap: 12px; padding: 0; }
 .skipDates h4 { margin: 0; color: var(--ui-text-primary); font-size: 18px; font-weight: 650; line-height: 1.4; }
 .skipDates p { margin: 3px 0 0; color: var(--ui-text-secondary); font-size: 14px; line-height: 1.5; }
 .skipDateControls { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.skipDateFooter { display: flex; justify-content: flex-end; }
+.skipDateFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: auto; }
+.profileButton { color: var(--ui-text-secondary); }
+.profileButton:hover:not(:disabled) { color: var(--ui-text-primary); }
 .dateField input { box-sizing: border-box; min-height: 44px; padding: 9px 12px; border: 1px solid var(--admin-border); border-radius: 9px; background: var(--admin-bg); color: var(--ui-text-primary); font: inherit; font-size: 15px; }
 .dateField input:hover { border-color: var(--ui-border-hover); }
 .skipDateList { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .skipDateList li { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 3px 5px 3px 10px; border: 1px solid var(--admin-border); border-radius: 8px; color: var(--ui-text-primary); font-size: 14px; font-weight: 550; }
 .skipDateList button { display: grid; width: 26px; height: 26px; place-items: center; padding: 0; border: 0; border-radius: 6px; background: transparent; color: var(--ui-text-secondary); cursor: pointer; }
 .skipDateList button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-text-primary) 7%, var(--admin-bg)); color: var(--ui-text-primary); }
-.skipSchedule { display: grid; gap: 14px; min-width: 0; padding: 16px; border: 1px solid transparent; border-radius: 10px; background: transparent; transition: border-color 150ms ease; }
+.skipSchedule { display: flex; max-height: min(58dvh, 600px); flex-direction: column; gap: 14px; min-width: 0; padding: 16px; overflow: hidden; border: 1px solid transparent; border-radius: 10px; background: transparent; transition: border-color 150ms ease; }
 .skipSchedule:hover { border-color: var(--ui-border-hover); }
 .skipScheduleHeading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; }
 .skipScheduleHeading h3 { margin: 0; color: var(--ui-text-primary); font-size: 17px; font-weight: 700; line-height: 1.4; }
 .skipScheduleHeading > span { color: var(--ui-text-secondary); font-size: 13px; font-weight: 600; white-space: nowrap; }
-.skipScheduleList { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
+.skipScheduleList { display: grid; min-height: 0; gap: 0; margin: 0; padding: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-border) transparent; list-style: none; }
 .skipScheduleList li { display: grid; grid-template-columns: minmax(130px, .35fr) minmax(0, 1fr); align-items: start; gap: 10px 18px; padding: 12px 0; border-bottom: 1px solid var(--admin-border); }
 .skipScheduleList li:first-child { padding-top: 0; }
 .skipScheduleList li:last-child { padding-bottom: 0; border-bottom: 0; }
@@ -117,10 +124,15 @@
 @media (prefers-reduced-motion: reduce) { .loadingIcon { animation: none; } }
 @container (max-width: 580px) { .ruleList, .employeeControlsGrid { grid-template-columns: minmax(0, 1fr); } }
 @container (max-width: 420px) {
+  .warningOverview { grid-template-columns: minmax(0, 1fr); }
+  .warningOverview .historyLink { justify-self: start; }
+  .warningCount > span { white-space: normal; }
   .header { padding: 16px; gap: 4px 16px; }
   .header h2 { font-size: 20px; }
   .selector { padding: 16px; }
   .sections { padding-inline: 16px; }
+  .panel { max-height: 76dvh; }
+  .skipSchedule { max-height: 50dvh; }
   .rules, .warnings { padding-block: 20px; }
   .resetControls { grid-template-columns: minmax(0, 1fr); }
   .skipScheduleList li { grid-template-columns: minmax(0, 1fr); gap: 6px; }

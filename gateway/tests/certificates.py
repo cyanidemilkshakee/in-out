@@ -20,7 +20,14 @@ def issue(name, common_name, issuer=None, server=False, expired=False):
         .public_key(key.public_key()).serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(days=2))
         .not_valid_after(now + timedelta(days=-1 if expired else 2))
-        .add_extension(x509.BasicConstraints(ca=issuer is None, path_length=None), critical=True))
+        .add_extension(x509.BasicConstraints(ca=issuer is None, path_length=None), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .add_extension(x509.AuthorityKeyIdentifier.from_issuer_public_key(
+            issuer[0].public_key() if issuer else key.public_key()), critical=False)
+        .add_extension(x509.KeyUsage(digital_signature=True, content_commitment=False,
+            key_encipherment=issuer is not None, data_encipherment=False,
+            key_agreement=False, key_cert_sign=issuer is None, crl_sign=issuer is None,
+            encipher_only=None, decipher_only=None), critical=True))
     if issuer:
         builder = builder.add_extension(x509.ExtendedKeyUsage([
             ExtendedKeyUsageOID.SERVER_AUTH if server else ExtendedKeyUsageOID.CLIENT_AUTH]), critical=False)

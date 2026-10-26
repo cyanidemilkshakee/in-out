@@ -1,12 +1,13 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { emptyData } from "./dataDefaults";
 import { scopeForPath } from "./dataHelpers";
 import { useDataActions as useDataActionSet } from "./useDataActions";
 import type { DataActions, DataProviderProps, DataState } from "./dataTypes";
 import { applyPresenceUpdate, parsePresenceUpdate, type PresenceUpdate } from "./presenceUpdates";
+import { createRefreshCoordinator } from "../../lib/refreshCoordinator";
 
 export type { DataActions, DataState } from "./dataTypes";
 
@@ -18,6 +19,7 @@ export function DataProvider({
   service,
   initialData,
   initialScope,
+  clientManaged = false,
 }: DataProviderProps) {
   const pathname = usePathname();
   const scope = scopeForPath(pathname);
@@ -32,8 +34,26 @@ export function DataProvider({
   const bufferedUpdates = useRef<Array<{ revision: number; update: PresenceUpdate }>>([]);
   const snapshotInFlight = useRef(false);
   const reconnectRefresh = useRef<number | undefined>(undefined);
+  const [snapshotCursor, setSnapshotCursor] = useState({ revision: initialData?.eventRevision, generation: 0 });
 
-  const refresh = useCallback(async () => {
+  useEffect(() => {
+    if (snapshotCursor.revision === undefined || !pathname.startsWith("/admin")) return;
+    let active = true;
+    // Child effects run before the shared chrome installs its listener.
+    queueMicrotask(() => {
+      if (active) window.dispatchEvent(new CustomEvent("inout:snapshot-revision", { detail: { revision: snapshotCursor.revision, scope } }));
+    });
+    return () => { active = false; };
+  }, [snapshotCursor, scope, pathname]);
+
+  useEffect(() => {
+    if (clientManaged && pathname.startsWith("/admin")) queueMicrotask(() => {
+      window.dispatchEvent(new Event("inout:snapshot-pending"));
+    });
+  }, [clientManaged, pathname]);
+
+  const loadSnapshot = useCallback(async () => {
+    if (clientManaged) return;
     const version = ++refreshVersion.current;
     const revisionAtStart = streamRevision.current;
     snapshotInFlight.current = true;
@@ -48,6 +68,7 @@ export function DataProvider({
       const updates = bufferedUpdates.current.filter(item => item.revision > revisionAtStart);
       const base: DataState = { ...emptyData, ...snapshot, isLoading: false, error: null };
       setState(updates.reduce((next, item) => applyPresenceUpdate(next, item.update), base));
+      setSnapshotCursor(previous => ({ revision: snapshot.eventRevision, generation: previous.generation + 1 }));
       bufferedUpdates.current = [];
     } catch (error) {
       if (version !== refreshVersion.current) return;
@@ -59,17 +80,43 @@ export function DataProvider({
     } finally {
       if (version === refreshVersion.current) snapshotInFlight.current = false;
     }
-  }, [scope, service]);
+  }, [scope, service, clientManaged]);
+
+  const refreshQueue = useMemo(() => {
+    const queue = {
+      active: true,
+      coordinator: createRefreshCoordinator(async () => {
+        if (queue.active) await loadSnapshot();
+      }),
+    };
+    return queue;
+  }, [loadSnapshot]);
+  const refresh = useCallback(() => {
+    if (!refreshQueue.active) return Promise.resolve();
+    // Keep an already-running snapshot from undoing an optimistic mutation
+    // while its single follow-up waits for that request to finish.
+    refreshVersion.current++;
+    return refreshQueue.coordinator.request(true);
+  }, [refreshQueue]);
+  const syncSnapshot = useCallback(() => refreshQueue.active
+    ? refreshQueue.coordinator.request() : Promise.resolve(), [refreshQueue]);
 
   useEffect(() => {
+    refreshQueue.active = true;
+    const stop = () => {
+      refreshQueue.active = false;
+      refreshQueue.coordinator.clearPending();
+      refreshVersion.current++;
+    };
     if (hydratedScope.current === scope) {
       hydratedScope.current = undefined;
-      return () => { refreshVersion.current++; };
+      return stop;
     }
-    setState({ ...emptyData, isLoading: true, error: null });
+    setState({ ...emptyData, isLoading: !clientManaged, error: null });
+    // A remounted effect must not join a read invalidated by its cleanup.
     void refresh();
-    return () => { refreshVersion.current++; };
-  }, [refresh, scope]);
+    return stop;
+  }, [refresh, refreshQueue, scope, clientManaged]);
 
   useEffect(() => {
     if (scope === "profile") return;
@@ -92,7 +139,7 @@ export function DataProvider({
       const receive = (event: Event) => receiveMessage((event as CustomEvent<string>).detail);
       const syncFromServer = () => void refresh();
       const restore = () => {
-        if (document.visibilityState === "visible") void refresh();
+        if (document.visibilityState === "visible") void syncSnapshot();
       };
       window.addEventListener("inout:presence-message", receive);
       window.addEventListener("inout:presence-sync", syncFromServer);
@@ -107,30 +154,38 @@ export function DataProvider({
         document.removeEventListener("visibilitychange", restore);
       };
     }
-    const eventSource = new EventSource("/api/presence");
+    const eventSource = new EventSource(snapshotCursor.revision === undefined ? "/api/presence" : `/api/presence?since=${snapshotCursor.revision}`);
+    let needsSnapshot = false;
+    const recoveryTimer = window.setInterval(() => { if (needsSnapshot) void refresh(); }, 5_000);
     eventSource.onopen = () => {
       // Reconcile the initial snapshot and any gap left by a lost connection.
       window.clearTimeout(reconnectRefresh.current);
-      reconnectRefresh.current = window.setTimeout(() => void refresh(), 250);
+      if (snapshotCursor.revision === undefined) reconnectRefresh.current = window.setTimeout(() => void refresh(), 250);
     };
     eventSource.onmessage = (event) => {
       receiveMessage(event.data);
     };
+    eventSource.addEventListener("snapshot_required", () => {
+      needsSnapshot = true;
+      eventSource.close();
+      void refresh();
+    });
     const restore = () => {
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") void syncSnapshot();
     };
     window.addEventListener("focus", restore);
     window.addEventListener("online", restore);
     document.addEventListener("visibilitychange", restore);
     return () => {
       eventSource.close();
+      window.clearInterval(recoveryTimer);
       window.removeEventListener("focus", restore);
       window.removeEventListener("online", restore);
       document.removeEventListener("visibilitychange", restore);
       window.clearTimeout(reconnectRefresh.current);
       reconnectRefresh.current = undefined;
     };
-  }, [refresh, scope, pathname]);
+  }, [refresh, syncSnapshot, scope, pathname, snapshotCursor]);
 
   const actions = useDataActionSet({ service, setState, refresh });
 

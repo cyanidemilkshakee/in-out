@@ -4,7 +4,7 @@ import os
 import sys
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -16,7 +16,7 @@ from sqlalchemy import select, func, delete
 import test_database as database_fixture
 from auth import verify_admin_request, verify_terminal_access_request
 from models import (Alert, AlertRule, AlertReview, WarningReset, Subject, Person,
-    AuditEvent, CriticalEntryRestriction, PresenceState, Movement)
+    AuditEvent, CriticalEntryRestriction, PresenceState, Movement, AlertRuleAssignment)
 from alert_reviews import AlertReviewInput, WarningResetInput, review_alert, reset_subject_warnings
 from critical_entry_restrictions import activate_critical_entry_restrictions
 
@@ -49,9 +49,9 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "review-admin"}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
 
-    async def create_alert(self, *, subject_id="p1", barcode=None, severity="medium", **extra):
+    async def create_alert(self, *, subject_id="p1", barcode=None, severity="medium", created_at=None, **extra):
         alert_id = "AL-" + uuid.uuid4().hex
-        now = datetime.now(timezone.utc)
+        now = created_at or datetime.now(timezone.utc)
         data = {"id": alert_id, "title": "No break recorded", "reason": "Full workday without a break",
             "severity": severity, "status": "open", "createdAt": now.isoformat(), **extra}
         if subject_id is not None:
@@ -71,6 +71,10 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
             body["reason"] = reason
         with patch("routers.alerts.publish_data_changed", new=AsyncMock()):
             return await self.client.post(f"/v1/alerts/{alert_id}/review", json=body)
+
+    async def acknowledge(self, alert_id):
+        with patch("routers.alerts.publish_presence_update", new=AsyncMock()):
+            return await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
 
     async def reset(self, subject_id="p1", reason="Warnings checked and entry may resume"):
         with patch("routers.alerts.publish_data_changed", new=AsyncMock()):
@@ -138,6 +142,106 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         active = (await self.client.get("/v1/alerts", params={"status": "active"})).json()
         self.assertEqual(active["items"], [])
         self.assertTrue(next(row for row in active["warnings"] if row["subjectId"] == "p1")["entryRestriction"]["active"])
+
+    async def test_newer_alert_requires_final_review_even_if_older_alert_was_acknowledged(self):
+        self.authorize()
+        now = datetime.now(timezone.utc)
+        older = await self.create_alert(created_at=now)
+        newer = await self.create_alert(created_at=now + timedelta(seconds=1))
+
+        self.assertEqual((await self.acknowledge(newer)).status_code, 409)
+        blocked_review = await self.review(newer, "excused", "Trying to skip the first alert")
+        self.assertEqual(blocked_review.status_code, 409, blocked_review.text)
+        self.assertEqual((await self.acknowledge(older)).status_code, 200)
+        still_blocked = await self.review(newer, "excused", "Acknowledge is not a final review")
+        self.assertEqual(still_blocked.status_code, 409, still_blocked.text)
+        reviewed_older = await self.review(older)
+        self.assertEqual(reviewed_older.status_code, 200, reviewed_older.text)
+        allowed_review = await self.review(newer)
+        self.assertEqual(allowed_review.status_code, 200, allowed_review.text)
+
+    async def test_fourth_alert_requires_reset_after_three_confirmed_warnings(self):
+        self.authorize()
+        now = datetime.now(timezone.utc)
+        for index in range(3):
+            alert_id = await self.create_alert(created_at=now + timedelta(seconds=index))
+            accepted = await self.review(alert_id)
+            self.assertEqual(accepted.status_code, 200, accepted.text)
+
+        fourth = await self.create_alert(created_at=now + timedelta(seconds=3))
+        self.assertEqual((await self.acknowledge(fourth)).status_code, 409)
+        blocked_accept = await self.review(fourth)
+        self.assertEqual(blocked_accept.status_code, 409, blocked_accept.text)
+        blocked_excuse = await self.review(fourth, "excused", "Do not bypass the warning reset")
+        self.assertEqual(blocked_excuse.status_code, 409, blocked_excuse.text)
+        reset = await self.reset()
+        self.assertEqual(reset.status_code, 200, reset.text)
+        reviewed = await self.review(fourth)
+        self.assertEqual(reviewed.status_code, 200, reviewed.text)
+        self.assertEqual(reviewed.json()["alert"]["status"], "warned")
+
+    async def test_warning_directory_includes_registered_visitors(self):
+        self.authorize()
+        async with self.sessions() as db:
+            db.add(Subject(id="v1", kind="visitor", barcode="VISITOR-1",
+                person=Person(data={"name": "Visitor One", "status": "active"})))
+            await db.commit()
+
+        response = await self.client.get("/v1/alerts")
+        self.assertEqual(response.status_code, 200, response.text)
+        visitor = next((item for item in response.json()["warnings"] if item["subjectId"] == "v1"), None)
+        self.assertIsNotNone(visitor)
+        self.assertEqual((visitor["subjectType"], visitor["subjectName"], visitor["count"]),
+            ("visitor", "Visitor One", 0))
+
+    async def test_command_view_pages_pending_alerts_but_keeps_global_warning_count_and_scheduled_skips(self):
+        self.authorize()
+        now = datetime.now(timezone.utc)
+        first = await self.create_alert(created_at=now)
+        second = await self.create_alert(created_at=now + timedelta(seconds=1))
+        self.assertEqual((await self.acknowledge(first)).status_code, 200)
+        from alert_rule_assignments import irregularity_skip_date_window
+        today, _ = irregularity_skip_date_window()
+        future = (today + timedelta(days=1)).isoformat()
+        async with self.sessions() as db:
+            db.add(Subject(id="p2", kind="employee", barcode="EMP-2", person=Person(data={"name": "Bob", "status": "active"})))
+            await db.flush()
+            db.add(AlertReview(alert_id="retained-warning", subject_id="p2", decision="confirmed", reason="Verified",
+                reviewed_at=now, reviewed_by="admin", alert_created_at=now,
+                alert_data={"subjectId": "p2", "title": "Attendance irregularity", "severity": "medium", "status": "warned"}))
+            db.add(AlertRuleAssignment(subject_id="p2", rule_ids=[], rules_customized=False,
+                irregularity_skip_dates=[future], revision=1, updated_by="admin", updated_at=now))
+            await db.commit()
+        response = await self.client.get("/v1/alerts", params={"view": "command", "limit": 1, "offset": 0, "sortDirection": "asc"})
+        self.assertEqual(response.status_code, 200, response.text)
+        page = response.json()
+        self.assertEqual(page["total"], 2)
+        self.assertEqual([item["id"] for item in page["items"]], [first])
+        self.assertEqual(page["summary"], {"openCount": 2, "confirmedWarnings": 1})
+        self.assertEqual([item["subjectId"] for item in page["warnings"]], ["p1"])
+        self.assertEqual([item["id"] for item in page["people"]], ["p1"])
+        self.assertEqual([(item["subjectId"], item["irregularitySkipDates"]) for item in page["assignments"]], [("p2", [future])])
+        next_page = await self.client.get("/v1/alerts", params={"view": "command", "limit": 1, "offset": 1, "sortDirection": "asc"})
+        self.assertEqual([item["id"] for item in next_page.json()["items"]], [second])
+        subject = await self.client.get("/v1/alerts", params={"view": "subject", "subjectId": "p2", "status": "warned", "limit": 3})
+        self.assertEqual(subject.status_code, 200, subject.text)
+        detail = subject.json()
+        self.assertEqual([item["id"] for item in detail["items"]], ["retained-warning"])
+        self.assertEqual([item["subjectId"] for item in detail["warnings"]], ["p2"])
+        self.assertEqual(detail["warnings"][0]["count"], 1)
+        self.assertEqual([item["id"] for item in detail["people"]], ["p2"])
+        self.assertEqual([item["subjectId"] for item in detail["assignments"]], ["p2"])
+        self.assertEqual(detail["totalSubjectAlerts"], 1)
+        self.assertEqual([item["id"] for item in detail["currentWarnings"]], ["retained-warning"])
+        self.assertEqual([item["id"] for item in detail["recentAlerts"]], ["retained-warning"])
+        pending = await self.client.get("/v1/alerts", params={"view": "subject", "subjectId": "p1", "reviewState": "needs_review", "limit": 1})
+        self.assertEqual(pending.json()["total"], 2)
+        self.assertEqual(pending.json()["totalSubjectAlerts"], 2)
+        self.assertEqual(len(pending.json()["recentAlerts"]), 2)
+        reviewed = await self.client.get("/v1/alerts", params={"view": "subject", "subjectId": "p2", "reviewState": "reviewed", "limit": 1})
+        self.assertEqual(reviewed.json()["total"], 1)
+        self.assertEqual((await self.client.get("/v1/alerts", params={"view": "subject", "subjectId": "p1", "reviewState": "reviewed"})).json()["total"], 0)
+        self.assertEqual((await self.client.get("/v1/alerts", params={"view": "subject"})).status_code, 422)
 
     async def test_binding_uses_registered_identity_or_unique_barcode_never_name(self):
         self.authorize()
@@ -219,7 +323,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async def scan():
             with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
                 return await self.client.post("/v1/terminal/scans",
-                    json={"barcode": "p1", "checkpointId": "cp-main", "direction": "entry"},
+                    json={"barcode": "p1", "checkpointId": "cp-main"},
                     headers={"Idempotency-Key": str(uuid.uuid4())})
         blocked = await scan()
         self.assertFalse(blocked.json()["allowed"], blocked.text)
@@ -290,6 +394,42 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             self.assertEqual({row.id: row.data for row in (await db.scalars(select(AlertRule))).all()}, before)
         self.assertEqual(await self.audit_count(), 0)
+
+    async def test_rule_listing_uses_canonical_ids_and_counts_for_stale_or_missing_serialized_ids(self):
+        from rule_engine import default_alert_rules
+
+        self.authorize()
+        defaults = {rule["id"]: rule for rule in default_alert_rules()}
+        stale = {**defaults["rule-visitor-overstay"], "id": "stale-serialized-id",
+                 "ruleId": "forged-rule-reference", "enabled": False}
+        missing = dict(defaults["rule-cross-building-scan"])
+        missing.pop("id")
+        async with self.sessions() as db:
+            for rule_id, data in (("rule-visitor-overstay", stale), ("rule-cross-building-scan", missing)):
+                row = await db.get(AlertRule, rule_id)
+                if row is None:
+                    db.add(AlertRule(id=rule_id, data=data))
+                else:
+                    row.data = data
+            await db.commit()
+        await self.create_alert(ruleId="rule-visitor-overstay")
+        await self.create_alert(ruleId="rule-visitor-overstay")
+        await self.create_alert(ruleId="rule-cross-building-scan")
+
+        response = await self.client.get("/v1/alerts")
+        self.assertEqual(response.status_code, 200, response.text)
+        rules = {rule["id"]: rule for rule in response.json()["rules"]}
+        self.assertEqual(set(rules), set(defaults))
+        self.assertEqual(rules["rule-visitor-overstay"]["recentTriggers"], 2)
+        self.assertEqual(rules["rule-cross-building-scan"]["recentTriggers"], 1)
+        self.assertEqual(rules["rule-no-break"]["recentTriggers"], 0)
+        self.assertFalse(rules["rule-visitor-overstay"]["enabled"])
+        self.assertEqual(rules["rule-visitor-overstay"]["eligibleSubjectTypes"], ["visitor"])
+        self.assertEqual(rules["rule-cross-building-scan"]["eligibleSubjectTypes"], ["employee", "visitor"])
+        self.assertNotIn("ruleId", rules["rule-visitor-overstay"])
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(AlertRule, "rule-visitor-overstay")).data, stale)
+            self.assertEqual((await db.get(AlertRule, "rule-cross-building-scan")).data, missing)
 
     async def test_concurrent_same_review_creates_one_count_and_conflicting_review_is_final(self):
         alert_id = await self.create_alert()

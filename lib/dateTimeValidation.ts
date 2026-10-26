@@ -93,25 +93,3 @@ export function validateHistoricalDateRange(start: string, end: string, now = ne
   else if (!errors.start && start && end && start > end) errors.end = "Start date must not be after end date.";
   return errors;
 }
-
-export function historicalDateTimeLimits(start: string, end: string, now = new Date()) {
-  const maximum = Math.floor(now.getTime() / MINUTE_MS) * MINUTE_MS;
-  const first = parseFacilityDateTime(start);
-  const last = parseFacilityDateTime(end);
-  return {
-    start: { max: facilityInput(last !== undefined ? Math.min(maximum, last - MINUTE_MS) : maximum) },
-    end: { min: first !== undefined ? facilityInput(first + MINUTE_MS) : undefined, max: facilityInput(maximum) },
-  };
-}
-
-export function validateHistoricalDateTimeRange(start: string, end: string, now = new Date()): DateRangeErrors {
-  const errors: DateRangeErrors = {};
-  const first = parseFacilityDateTime(start);
-  const last = parseFacilityDateTime(end);
-  if (first === undefined) errors.start = "Enter a valid entry date and time.";
-  else if (first > now.getTime()) errors.start = "Entry time cannot be in the future.";
-  if (last === undefined) errors.end = "Enter a valid exit date and time.";
-  else if (last > now.getTime()) errors.end = "Exit time cannot be in the future.";
-  else if (first !== undefined && last <= first) errors.end = "Exit time must be after entry time.";
-  return errors;
-}
