@@ -41,6 +41,7 @@ export type DataActions = {
   queryRegistryPage: DataService["queryRegistryPage"];
   queryRegistrySubjects: DataService["queryRegistrySubjects"];
   querySubjectProfile: DataService["querySubjectProfile"];
+  loadMoreTerminalVisitors: (cursor?: string) => Promise<void>;
   refresh: () => Promise<void>;
   queryMovements: (query: MovementQuery, signal?: AbortSignal) => Promise<MovementPage>;
   queryDashboardAnalytics: (query: DashboardAnalyticsQuery, signal?: AbortSignal) => Promise<DashboardAnalytics>;

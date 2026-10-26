@@ -73,7 +73,7 @@ export function TerminalActivity({ movements, requests }: { movements: MovementE
                 const expired = manualApproval && request.status === "approved" && !request.consumedAt &&
                   Boolean(request.validTo) && Date.parse(request.validTo!) <= now.getTime();
                 const label = request.status === "pending" ? "Waiting" : request.status === "denied" ? "Denied" :
-                  !manualApproval ? "Approved" : request.consumedAt ? "Used" : expired ? "Expired" : "Rescan";
+                  !manualApproval ? "Approved" : request.consumedAt ? "Used" : expired ? "Expired" : "Approved · rescan";
                 return <tr key={request.id}>
                   <td><strong>{request.subjectName || "Unregistered barcode"}</strong><small>{request.operatorNote || "No note"}</small></td>
                   <td><span className={styles.direction} data-direction={request.direction}>{request.direction === "exit" ? <ArrowUpRight /> : <ArrowDownLeft />}{request.direction === "exit" ? "Exit" : "Entry"}</span></td>
@@ -134,7 +134,7 @@ export function TerminalNotifications({
           const timestamp = hasDecision ? request.decidedAt ?? request.createdAt : request.createdAt;
           const dismissing = dismissingId === request.id;
           const statusLabel = request.status === "approved"
-            ? request.consumedAt ? "Used" : approvalExpired ? "Expired" : approvalReady ? "Rescan" : "Approved"
+            ? request.consumedAt ? "Used" : approvalExpired ? "Expired" : approvalReady ? "Approved · rescan" : "Approved"
             : request.status === "denied" ? `${direction} denied` : "Awaiting decision";
           return <li key={request.id}>
             <div className={styles.pendingIdentityGroup}>

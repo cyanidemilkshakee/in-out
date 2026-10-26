@@ -1,0 +1,28 @@
+.typeSelector .typeChoice {
+  color: var(--ui-text-primary);
+}
+
+.typeSelector .typeChoice svg {
+  color: var(--ui-text-positive);
+}
+
+.typeSelector .typeChoice span,
+.fields span {
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.typeSelector .typeChoice[data-selected="true"] {
+  border-color: var(--ui-text-positive);
+  background: var(--ui-text-positive);
+  color: var(--ui-text-inverse);
+}
+
+.typeSelector .typeChoice[data-selected="true"] svg {
+  color: currentColor;
+}
+
+.typeSelector .typeChoice:hover:not([data-selected="true"]) {
+  border-color: var(--ui-text-positive);
+  background: color-mix(in srgb, var(--ui-text-positive) 8%, var(--admin-surface));
+}

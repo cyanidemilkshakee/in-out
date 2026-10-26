@@ -1,5 +1,4 @@
 """Typed request effects and validation, without external services."""
-import json
 import sys
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -13,7 +12,7 @@ from models import Subject, Person, HardwareAsset, PermissionRequestModel, Acces
 from schemas import PermissionRequestCreate, ManualReviewPayload, PermissionDecision
 from routers.permissions import create_permission_request
 from routers.terminal import create_manual_review
-from permission_decisions import apply_permission_decision, publish_decision, zone_permission_version, custody_version
+from permission_decisions import apply_permission_decision, decision_event, zone_permission_version, custody_version
 
 
 def scalar_result(value):
@@ -144,7 +143,7 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         person = Person(subject_id="employee", data={"name": "New employee"})
         db = session()
         db.execute.side_effect = [scalar_result(subject), scalar_result(asset)]
-        db.get.side_effect = [checkpoint, employee, person]
+        db.get.side_effect = [checkpoint, checkpoint, subject, employee, employee, person]
         payload = PermissionRequestCreate(subject_id="asset", checkpoint_id="cp-main", request_type="hardware_custody", reason="Transfer", carrier_id="employee", carrier_name="Forged")
         with patch("routers.permissions.enqueue_decision", new=AsyncMock()) as enqueue:
             result = await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["admin"]}})
@@ -158,7 +157,10 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
     async def test_create_custody_rejects_non_employee(self):
         db = session()
         db.execute.side_effect = [scalar_result(Subject(id="asset", kind="hardware", barcode="asset")), scalar_result(HardwareAsset(data={"name": "Laptop"}))]
-        db.get.side_effect = [Checkpoint(id="cp-main", data={"zone": "public"}), Subject(id="visitor", kind="visitor", barcode="visitor")]
+        checkpoint = Checkpoint(id="cp-main", data={"zone": "public"})
+        asset_subject = Subject(id="asset", kind="hardware", barcode="asset")
+        visitor = Subject(id="visitor", kind="visitor", barcode="visitor")
+        db.get.side_effect = [checkpoint, checkpoint, asset_subject, visitor]
         payload = PermissionRequestCreate(subject_id="asset", checkpoint_id="cp-main", request_type="hardware_custody", reason="Transfer", carrier_id="visitor")
         with self.assertRaises(HTTPException) as error:
             await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["admin"]}})
@@ -180,13 +182,14 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         db = session()
         db.execute.return_value = scalar_result(Subject(id="visitor", kind="visitor", barcode="visitor"))
         db.scalar.return_value = existing
+        db.get.return_value = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"})
         payload = PermissionRequestCreate(subject_id="visitor", checkpoint_id="cp-main", request_type="visitor", reason="Visit")
         result = await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["admin"]}})
         self.assertEqual(result["id"], "existing")
         db.add.assert_not_called()
 
     async def test_publication_carries_request_access_permission_and_presence(self):
-        event = await publish_decision({"request": {"id": "req", "subjectId": "visitor"}, "permission": {"id": "permission"}, "person": {"id": "visitor"}})
+        event = decision_event({"request": {"id": "req", "subjectId": "visitor"}, "permission": {"id": "permission"}, "person": {"id": "visitor"}})
         self.assertEqual(set(event), {"type", "requestId", "subject_id", "movement", "request", "permission", "people", "hardwareAssets"})
         self.assertEqual(event["permission"], {"id": "permission"})
         self.assertEqual(event["people"], [{"id": "visitor"}])
@@ -198,8 +201,6 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
             None,
         ]
         db.get.return_value = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"})
-        temporal = Mock()
-        temporal.start_workflow = AsyncMock()
         source = Mock(
             subject_id=None,
             occurred_at=datetime.now(timezone.utc),
@@ -210,10 +211,7 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
             barcode="unknown", checkpointId="cp-main", eventId="denied-scan",
             operatorNote="Checked photo ID",
         )
-        with patch("routers.terminal.review_source", new=AsyncMock(return_value=source)), \
-             patch("routers.terminal.pending_manual_review", new=AsyncMock(return_value=None)), \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(return_value=temporal)), \
-             patch("routers.terminal.enqueue_presence", new=AsyncMock()) as enqueue:
+        with patch("routers.terminal.review_source", new=AsyncMock(return_value=source)), patch("routers.terminal.pending_manual_review", new=AsyncMock(return_value=None)), patch("routers.terminal.enqueue_presence", new=AsyncMock()) as enqueue:
             request = await create_manual_review(payload, db, {"sub": "operator"})
         db.add.assert_called_once()
         db.commit.assert_awaited_once()

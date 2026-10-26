@@ -11,10 +11,9 @@ from sqlalchemy.orm import selectinload
 
 from models import (Subject, Person, HardwareAsset, AccessPermission, PresenceState,
                     PermissionRequestModel, Movement, Checkpoint, AuditEvent)
-from redis_client import publish_presence_update
 from movement_logic import _current_date, _current_time
 from access_validation import (parse_validity, require_registered_checkpoint,
-    validate_permission_window, validate_registered_zones, validate_zones)
+    validate_permission_window, validate_registered_zones)
 from facility_zones import building_for_checkpoint, canonical_checkpoint_id, normalize_facility_document
 from schemas import manual_approval_minutes
 from manual_review_policy import MANUAL_REVIEW_TIMEOUT_MINUTES, manual_access_snapshot, revised_access_data
@@ -519,8 +518,3 @@ async def enqueue_decision(db, result):
     """Call after domain writes/locks and before committing their transaction."""
     from event_outbox import enqueue_presence
     return await enqueue_presence(db, decision_event(result))
-
-
-async def publish_decision(result):
-    """Compatibility event builder; delivery belongs to the durable dispatcher."""
-    return decision_event(result)

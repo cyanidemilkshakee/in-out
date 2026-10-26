@@ -60,6 +60,15 @@
   gap: 16px;
 }
 
+.setupForm {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid var(--border, #d2ddd7);
+}
+
 .form :global(.identity-duration-select) {
   display: flex;
   flex-direction: column;
@@ -185,6 +194,34 @@
 
 .recoveryLink:hover {
   text-decoration: underline;
+}
+
+.homeButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--border, #d2ddd7);
+  border-radius: var(--radius, 9px);
+  background: transparent;
+  color: var(--ui-text-primary, #17211d);
+  font-size: var(--type-14, 14px);
+  font-weight: var(--weight-semibold, 600);
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.homeButton:hover {
+  border-color: var(--ui-accent, #087443);
+  background: var(--bg, #f5f8f6);
+}
+
+.homeButton:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ui-accent, #087443) 18%, transparent);
+  outline-offset: 2px;
 }
 
 .errorBanner {

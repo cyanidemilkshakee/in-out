@@ -4,6 +4,8 @@ import { useId, useState, type FormEventHandler } from "react";
 import { Check, Eye, EyeOff, ScanLine, ShieldCheck } from "lucide-react";
 import type { FacilityCheckpoint } from "../../../lib/facilityZones";
 import type { ManagedUser } from "../../../services/keycloakUserService";
+import { PasswordRequirements } from "../PasswordRequirements";
+import { PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH } from "../../../lib/passwordPolicy";
 import styles from "./ManagedUserForm.module.css";
 
 export type ManagedUserFormValue = {
@@ -81,7 +83,8 @@ export function CreateUserForm({ form, onChange, busy, onSubmit, onCancel, check
         <AccessFields form={form} onChange={onChange} checkpoints={checkpoints} />
         <section className={`${styles.section} ${styles.passwordSection}`} aria-label="Password settings">
           <label className={styles.field} htmlFor={`${id}-new-password`}><span>Password</span></label>
-          <div className={styles.passwordInput}><input id={`${id}-new-password`} required minLength={12} maxLength={128} type={showPassword ? "text" : "password"} autoComplete="new-password" value={form.password} onChange={(event) => onChange({ ...form, password: event.target.value })} placeholder="12+ characters" /><button type="button" aria-label={showPassword ? "Hide password" : "Show password"} title={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((current) => !current)}>{showPassword ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}</button></div>
+          <div className={styles.passwordInput}><input id={`${id}-new-password`} required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} type={showPassword ? "text" : "password"} autoComplete="new-password" value={form.password} onChange={(event) => onChange({ ...form, password: event.target.value })} placeholder="8+ characters" /><button type="button" aria-label={showPassword ? "Hide password" : "Show password"} title={showPassword ? "Hide password" : "Show password"} aria-pressed={showPassword} onClick={() => setShowPassword((current) => !current)}>{showPassword ? <EyeOff size={20} aria-hidden="true" /> : <Eye size={20} aria-hidden="true" />}</button></div>
+          <PasswordRequirements value={form.password} />
           <label className={styles.toggle}><input type="checkbox" checked={form.temporaryPassword} onChange={(event) => onChange({ ...form, temporaryPassword: event.target.checked })} /><strong>Change at sign-in</strong></label>
         </section>
       </div>

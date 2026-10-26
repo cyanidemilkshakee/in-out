@@ -19,6 +19,32 @@ def validate_subject_metadata_size(data: dict[str, Any] | None) -> None:
     size = 0
     encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     try:
+        pending = [data or {}]
+        visited_containers = set()
+        visited_values = 0
+        while pending:
+            value = pending.pop()
+            visited_values += 1
+            if visited_values > maximum * 2:
+                raise HTTPException(422, f"Subject metadata must be {maximum} bytes or fewer.")
+            if isinstance(value, str):
+                if "\x00" in value:
+                    raise HTTPException(422, "Subject metadata cannot contain null bytes.")
+            elif isinstance(value, dict):
+                marker = id(value)
+                if marker in visited_containers:
+                    raise HTTPException(422, "Subject metadata must not contain circular references.")
+                visited_containers.add(marker)
+                for key, item in value.items():
+                    if isinstance(key, str) and "\x00" in key:
+                        raise HTTPException(422, "Subject metadata keys cannot contain null bytes.")
+                    pending.append(item)
+            elif isinstance(value, (list, tuple)):
+                marker = id(value)
+                if marker in visited_containers:
+                    raise HTTPException(422, "Subject metadata must not contain circular references.")
+                visited_containers.add(marker)
+                pending.extend(value)
         for piece in encoder.iterencode(data or {}):
             # Individual JSON string tokens can be large; bound the temporary
             # UTF-8 byte buffer rather than encoding the whole token at once.

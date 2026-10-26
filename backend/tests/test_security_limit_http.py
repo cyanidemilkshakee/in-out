@@ -1,6 +1,4 @@
 """Verified identities keep data/behavior budgets across tokens and replicas."""
-import asyncio
-import hashlib
 import os
 import sys
 import time

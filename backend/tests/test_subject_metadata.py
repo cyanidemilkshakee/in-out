@@ -1,20 +1,22 @@
 """Retired employee metadata cannot return through writes, reads or live updates."""
 import copy
-import json
 import sys
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import AsyncMock, Mock, patch
+from fastapi import HTTPException
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from models import AccessPermission, Checkpoint, Person, PresenceState, ScanRequest, Subject, PermissionRequestModel
 from schemas import BrowserScanPayload, SubjectCreate, SubjectUpdate
 from routers.registry import create_subject, get_subject, list_subjects, registry_bundle, update_subject
 from routers.permissions import list_permissions
-from permission_decisions import apply_permission_decision, publish_decision, zone_permission_version
+from permission_decisions import apply_permission_decision, decision_event, zone_permission_version
 from terminal_scans import record_scan
+from subject_metadata import validate_subject_metadata_size
+from database import database_engine_options
 
 
 ADMIN = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
@@ -40,6 +42,8 @@ def legacy_employee():
         "name": "Alice", "type": "visitor", "department": "Operations", "accessLevel": "Admin",
         "allowedZones": ["public"], "status": "active", "inside": False,
         "validFrom": "2026-01-01T00:00:00Z", "validTo": "",
+        "phone": "+1-555-0100", "ownerId": "private-owner", "taxId": "synthetic-tax-id",
+        "privateCustomField": {"secret": "synthetic-private-value"},
     }))
 
 
@@ -54,6 +58,10 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("department", data)
         self.assertNotIn("accessLevel", data)
 
+    def assert_terminal_allowlist(self, data):
+        for field in ("phone", "ownerId", "taxId", "privateCustomField", "department", "accessLevel"):
+            self.assertNotIn(field, data)
+
     async def test_create_discards_stale_fields_without_rejecting_or_changing_zones(self):
         db = session()
         added = []
@@ -62,7 +70,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
             "name": "Alice", "allowedZones": ["public"], "department": {"stale": "value"},
             "accessLevel": ["Admin"], "type": "visitor",
         })
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
+        with patch("routers.registry.enqueue_changed", new=AsyncMock()):
             result = await create_subject(payload, db, ADMIN)
         self.assert_retired_absent(result.data)
         self.assertEqual(result.data["allowedZones"], ["public"])
@@ -79,7 +87,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         db = session()
         db.execute.return_value = rows(scalar=subject)
         db.scalar.return_value = permission
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
+        with patch("routers.registry.enqueue_changed", new=AsyncMock()):
             result = await update_subject(subject.id, SubjectUpdate(data={
                 "department": 123, "accessLevel": "Elevated", "allowedZones": ["secure"], "status": "restricted",
             }), db, ADMIN)
@@ -92,7 +100,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         subject = legacy_employee()
         db = session()
         db.execute.return_value = rows(scalar=subject)
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
+        with patch("routers.registry.enqueue_changed", new=AsyncMock()):
             result = await update_subject(subject.id, SubjectUpdate(barcode="EMP-RENAMED"), db, ADMIN)
         self.assert_retired_absent(subject.person.data)
         self.assert_retired_absent(result.data)
@@ -111,10 +119,10 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assert_retired_absent(listed.items[0].data)
         db.execute.side_effect = [rows([(subject,)]), *[rows() for _ in range(7)]]
         with patch("critical_entry_restrictions.entry_restrictions_for_subjects", new=AsyncMock(return_value={})):
-            bundle = await registry_bundle(db)
+            bundle = await registry_bundle(db, actor=ADMIN)
         self.assert_retired_absent(bundle["people"][0])
         self.assertEqual(bundle["people"][0]["type"], "employee")
-        db.execute.side_effect = [rows(), rows(), rows(), rows([(subject,)]), rows()]
+        db.execute.side_effect = [rows([("employee",)]), rows(), rows(), rows(), rows([(subject,)]), rows()]
         with patch("critical_entry_restrictions.entry_restrictions_for_subjects", new=AsyncMock(return_value={})):
             permissions = await list_permissions(db, ADMIN)
         self.assert_retired_absent(permissions["subjects"][0])
@@ -139,6 +147,8 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(result["allowed"], not restricted)
                 self.assert_retired_absent(result["decision"]["subject"])
                 self.assert_retired_absent(result["updatedPeople"][0])
+                self.assert_terminal_allowlist(result["decision"]["subject"])
+                self.assert_terminal_allowlist(result["updatedPeople"][0])
                 self.assertEqual(result["updatedPeople"][0]["allowedZones"], ["public"])
 
     async def test_legacy_scan_replay_hides_employee_fields_without_rewriting_snapshot(self):
@@ -153,8 +163,37 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         result = await record_scan(db, key, BrowserScanPayload(barcode=subject.barcode, checkpointId="cp-main"), "operator")
         self.assert_retired_absent(result["decision"]["subject"])
         self.assert_retired_absent(result["updatedPeople"][0])
+        self.assert_terminal_allowlist(result["decision"]["subject"])
+        self.assert_terminal_allowlist(result["updatedPeople"][0])
         self.assertEqual(cached.response_body, saved)
         self.assertTrue(db.info["scan_replayed"])
+
+    async def test_subject_metadata_rejects_postgres_null_bytes_and_engine_hides_parameters(self):
+        for value in ({"name": "bad\x00value"}, {"bad\x00key": "value"}):
+            with self.subTest(value=value), self.assertRaises(HTTPException) as raised:
+                validate_subject_metadata_size(value)
+            self.assertEqual(raised.exception.status_code, 422)
+        self.assertTrue(database_engine_options()["hide_parameters"])
+
+    async def test_registry_database_exception_logging_omits_sql_parameter_text(self):
+        db = session()
+        db.commit.side_effect = RuntimeError("INSERT parameters include private@example.test")
+        payload = SubjectCreate(kind="employee", barcode="EMP-FAIL", data={
+            "name": "Private Name", "allowedZones": ["public"],
+        })
+        admin_zones = patch("routers.registry.admin_zone_ids", new=AsyncMock(return_value=["public"]))
+        admin_zones.start()
+        self.addCleanup(admin_zones.stop)
+        registered_zones = patch("routers.registry.validate_registered_zones",
+            new=AsyncMock(side_effect=lambda _db, zones: zones))
+        registered_zones.start()
+        self.addCleanup(registered_zones.stop)
+        with patch("routers.registry.enqueue_changed", new=AsyncMock()), \
+             patch("routers.registry.logger.error") as logged, \
+             self.assertRaises(HTTPException) as raised:
+            await create_subject(payload, db, ADMIN)
+        self.assertEqual(raised.exception.status_code, 500)
+        self.assertNotIn("private@example.test", str(logged.call_args))
 
     async def test_zone_approval_result_and_live_person_do_not_resurrect_legacy_fields(self):
         subject = legacy_employee()
@@ -174,7 +213,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assert_retired_absent(subject.person.data)
         self.assertEqual(result["person"]["allowedZones"], ["secure"])
         self.assertEqual(result["permission"]["validTo"], end)
-        event = await publish_decision(result)
+        event = decision_event(result)
         self.assert_retired_absent(event["people"][0])
 
 

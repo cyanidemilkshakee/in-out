@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
-import { Urbanist } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 
-const urbanist = Urbanist({
-  subsets: ["latin"],
+const urbanist = localFont({
+  src: "./fonts/urbanist-latin.woff2",
+  weight: "100 900",
+  style: "normal",
   variable: "--font-urbanist",
   display: "swap",
   preload: true,

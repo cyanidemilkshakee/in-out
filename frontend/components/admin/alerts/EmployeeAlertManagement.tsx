@@ -1,7 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import type { AccessPermission, Alert, AlertPage, AlertRule, AlertRuleAssignment, AlertWarningSummary, MovementEvent, Person } from "../../../../lib/types";
+import type { Alert, AlertPage, AlertRule, AlertRuleAssignment, AlertWarningSummary, MovementEvent, Person } from "../../../../lib/types";
 import { useDataActions } from "../../../context/DataContext";
 import { AlertSubjectPicker, type AlertSubjectOption } from "./AlertSubjectPicker";
 import { RuleAssignments } from "./RuleAssignments";
@@ -12,13 +12,12 @@ const EmployeeProfileCard = lazy(() =>
   import("../EmployeeProfileCard").then((module) => ({ default: module.EmployeeProfileCard }))
 );
 
-export function EmployeeAlertManagement({ assignments, warnings, alerts, rules, people, permissions, movements, onReset, onSave, onReload, isLoading = false }: {
+export function EmployeeAlertManagement({ assignments, warnings, alerts, rules, people, movements, onReset, onSave, onReload, isLoading = false }: {
   assignments: AlertRuleAssignment[];
   warnings: AlertWarningSummary[];
   alerts: Alert[];
   rules: AlertRule[];
   people: Person[];
-  permissions: AccessPermission[];
   movements: MovementEvent[];
   onReset: (subjectId: string, reason: string) => Promise<void>;
   onSave: (subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision: number) => Promise<AlertRuleAssignment>;
@@ -109,7 +108,6 @@ export function EmployeeAlertManagement({ assignments, warnings, alerts, rules, 
       <EmployeeProfileCard
         person={profilePerson}
         sessions={[]}
-        permissions={permissions}
         alerts={alerts}
         movements={movements}
         onClose={() => setProfilePerson(null)}

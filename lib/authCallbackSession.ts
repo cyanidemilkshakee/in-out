@@ -45,6 +45,11 @@ export function issuedAuthSession(cookies: string[], secure: boolean): { value: 
   return { value: values.join(''), salt };
 }
 
+/** Reauthentication must prove the same administrator identity that requested the step-up. */
+export function matchesAdminStepUpIdentity(intent: StepUpIntent | null, subject: unknown, roles: unknown): boolean {
+  return !!intent && typeof subject === "string" && subject === intent.subject && hasAdminAccess(roles);
+}
+
 /** A destination/cookie alone cannot prove that this admin's unlock intent completed. */
 export function isCompletedAdminStepUpToken(token: Record<string, unknown> | null, intent: StepUpIntent, now = Date.now()): boolean {
   if (!token || token.error || token.sub !== intent.subject || token.step_up_intent_id !== intent.intentId ||

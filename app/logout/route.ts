@@ -60,6 +60,22 @@ export async function POST(request: NextRequest) {
       }).catch(() => undefined);
     }
   }
+  if (session?.access_token) {
+    const apiUrl = process.env.PYTHON_API_URL?.replace(/\/$/, "");
+    if (apiUrl) {
+      try {
+        const revocation = await fetch(`${apiUrl}/v1/auth/revoke-session`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${session.access_token}` },
+          cache: "no-store",
+          signal: AbortSignal.timeout(5_000),
+        });
+        if (!revocation.ok) console.warn("[auth] Application session revocation was not confirmed during logout.");
+      } catch {
+        console.warn("[auth] Application session revocation unavailable during logout.");
+      }
+    }
+  }
   // Clear the local session before leaving the application. An unavailable
   // identity provider must not leave this browser signed into the app.
   await signOut({ redirect: false });

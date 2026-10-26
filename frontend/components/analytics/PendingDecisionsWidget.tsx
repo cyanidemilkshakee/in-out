@@ -5,6 +5,7 @@ import { Check, ChevronRight, Clock3, MapPin, X } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useDataActions, useDataState } from "../../context/DataContext";
 import type { PermissionRequest } from "../../../lib/types";
+import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
 import { DEFAULT_MANUAL_REVIEW_MINUTES, MANUAL_REVIEW_DURATIONS } from "../../../lib/manualReviewDuration";
 
 export function PendingDecisionsWidget({
@@ -101,7 +102,7 @@ export function PendingDecisionsWidget({
         <ul className="alert-list-container pending-decision-list scrollable-content">
           {pendingRequests.map((request) => {
             const busy = workingId === request.id;
-            const checkpointName = request.checkpoint || checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId;
+            const checkpointName = normalizeCheckpointLabel(request.checkpoint) || checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId;
             const isManualReview = request.type === "manual_override";
             return (
               <li key={request.id}>

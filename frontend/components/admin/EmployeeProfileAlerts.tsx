@@ -8,14 +8,13 @@ import { AlertActivity } from "./alerts/AlertActivity";
 import { RuleAssignments } from "./alerts/RuleAssignments";
 import { WarningSummary } from "./alerts/WarningSummary";
 import { ScheduledIrregularitySkips } from "./alerts/ScheduledIrregularitySkips";
-import { alertTimestamp, getAlertReviewState } from "./alerts/alertPresentation";
+import { getAlertReviewState } from "./alerts/alertPresentation";
 import styles from "./EmployeeProfileAlerts.module.css";
 
-export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged, onMetricsChange }: {
+export function EmployeeProfileAlerts({ person, initialAlerts, showHistory }: {
   person: Person;
   initialAlerts: Alert[];
-  onHistoryChanged: (alerts: Alert[], total: number) => void;
-  onMetricsChange: (metrics: { openAlerts: number; confirmedWarnings: number }) => void;
+  showHistory: boolean;
 }) {
   const { queryAlerts, reviewAlert, resetAlertWarnings, setAlertRuleAssignments } = useDataActions();
   const [alerts, setAlerts] = useState(initialAlerts);
@@ -25,7 +24,6 @@ export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged,
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState(false);
   const [error, setError] = useState("");
-  const [showHistory, setShowHistory] = useState(false);
   const [openOffset, setOpenOffset] = useState(0);
   const [openTotal, setOpenTotal] = useState(0);
   const [reviewedAlerts, setReviewedAlerts] = useState<Alert[]>([]);
@@ -34,7 +32,6 @@ export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged,
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [historyRevision, setHistoryRevision] = useState(0);
-  const historyRef = useRef<HTMLDivElement>(null);
   const loadController = useRef<AbortController | null>(null);
   const mutationPending = useRef(false);
 
@@ -53,10 +50,8 @@ export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged,
       if (openOffset >= firstPage.total && openOffset > 0) setOpenOffset(Math.max(0, Math.ceil(firstPage.total / 25) - 1) * 25);
       const subjectWarnings = (firstPage.warnings ?? []).filter((summary) => summary.subjectId === person.id);
       setWarnings(subjectWarnings);
-      onMetricsChange({ openAlerts: firstPage.total, confirmedWarnings: subjectWarnings[0]?.count ?? 0 });
       setRules(firstPage.rules ?? []);
       setAssignments(firstPage.assignments ?? []);
-      onHistoryChanged([...(firstPage.recentAlerts ?? firstPage.items)].sort((left, right) => alertTimestamp(right) - alertTimestamp(left)), firstPage.totalSubjectAlerts ?? firstPage.total);
       setHistoryRevision(value => value + 1);
     } catch (cause) {
       if (!controller.signal.aborted) {
@@ -66,7 +61,7 @@ export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged,
     } finally {
       if (!controller.signal.aborted) setLoading(false);
     }
-  }, [person.id, queryAlerts, onHistoryChanged, onMetricsChange, openOffset]);
+  }, [person.id, queryAlerts, openOffset]);
 
   useEffect(() => {
     if (!showHistory) return;
@@ -118,10 +113,6 @@ export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged,
     };
   }, [reload, person.id, person.barcode]);
 
-  useEffect(() => {
-    if (showHistory) historyRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-  }, [showHistory]);
-
   // A failed refresh after a successful mutation should offer a reload, not report
   // that the review/reset failed and encourage the administrator to repeat it.
   async function mutate<T,>(action: () => Promise<T>): Promise<T> {
@@ -142,39 +133,46 @@ export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged,
   const subject = { subjectId: person.id, subjectName: person.name, subjectType: person.type, barcode: person.barcode, status: person.status };
   const busy = loading || mutating;
   const controlsDisabled = busy || Boolean(error);
+  const warningSummary = <WarningSummary warnings={warnings} alerts={alerts} selectedSubject={subject} isLoading={controlsDisabled}
+    onReset={(subjectId, reason) => mutate(() => resetAlertWarnings(subjectId, reason))}
+    showHistoryAction={false} hideWarningEmptyText className="employee-profile-warning-summary" />;
 
-  return <aside className={`${styles.panel} scrollable-content`} aria-label={`Alerts and rules for ${person.name}`}>
+  return <aside className={`${styles.panel} employee-profile-alerts-panel scrollable-content`} aria-label={`Alerts and rules for ${person.name}`}>
     {error && <div className={styles.error} role="status"><p>{error}</p><button type="button" disabled={loading || mutating} onClick={() => void reload().catch(() => {})}>Reload alerts</button></div>}
-    <div className={styles.controls}>
-      <WarningSummary warnings={warnings} alerts={alerts} selectedSubject={subject} isLoading={controlsDisabled}
-        onReset={(subjectId, reason) => mutate(() => resetAlertWarnings(subjectId, reason))}
-        onViewHistory={() => setShowHistory((current) => !current)} />
-      {person.type === "employee" && <RuleAssignments assignments={assignments} rules={rules} selectedEmployeeId={person.id} isLoading={controlsDisabled}
-        onSave={(subjectId, ruleIds, skipDates, revision) => mutate(() => setAlertRuleAssignments(subjectId, ruleIds, skipDates, revision))}
-        onReload={reload} />}
-      {person.type === "employee" && <ScheduledIrregularitySkips
-        assignments={assignments.filter((assignment) => assignment.subjectId === person.id)}
-        variant="profile"
-      />}
+    <div className={`${styles.controls} employee-profile-utilities`}>
+      {person.type === "employee" ? <div className={`${styles.assignmentStack} employee-profile-assignment-stack`}>
+        <RuleAssignments assignments={assignments} rules={rules} selectedEmployeeId={person.id} isLoading={controlsDisabled}
+          onSave={(subjectId, ruleIds, skipDates, revision) => mutate(() => setAlertRuleAssignments(subjectId, ruleIds, skipDates, revision))}
+          onReload={reload} profileLayout
+          profileSchedule={<ScheduledIrregularitySkips assignments={assignments.filter((assignment) => assignment.subjectId === person.id)} variant="profile" />}>
+          {warningSummary}
+        </RuleAssignments>
+      </div> : <section className={`${styles.visitorWarnings} employee-profile-rules-card`} aria-label="Warnings">{warningSummary}</section>}
     </div>
-    <section className={styles.openAlertsBox} aria-label="Open alerts">
-      <AlertActivity className={styles.activity} alerts={openAlerts} people={[person]} filter="needs_review" isLoading={busy} disabled={controlsDisabled}
-        title="Reset confirmed warnings before reviewing another alert."
-        totalCount={openTotal}
-        showSubjectDetails={false} showDescription={false} showWarningLimitMessage={false}
-        emptyMessage="No open alerts for this employee."
-        onReview={(alertId, decision, reason) => mutate(() => reviewAlert(alertId, decision, reason))} />
-      {openTotal > 25 ? <div className="pagination"><button type="button" disabled={!openOffset || busy} onClick={() => setOpenOffset(value => Math.max(0, value - 25))}>Previous</button>
-        <span>Page {Math.floor(openOffset / 25) + 1} of {Math.ceil(openTotal / 25)}</span><button type="button" disabled={busy || openOffset + 25 >= openTotal} onClick={() => setOpenOffset(value => value + 25)}>Next</button></div> : null}
+    <section id="employee-profile-alert-history" className={`${styles.openAlertsBox} employee-profile-open-alerts-card`} aria-label={showHistory ? "Alert history" : "Open alerts"}>
+      <div className={styles.openAlertsHeading}>
+        <h3>{showHistory ? "Alert history" : "Open alerts"}</h3>
+        <span>{showHistory ? historyTotal : openTotal}</span>
+      </div>
+      {showHistory ? <>
+        {historyError ? <p role="alert">{historyError}</p> : null}
+        <AlertActivity className={styles.activity} alerts={reviewedAlerts} people={[person]} filter="all" isLoading={historyLoading}
+          title="Reviewed alerts and saved notes"
+          showSubjectDetails={false} showDescription={false}
+          emptyMessage="No reviewed alerts for this employee."
+          onReview={(alertId, decision, reason) => mutate(() => reviewAlert(alertId, decision, reason))} />
+        {historyTotal > 25 ? <div className="pagination"><button type="button" disabled={!historyOffset || historyLoading} onClick={() => setHistoryOffset(value => Math.max(0, value - 25))}>Previous</button>
+          <span>Page {Math.floor(historyOffset / 25) + 1} of {Math.ceil(historyTotal / 25)}</span><button type="button" disabled={historyLoading || historyOffset + 25 >= historyTotal} onClick={() => setHistoryOffset(value => value + 25)}>Next</button></div> : null}
+      </> : <>
+        <AlertActivity className={styles.activity} alerts={openAlerts} people={[person]} filter="needs_review" isLoading={busy} disabled={controlsDisabled}
+          title="Review alerts in chronological order"
+          totalCount={openTotal}
+          showSubjectDetails={false} showDescription={false} showWarningLimitMessage={false}
+          emptyMessage="No open alerts for this employee."
+          onReview={(alertId, decision, reason) => mutate(() => reviewAlert(alertId, decision, reason))} />
+        {openTotal > 25 ? <div className="pagination"><button type="button" disabled={!openOffset || busy} onClick={() => setOpenOffset(value => Math.max(0, value - 25))}>Previous</button>
+          <span>Page {Math.floor(openOffset / 25) + 1} of {Math.ceil(openTotal / 25)}</span><button type="button" disabled={busy || openOffset + 25 >= openTotal} onClick={() => setOpenOffset(value => value + 25)}>Next</button></div> : null}
+      </>}
     </section>
-    {showHistory && <div ref={historyRef}>
-      {historyError ? <p role="alert">{historyError}</p> : null}
-      <AlertActivity className={styles.activity} alerts={reviewedAlerts} people={[person]} filter="all" isLoading={historyLoading}
-        showSubjectDetails={false} showDescription={false}
-        emptyMessage="No reviewed alerts for this employee."
-        onReview={(alertId, decision, reason) => mutate(() => reviewAlert(alertId, decision, reason))} />
-      {historyTotal > 25 ? <div className="pagination"><button type="button" disabled={!historyOffset || historyLoading} onClick={() => setHistoryOffset(value => Math.max(0, value - 25))}>Previous</button>
-        <span>Page {Math.floor(historyOffset / 25) + 1} of {Math.ceil(historyTotal / 25)}</span><button type="button" disabled={historyLoading || historyOffset + 25 >= historyTotal} onClick={() => setHistoryOffset(value => value + 25)}>Next</button></div> : null}
-    </div>}
   </aside>;
 }

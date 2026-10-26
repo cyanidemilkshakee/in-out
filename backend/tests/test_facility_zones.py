@@ -7,22 +7,22 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException
-from access_validation import validate_checkpoint_id, validate_zones
+from access_validation import require_registered_checkpoint, validate_zones
 from facility_zones import CHECKPOINTS, compatible_request_fingerprints, normalize_facility_document
 
 
-class FacilityZoneTests(unittest.TestCase):
-    def test_only_two_zones_and_checkpoints_can_be_written(self):
+class FacilityZoneTests(unittest.IsolatedAsyncioTestCase):
+    async def test_only_two_zones_and_checkpoints_can_be_written(self):
         self.assertEqual([item["id"] for item in CHECKPOINTS], ["cp-main", "server-room"])
         self.assertEqual(validate_zones([" Main Entrance ", "public", "Server Room"]), ["public", "secure"])
         self.assertEqual(validate_zones(["All Zones"]), ["public", "secure"])
-        self.assertEqual(validate_checkpoint_id("main-gate"), "cp-main")
+        self.assertEqual(await require_registered_checkpoint(None, "main-gate"), "cp-main")
         for zone in ("IT Lab", "Warehouse", "Auditorium", "main-gate"):
             with self.subTest(zone=zone), self.assertRaises(HTTPException) as error:
                 validate_zones([zone])
             self.assertEqual(error.exception.status_code, 422)
         with self.assertRaises(HTTPException):
-            validate_checkpoint_id("cp-warehouse")
+            await require_registered_checkpoint(None, "cp-warehouse")
 
     def test_nested_snapshots_retain_evidence_and_normalize_typed_references(self):
         source = {"decision": {"event": {"id": "original", "checkpointId": "main-gate", "reason": "main-gate was closed"}},

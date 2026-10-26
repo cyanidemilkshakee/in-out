@@ -66,7 +66,7 @@ class UserManagementLockTests(unittest.IsolatedAsyncioTestCase):
             rejected = await self.client.get("/v1/keycloak/users", headers=headers)
             self.assertEqual(rejected.status_code, 403, rejected.text)
             renewed = {**window, "tokenHash": hashlib.sha256(b"refreshed-bearer").hexdigest()}
-            replay = await self.client.post("/v1/keycloak/users", json={"username": "blocked", "password": "test-only-password", "roles": ["operator"]},
+            replay = await self.client.post("/v1/keycloak/users", json={"username": "blocked", "password": "Test-only9-password", "roles": ["operator"]},
                 headers={"Authorization": "Bearer refreshed-bearer", "X-InOut-Step-Up": proof_for(renewed)})
             self.assertEqual(replay.status_code, 403, replay.text)
             bare = await self.client.get("/v1/keycloak/users", headers={"Authorization": "Bearer synthetic-bearer"})
@@ -91,7 +91,7 @@ class UserManagementLockTests(unittest.IsolatedAsyncioTestCase):
                 await require_unlocked_window(db, claims, window)
 
     async def test_queued_command_must_recheck_expiry_after_guard_acquisition(self):
-        window = {**self.window(), "expiresAt": int(time.time()) + 1}
+        window = {**self.window(), "expiresAt": int(time.time()) + 5}
         claims = {"sub": "admin-a"}
         async with self.sessions() as blocker:
             await require_unlocked_window(blocker, claims, window)
@@ -124,13 +124,9 @@ class UserManagementLockTests(unittest.IsolatedAsyncioTestCase):
                 return httpx.Response(201, headers={"Location": "http://synthetic/users/new-operator"})
             return httpx.Response(200, json={"id": "new-operator", "username": "new-operator", "enabled": True})
         headers = {"Authorization": "Bearer synthetic-bearer", "X-InOut-Step-Up": proof_for(self.window())}
-        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), \
-             patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value=claims)), \
-             patch("routers.keycloak_admin._request", side_effect=provider), \
-             patch("routers.keycloak_admin._replace_roles", side_effect=roles), \
-             patch("routers.keycloak_admin.publish_checkpoint_assignment", new=AsyncMock()):
+        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value=claims)), patch("routers.keycloak_admin._request", side_effect=provider), patch("routers.keycloak_admin._replace_roles", side_effect=roles):
             creating = asyncio.create_task(self.client.post("/v1/keycloak/users", headers=headers, json={
-                "username": "new-operator", "password": "test-only-password", "roles": ["operator"], "checkpointId": "cp-main"}))
+                "username": "new-operator", "password": "Test-only9-password", "roles": ["operator"], "checkpointId": "cp-main"}))
             locking = None
             try:
                 await asyncio.wait_for(entered.wait(), 3)

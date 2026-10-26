@@ -157,15 +157,19 @@ def verify_keycloak_token(token: str, signing_keys: list[dict] | None = None) ->
             algorithms=["RS256"],
             issuer=settings.KEYCLOAK_ISSUER,
             audience=settings.KEYCLOAK_AUDIENCE,
-            options={"require": ["exp", "iss", "aud", "sub"]},
+            options={"require": ["exp", "iat", "iss", "aud", "sub", "jti"]},
         )
         # ID tokens are intended for the OIDC client, never for API access.
         if payload.get("typ") != "Bearer" or not isinstance(payload.get("sub"), str) or not payload["sub"]:
             raise InvalidTokenError("A Keycloak access token is required")
         expiry = payload["exp"]
+        issued_at = payload["iat"]
         if (isinstance(expiry, bool) or not isinstance(expiry, (int, float))
-                or not math.isfinite(expiry)):
-            raise InvalidTokenError("A numeric token expiry is required")
+                or not math.isfinite(expiry) or isinstance(issued_at, bool)
+                or not isinstance(issued_at, (int, float)) or not math.isfinite(issued_at)
+                or not isinstance(payload.get("jti"), str) or not payload["jti"]):
+            raise InvalidTokenError("Numeric token expiry, issue time and token ID are required")
+        payload["_inout_verified_access_token"] = True
         return payload
     except ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token has expired", headers={"WWW-Authenticate": "Bearer"})
@@ -211,6 +215,10 @@ async def verify_authenticated_request(
     # a refresh again. Malformed headers still use the standard 401 verifier.
     payload = await run_in_threadpool(verify_keycloak_token, credentials.credentials,
                                      **({"signing_keys": signing_keys} if signing_keys is not None else {}))
+    cryptographically_verified = payload.pop("_inout_verified_access_token", False)
+    if cryptographically_verified:
+        from token_revocation import assert_token_active
+        await assert_token_active(payload)
     if request is not None:
         identity = "principal:" + settings.KEYCLOAK_ISSUER + ":" + payload["sub"]
         state = request.scope.setdefault("state", {})

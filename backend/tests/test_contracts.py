@@ -24,7 +24,8 @@ class ContractTests(unittest.TestCase):
         key = private.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption())
         public = json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private.public_key()))
         public["kid"] = "contract-key"
-        claims = {"sub": "admin", "typ": "Bearer", "iss": "https://identity.test/realms/inout", "aud": "another-client", "exp": datetime.now(timezone.utc) + timedelta(minutes=5)}
+        claims = {"sub": "admin", "typ": "Bearer", "iss": "https://identity.test/realms/inout", "aud": "another-client",
+            "exp": datetime.now(timezone.utc) + timedelta(minutes=5), "iat": int(datetime.now(timezone.utc).timestamp()), "jti": "contract-token"}
         with patch("auth._load_jwks", return_value=[public]), patch("auth.settings.KEYCLOAK_ISSUER", claims["iss"]):
             with self.assertRaises(HTTPException) as error:
                 verify_keycloak_token(jwt.encode(claims, key, algorithm="RS256", headers={"kid": "contract-key"}))

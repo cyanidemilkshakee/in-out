@@ -238,6 +238,7 @@ export type AccessPermission = {
   id: string;
   subjectId: string;
   subjectName: string;
+  barcode?: string;
   subjectType: SubjectType;
   assignment: string;
   state: AccessState;
@@ -299,6 +300,12 @@ export type TerminalVisitor = {
   validTo?: string;
   createdAt?: string;
   status: TerminalVisitorStatus;
+};
+
+export type TerminalVisitorPage = {
+  items: TerminalVisitor[];
+  nextCursor: string | null;
+  hasMore: boolean;
 };
 
 export type PermissionRequestInput = Omit<PermissionRequest, "id" | "status" | "createdAt"> & {
@@ -382,6 +389,8 @@ export type AppDataSnapshot = {
   adminAvailability?: { status: "available" | "offline"; availableAt: string | null };
   terminalAssignment?: { operatorSubject: string; checkpointId: string | null };
   terminalVisitors: TerminalVisitor[];
+  terminalVisitorsCursor?: string | null;
+  terminalVisitorsHasMore?: boolean;
 };
 
 export type TerminalReplayPolicy = { receiptRetentionDays: number; serverTime: string };
@@ -510,7 +519,7 @@ export type DashboardAnalytics = {
   previousEndAt: string | null;
 };
 
-export type EmployeeActivityQuery = { subjectId: string; days: number; endAt?: string };
+export type EmployeeActivityQuery = { subjectId: string; days?: number; allTime?: boolean; endAt?: string };
 export type EmployeeActivitySummaryQuery = { days: number; endAt?: string };
 export type EmployeeActivitySummary = {
   averages: Record<string, number | null>;
@@ -618,6 +627,7 @@ export interface DataService {
   queryRegistryPage(query: RegistryPageQuery, signal?: AbortSignal): Promise<RegistryPage>;
   queryRegistrySubjects(query: RegistrySubjectQuery, signal?: AbortSignal): Promise<RegistrySubjectPage>;
   querySubjectProfile(subjectId: string, signal?: AbortSignal): Promise<SubjectProfile>;
+  queryTerminalVisitors(cursor?: string, signal?: AbortSignal): Promise<TerminalVisitorPage>;
 }
 
 export type RegistryKind = "employee" | "visitor" | "hardware";

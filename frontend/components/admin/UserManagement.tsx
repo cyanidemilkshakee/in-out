@@ -7,6 +7,8 @@ import { FACILITY_CHECKPOINTS } from "../../../lib/facilityZones";
 import { DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES, USER_MANAGEMENT_STEP_UP_DURATIONS, formatStepUpCountdown, isStepUpDurationMinutes } from "../../../lib/userManagementStepUp";
 import { CreateUserForm, UserDetailsForm, type ManagedUserFormValue } from "./ManagedUserForm";
 import { StepUpDurationSelect } from "./StepUpDurationSelect";
+import { PasswordRequirements } from "../PasswordRequirements";
+import { isPasswordValid, PASSWORD_MAX_LENGTH, PASSWORD_MIN_LENGTH, PASSWORD_POLICY_MESSAGE } from "../../../lib/passwordPolicy";
 import styles from "./UserManagement.module.css";
 
 const emptyForm: ManagedUserFormValue = {
@@ -137,7 +139,12 @@ export function UserManagement({ stepUpExpiresAt, stepUpDurationMinutes = DEFAUL
 
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!event.currentTarget.reportValidity() || !beginOperation("create")) return;
+    if (!event.currentTarget.reportValidity()) return;
+    if (!isPasswordValid(createForm.password)) {
+      setMessage({ kind: "error", text: PASSWORD_POLICY_MESSAGE });
+      return;
+    }
+    if (!beginOperation("create")) return;
     setMessage(null);
     try {
       const created = await createManagedUser(createForm);
@@ -189,7 +196,12 @@ export function UserManagement({ stepUpExpiresAt, stepUpDurationMinutes = DEFAUL
 
   async function resetPassword(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!selected?.canManage || !event.currentTarget.reportValidity() || !beginOperation("password")) return;
+    if (!selected?.canManage || !event.currentTarget.reportValidity()) return;
+    if (!isPasswordValid(newPassword)) {
+      setMessage({ kind: "error", text: PASSWORD_POLICY_MESSAGE });
+      return;
+    }
+    if (!beginOperation("password")) return;
     setMessage(null);
     try {
       await resetManagedUserPassword(selected.id, newPassword, temporaryPassword);
@@ -436,8 +448,9 @@ export function UserManagement({ stepUpExpiresAt, stepUpDurationMinutes = DEFAUL
                 <form className={styles.passwordForm} onSubmit={resetPassword}>
                   <label className={styles.field}>
                     Password
-                    <input required minLength={12} maxLength={128} type="password" autoComplete="new-password" disabled={busy} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="12+ characters" />
+                    <input required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} type="password" autoComplete="new-password" disabled={busy} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="8+ characters" />
                   </label>
+                  <PasswordRequirements value={newPassword} />
                   <label className={styles.checkRow}>
                     <input type="checkbox" checked={temporaryPassword} disabled={busy} onChange={(event) => setTemporaryPassword(event.target.checked)} />
                     <span>Change at sign-in</span>
@@ -446,7 +459,7 @@ export function UserManagement({ stepUpExpiresAt, stepUpDurationMinutes = DEFAUL
                     <button className={styles.dangerButton} type="button" aria-label="End sessions" title={operation === "sessions" ? "Ending sessions…" : "End sessions"} disabled={busy} onClick={() => void endSessions()}>
                       End sessions
                     </button>
-                    <button className={styles.secondaryButton} type="submit" aria-label="Reset password" title={operation === "password" ? "Resetting…" : "Reset password"} disabled={busy || newPassword.length < 12}>
+                    <button className={styles.secondaryButton} type="submit" aria-label="Reset password" title={operation === "password" ? "Resetting…" : "Reset password"} disabled={busy || !isPasswordValid(newPassword)}>
                       Reset password
                     </button>
                   </div>

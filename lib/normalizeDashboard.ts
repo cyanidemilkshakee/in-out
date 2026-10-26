@@ -17,6 +17,7 @@ import type {
   MovementEvent,
   PermissionRequest,
   TerminalVisitor,
+  TerminalVisitorPage,
 } from "./types";
 import type { DataScope } from "./types";
 import { canonicalCheckpointId, normalizeFacilityCheckpoints, normalizeFacilityZones, normalizeSubjectZones } from "./facilityZones";
@@ -24,6 +25,15 @@ import { canonicalCheckpointId, normalizeFacilityCheckpoints, normalizeFacilityZ
 // ---------------------------------------------------------------------------
 // Shared helpers
 // ---------------------------------------------------------------------------
+
+export function normalizeCheckpointLabel(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+  const checkpoint = value as Record<string, unknown>;
+  if (typeof checkpoint.name === "string") return checkpoint.name;
+  if (typeof checkpoint.zone === "string") return checkpoint.zone;
+  return typeof checkpoint.id === "string" ? checkpoint.id : "";
+}
 
 export function normalizeDashboardMovement(raw: Record<string, unknown>): MovementEvent {
   const data = (raw.data ?? raw) as Record<string, unknown>;
@@ -35,7 +45,7 @@ export function normalizeDashboardMovement(raw: Record<string, unknown>): Moveme
     date:         (data.date as string | undefined) ?? date,
     time:         (data.time as string | undefined) ?? time,
     checkpointId: canonicalCheckpointId((raw.checkpoint_id ?? data.checkpointId ?? "") as string),
-    checkpoint:   (data.checkpoint ?? "") as string,
+    checkpoint:   normalizeCheckpointLabel(data.checkpoint),
     direction:    (raw.direction ?? data.direction ?? "entry") as MovementEvent["direction"],
     subjectId:    (raw.subject_id ?? data.subjectId ?? "") as string,
     subjectName:  (data.subjectName ?? data.name ?? "") as string,
@@ -74,7 +84,7 @@ export function normalizeAlert(raw: unknown): Alert {
     reason:        (a.reason ?? "") as string,
     subjectName:   (a.subjectName ?? "") as string,
     barcode:       (a.barcode ?? "") as string,
-    checkpoint:    (a.checkpoint ?? "") as string,
+    checkpoint:    normalizeCheckpointLabel(a.checkpoint),
     date:          (a.date ?? "") as string,
     time:          (a.time ?? "") as string,
     subjectType: a.subjectType === "employee" || a.subjectType === "visitor" || a.subjectType === "hardware"
@@ -148,7 +158,7 @@ function normalizeDashboardAlert(a: Record<string, unknown>): Alert {
     reason:        (data.reason ?? "") as string,
     subjectName:   (data.subjectName ?? "") as string,
     barcode:       (data.barcode ?? "") as string,
-    checkpoint:    (data.checkpoint ?? "") as string,
+    checkpoint:    normalizeCheckpointLabel(data.checkpoint),
     date:          (data.date ?? "") as string,
     time:          (data.time ?? "") as string,
     category:      data.category as Alert["category"] | undefined,
@@ -185,7 +195,7 @@ export function normalizePermissionRequest(raw: unknown): PermissionRequest {
     carrierId: typeof request.carrierId === "string" ? request.carrierId : undefined,
     carrierName: typeof request.carrierName === "string" ? request.carrierName : undefined,
     checkpointId: typeof request.checkpointId === "string" ? canonicalCheckpointId(request.checkpointId) : undefined,
-    checkpoint: typeof request.checkpoint === "string" ? request.checkpoint : undefined,
+    checkpoint: normalizeCheckpointLabel(request.checkpoint) || undefined,
     direction: request.direction === "entry" || request.direction === "exit" ? request.direction : undefined,
     eventId: typeof request.eventId === "string" ? request.eventId : undefined,
     barcode: typeof request.barcode === "string" ? request.barcode : undefined,
@@ -222,6 +232,7 @@ export function normalizeAccessPermission(raw: unknown): AccessPermission {
     id: typeof permission.id === "string" ? permission.id : "",
     subjectId: typeof permission.subjectId === "string" ? permission.subjectId : "",
     subjectName: typeof permission.subjectName === "string" ? permission.subjectName : "Unknown subject",
+    barcode: typeof permission.barcode === "string" ? permission.barcode : undefined,
     subjectType,
     assignment: typeof permission.assignment === "string" ? permission.assignment : "Access permission",
     state,
@@ -414,6 +425,33 @@ export function normalizeRegistrySnapshot(raw: unknown): AppDataSnapshot {
   };
 }
 
+export function normalizeTerminalVisitorPage(raw: unknown): TerminalVisitorPage {
+  const page = (raw ?? {}) as { items?: unknown[]; nextCursor?: unknown; hasMore?: unknown };
+  const items = (page.items ?? []).map((rawVisitor) => {
+    const visitor = (rawVisitor ?? {}) as Record<string, unknown>;
+    const rawStatus = visitor.status;
+    const status: TerminalVisitor["status"] = rawStatus === "pending" || rawStatus === "approved" || rawStatus === "denied" || rawStatus === "expired" || rawStatus === "restricted" || rawStatus === "inactive"
+      ? rawStatus : "pending";
+    return {
+      id: String(visitor.id ?? ""),
+      name: String(visitor.name ?? "Visitor"),
+      barcode: String(visitor.barcode ?? ""),
+      ...(typeof visitor.host === "string" ? { host: visitor.host } : {}),
+      ...(typeof visitor.company === "string" ? { company: visitor.company } : {}),
+      allowedZones: normalizeFacilityZones(Array.isArray(visitor.allowedZones) ? visitor.allowedZones.filter((zone): zone is string => typeof zone === "string") : []),
+      ...(typeof visitor.validFrom === "string" ? { validFrom: visitor.validFrom } : {}),
+      ...(typeof visitor.validTo === "string" ? { validTo: visitor.validTo } : {}),
+      ...(typeof visitor.createdAt === "string" ? { createdAt: visitor.createdAt } : {}),
+      status,
+    };
+  }).filter((visitor) => visitor.id);
+  return {
+    items,
+    nextCursor: typeof page.nextCursor === "string" ? page.nextCursor : null,
+    hasMore: page.hasMore === true,
+  };
+}
+
 /** /v1/terminal/bundle → pass-through (already AppDataSnapshot-compatible) */
 export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
   const r = raw as {
@@ -424,6 +462,7 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
     movements?: unknown[];
     permissionRequests?: unknown[];
     terminalVisitors?: unknown[];
+    terminalVisitorsHasMore?: boolean;
     adminAvailability?: AppDataSnapshot["adminAvailability"];
     terminalAssignment?: AppDataSnapshot["terminalAssignment"];
     terminalReplayPolicy?: AppDataSnapshot["terminalReplayPolicy"];
@@ -459,6 +498,7 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
         status,
       };
     }).filter((visitor) => visitor.id),
+    terminalVisitorsHasMore: r.terminalVisitorsHasMore === true,
     checkpoints: normalizeFacilityCheckpoints(r.checkpoints).filter(checkpoint => !terminalAssignment || checkpoint.id === terminalAssignment.checkpointId),
     terminalAssignment,
     terminalReplayPolicy: r.terminalReplayPolicy,

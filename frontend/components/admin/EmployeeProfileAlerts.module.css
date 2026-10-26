@@ -1,118 +1,262 @@
-.panel {
-  container-type: inline-size;
+.panel,
+.assignmentStack {
+  display: contents;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: start;
+  align-self: start;
+  gap: 24px;
+  min-width: 0;
+}
+
+.controls .assignmentStack :global(.employee-profile-warning-summary),
+.controls .assignmentStack :global(.employee-profile-leave-card),
+.controls .assignmentStack :global(.employee-profile-schedule-section) {
+  min-width: 0;
+  padding-left: 20px;
+  border-left: 1px solid var(--profile-border);
+}
+
+.controls .assignmentStack :global(.employee-profile-warning-summary) {
+  box-sizing: border-box;
+  height: 168px;
+  min-height: 168px;
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  padding-top: 0;
+  padding-bottom: 0;
+  overflow: hidden;
+}
+
+.controls .assignmentStack :global(.employee-profile-warning-overview) {
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 7px;
+}
+
+.controls .assignmentStack :global(.employee-profile-warning-count) { flex-wrap: nowrap; gap: 9px; }
+.controls .assignmentStack :global(.employee-profile-warning-count strong) { font-size: 28px; }
+.controls .assignmentStack :global(.employee-profile-warning-count > span) { font-size: 14px; white-space: nowrap; }
+.controls .assignmentStack :global(.employee-profile-warning-hold) { grid-column: 1; padding: 0; background: transparent; font-size: 14px; }
+.controls .assignmentStack :global(.employee-profile-warning-list) { max-height: 52px; overflow-y: auto; }
+.controls .assignmentStack :global(.employee-profile-warning-reset) { gap: 0; padding-top: 0; border-top: 0; }
+.controls .assignmentStack :global(.employee-profile-warning-reset-controls) { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; }
+.controls .assignmentStack :global(.employee-profile-warning-reset-controls input) { min-width: 0; min-height: 36px; padding: 6px 8px; font-size: 14px; }
+.controls .assignmentStack :global(.employee-profile-warning-reset-button) { min-width: 0; min-height: 36px; padding: 6px 8px; font-size: 14px; }
+
+.openAlertsBox,
+.visitorWarnings {
+  box-sizing: border-box;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 20px;
-  border-left: 1px solid var(--profile-border);
-  background: color-mix(in srgb, var(--admin-panel) 50%, var(--admin-bg));
-  scrollbar-width: thin;
-  scrollbar-color: var(--admin-border) transparent;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .openAlertsBox {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  overflow: hidden;
+}
+
+.openAlertsHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  flex: 0 0 auto;
+}
+
+.openAlertsHeading h3 {
+  margin: 0;
+  color: var(--ui-text-primary);
+  font-size: 19px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.openAlertsHeading span {
+  display: inline;
   min-width: 0;
-  padding: 16px;
-  border: 1px solid var(--profile-border);
-  border-radius: 14px;
-  background: color-mix(in srgb, var(--admin-bg) 72%, transparent);
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ui-text-secondary);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 .panel .activity {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
   width: 100%;
+  min-width: 0;
+  min-height: 0;
   border: 0;
-  overflow: visible;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
 }
 
 .panel .activity > :global(.permission-section-heading) {
-  display: grid;
-  justify-items: start;
-  gap: 6px;
+  display: flex;
+  align-items: center;
   padding: 0 0 12px;
+  flex: 0 0 auto;
 }
 
 .panel .activity > :global(.permission-section-heading h2) {
   margin: 0;
-  font-size: 16px;
-  line-height: 1.4;
+  color: var(--ui-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
 }
 
 .panel .activity > :global(.permission-section-heading > span) {
-  margin: 0;
+  display: none;
 }
 
 .panel .activity :global(.alert-activity-list) {
+  flex: 1 1 auto;
+  grid-auto-rows: max-content;
+  align-content: start;
   max-height: none;
-  overflow: visible;
+  min-height: 0;
+  padding-right: 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--profile-border) transparent;
 }
 
 .panel .activity :global(.alert-activity-list article) {
-  grid-template-columns: 10px minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 18px 0;
+  grid-template-columns: 82px 12px minmax(0, 1fr) max-content;
+  gap: 10px 14px;
+  padding: 12px 4px 12px 0;
+  border-bottom: 1px solid var(--profile-border);
+}
+
+.panel .activity :global(.alert-activity-list time small),
+.panel .activity :global(.alert-warning-label),
+.panel .activity :global(.alert-review-state),
+.panel .activity :global(.alert-activity-copy small),
+.panel .activity :global(.alert-action-error) {
+  font-size: 14px;
+}
+
+.panel .activity :global(.alert-activity-list article:last-child) {
+  border-bottom: 0;
 }
 
 .panel .activity :global(.alert-activity-list time) {
-  grid-column: 2;
-  grid-row: 1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  align-items: baseline;
+  grid-column: 1;
+  grid-row: 1 / span 2;
+  display: grid;
+  align-content: start;
+  gap: 5px;
 }
 
 .panel .activity :global(.alert-activity-dot) {
-  grid-column: 1;
-  grid-row: 1 / span 3;
+  grid-column: 2;
+  grid-row: 1 / span 2;
 }
 
 .panel .activity :global(.alert-activity-copy) {
-  grid-column: 2 / -1;
-  grid-row: 2;
+  grid-column: 3;
+  grid-row: 1;
   gap: 8px;
 }
 
 .panel .activity :global(.alert-activity-marker) {
-  grid-column: 3;
+  grid-column: 4;
   grid-row: 1;
   align-self: start;
 }
 
 .panel .activity :global(.alert-review-controls) {
-  grid-column: 2 / -1;
-  grid-row: 3;
-  gap: 12px;
+  grid-column: 3 / -1;
+  grid-row: 2;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px 12px;
 }
 
 .panel .activity :global(.alert-review-controls input) {
   box-sizing: border-box;
-  min-height: 44px;
-  padding: 10px 12px;
+  min-height: 36px;
+  padding: 7px 10px;
+  background: transparent;
+  font-size: 14px;
 }
 
-.controls {
-  display: grid;
-  padding-top: 12px;
+.panel .activity :global(.alert-review-controls .alert-activity-actions) {
+  min-height: 36px;
+  gap: 8px;
 }
+
+.panel .activity :global(.alert-review-controls .alert-activity-actions button) {
+  min-height: 36px;
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 14px;
+}
+
+.panel .activity :global(.alert-review-controls > p) {
+  grid-column: 1 / -1;
+}
+
+.panel .activity :global(.alert-activity-empty) {
+  min-height: 60px;
+  padding: 12px 0;
+}
+
+.visitorWarnings > :global(section) {
+  padding: 0;
+}
+
+.visitorWarnings { grid-column: 1 / -1; }
 
 .error {
-  display: grid;
-  justify-items: start;
-  gap: 10px;
-  margin-bottom: 16px;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 0;
+  border-left: 2px solid var(--ui-text-danger);
+  border-radius: 0;
+  background: transparent;
   color: var(--ui-text-danger);
-  font-size: 15px;
+  font-size: 14px;
   overflow-wrap: anywhere;
 }
 
 .error p { margin: 0; }
 .error button {
-  min-height: 40px;
-  padding: 8px 12px;
+  min-height: 32px;
+  padding: 6px 10px;
   border: 1px solid var(--admin-border);
-  border-radius: var(--radius);
-  background: var(--admin-bg);
+  border-radius: 6px;
+  background: transparent;
   color: var(--ui-text-primary);
   font: inherit;
   cursor: pointer;
@@ -127,20 +271,37 @@
   outline-color: var(--ui-text-danger);
 }
 
-@media (max-width: 1050px) {
-  .panel {
-    overflow: visible;
+@container (max-width: 760px) {
+  .panel .activity :global(.alert-review-controls) { grid-template-columns: minmax(0, 1fr); }
+  .panel .activity :global(.alert-activity-list article) { grid-template-columns: 72px 10px minmax(0, 1fr) max-content; gap: 10px 12px; }
+}
+
+@container (max-width: 480px) {
+  .panel .activity :global(.alert-activity-list article) { grid-template-columns: 10px minmax(0, 1fr); }
+  .panel .activity :global(.alert-activity-list time) { grid-column: 2; grid-row: 1; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+  .panel .activity :global(.alert-activity-dot) { grid-column: 1; grid-row: 1 / span 4; }
+  .panel .activity :global(.alert-activity-copy) { grid-column: 2; grid-row: 2; }
+  .panel .activity :global(.alert-activity-marker) { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  .panel .activity :global(.alert-review-controls) { grid-column: 2; grid-row: 4; }
+  .panel .activity :global(.alert-review-controls .alert-activity-actions button) { flex: 1 1 100px; }
+}
+
+@media (max-width: 760px) {
+  .controls { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .controls .assignmentStack :global(.employee-profile-warning-summary),
+  .controls .assignmentStack :global(.employee-profile-leave-card),
+  .controls .assignmentStack :global(.employee-profile-schedule-section) {
+    min-height: 0;
+    padding: 16px 0 0;
     border-left: 0;
     border-top: 1px solid var(--profile-border);
   }
+  .controls .assignmentStack :global(.employee-profile-warning-summary) { height: auto; min-height: 0; }
+  .controls .assignmentStack :global(.employee-profile-warning-reset-controls) { grid-template-columns: minmax(0, 1fr) auto; }
 }
 
-@media (max-width: 600px) {
-  .panel { padding: 18px 14px; }
-}
-
-@container (max-width: 350px) {
-  .panel .activity :global(.alert-activity-list article) { grid-template-columns: 10px minmax(0, 1fr); }
-  .panel .activity :global(.alert-activity-marker) { grid-column: 2; grid-row: 3; justify-content: flex-start; }
-  .panel .activity :global(.alert-review-controls) { grid-row: 4; }
+@media (min-width: 761px) and (max-width: 1000px) {
+  .controls { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+  .controls .assignmentStack :global(.employee-profile-warning-summary),
+  .controls .assignmentStack :global(.employee-profile-schedule-section) { padding-left: 16px; }
 }

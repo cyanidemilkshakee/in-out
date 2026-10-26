@@ -51,6 +51,7 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         return SubjectCreate(barcode="guest-1", kind="visitor", data={
             "name": "Guest", "host": "Host employee", "hours": 3, "purpose": "Project meeting",
             "status": "active", "inside": True, "allowedZones": ["All Zones"], "id": "spoofed",
+            "checkpointId": "cp-main",
         })
 
     async def test_visitor_registration_commits_identity_permission_and_request_together(self):
@@ -77,10 +78,8 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
 
         db.commit.side_effect = commit
         db.refresh.side_effect = refresh
-        temporal = Mock(start_workflow=AsyncMock())
         with patch("routers.registry.enqueue_decision", new=AsyncMock(side_effect=enqueue)), \
-             patch("routers.registry.enqueue_workflow_start", new=AsyncMock()) as start, \
-             patch("routers.registry.get_temporal_client", new=AsyncMock(return_value=temporal)):
+             patch("routers.registry.enqueue_workflow_start", new=AsyncMock()) as start:
             result = await create_subject(self.visitor(), db, {"sub": "operator", "realm_access": {"roles": ["operator"]}})
 
         subject = next(row for row in added if isinstance(row, Subject))
@@ -94,20 +93,18 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(permission.subject_id, subject.id)
         self.assertEqual(permission.data["state"], "pending_approval")
         self.assertEqual(request.subject_id, subject.id)
-        self.assertEqual(request.data["requestedZones"], ["public", "secure"])
+        self.assertEqual(request.data["requestedZones"], ["public"])
         self.assertEqual(request.data["validTo"], subject.person.data["validTo"])
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
         start.assert_awaited_once_with(db, request.id, visitor=True)
-        temporal.start_workflow.assert_not_awaited()
         self.assertEqual(events, ["enqueue", "commit", "refresh"])
 
     async def test_duplicate_barcode_rolls_back_registration_without_publication(self):
         db = session()
         db.execute.return_value = scalar_result(Checkpoint(id="cp-main", data={"zone": "public"}))
         db.commit.side_effect = IntegrityError("INSERT subjects", {}, ValueError("duplicate barcode"))
-        with patch("routers.registry.publish_decision", new=AsyncMock()) as publish, \
-             patch("routers.registry.get_temporal_client", new=AsyncMock()) as temporal:
+        with patch("routers.registry.enqueue_decision", new=AsyncMock()):
             with self.assertRaises(HTTPException) as error:
                 await create_subject(self.visitor(), db, {"sub": "operator"})
         self.assertEqual(error.exception.status_code, 409)
@@ -115,5 +112,3 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
         db.rollback.assert_awaited_once()
         db.refresh.assert_not_awaited()
-        publish.assert_not_awaited()
-        temporal.assert_not_awaited()

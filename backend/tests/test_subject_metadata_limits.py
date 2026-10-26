@@ -35,6 +35,7 @@ def fake_session(subject=None, permission=None):
     result = Mock()
     result.scalar_one_or_none.return_value = subject
     return Mock(execute=AsyncMock(return_value=result), scalar=AsyncMock(return_value=permission),
+                get=AsyncMock(return_value=subject),
                 add=Mock(), flush=AsyncMock(), commit=AsyncMock(), refresh=AsyncMock(),
                 rollback=AsyncMock(), info={})
 
@@ -98,17 +99,13 @@ class MetadataWriteUnitTests(unittest.IsolatedAsyncioTestCase):
             "name": "Guest", "host": "Alice", "hours": 1,
             "extension": "x" * settings.MAX_SUBJECT_METADATA_BYTES,
         })
-        with patch("routers.registry.publish_decision", new=AsyncMock()) as publish, \
-             patch("routers.registry.get_temporal_client", new=AsyncMock()) as temporal:
-            with self.assertRaises(HTTPException) as caught:
-                await create_subject(payload, db, OPERATOR)
+        with self.assertRaises(HTTPException) as caught:
+            await create_subject(payload, db, OPERATOR)
         self.assertEqual(caught.exception.status_code, 422)
         db.execute.assert_not_awaited()
         db.add.assert_not_called()
         db.flush.assert_not_awaited()
         db.commit.assert_not_awaited()
-        publish.assert_not_awaited()
-        temporal.assert_not_awaited()
 
     async def test_creation_counts_complete_server_metadata_before_adding_rows(self):
         db = fake_session()
@@ -130,8 +127,7 @@ class MetadataWriteUnitTests(unittest.IsolatedAsyncioTestCase):
             data={"state": "active", "zones": ["public"]})
         original, original_permission = copy.deepcopy(subject.person.data), copy.deepcopy(permission.data)
         db = fake_session(subject, permission)
-        with patch.object(settings, "MAX_SUBJECT_METADATA_BYTES", 1024), \
-             patch("routers.registry.publish_data_changed", new=AsyncMock()) as publish:
+        with patch.object(settings, "MAX_SUBJECT_METADATA_BYTES", 1024):
             with self.assertRaises(HTTPException) as caught:
                 await update_subject(subject.id, SubjectUpdate(barcode="NEW", data={
                     "extraB": "b" * 400, "allowedZones": ["secure"], "status": "restricted"}), db, ADMIN)
@@ -142,14 +138,13 @@ class MetadataWriteUnitTests(unittest.IsolatedAsyncioTestCase):
         db.scalar.assert_not_awaited()
         db.add.assert_not_called()
         db.commit.assert_not_awaited()
-        publish.assert_not_awaited()
 
     async def test_normal_unknown_metadata_remains_supported(self):
         db = fake_session()
         payload = SubjectCreate(kind="employee", barcode="NORMAL", data={
             "name": "Alice", "allowedZones": ["public"], "extension": {"notes": ["é", "ok"]},
         })
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
+        with patch("routers.registry.enqueue_changed", new=AsyncMock()):
             result = await create_subject(payload, db, ADMIN)
         self.assertEqual(result.data["extension"], {"notes": ["é", "ok"]})
         db.commit.assert_awaited_once()
@@ -168,28 +163,22 @@ class MetadataWriteDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_operator_oversize_create_has_no_subject_permission_or_approval(self):
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: OPERATOR
         before = await self.counts()
-        with patch("routers.registry.publish_decision", new=AsyncMock()) as publish, \
-             patch("routers.registry.get_temporal_client", new=AsyncMock()) as temporal:
-            response = await self.client.post("/v1/registry/subjects", json={
-                "kind": "visitor", "barcode": "oversize-visitor", "data": {
-                    "name": "Guest", "host": "Alice", "hours": 1,
-                    "extension": "x" * settings.MAX_SUBJECT_METADATA_BYTES,
-                }})
+        response = await self.client.post("/v1/registry/subjects", json={
+            "kind": "visitor", "barcode": "oversize-visitor", "data": {
+                "name": "Guest", "host": "Alice", "hours": 1,
+                "extension": "x" * settings.MAX_SUBJECT_METADATA_BYTES,
+            }})
         self.assertEqual(response.status_code, 422, response.text)
         self.assertEqual(await self.counts(), before)
-        publish.assert_not_awaited()
-        temporal.assert_not_awaited()
 
     async def test_final_create_overhead_is_rejected_before_any_registry_rows(self):
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: ADMIN
         before = await self.counts()
-        with patch.object(settings, "MAX_SUBJECT_METADATA_BYTES", 1024), \
-             patch("routers.registry.publish_data_changed", new=AsyncMock()) as publish:
+        with patch.object(settings, "MAX_SUBJECT_METADATA_BYTES", 1024):
             response = await self.client.post("/v1/registry/subjects", json={
                 "kind": "employee", "barcode": "server-overhead", "data": padded_metadata(1024)})
         self.assertEqual(response.status_code, 422, response.text)
         self.assertEqual(await self.counts(), before)
-        publish.assert_not_awaited()
 
     async def test_cumulative_merge_rejection_preserves_access_and_small_update_works(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: ADMIN
@@ -200,12 +189,10 @@ class MetadataWriteDatabaseTests(unittest.IsolatedAsyncioTestCase):
             original_permission = {"state": "active", "zones": ["public"], "subjectName": "Alice"}
             db.add(AccessPermission(id="metadata-permission", subject_id="p1", data=original_permission))
             await db.commit()
-        with patch.object(settings, "MAX_SUBJECT_METADATA_BYTES", 2048), \
-             patch("routers.registry.publish_data_changed", new=AsyncMock()) as publish:
+        with patch.object(settings, "MAX_SUBJECT_METADATA_BYTES", 2048):
             denied = await self.client.put("/v1/registry/subjects/p1", json={"barcode": "changed-barcode",
                 "data": {"extraB": "b" * 700, "allowedZones": ["secure"], "status": "restricted"}})
             self.assertEqual(denied.status_code, 422, denied.text)
-            publish.assert_not_awaited()
             async with self.sessions() as db:
                 self.assertEqual((await db.get(Subject, "p1")).barcode, "p1")
                 self.assertEqual((await db.get(Person, "p1")).data, original)
@@ -215,7 +202,6 @@ class MetadataWriteDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(accepted.status_code, 200, accepted.text)
             self.assertEqual(accepted.json()["data"]["extraA"], original["extraA"])
             self.assertEqual(accepted.json()["data"]["extraB"], "small")
-            publish.assert_not_awaited()
             async with self.sessions() as db:
                 self.assertEqual(await db.scalar(select(func.count()).select_from(EventOutbox)), 1)
         async with self.sessions() as db:

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import unicodedata
 from typing import Annotated, Any, Literal
 import time
 from urllib.parse import quote
@@ -21,16 +22,18 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 from auth import verify_admin_request
 from config import settings
 from database import get_db
+from data_limits import precharge_mutation_response
 from keycloak_http import get_keycloak_admin_client
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from models import TerminalCheckpointAssignment
 from event_outbox import enqueue_changed
-from terminal_assignments import enqueue_checkpoint_assignment, publish_checkpoint_assignment, set_checkpoint_assignment
+from terminal_assignments import enqueue_checkpoint_assignment, set_checkpoint_assignment
 from user_management_step_up import verified_user_management_window
 from user_management_locks import get_window_guard_db, require_unlocked_window
 from user_management_policy import can_manage_user, can_update_user_fields
 from zone_access import require_checkpoint_scope
+from token_revocation import revoke_principal_tokens
 
 router = APIRouter(prefix="/v1/keycloak", tags=["keycloak"])
 _bearer = HTTPBearer(auto_error=False)
@@ -38,6 +41,16 @@ APP_ROLES = frozenset({"admin", "operator"})
 ASSIGNABLE_ROLES = frozenset({"admin", "operator"})
 CheckpointId = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
 logger = logging.getLogger(__name__)
+PASSWORD_POLICY_ERROR = "Password must be at least 8 characters and include an uppercase letter, a lowercase letter, a number, and a symbol."
+
+
+def _validate_password_policy(value: str) -> str:
+    if (len(value) < 8 or len(value) > 128 or not any(char.isupper() for char in value) or
+            not any(char.islower() for char in value) or
+            not any(unicodedata.category(char).startswith("N") for char in value) or
+            not any(unicodedata.category(char)[0] in {"P", "S"} for char in value)):
+        raise ValueError(PASSWORD_POLICY_ERROR)
+    return value
 
 
 class UserCreateRequest(BaseModel):
@@ -46,7 +59,7 @@ class UserCreateRequest(BaseModel):
     first_name: str = Field("", alias="firstName", max_length=100)
     last_name: str = Field("", alias="lastName", max_length=100)
     email: str = Field("", max_length=320)
-    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=12, max_length=128)
+    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=8, max_length=128)
     temporary_password: bool = Field(True, alias="temporaryPassword")
     roles: list[Literal["admin", "operator"]] = Field(default_factory=list)
     enabled: bool = True
@@ -58,6 +71,11 @@ class UserCreateRequest(BaseModel):
         if value and ("@" not in value or value.startswith("@") or value.endswith("@")):
             raise ValueError("Enter a valid email address")
         return value
+
+    @field_validator("password")
+    @classmethod
+    def valid_password(cls, value: str) -> str:
+        return _validate_password_policy(value)
 
 
 class UserUpdateRequest(BaseModel):
@@ -91,8 +109,13 @@ class RolesRequest(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=8, max_length=128)
     temporary: bool = True
+
+    @field_validator("password")
+    @classmethod
+    def valid_password(cls, value: str) -> str:
+        return _validate_password_policy(value)
 
 
 async def _admin_context(
@@ -284,6 +307,17 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
         raise HTTPException(422, "Assign a checkpoint when creating an operator account")
     if payload.checkpoint_id:
         await require_checkpoint_scope(db, actor, payload.checkpoint_id)
+    predicted = _user_summary({
+        "id": "0" * 36,
+        "username": payload.username,
+        "firstName": payload.first_name,
+        "lastName": payload.last_name,
+        "email": payload.email,
+        "enabled": payload.enabled,
+        "emailVerified": False,
+        "createdTimestamp": 9_999_999_999_999,
+    }, payload.roles, payload.checkpoint_id, can_manage_user(True, payload.roles))
+    await precharge_mutation_response(db, predicted)
     try:
         response = await _request(token, "POST", "users", {
             "username": payload.username,
@@ -311,14 +345,16 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
         if payload.checkpoint_id:
             await set_checkpoint_assignment(db, identity, payload.checkpoint_id, actor["sub"])
             await enqueue_checkpoint_assignment(db, identity)
+            # Persist the checkpoint before granting the operator role. This
+            # keeps a newly created operator from becoming usable until their
+            # terminal scope is durable.
+            await enqueue_changed(db)
+            await db.commit()
+            assignment_saved = True
         roles = await _replace_roles(token, user_id, payload.roles)
         if payload.enabled:
             await _request(token, "PUT", f"users/{quote(user_id, safe='')}", {"enabled": True})
         user = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
-        if payload.checkpoint_id:
-            await enqueue_changed(db)
-            await db.commit()
-            assignment_saved = True
     except Exception as error:
         await db.rollback()
         cleanup_failed = False
@@ -335,7 +371,9 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
             try:
                 await set_checkpoint_assignment(db, identity, None, actor["sub"])
                 await enqueue_checkpoint_assignment(db, identity)
+                await enqueue_changed(db)
                 await db.commit()
+                assignment_saved = False
             except Exception:
                 cleanup_failed = True
                 await db.rollback()
@@ -371,6 +409,10 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
     ) if source in updates}
     if "email" in updates and updates["email"] != current.get("email", ""):
         body["emailVerified"] = False
+    predicted_user = {**current, **body}
+    predicted = _user_summary(predicted_user, requested_roles, checkpoint,
+        can_manage_user(administrator, requested_roles))
+    await precharge_mutation_response(db, predicted)
     checkpoint_changed = checkpoint != previous_checkpoint
     profile_attempted = False
     role_mutations: list[str] = []
@@ -389,6 +431,8 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
             await _replace_roles(token, user_id, requested_roles, role_mutations)
         saved = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
         saved_roles = await _user_roles(token, user_id)
+        if requested_roles != previous_roles or "enabled" in body:
+            await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
         if checkpoint_changed:
             await enqueue_checkpoint_assignment(db, "browser:" + user_id)
             await db.commit()
@@ -425,19 +469,25 @@ async def replace_user_roles(user_id: str, payload: RolesRequest, token: str = D
 
 @router.put("/users/{user_id}/password")
 async def reset_password(user_id: str, payload: PasswordResetRequest, token: str = Depends(_admin_context),
-    actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
+    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
     if not can_manage_user(True, await _user_roles(token, user_id)):
         raise HTTPException(404, "User not found")
+    result = {"updated": True}
+    await precharge_mutation_response(db, result)
+    await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
     await _request(token, "PUT", f"users/{quote(user_id, safe='')}/reset-password", {
         "type": "password", "value": payload.password, "temporary": payload.temporary,
     })
-    return {"updated": True}
+    return result
 
 
 @router.post("/users/{user_id}/logout")
 async def end_user_sessions(user_id: str, token: str = Depends(_admin_context),
-    actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
+    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
     if not can_manage_user(True, await _user_roles(token, user_id)):
         raise HTTPException(404, "User not found")
+    result = {"ended": True}
+    await precharge_mutation_response(db, result)
+    await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
     await _request(token, "POST", f"users/{quote(user_id, safe='')}/logout")
-    return {"ended": True}
+    return result

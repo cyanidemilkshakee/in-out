@@ -6,6 +6,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from urllib.parse import urlparse
 
@@ -96,18 +97,20 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
             return {"type": "http.disconnect"}
         scope = {"type": "http", "method": "GET", "path": "/stream", "headers": [], "asgi": {"spec_version": "2.0"}}
         claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["admin"]}}
-        with patch("routers.presence.acquire_stream_lease", new=AsyncMock(return_value="lease")), \
+        lease = SimpleNamespace(expires_at=claims["exp"])
+        with patch("routers.presence.acquire_stream_lease", new=AsyncMock(return_value=lease)), \
              patch("routers.presence.release_stream_lease", new=AsyncMock()) as release, \
              patch("routers.presence.renew_stream_lease", new=AsyncMock(return_value=True)), \
              patch("routers.presence.subscribe_presence", subscription):
             response = await presence.stream_presence(Request(scope), claims)
             await response(scope, receive, AsyncMock())
         self.assertEqual(closed, [True])
-        release.assert_awaited_once_with("lease")
+        release.assert_awaited_once_with(lease)
 
     async def test_response_send_failure_releases_lease(self):
         scope = {"type": "http", "method": "GET", "headers": [], "asgi": {"spec_version": "2.4"}}
         claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["admin"]}}
+        lease = SimpleNamespace(expires_at=claims["exp"])
         closed, sent = [], []
         async def subscription():
             try:
@@ -120,7 +123,7 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
                 sent.append(message["body"])
                 self.assertEqual(message["body"], b": heartbeat\n\n")
                 raise RuntimeError("send failure")
-        with patch("routers.presence.acquire_stream_lease", new=AsyncMock(return_value="lease")), \
+        with patch("routers.presence.acquire_stream_lease", new=AsyncMock(return_value=lease)), \
              patch("routers.presence.release_stream_lease", new=AsyncMock()) as release, \
              patch("routers.presence.renew_stream_lease", new=AsyncMock(return_value=True)), \
              patch("routers.presence.subscribe_presence", subscription):
@@ -129,7 +132,7 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
                 await response(scope, AsyncMock(return_value={"type": "http.request"}), send)
         self.assertEqual(sent, [b": heartbeat\n\n"])
         self.assertEqual(closed, [True])
-        release.assert_awaited_once_with("lease")
+        release.assert_awaited_once_with(lease)
 
     async def test_lease_watchdog_closes_backpressured_stream_on_lost_lease(self):
         blocked, closed = asyncio.Event(), []
@@ -146,8 +149,9 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
             await blocked.wait()
         scope = {"type": "http", "method": "GET", "headers": [], "asgi": {"spec_version": "2.4"}}
         claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["admin"]}}
+        lease = SimpleNamespace(expires_at=claims["exp"])
         request = Request(scope, receive=AsyncMock(return_value={"type": "http.request"}))
-        with patch("routers.presence.acquire_stream_lease", new=AsyncMock(return_value="lease")), \
+        with patch("routers.presence.acquire_stream_lease", new=AsyncMock(return_value=lease)), \
              patch("routers.presence.release_stream_lease", new=AsyncMock()) as release, \
              patch("routers.presence.renew_stream_lease", new=AsyncMock(side_effect=[True, False])) as renew, \
              patch("routers.presence.subscribe_presence", subscription), \
@@ -156,7 +160,7 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.wait_for(response(scope, AsyncMock(), send), timeout=1)
         self.assertEqual(renew.await_count, 2)
         self.assertEqual(closed, [True])
-        release.assert_awaited_once_with("lease")
+        release.assert_awaited_once_with(lease)
 
     async def test_subscribe_failure_still_closes_pubsub(self):
         pubsub = Mock(subscribe=AsyncMock(side_effect=RuntimeError("subscription failure")),

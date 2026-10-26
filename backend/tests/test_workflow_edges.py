@@ -3,7 +3,6 @@ import asyncio
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, Mock, patch
 
 import test_database as fixture
 from auth import verify_admin_or_operator_request, verify_admin_request
@@ -20,10 +19,13 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixture.DatabaseTests.asyncSetUp
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
-    def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
-        self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
-            "sub": "operator", "realm_access": {"roles": ["operator"]}}
+    def authorize(self, *, actor="admin"):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        if actor == "admin":
+            identity = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        else:
+            identity = {"sub": "operator", "realm_access": {"roles": ["operator"]}}
+        self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: identity
 
     async def add_visitor(self, *, active=False):
         now = datetime.now(timezone.utc)
@@ -41,14 +43,11 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             return dict(permission.data)
 
-    async def request(self, **fields):
-        self.authorize()
-        temporal = Mock(start_workflow=AsyncMock())
-        with patch("routers.permissions.get_temporal_client", new=AsyncMock(return_value=temporal)), \
-             patch("routers.permissions.publish_decision", new=AsyncMock()):
-            return await self.client.post("/v1/permission-requests", json={
-                "subject_id": "v1", "checkpoint_id": "cp-main", "request_type": "visitor",
-                "reason": "Visit", **fields})
+    async def request(self, *, actor="admin", **fields):
+        self.authorize(actor=actor)
+        return await self.client.post("/v1/permission-requests", json={
+            "subject_id": "v1", "checkpoint_id": "cp-main", "request_type": "visitor",
+            "reason": "Visit", **fields})
 
     async def test_manual_denial_preserves_existing_visit_and_carried_hardware(self):
         now = datetime.now(timezone.utc)
@@ -118,7 +117,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_operator_cannot_create_request_that_revokes_active_visitor(self):
         original = await self.add_visitor(active=True)
-        response = await self.request()
+        response = await self.request(actor="operator")
         self.assertEqual(response.status_code, 409, response.text)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(PermissionRequestModel)), 0)
@@ -232,8 +231,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         await self.add_visitor()
         created = await self.request()
         self.assertEqual(created.status_code, 200, created.text)
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
-            updated = await self.client.put("/v1/registry/subjects/v1", json={"data": {"name": "Corrected guest"}})
+        updated = await self.client.put("/v1/registry/subjects/v1", json={"data": {"name": "Corrected guest"}})
         self.assertEqual(updated.status_code, 200, updated.text)
         async with self.sessions() as db:
             result = await apply_permission_decision(db, created.json()["id"], "approved", "admin", "Checked")
@@ -269,10 +267,9 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(Subject(id="p2", kind="employee", barcode="p2", person=Person(data={"name": "Bob", "status": "active"})))
             await db.commit()
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
-            updated = await self.client.put("/v1/registry/subjects/h1", json={"data": {
-                "ownerId": " p2 ", "owner": "Forged owner", "assignedEmployeeId": " p1 ",
-                "assignedEmployeeName": "Forged custodian"}})
+        updated = await self.client.put("/v1/registry/subjects/h1", json={"data": {
+            "ownerId": " p2 ", "owner": "Forged owner", "assignedEmployeeId": " p1 ",
+            "assignedEmployeeName": "Forged custodian"}})
         self.assertEqual(updated.status_code, 200, updated.text)
         data = updated.json()["data"]
         self.assertEqual((data["ownerId"], data["owner"]), ("p2", "Bob"))
@@ -291,11 +288,9 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         for subject_id, barcode, patch_data in (("p1", "H1", {"name": "Changed employee"}),
                                                 ("h1", "P1", {"ownerId": "p1", "name": "Changed asset"})):
             with self.subTest(subject_id=subject_id):
-                with patch("routers.registry.publish_data_changed", new=AsyncMock()) as publish:
-                    response = await self.client.put(f"/v1/registry/subjects/{subject_id}", json={
-                        "barcode": barcode, "data": patch_data})
+                response = await self.client.put(f"/v1/registry/subjects/{subject_id}", json={
+                    "barcode": barcode, "data": patch_data})
                 self.assertEqual(response.status_code, 409, response.text)
-                publish.assert_not_awaited()
                 async with self.sessions() as db:
                     self.assertEqual((await db.get(Subject, subject_id)).barcode, subject_id)
                     metadata = await db.get(Person if subject_id == "p1" else HardwareAsset, subject_id)

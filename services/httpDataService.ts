@@ -32,6 +32,7 @@ import type {
   RecordScanInput,
   RecordScanResult,
   RegistryPage, RegistryPageQuery, RegistrySubjectPage, RegistrySubjectQuery, SubjectProfile,
+  TerminalVisitorPage,
 } from "../lib/types";
 
 type Command =
@@ -95,28 +96,34 @@ async function readResponse<T>(response: Response, signal?: AbortSignal): Promis
   return body.data as T;
 }
 
+function resourceParams(
+  resource: string,
+  query: object,
+  initial: Record<string, string> = {},
+  excludedKeys: readonly string[] = []
+) {
+  const params = new URLSearchParams({ resource, ...initial });
+  for (const [key, value] of Object.entries(query)) {
+    if (!excludedKeys.includes(key) && value !== undefined && value !== "") {
+      params.set(key, String(value));
+    }
+  }
+  return params;
+}
+
 export class HttpDataService implements DataService {
   async queryDashboardAnalytics(query: DashboardAnalyticsQuery, signal?: AbortSignal): Promise<DashboardAnalytics> {
-    const params = new URLSearchParams({ resource: "dashboardAnalytics" });
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== "") params.set(key, String(value));
-    }
+    const params = resourceParams("dashboardAnalytics", query);
     return readResponse<DashboardAnalytics>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async queryEmployeeActivity(query: EmployeeActivityQuery, signal?: AbortSignal): Promise<EmployeeActivity> {
-    const params = new URLSearchParams({ resource: "employeeActivity" });
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== "") params.set(key, String(value));
-    }
+    const params = resourceParams("employeeActivity", query);
     return readResponse<EmployeeActivity>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async queryEmployeeActivitySummary(query: EmployeeActivitySummaryQuery, signal?: AbortSignal): Promise<EmployeeActivitySummary> {
-    const params = new URLSearchParams({ resource: "employeeActivitySummary" });
-    for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined && value !== "") params.set(key, String(value));
-    }
+    const params = resourceParams("employeeActivitySummary", query);
     return readResponse<EmployeeActivitySummary>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
@@ -133,21 +140,10 @@ export class HttpDataService implements DataService {
   }
 
   async queryMovements(query: MovementQuery, signal?: AbortSignal) {
-    const params = new URLSearchParams({
-      resource: "movements",
+    const params = resourceParams("movements", query, {
       page: String(query.page),
       pageSize: String(query.pageSize),
-    });
-    for (const [key, value] of Object.entries(query)) {
-      if (
-        key !== "page" &&
-        key !== "pageSize" &&
-        value !== undefined &&
-        value !== ""
-      ) {
-        params.set(key, String(value));
-      }
-    }
+    }, ["page", "pageSize"]);
     const response = await fetch(`/api/data?${params.toString()}`, {
       cache: "no-store",
       signal,
@@ -156,31 +152,19 @@ export class HttpDataService implements DataService {
   }
 
   async queryAuditEvents(query: AuditEventQuery, signal?: AbortSignal) {
-    const params = new URLSearchParams({
-      resource: "auditEvents",
+    const params = resourceParams("auditEvents", query, {
       limit: String(query.limit),
       offset: String(query.offset),
-    });
-    for (const [key, value] of Object.entries(query)) {
-      if (key !== "limit" && key !== "offset" && value !== undefined && value !== "") {
-        params.set(key, String(value));
-      }
-    }
+    }, ["limit", "offset"]);
     const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store", signal });
     return readResponse<AuditEventPage>(response, signal);
   }
 
   async queryAlerts(query: AlertQuery, signal?: AbortSignal) {
-    const params = new URLSearchParams({
-      resource: "alerts",
+    const params = resourceParams("alerts", query, {
       limit: String(query.limit),
       offset: String(query.offset),
-    });
-    for (const [key, value] of Object.entries(query)) {
-      if (key !== "limit" && key !== "offset" && value !== undefined && value !== "") {
-        params.set(key, String(value));
-      }
-    }
+    }, ["limit", "offset"]);
     const response = await fetch(`/api/data?${params.toString()}`, { cache: "no-store", signal });
     return readResponse<AlertPage>(response, signal);
   }
@@ -279,20 +263,24 @@ export class HttpDataService implements DataService {
   }
 
   async queryRegistryPage(query: RegistryPageQuery, signal?: AbortSignal) {
-    const params = new URLSearchParams({ resource: "registryPage" });
-    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+    const params = resourceParams("registryPage", query);
     return readResponse<RegistryPage>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async queryRegistrySubjects(query: RegistrySubjectQuery, signal?: AbortSignal) {
-    const params = new URLSearchParams({ resource: "registrySubjects" });
-    for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
+    const params = resourceParams("registrySubjects", query);
     return readResponse<RegistrySubjectPage>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async querySubjectProfile(subjectId: string, signal?: AbortSignal) {
     const params = new URLSearchParams({ resource: "subjectProfile", subjectId });
     return readResponse<SubjectProfile>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
+  }
+
+  async queryTerminalVisitors(cursor?: string, signal?: AbortSignal) {
+    const params = new URLSearchParams({ resource: "terminalVisitors" });
+    if (cursor) params.set("cursor", cursor);
+    return readResponse<TerminalVisitorPage>(await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
 }

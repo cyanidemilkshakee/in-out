@@ -19,6 +19,10 @@ CLIENT_SECRET = "isolated-keycloak-test-client-secret"
 CALLBACK = "http://app.fixture:3000/api/auth/callback/keycloak"
 
 
+def strong_password():
+    return "Aa9!" + secrets.token_urlsafe(28)
+
+
 class KeycloakCompatibilityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -38,7 +42,7 @@ class KeycloakCompatibilityTests(unittest.TestCase):
         cls.users = {}
         for role in ("operator", "admin"):
             username = "fixture-" + role
-            password = secrets.token_urlsafe(32)
+            password = strong_password()
             created = cls.admin_request("POST", "/users", json={
                 "username": username, "enabled": True, "email": username + "@example.invalid",
                 "firstName": "Compatibility", "lastName": "Fixture", "emailVerified": True,
@@ -369,7 +373,7 @@ class KeycloakCompatibilityTests(unittest.TestCase):
 
     def test_disabled_accounts_cannot_use_the_app_password_grant(self):
         username = "fixture-disabled-" + secrets.token_hex(4)
-        password = secrets.token_urlsafe(32)
+        password = strong_password()
         created = self.admin_request("POST", "/users", json={
             "username": username, "enabled": False, "email": username + "@example.invalid",
             "firstName": "Disabled", "lastName": "Fixture", "emailVerified": True,
@@ -420,10 +424,10 @@ class KeycloakCompatibilityTests(unittest.TestCase):
         created = self.admin_request("POST", "/users", json={"username": username, "enabled": True,
             "email": username + "@example.invalid", "firstName": "MFA", "lastName": "Fixture", "emailVerified": True,
             "requiredActions": ["CONFIGURE_TOTP"],
-            "credentials": [{"type": "password", "value": secrets.token_urlsafe(32), "temporary": False}]})
+            "credentials": [{"type": "password", "value": strong_password(), "temporary": False}]})
         self.assertEqual(created.status_code, 201)
         user_id = created.headers["location"].rsplit("/", 1)[1]
-        password = secrets.token_urlsafe(32)
+        password = strong_password()
         try:
             self.admin_request("PUT", f"/users/{user_id}/reset-password", json={
                 "type": "password", "value": password, "temporary": False}).raise_for_status()
@@ -477,7 +481,12 @@ class KeycloakCompatibilityTests(unittest.TestCase):
 
     def test_password_policy_rejects_short_credentials_at_the_provider(self):
         realm = self.admin_request("GET", "").json()
-        self.assertIn("length(12)", realm.get("passwordPolicy", ""))
+        password_policy = realm.get("passwordPolicy", "")
+        self.assertIn("length(8)", password_policy)
+        self.assertIn("upperCase(1)", password_policy)
+        self.assertIn("lowerCase(1)", password_policy)
+        self.assertIn("digits(1)", password_policy)
+        self.assertIn("specialChars(1)", password_policy)
         user = self.users["operator"]
         rejected = self.admin_request("PUT", f"/users/{user['id']}/reset-password", json={
             "type": "password", "value": "x", "temporary": False,
@@ -496,7 +505,7 @@ class KeycloakCompatibilityTests(unittest.TestCase):
         self.assertEqual(incomplete.json()["error"], "invalid_grant")
         self.assertEqual(incomplete.json().get("error_description"), "Account is not fully set up",
             "Only this valid-credentials required-action response may offer account setup")
-        self.sign_in("operator", password_update=secrets.token_urlsafe(32))
+        self.sign_in("operator", password_update=strong_password())
         self.direct_sign_in("operator")
 
 

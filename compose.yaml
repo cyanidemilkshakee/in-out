@@ -400,6 +400,8 @@ services:
       - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
       - KEYCLOAK_CLIENT_ID=inout-frontend
       - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      - KEYCLOAK_ACCOUNT_SETUP_CLIENT_ID=${KEYCLOAK_ACCOUNT_SETUP_CLIENT_ID:-inout-account-setup}
+      - KEYCLOAK_ACCOUNT_SETUP_CLIENT_SECRET=${KEYCLOAK_ACCOUNT_SETUP_CLIENT_SECRET:-}
       - KEYCLOAK_ISSUER=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:1105/realms/inout
       - KEYCLOAK_ISSUER_PUBLIC=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout

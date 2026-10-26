@@ -7,6 +7,7 @@ import type {
   SortDirection,
   VisibleColumn,
 } from '../../../../lib/types';
+import { normalizeCheckpointLabel } from '../../../../lib/normalizeDashboard';
 
 function ResultPill({ value }: { value: ResultStatus }) {
   return (
@@ -112,7 +113,7 @@ export function MovementTable({
       case "active": return <td key={column} className="column-active" data-label="Status">{renderStatus(event)}</td>;
       case "type": return <td key={column} className="column-type cell-capitalize" data-label="Type">{event.subjectType}</td>;
       case "result": return <td key={column} className="column-result" data-label="Result"><ResultPill value={event.result} /></td>;
-      case "checkpoint": return <td key={column} className="column-checkpoint truncate" data-label="Checkpoint Name">{event.checkpoint}</td>;
+      case "checkpoint": return <td key={column} className="column-checkpoint truncate" data-label="Checkpoint Name">{normalizeCheckpointLabel(event.checkpoint)}</td>;
       case "scanType": return <td key={column} className="column-scanType cell-capitalize" data-label="Scan Type">{event.scanType}</td>;
       case "direction": return <td key={column} className="column-direction" data-label="Direction"><span className={`direction direction-${event.direction}`}>{event.direction}</span></td>;
       case "barcode": return <td key={column} className="column-barcode cell-barcode" data-label="Barcode ID">{event.barcode}</td>;

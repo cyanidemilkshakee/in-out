@@ -38,9 +38,11 @@ export function AccessDirectory({ rows, hardwareAssets, tab, onTabChange, search
       </div>
       <div className={styles.directoryToolbar}>
       <div className={styles.directoryTabs} role="group" aria-label="Permission subject type">
-        {(["people", "hardware"] as const).map((value) => <button key={value} type="button" aria-pressed={tab === value} onClick={() => onTabChange(value)}>{value === "people" ? <UserRound size={16} /> : <Package size={16} />}{value === "people" ? "People" : "Hardware"}</button>)}
+        {(["people", "hardware"] as const).map((value) => {
+          const label = value === "people" ? "People" : "Hardware";
+          return <button key={value} type="button" aria-label={label} title={label} aria-pressed={tab === value} onClick={() => onTabChange(value)}>{value === "people" ? <UserRound size={18} aria-hidden="true" /> : <Package size={18} aria-hidden="true" />}</button>;
+        })}
       </div>
-      <span className={styles.recordSummary}>{total} total permissions</span>
       </div>
       <div className={styles.directoryFilters}>
         <div className={styles.directorySearch}><Search size={17} aria-hidden="true" /><input type="search" value={search} onChange={(event) => onSearchChange(event.target.value)} placeholder={`Find ${tab === "people" ? "a person" : "an asset"}…`} aria-label={`Search ${tab === "people" ? "people" : "hardware"} permissions`} />{search && <button type="button" aria-label="Clear search" onClick={() => onSearchChange("")}><X size={15} /></button>}</div>
@@ -60,6 +62,7 @@ export function AccessDirectory({ rows, hardwareAssets, tab, onTabChange, search
                   <span className={styles.subjectAvatar} data-type={permission.subjectType} aria-hidden="true">{permission.subjectType === "hardware" ? <Package size={20} strokeWidth={1.6} /> : permission.subjectName.split(" ").filter(Boolean).map((part) => part[0]).join("").slice(0, 2).toUpperCase()}</span>
                   <div className={styles.directoryIdentityDetails}>
                     <div className={styles.directoryNameLine}><h3>{permission.subjectName}</h3><span className={styles.accessState} data-state={displayState}><span aria-hidden="true" />{displayState === "pending_approval" ? "Pending" : displayState.charAt(0).toUpperCase() + displayState.slice(1)}</span></div>
+                    {(permission.barcode || asset?.barcode) && <span className={styles.subjectBarcode}>Barcode: {permission.barcode || asset?.barcode}</span>}
                     <span className={styles.subjectType}>{permission.subjectType === "employee" ? "Employee" : permission.subjectType === "visitor" ? "Visitor" : "Hardware"} · {zones}</span>
                   </div>
                 </div>

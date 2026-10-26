@@ -9,7 +9,7 @@ from sqlalchemy import false, select, true
 
 from auth import has_admin_role
 from facility_zones import CHECKPOINTS, CHECKPOINT_IDS, FACILITY_ZONES
-from models import Alert, AlertReview, Checkpoint, Subject
+from models import Alert, AlertReview, Checkpoint, CriticalAlertTrigger, Subject
 
 
 async def admin_zone_ids(db, actor: dict) -> tuple[str, ...]:
@@ -57,9 +57,16 @@ async def require_alert_scope(db, actor: dict, alert_id: str) -> dict:
         data = alert.data or {}
     else:
         review = await db.scalar(select(AlertReview).where(AlertReview.alert_id == alert_id))
-        if review is None:
-            raise HTTPException(status_code=404, detail="Alert not found")
-        data = {**(review.alert_data or {}), "subjectId": review.subject_id}
+        if review is not None:
+            data = {**(review.alert_data or {}), "subjectId": review.subject_id}
+        else:
+            # Critical holds survive alert retention too, and must remain
+            # explicitly releasable by an administrator after the alert row
+            # has been purged.
+            trigger = await db.get(CriticalAlertTrigger, alert_id)
+            if trigger is None:
+                raise HTTPException(status_code=404, detail="Alert not found")
+            data = {"subjectId": trigger.subject_id}
     checkpoint_id = data.get("checkpointId")
     if isinstance(checkpoint_id, str) and checkpoint_id:
         await require_checkpoint_scope(db, actor, checkpoint_id)
@@ -69,10 +76,15 @@ async def require_alert_scope(db, actor: dict, alert_id: str) -> dict:
         await require_zone_scope(db, actor, zone_id)
         return data
     subject_id = data.get("subjectId")
-    if isinstance(subject_id, str) and subject_id:
-        await require_subject_scope(db, actor, subject_id)
-        return data
-    raise HTTPException(status_code=404, detail="Alert not found")
+    if isinstance(subject_id, str) and subject_id.strip():
+        subject_id = subject_id.strip()
+        if await db.get(Subject, subject_id) is not None:
+            await require_subject_scope(db, actor, subject_id)
+            return data
+    # Administrators have facility-wide scope. Keep legacy or unbound alerts
+    # reviewable so the review service can validate their barcode/subject link.
+    await admin_zone_ids(db, actor)
+    return data
 
 
 def validate_zone_subset(zone_ids, allowed_zone_ids):

@@ -263,7 +263,7 @@ async def main() -> None:
     )
     args = parser.parse_args()
 
-    engine = create_async_engine(DATABASE_URL)
+    engine = create_async_engine(DATABASE_URL, hide_parameters=True)
 
     try:
         if args.mode == "reference":

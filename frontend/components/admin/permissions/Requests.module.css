@@ -20,7 +20,7 @@
 .pageError { background: color-mix(in srgb, var(--ui-text-danger) 5%, var(--permission-surface)); color: var(--ui-text-danger); }
 .managerLayout { display: grid; grid-template-columns: minmax(0, 1.24fr) minmax(0, 1fr); align-items: start; gap: 24px; }
 .queueColumn { display: grid; min-width: 0; gap: 22px; }
-.queuePanel, .directoryPanel { min-width: 0; overflow: hidden; border: 1px solid var(--admin-line); border-radius: 18px; background: var(--permission-surface); }
+.queuePanel, .directoryPanel { min-width: 0; overflow: hidden; border: 1px solid var(--admin-line); border-radius: 18px; background: var(--admin-bg); }
 .directoryHeading, .queueHeading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 22px; }
 .sectionTitle { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .sectionTitle > div { min-width: 0; }
@@ -32,7 +32,7 @@
 .queueCount { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; padding: 5px 9px; border-radius: 7px; background: color-mix(in srgb, var(--ui-text-info) 7%, transparent); color: var(--ui-text-info); font-size: 14px; font-weight: 700; }
 .directoryToolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 0 22px 16px; }
 .directoryTabs { display: inline-flex; gap: 3px; padding: 4px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--permission-inset); }
-.directoryTabs button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 33px; padding: 0 14px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ui-text-secondary); font-size: 15px; font-weight: 500; }
+.directoryTabs button { display: inline-flex; align-items: center; justify-content: center; width: 38px; min-height: 36px; padding: 0; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ui-text-secondary); font-size: 15px; font-weight: 500; cursor: pointer; }
 .directoryTabs button[aria-pressed="true"] { border-color: var(--admin-line); background: var(--permission-surface); color: var(--ui-text-primary); font-weight: 800; box-shadow: 0 1px 3px rgb(24 32 31 / 4%); }
 .recordSummary { color: var(--ui-text-secondary); font-size: 13px; font-weight: 500; }
 .directoryFilters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(132px, .48fr); gap: 10px; padding: 0 22px 18px; border-bottom: 1px solid var(--admin-line); }
@@ -53,6 +53,7 @@
 .directoryIdentityDetails { display: grid; align-content: start; gap: 4px; min-width: 0; }
 .directoryNameLine { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
 .directoryCardHeader h3 { margin: 0; font-size: 18px; font-weight: 800; line-height: 1.35; letter-spacing: -.02em; overflow-wrap: anywhere; }
+.subjectBarcode { display: block; color: var(--ui-text-secondary); font-size: 14px; font-weight: 600; line-height: 1.4; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .subjectType { display: block; color: var(--ui-text-secondary); font-size: 14px; font-weight: 500; line-height: 1.45; overflow-wrap: anywhere; }
 .subjectAvatar { display: grid; place-items: center; flex: 0 0 41px; width: 41px; height: 41px; border-radius: 12px; background: color-mix(in srgb, var(--ui-text-positive) 8%, transparent); color: var(--ui-text-positive); font-size: 16px; font-weight: 700; }
 .subjectAvatar[data-type="visitor"] { background: color-mix(in srgb, var(--ui-text-info) 8%, transparent); color: var(--ui-text-info); }

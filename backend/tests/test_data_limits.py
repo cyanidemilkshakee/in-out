@@ -19,7 +19,7 @@ from sqlalchemy import literal, select
 from starlette.responses import JSONResponse, Response
 
 import data_limits
-from data_limits import DataLimitsMiddleware, bounded_rows, consume_data_bytes
+from data_limits import DataLimitsMiddleware, bounded_rows, consume_data_bytes, precharge_mutation_response
 
 
 class FakeRedis:
@@ -88,11 +88,53 @@ class DataLimitTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.request(fixture_app(response=Response("public text")))).status_code, 200)
         self.assertEqual(self.redis.used, {})
 
-    async def test_write_response_is_never_blocked_after_a_committed_mutation(self):
+    async def test_mutation_is_rejected_before_commit_when_response_bytes_exceed_quota(self):
         self.config.DATA_BYTES_PER_MINUTE = 1
-        response = await self.request(method="POST")
-        self.assertEqual(response.status_code, 200)
+        commits = []
+        payload = {"changed": True, "value": "private result"}
+        async def mutating_app(scope, receive, send):
+            scope.setdefault("state", {})["limit_identity"] = "verified:alice"
+            db = SimpleNamespace(info={"request_scope": scope})
+            try:
+                await precharge_mutation_response(db, payload)
+            except HTTPException as error:
+                await JSONResponse({"detail": error.detail}, status_code=error.status_code)(scope, receive, send)
+                return
+            commits.append(True)
+            await JSONResponse(payload)(scope, receive, send)
+        response = await self.request(DataLimitsMiddleware(mutating_app), method="POST")
+        self.assertEqual(response.status_code, 429)
+        self.assertEqual(commits, [])
         self.assertEqual(self.redis.used, {})
+
+        self.config.DATA_BYTES_PER_MINUTE = 1024
+        success = await self.request(DataLimitsMiddleware(mutating_app), method="POST")
+        self.assertEqual(success.status_code, 200)
+        self.assertEqual(commits, [True])
+        self.assertEqual(sum(self.redis.used.values()), len(success.content))
+
+    async def test_oversized_committed_mutation_streams_chunks_and_accounts_bytes(self):
+        self.config.MAX_DATA_RESPONSE_BYTES = 4
+        forwarded = []
+        chunks = [b'{"a":', b'1}']
+
+        async def app(scope, receive, send):
+            scope.setdefault("state", {})["limit_identity"] = "verified:alice"
+            await send({"type": "http.response.start", "status": 200,
+                "headers": [(b"content-type", b"application/json")]})
+            await send({"type": "http.response.body", "body": chunks[0], "more_body": True})
+            # The first chunk reaches the client before the application emits
+            # the rest, proving this committed response is not buffered.
+            self.assertEqual(forwarded[-1]["body"], chunks[0])
+            await send({"type": "http.response.body", "body": chunks[1], "more_body": False})
+
+        scope = {"type": "http", "method": "POST", "path": "/mutation", "headers": []}
+        await DataLimitsMiddleware(app)(scope, AsyncMock(return_value={"type": "http.request"}),
+            AsyncMock(side_effect=lambda message: forwarded.append(message)))
+        self.assertEqual([message["type"] for message in forwarded], [
+            "http.response.start", "http.response.body", "http.response.body"])
+        self.assertEqual([message.get("body") for message in forwarded[1:]], chunks)
+        self.assertEqual(sum(self.redis.used.values()), sum(map(len, chunks)))
 
     async def test_declared_oversized_response_rejected_before_headers(self):
         self.config.MAX_DATA_RESPONSE_BYTES = 10

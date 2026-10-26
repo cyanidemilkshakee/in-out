@@ -21,6 +21,7 @@ import { AlertsHistoryTable } from "../../../frontend/components/admin/alerts/Al
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import { isMovementEventId } from "../../../lib/movementReferences";
 import { movementAnalyticsFilters } from "../../../lib/analyticsQueries";
+import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
 import {
   compactRangeBounds,
   parseDateInput,
@@ -467,7 +468,10 @@ function LogsWorkspace() {
               onChange={(e) => setCheckpointFilter(e.target.value)}
             >
               <option value="all">All Checkpoints</option>
-              {movementPage.checkpoints.map(cp => <option key={cp} value={cp}>{cp}</option>)}
+              {movementPage.checkpoints.map((checkpoint) => {
+                const label = normalizeCheckpointLabel(checkpoint);
+                return label ? <option key={label} value={label}>{label}</option> : null;
+              })}
             </select>
           </label>
           <label className="select-control">

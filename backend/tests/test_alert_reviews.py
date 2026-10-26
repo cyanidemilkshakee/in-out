@@ -16,7 +16,7 @@ from sqlalchemy import select, func, delete
 import test_database as database_fixture
 from auth import verify_admin_request, verify_terminal_access_request
 from models import (Alert, AlertRule, AlertReview, WarningReset, Subject, Person,
-    AuditEvent, CriticalEntryRestriction, PresenceState, Movement, AlertRuleAssignment)
+    AuditEvent, CriticalEntryRestriction, PresenceState, Movement, AlertRuleAssignment, EventOutbox)
 from alert_reviews import AlertReviewInput, WarningResetInput, review_alert, reset_subject_warnings
 from critical_entry_restrictions import activate_critical_entry_restrictions
 
@@ -46,7 +46,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = database_fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "review-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "review-admin", "realm_access": {"roles": ["admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
 
     async def create_alert(self, *, subject_id="p1", barcode=None, severity="medium", created_at=None, **extra):
@@ -69,16 +69,13 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         body = {"decision": decision}
         if reason is not None:
             body["reason"] = reason
-        with patch("routers.alerts.publish_data_changed", new=AsyncMock()):
-            return await self.client.post(f"/v1/alerts/{alert_id}/review", json=body)
+        return await self.client.post(f"/v1/alerts/{alert_id}/review", json=body)
 
     async def acknowledge(self, alert_id):
-        with patch("routers.alerts.publish_presence_update", new=AsyncMock()):
-            return await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
+        return await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
 
     async def reset(self, subject_id="p1", reason="Warnings checked and entry may resume"):
-        with patch("routers.alerts.publish_data_changed", new=AsyncMock()):
-            return await self.client.post(f"/v1/alert-warnings/{subject_id}/reset", json={"reason": reason})
+        return await self.client.post(f"/v1/alert-warnings/{subject_id}/reset", json={"reason": reason})
 
     async def audit_count(self):
         async with self.sessions() as db:
@@ -248,7 +245,8 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         for fields in ({"subject_id": None, "subjectName": "Alice"},
                        {"subject_id": "missing", "barcode": "p1"}, {"subject_id": " ", "barcode": "p1"}):
             alert_id = await self.create_alert(**fields)
-            self.assertEqual((await self.review(alert_id)).status_code, 422)
+            invalid_review = await self.review(alert_id)
+            self.assertEqual(invalid_review.status_code, 422, invalid_review.text)
             excuse = await self.review(alert_id, "excused", "Cannot bind to a registered subject")
             self.assertEqual(excuse.status_code, 200, excuse.text)
             self.assertNotIn("subjectId", excuse.json()["alert"])
@@ -321,10 +319,9 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         await self.create_alert(severity="critical")
         async def scan():
-            with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
-                return await self.client.post("/v1/terminal/scans",
-                    json={"barcode": "p1", "checkpointId": "cp-main"},
-                    headers={"Idempotency-Key": str(uuid.uuid4())})
+            return await self.client.post("/v1/terminal/scans",
+                json={"barcode": "p1", "checkpointId": "cp-main"},
+                headers={"Idempotency-Key": str(uuid.uuid4())})
         blocked = await scan()
         self.assertFalse(blocked.json()["allowed"], blocked.text)
         async with self.sessions() as db:
@@ -531,15 +528,16 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn("warningReset", (await db.get(AlertReview, alert_id)).alert_data)
         self.assertEqual(await self.audit_count(), before)
 
-    async def test_publication_failure_does_not_lose_committed_review_or_reset(self):
+    async def test_review_and_reset_commit_with_durable_refresh_events(self):
         self.authorize()
         alert_id = await self.create_alert()
-        with patch("routers.alerts.publish_data_changed", new=AsyncMock(side_effect=RuntimeError("Redis offline"))):
-            review = await self.client.post(f"/v1/alerts/{alert_id}/review", json={"decision": "confirmed"})
-            reset = await self.client.post("/v1/alert-warnings/p1/reset", json={"reason": "Checked"})
+        review = await self.client.post(f"/v1/alerts/{alert_id}/review", json={"decision": "confirmed"})
+        reset = await self.client.post("/v1/alert-warnings/p1/reset", json={"reason": "Checked"})
         self.assertEqual(review.status_code, 200, review.text)
         self.assertEqual(reset.status_code, 200, reset.text)
         async with self.sessions() as db:
             self.assertEqual((await db.get(AlertReview, alert_id)).decision, "confirmed")
             self.assertIsNotNone(await db.get(WarningReset, "p1"))
             self.assertEqual((await db.get(Alert, alert_id)).data["status"], "acknowledged")
+            events = (await db.scalars(select(EventOutbox).where(EventOutbox.kind == "presence"))).all()
+            self.assertEqual(sum(event.payload.get("type") == "data_changed" for event in events), 2)

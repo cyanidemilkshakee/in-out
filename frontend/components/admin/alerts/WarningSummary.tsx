@@ -8,14 +8,18 @@ import type { AlertSubjectOption } from "./AlertSubjectPicker";
 import { formatAlertReviewDate } from "./alertPresentation";
 import styles from "./EmployeeAlertManagement.module.css";
 
-export function WarningSummary({ warnings, alerts, selectedSubject, onReset, onViewHistory, isLoading = false }: {
+export function WarningSummary({ warnings, alerts, selectedSubject, onReset, onViewHistory, showHistoryAction = true, hideWarningEmptyText = false, isLoading = false, className = "" }: {
   warnings: AlertWarningSummary[];
   alerts: Alert[];
   selectedSubject?: AlertSubjectOption;
   onReset: (subjectId: string, reason: string) => Promise<void>;
   onViewHistory?: () => void;
+  showHistoryAction?: boolean;
+  hideWarningEmptyText?: boolean;
   isLoading?: boolean;
+  className?: string;
 }) {
+  const profileSummary = className.includes("employee-profile-warning-summary");
   const [reason, setReason] = useState("");
   const [invalidReason, setInvalidReason] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -59,25 +63,25 @@ export function WarningSummary({ warnings, alerts, selectedSubject, onReset, onV
     finally { pending.current = false; setBusy(false); }
   }
 
-  return <section className={styles.warnings} aria-label="Confirmed warnings" aria-busy={busy}>
+  return <section className={`${styles.warnings} ${className}`} aria-label="Confirmed warnings" aria-busy={busy}>
     {selectedSubject ? <>
-      <div className={styles.warningOverview}>
-        <div className={styles.warningCount}><strong>{warningCount}</strong><span>Confirmed warning{warningCount === 1 ? "" : "s"}</span></div>
-        {onViewHistory
+      <div className={`${styles.warningOverview}${profileSummary ? " employee-profile-warning-overview" : ""}`}>
+        <div className={`${styles.warningCount}${profileSummary ? " employee-profile-warning-count" : ""}`}><strong>{warningCount}</strong><span>Confirmed warning{warningCount === 1 ? "" : "s"}</span></div>
+        {showHistoryAction ? (onViewHistory
           ? <button type="button" className={`${styles.button} ${styles.historyLink}`} onClick={onViewHistory}>View history<ArrowUpRight size={17} aria-hidden="true" /></button>
-          : <Link className={styles.historyLink} href={`/admin/registry?tab=alerts&subject=${encodeURIComponent(selectedSubject.subjectId)}`}>View history<ArrowUpRight size={17} aria-hidden="true" /></Link>}
-        {hasEntryRestriction && <span className={styles.holdBadge}><ShieldAlert size={17} aria-hidden="true" />Entry blocked</span>}
+          : <Link className={styles.historyLink} href={`/admin/registry?tab=alerts&subject=${encodeURIComponent(selectedSubject.subjectId)}`}>View history<ArrowUpRight size={17} aria-hidden="true" /></Link>) : null}
+        {hasEntryRestriction && <span className={`${styles.holdBadge}${profileSummary ? " employee-profile-warning-hold" : ""}`}><ShieldAlert size={17} aria-hidden="true" />Entry blocked</span>}
       </div>
-      {triggeredWarnings.length ? <ul className={`${styles.warningList} scrollable-content`}>{triggeredWarnings.map((alert) => (
+      {triggeredWarnings.length ? <ul className={`${styles.warningList} scrollable-content${profileSummary ? " employee-profile-warning-list" : ""}`}>{triggeredWarnings.map((alert) => (
         <li key={alert.id}>
           <div><strong>{alert.title || alert.ruleId || "Confirmed alert"}</strong>{alert.severity !== "medium" && <span className={styles.severity} data-severity={alert.severity}>{alert.severity}</span>}</div>
           {alert.review?.reviewedAt && <time dateTime={alert.review.reviewedAt}>{formatAlertReviewDate(alert.review.reviewedAt)}</time>}
         </li>
-      ))}</ul> : <p className={styles.warningEmpty}>{warningCount ? "Warning details are available in alert history." : "No current warnings."}</p>}
-      {canReset && <div className={styles.resetPanel}>
-        <div className={styles.resetControls}>
+      ))}</ul> : hideWarningEmptyText ? null : <p className={styles.warningEmpty}>{warningCount ? "Warning details are available in alert history." : "No current warnings."}</p>}
+      {canReset && <div className={`${styles.resetPanel}${profileSummary ? " employee-profile-warning-reset" : ""}`}>
+        <div className={`${styles.resetControls}${profileSummary ? " employee-profile-warning-reset-controls" : ""}`}>
           <input ref={noteRef} type="text" maxLength={1000} value={reason} disabled={busy || isLoading} aria-label={`Reason to reset warnings for ${selectedSubject.subjectName}`} aria-invalid={invalidReason} placeholder="Reason for reset (required)" onChange={(event) => { setReason(event.target.value); if (event.target.value.trim()) setInvalidReason(false); }} />
-          <button type="button" className={`${styles.button} ${styles.resetButton}`} disabled={busy || isLoading} onClick={() => void reset()}>
+          <button type="button" className={`${styles.button} ${styles.resetButton}${profileSummary ? " employee-profile-warning-reset-button" : ""}`} disabled={busy || isLoading} onClick={() => void reset()}>
             {busy ? <LoaderCircle size={17} className={styles.loadingIcon} aria-hidden="true" /> : <RotateCcw size={17} aria-hidden="true" />}
             {busy ? "Resetting…" : "Reset warnings"}
           </button>

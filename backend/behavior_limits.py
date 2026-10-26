@@ -104,7 +104,9 @@ async def enforce_behavior_admission(request, identity):
         return
     # A cooldown must not prevent an administrator revoking their unlocked
     # user-management window. This operation only removes authorization.
-    if scope.get("method") == "POST" and scope.get("path", "").rstrip("/") == "/v1/user-management/lock":
+    if scope.get("method") == "POST" and scope.get("path", "").rstrip("/") in {
+        "/v1/user-management/lock", "/v1/auth/revoke-session",
+    }:
         return
     state = scope.setdefault("state", {})
     if state.get("behavior_admitted"):

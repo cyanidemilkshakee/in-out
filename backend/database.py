@@ -1,6 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 
+from fastapi import Request
 from sqlalchemy.exc import TimeoutError as PoolTimeoutError
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
@@ -19,6 +20,7 @@ def database_engine_options(configuration=settings):
     """Bound connection, checkout, server execution and transport waits."""
     return {
         "echo": False,
+        "hide_parameters": True,
         "pool_size": 5,
         "max_overflow": 10,
         "pool_timeout": configuration.DATABASE_POOL_TIMEOUT_SECONDS,
@@ -102,8 +104,13 @@ async def rollback_after_error(session):
                 extra={"exception_type": type(invalidation_error).__name__})
 
 
-async def get_db():
+async def get_db(request: Request = None):
     async with _session_dependency(AsyncSessionLocal) as session:
+        if request is not None:
+            # The route builds its JSON response before its transaction commit.
+            # Keep the verified request identity available to that precommit
+            # response quota check.
+            session.info["request_scope"] = request.scope
         yield session
 
 

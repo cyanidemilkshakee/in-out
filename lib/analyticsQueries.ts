@@ -33,10 +33,10 @@ export function comparePeriods(current: number, previous: number): PeriodCompari
     percentage: Math.round(Math.abs(current - previous) / previous * 100) };
 }
 
-export type EmployeeActivityRange = "1D" | "1W" | "1M" | "1Y";
+export type EmployeeActivityRange = "1D" | "1W" | "1M" | "1Y" | "ALL";
 
 export function employeeActivityRangeDays(range: EmployeeActivityRange) {
-  return range === "1D" ? 1 : range === "1W" ? 7 : range === "1M" ? 30 : 365;
+  return range === "ALL" ? 0 : range === "1D" ? 1 : range === "1W" ? 7 : range === "1M" ? 30 : range === "1Y" ? 365 : 7;
 }
 
 export function averageWorkedHoursPerDay(days: ReadonlyArray<Pick<DayPattern, "workedHours">>, periodDays: number) {
@@ -53,27 +53,29 @@ export function employeeActivityPatterns(activity: EmployeeActivity): DayPattern
   });
 }
 
-export function employeeHoursSeries(activity: EmployeeActivity, range: "1W" | "1M" | "1Y") {
+export function employeeHoursSeries(activity: EmployeeActivity, range: "1W" | "1M" | "1Y" | "ALL") {
   const byDay = new Map(activity.days.map(day => [day.date, day.workedHours]));
   const facilityDate = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
   }).format(new Date(activity.endAt));
   const lastDay = new Date(`${facilityDate}T00:00:00Z`);
-  const days = range === "1W" ? 7 : range === "1M" ? 30 : 365;
-  const buckets = new Map<string, { label: string; hours: number }>();
+  const days = range === "ALL" ? activity.days.length : range === "1W" ? 7 : range === "1M" ? 30 : 365;
+  const buckets = new Map<string, { label: string; hours: number; dayCount: number }>();
   for (let i = days - 1; i >= 0; i--) {
     const date = new Date(lastDay);
     date.setUTCDate(date.getUTCDate() - i);
     const key = date.toISOString().slice(0, 10);
     // A year is 365 days, including the first partial calendar month.
-    const bucket = range === "1Y" ? key.slice(0, 7) : range === "1M" ? String(Math.floor((days - 1 - i) / 3)) : key;
+    const bucket = range === "ALL" || range === "1Y" ? key.slice(0, 7) : range === "1M" ? String(Math.floor((days - 1 - i) / 3)) : key;
     const existing = buckets.get(bucket);
     const hours = byDay.get(key) ?? 0;
-    if (existing) existing.hours += hours;
-    else buckets.set(bucket, { label: date.toLocaleDateString("en-GB", {
-      timeZone: "UTC", month: "short", ...(range === "1Y" ? { year: "2-digit" } : { day: "numeric" }),
-    }), hours });
+    if (existing) {
+      existing.hours += hours;
+      existing.dayCount += 1;
+    } else buckets.set(bucket, { label: date.toLocaleDateString("en-GB", {
+      timeZone: "UTC", month: "short", ...(range === "1Y" || range === "ALL" ? { year: "2-digit" } : { day: "numeric" }),
+    }), hours, dayCount: 1 });
   }
   return { labels: [...buckets.values()].map(bucket => bucket.label),
-    dataPoints: [...buckets.values()].map(bucket => Number(bucket.hours.toFixed(2))) };
+    dataPoints: [...buckets.values()].map(bucket => Number((bucket.hours / bucket.dayCount).toFixed(2))) };
 }

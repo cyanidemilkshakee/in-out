@@ -220,6 +220,35 @@ test("BFF GET cancellation reaches both movement reads and retains the existing 
   });
 });
 
+test("movement BFF converts checkpoint records to labels before rendering movement filters", async () => {
+  await withTransportFixture(async (_api, bff) => {
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    globalThis.fetch = async input => {
+      const path = new URL(String(input)).pathname;
+      return path.endsWith("/analytics")
+        ? Response.json({
+            items: [],
+            checkpoints: [{ id: "cp-main", name: "Main Entrance", mode: "auto", zone: "public", online: true }],
+            summary: {},
+            buckets: [],
+          })
+        : Response.json({
+            items: [{ id: "scan-1", checkpoint_id: "cp-main", data: { checkpoint: {
+              id: "cp-main", name: "Main Entrance", mode: "auto", zone: "public", online: true,
+            } } }],
+            total: 1,
+            page: 1,
+            pageSize: 25,
+          });
+    };
+    const response = await bff.handleGet(new NextRequest(
+      "https://app.invalid/api/data?resource=movements&page=1&pageSize=25"), new ServerTiming());
+    const data = (await response.json()).data;
+    assert.deepEqual(data.checkpoints, ["Main Entrance"]);
+    assert.equal(data.items[0].checkpoint, "Main Entrance");
+  });
+});
+
 test("upstream timeouts retain 504 while successful BFF reads report parsing and normalization", async () => {
   await withTransportFixture(async (api, bff) => {
     globalThis.fetch = async (_input, init) => new Promise((_resolve, reject) => {
@@ -785,6 +814,22 @@ test("the two fixed facility checkpoints normalize to their stable identities", 
   assert.equal(FACILITY_ZONES.length, 2);
   const event = normalizeDashboardMovement({ id: "scan-main", checkpoint_id: "cp-main", data: { checkpoint: "Main Entrance" } });
   assert.equal(event.checkpointId, "cp-main");
+});
+
+test("permission requests render checkpoint records as a label instead of a React child object", () => {
+  const request = normalizePermissionRequest({
+    id: "request-1",
+    checkpoint: {
+      id: "cp-main",
+      mode: "auto",
+      name: "Main Entrance",
+      zone: "public",
+      online: true,
+      createdAt: "2026-10-25T12:00:00Z",
+      buildingId: "main-building",
+    },
+  });
+  assert.equal(request.checkpoint, "Main Entrance");
 });
 
 test("fixed public and secure zones normalize across snapshots and live updates", () => {

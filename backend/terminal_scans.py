@@ -27,6 +27,7 @@ from critical_entry_restrictions import (
 from subject_metadata import current_subject_metadata
 from behavior_limits import consume_unknown_barcode_quota
 from manual_review_policy import manual_access_snapshot
+from terminal_response import project_terminal_scan_response
 
 _MANUAL_REVIEW_PAGE_SIZE = 50
 _MAX_MANUAL_REVIEW_CANDIDATES = 500
@@ -197,7 +198,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
         response["replayed"] = True
         response["authorizeMovement"] = False
         response["decision"] = {**replay_decision, "replayed": True, "authorizeMovement": False}
-        return response
+        return project_terminal_scan_response(response)
 
     # Check only after receipt lookup: an existing receipt is authoritative and
     # can safely replay without another movement. A miss must respect today's
@@ -263,6 +264,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
         result = {"allowed": False, "reason": event["reason"], "subject_id": None,
             "decision": decision, "updatedPeople": [], "updatedHardwareAssets": [],
             "replayed": False, "authorizeMovement": False}
+        result = project_terminal_scan_response(result)
         db.add(ScanRequest(idempotency_key=key, subject_id=None, terminal_id=terminal_id,
             status_code=200, response_body=result, request_fingerprint=fingerprint))
         await db.flush()
@@ -510,6 +512,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
     result["replayed"] = False
     result["authorizeMovement"] = result["allowed"]
     decision.update(replayed=False, authorizeMovement=result["allowed"])
+    result = project_terminal_scan_response(result)
     db.add(ScanRequest(idempotency_key=key, subject_id=subject.id, terminal_id=terminal_id,
         status_code=200, response_body=result, request_fingerprint=fingerprint))
     await db.flush()

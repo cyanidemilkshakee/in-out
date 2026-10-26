@@ -74,8 +74,8 @@ export function SecurityTerminal({
   accountRole: string;
   canManagePermissions?: boolean;
 }) {
-  const { hardwareAssets, checkpoints, terminalAssignment, terminalReplayPolicy, movements, permissionRequests, terminalVisitors, adminAvailability, error, isLoading } = useDataState();
-  const { recordScan, loadTerminalReplayPolicy, requestBarcodeManualReview, submitPermissionRequest, dismissPermissionNotification, createVisitor, refresh } = useDataActions();
+  const { hardwareAssets, checkpoints, terminalAssignment, terminalReplayPolicy, movements, permissionRequests, terminalVisitors, terminalVisitorsCursor, terminalVisitorsHasMore, adminAvailability, error, isLoading } = useDataState();
+  const { recordScan, loadTerminalReplayPolicy, loadMoreTerminalVisitors, requestBarcodeManualReview, submitPermissionRequest, dismissPermissionNotification, createVisitor, refresh } = useDataActions();
   const theme = useAdminTheme();
   const [manualDirection, setManualDirection] = useState<"entry" | "exit">("entry");
   const [barcode, setBarcode] = useState("");
@@ -96,6 +96,8 @@ export function SecurityTerminal({
   const [scanFeedback, setScanFeedback] = useState<{ outcome: "approved" | "denied"; key: number } | null>(null);
   const [dismissingRequestId, setDismissingRequestId] = useState<string | null>(null);
   const [notificationError, setNotificationError] = useState("");
+  const [visitorPageLoading, setVisitorPageLoading] = useState(false);
+  const [visitorPageError, setVisitorPageError] = useState("");
   const [visitorDialogOpen, setVisitorDialogOpen] = useState(false);
   const [registeredVisitor, setRegisteredVisitor] = useState<Person | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
@@ -117,6 +119,7 @@ export function SecurityTerminal({
   const replayClock = useMemo(() => sampleQueueServerClock(terminalReplayPolicy), [terminalReplayPolicy]);
   const activeCheckpointRef = useRef(checkpoint?.id);
   activeCheckpointRef.current = checkpoint?.id;
+  const visitorPageRequestRef = useRef<string | null>(null);
   const queueContextRef = useRef({ operatorSubject, checkpointId: checkpoint?.id, replayClock });
   queueContextRef.current = { operatorSubject, checkpointId: checkpoint?.id, replayClock };
   const pendingQueueCount = queuedScans.filter(scan => scan.operatorSubject === operatorSubject && scan.status !== "held").length;
@@ -126,6 +129,19 @@ export function SecurityTerminal({
   const checkpointMovements = useMemo(() => movements.filter((movement) => movement.checkpointId === checkpoint?.id), [movements, checkpoint?.id]);
   const checkpointReviews = useMemo(() => permissionRequests.filter((request) => request.type === "manual_override" && request.checkpointId === checkpoint?.id), [permissionRequests, checkpoint?.id]);
   const visibleTerminalVisitors = useMemo(() => [...terminalVisitors].sort((left, right) => Date.parse(right.createdAt ?? "") - Date.parse(left.createdAt ?? "")), [terminalVisitors]);
+  useEffect(() => {
+    const checkpointId = checkpoint?.id;
+    if (!checkpointId || terminalVisitorsHasMore !== true || terminalVisitorsCursor !== undefined || visitorPageRequestRef.current === checkpointId) return;
+    visitorPageRequestRef.current = checkpointId;
+    setVisitorPageLoading(true);
+    setVisitorPageError("");
+    void loadMoreTerminalVisitors().catch((error: unknown) => {
+      setVisitorPageError(messageFor(error, "Unable to load expected visitors."));
+    }).finally(() => {
+      visitorPageRequestRef.current = null;
+      setVisitorPageLoading(false);
+    });
+  }, [checkpoint?.id, terminalVisitorsCursor, terminalVisitorsHasMore, loadMoreTerminalVisitors]);
   const registeredVisitorStatus = registeredVisitor
     ? terminalVisitors.find((visitor) => visitor.id === registeredVisitor.id)?.status
     : undefined;
@@ -146,9 +162,9 @@ export function SecurityTerminal({
     ? formatTerminalTime(adminAvailability.availableAt)
     : null;
   const adminOfflineNotice = estimatedAdminReturn
-    ? `An administrator is offline. ${result === "pending" && !hasEntryRestriction ? "This permission may be picked up" : "Manual reviews may be picked up"} around ${estimatedAdminReturn}.`
+    ? `The administrator is offline. ${result === "pending" && !hasEntryRestriction ? "This permission may be picked up" : "Manual reviews may be picked up"} around ${estimatedAdminReturn}.`
     : null;
-  const title = result === "recorded" ? "Previously recorded scan" : result === "scanning" ? "Checking access" : result === "queued" ? latestQueueHeld ? "Scan held for review" : "Scan queued for verification" : result === "pending" ? "Awaiting approval" : approvalAwaitingScan ? approvalExpired ? "Approval expired" : "Approval ready" : result === "approved" ? `${direction} allowed` : result === "denied" ? "Access denied" : "Ready to scan";
+  const title = result === "recorded" ? "Previously recorded scan" : result === "scanning" ? "Checking access" : result === "queued" ? latestQueueHeld ? "Scan held for review" : "Scan queued for verification" : result === "pending" ? "Awaiting approval" : approvalAwaitingScan ? approvalExpired ? "Approval expired" : "Approved · rescan" : result === "approved" ? `${direction} allowed` : result === "denied" ? "Access denied" : "Ready to scan";
   const denialReason = decision?.event.reason?.trim();
   const description = result === "recorded" ? "This scan was recorded earlier. It does not authorize another movement. Scan again for a current access decision." : result === "scanning" ? "Verifying this barcode…" : result === "queued" ? latestQueueHeld ? "This scan needs an explicit retry or administrator reconciliation. Its original record is preserved on this device. Do not grant access until the server confirms it." : "This scan is stored on this terminal and will be sent when the connection returns. Do not grant access until the server confirms it." : result === "pending" ? hasEntryRestriction ? "Manual review requested. Entry remains blocked until an administrator lifts the entry restriction." : adminOfflineNotice ? null : "An administrator is reviewing this permission." : approvalAwaitingScan ? approvalExpired ? `This one-${direction.toLowerCase()} approval has expired. Request a new review before allowing ${direction.toLowerCase()}.` : review?.validTo ? `Rescan this barcode at the checkpoint before ${formatRequestDate(review.validTo)} to use the one-${direction.toLowerCase()} approval.` : "This approval has no active rescan window. Request a new review." : review?.status === "approved" && decision?.event.manualApprovalRequestId ? "The approved rescan is recorded. The matching exit remains allowed." : review?.status === "approved" ? "Approval is ready. Rescan the barcode before its validity window expires." : review?.status === "denied" ? "The administrator declined this request." : result === "denied" ? denialReason && denialReason !== "-" && denialReason.toLowerCase() !== "access denied" ? `Reason: ${denialReason}` : "Reason: This scan does not meet the current access policy." : decision ? decision.event.reason && decision.event.reason !== "-" ? decision.event.reason : "Access verified. You may proceed." : "The access decision will appear here.";
 
@@ -453,20 +469,20 @@ export function SecurityTerminal({
         </section>
 
         {error && !terminalCheckpoints.length && <div className={styles.connectionError} role="alert"><span>Unable to update terminal data. {error}</span><button type="button" onClick={() => void refresh()} disabled={isLoading}>Retry</button></div>}
-        <div className={styles.queueStatus} data-online={networkOnline}>
+        {(!networkOnline || pendingQueueCount > 0 || heldScans.length > 0 || queueStatus) && <div className={styles.queueStatus} data-online={networkOnline}>
           <span>{networkOnline ? "Online" : "Offline"}</span>
-          <p>{pendingQueueCount ? `${pendingQueueCount} scan${pendingQueueCount === 1 ? "" : "s"} awaiting retry.` : "No queued scans waiting for retry."}{heldScans.length > 0 && ` ${heldScans.length} held for review.`}</p>
+          {(pendingQueueCount > 0 || heldScans.length > 0) && <p>{pendingQueueCount > 0 && `${pendingQueueCount} scan${pendingQueueCount === 1 ? "" : "s"} awaiting retry.`}{heldScans.length > 0 && ` ${heldScans.length} held for review.`}</p>}
           {pendingQueueCount > 0 && <button type="button" onClick={() => void synchronizeQueuedScans()} disabled={!networkOnline || isQueueSyncing}>{isQueueSyncing ? "Retrying…" : "Retry queued scans"}</button>}
           {retryableHeldCount > 0 && <button type="button" onClick={() => void synchronizeQueuedScans(true)} disabled={!networkOnline || isQueueSyncing}>Check held scans</button>}
           {heldScans.length > 0 && <><button type="button" onClick={exportHeldScans}>Export held scans</button><small>Checking held scans revalidates the server policy. Expired or unverifiable evidence requires administrator reconciliation and cannot be retried.</small></>}
           {queueStatus && <small role="status">{queueStatus}</small>}
-        </div>
+        </div>}
 
         <div className={styles.scanWorkspace}>
           {checkpoint && <section className={styles.visitorRoster} aria-labelledby="terminal-visitors-title">
             <header className={styles.visitorRosterHeader}>
               <h2 id="terminal-visitors-title">Expected visitors</h2>
-              <span>{checkpoint.name} · {visibleTerminalVisitors.length} registered</span>
+              <span>{checkpoint.name} · {visibleTerminalVisitors.length}{terminalVisitorsHasMore ? "+" : ""} registered</span>
             </header>
             <ul className={`${styles.visitorRosterList} scrollable-content`}>
               {visibleTerminalVisitors.length ? visibleTerminalVisitors.map((visitor) => (
@@ -479,6 +495,18 @@ export function SecurityTerminal({
                 </li>
               )) : <li className={styles.visitorRosterEmpty}>No visitors registered for this checkpoint.</li>}
             </ul>
+            {visitorPageError && <p role="alert">{visitorPageError}</p>}
+            {terminalVisitorsHasMore && <button type="button" className={styles.textButton}
+              disabled={visitorPageLoading || !networkOnline}
+              onClick={() => {
+                setVisitorPageLoading(true);
+                setVisitorPageError("");
+                void loadMoreTerminalVisitors(terminalVisitorsCursor ?? undefined).catch((error: unknown) => {
+                  setVisitorPageError(messageFor(error, "Unable to load expected visitors."));
+                }).finally(() => setVisitorPageLoading(false));
+              }}>
+              {visitorPageLoading ? "Loading visitors…" : terminalVisitorsCursor ? "Load more visitors" : "Load visitors"}
+            </button>}
           </section>}
           <section className={styles.scanSection} aria-labelledby="scan-title">
             <h2 id="scan-title" className={styles.srOnly}>Scan barcode</h2>

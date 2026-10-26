@@ -46,6 +46,7 @@ class AuthenticationTests(unittest.TestCase):
 
     def claims(self):
         return {"sub": "user-123", "iss": auth.settings.KEYCLOAK_ISSUER, "aud": "inout-frontend", "exp": int(time.time()) + 300,
+                "iat": int(time.time()), "jti": "access-token-123",
                 "typ": "Bearer", "realm_access": {"roles": ["admin"]}}
 
     def token(self, claims=None, kid="old", header_kid=None):
@@ -62,7 +63,7 @@ class AuthenticationTests(unittest.TestCase):
 
     def test_required_claims_cannot_be_omitted(self):
         with patch("auth.httpx.get", return_value=self.response("old")):
-            for name in ("exp", "iss", "aud", "sub", "typ"):
+            for name in ("exp", "iat", "iss", "aud", "sub", "jti", "typ"):
                 with self.subTest(name=name):
                     claims = self.claims()
                     del claims[name]
@@ -194,6 +195,11 @@ class ConcurrentAuthenticationTests(unittest.IsolatedAsyncioTestCase):
     claims = AuthenticationTests.claims
     token = AuthenticationTests.token
     response = AuthenticationTests.response
+
+    async def asyncSetUp(self):
+        revocation = patch("token_revocation.assert_token_active", new=AsyncMock())
+        revocation.start()
+        self.addCleanup(revocation.stop)
 
     async def parallel_requests(self, token, count=24):
         app = FastAPI()

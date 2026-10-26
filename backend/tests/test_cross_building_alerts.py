@@ -3,7 +3,6 @@ import asyncio
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import func, select
 
@@ -149,7 +148,7 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_malformed_saved_policies_cannot_crash_scan_or_override_displayed_default(self):
         await self._presence()
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
         async with self.sessions() as db:
             disabled_policy = {"conditionKey": "cross_building_scan", "enabled": False}
             db.add_all([
@@ -181,13 +180,11 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         key = str(uuid.uuid4())
         body = {"barcode": "p1", "checkpointId": "server-room"}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
-            first = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-            retry = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+        first = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+        retry = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json(), fixture.replay_receipt(first.json()))
-        publish.assert_not_awaited()
         async with self.sessions() as db:
             events = (await db.scalars(select(EventOutbox).where(EventOutbox.kind == "presence"))).all()
             self.assertEqual(len(events), 1)

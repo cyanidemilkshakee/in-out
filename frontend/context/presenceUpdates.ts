@@ -61,6 +61,32 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
   );
   const acceptPresence = !previousMovement || !!finalizesMovement;
   const permissionRequests = update.request ? mergePermissionRequests(current.permissionRequests, [update.request]) : current.permissionRequests;
+  const visitorRequest = update.request?.type === "visitor" && update.request.subjectId
+    ? update.request
+    : undefined;
+  const visitorPermission = update.permission?.subjectType === "visitor" ? update.permission : undefined;
+  const terminalVisitors = current.terminalVisitors.map(visitor => {
+    if (visitorRequest?.subjectId === visitor.id) {
+      return {
+        ...visitor,
+        status: visitorRequest.status === "approved" ? "approved" as const
+          : visitorRequest.status === "denied" ? "denied" as const : visitor.status,
+        allowedZones: visitorRequest.requestedZones,
+        validFrom: visitorRequest.validFrom,
+        validTo: visitorRequest.validTo,
+      };
+    }
+    if (visitorPermission?.subjectId === visitor.id) {
+      const status = visitorPermission.state === "active" ? "approved"
+        : visitorPermission.state === "pending_approval" ? "pending"
+          : visitorPermission.state === "restricted" ? "restricted"
+            : visitorPermission.state === "expired" ? "expired"
+              : visitorPermission.state === "revoked" ? "inactive" : visitor.status;
+      return { ...visitor, status, allowedZones: visitorPermission.zones,
+        validFrom: visitorPermission.validFrom, validTo: visitorPermission.validTo };
+    }
+    return visitor;
+  });
   const alerts = update.alerts ? mergeAlerts(current.alerts, update.alerts) : current.alerts;
   const permissions = update.permission ? mergeById(current.permissions, [update.permission]) : current.permissions;
   const updatePresence = <T extends Person | HardwareAsset>(items: T[]): T[] => items.map(item =>
@@ -110,7 +136,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
     }
   }
   return {
-    ...current, people, hardwareAssets, permissionRequests, alerts, permissions,
+    ...current, people, hardwareAssets, permissionRequests, terminalVisitors, alerts, permissions,
     ...(update.revision !== undefined ? { eventRevision: update.revision } : {}),
     movements: movement ? mergeById(current.movements, [movement]).slice(0, 100) : current.movements,
     scanAnalytics: { ...analytics, activeInside: Math.max(0, current.scanAnalytics.activeInside + occupancyDelta) },

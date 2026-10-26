@@ -26,7 +26,20 @@ export function formatAlertReviewDate(value?: string) {
 }
 
 export function formatAlertExplanation(alert: Pick<Alert, "explanation" | "reason">) {
-  return (alert.explanation || alert.reason).replace("6:00 PM IST attendance cutoff", "6:00 PM attendance cutoff");
+  const explanation = alert.explanation || alert.reason;
+  const visitStart = /(The current visit began) at (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2}))/;
+  const readableExplanation = explanation.replace(visitStart, (_match, lead: string, value: string) => {
+    const timestamp = new Date(value);
+    if (!Number.isFinite(timestamp.getTime())) return `${lead} at ${value}`;
+    const date = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata", month: "short", day: "numeric", year: "numeric",
+    }).format(timestamp);
+    const time = new Intl.DateTimeFormat("en-US", {
+      timeZone: "Asia/Kolkata", hour: "numeric", minute: "2-digit",
+    }).format(timestamp);
+    return `${lead} on ${date} at ${time} IST`;
+  });
+  return readableExplanation.replace("6:00 PM IST attendance cutoff", "6:00 PM attendance cutoff");
 }
 
 export function getAlertWarningLevel(severity: Alert["severity"]): 1 | 2 | 3 {

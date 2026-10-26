@@ -203,6 +203,8 @@ async def _versioned_sse(request: Request, expires_at: float, claims: dict, afte
             queued_bytes -= size
             if not active:
                 return
+            if time.time() >= expires_at:
+                return
             if raw is None:
                 if not administrator:
                     current = await _current_checkpoint(claims)
@@ -291,11 +293,20 @@ class LeasedStreamingResponse(StreamingResponse):
             # sending is blocked. Otherwise a live stream could outlast its
             # lease and no longer count toward the shared stream caps.
             try:
-                while await renew_stream_lease(self.lease):
-                    await anyio.sleep(10)
+                while time.time() < self.lease.expires_at:
+                    if not await renew_stream_lease(self.lease):
+                        # Losing the lease before token expiry means admission
+                        # is no longer valid, so stop the response immediately.
+                        # At token expiry, the SSE generator can finish its
+                        # normal response instead of being cancelled mid-send.
+                        if time.time() < self.lease.expires_at:
+                            group.cancel_scope.cancel()
+                        return
+                    remaining = self.lease.expires_at - time.time()
+                    if remaining > 0:
+                        await anyio.sleep(min(10, remaining))
             except Exception:
                 logger.exception("Presence stream lease renewal failed")
-            finally:
                 group.cancel_scope.cancel()
 
         try:

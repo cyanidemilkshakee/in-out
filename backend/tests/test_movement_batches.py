@@ -34,7 +34,7 @@ class MovementBatchTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
 
     async def add_movements(self, count=3, state="queued", prefix="queued", note="paper ledger"):
         ids = [f"{prefix}-{i:03}" for i in range(count)]
@@ -100,7 +100,7 @@ class MovementBatchTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             with patch("routers.movements.settings.MAX_DATA_RESPONSE_BYTES", 32):
                 with self.assertRaises(HTTPException) as raised:
-                    await _sync_movement_batch(db, ids, "queued")
+                    await _sync_movement_batch(db, ids, "queued", ("public", "secure"))
             self.assertEqual(raised.exception.status_code, 422)
             self.assertEqual(raised.exception.detail["code"], "movement_batch_response_too_large")
             self.assertEqual(await db.scalar(text("SELECT 1")), 1)
@@ -113,7 +113,7 @@ class MovementBatchTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             with patch("routers.movements.enqueue_changed", side_effect=RuntimeError("fixture failure")):
                 with self.assertRaisesRegex(RuntimeError, "fixture failure"):
-                    await _sync_movement_batch(db, ids, "queued")
+                    await _sync_movement_batch(db, ids, "queued", ("public", "secure"))
             self.assertEqual(await db.scalar(text("SELECT 1")), 1)
         states, event_count = await self.states_and_event_count()
         self.assertEqual(set(states.values()), {"queued"})

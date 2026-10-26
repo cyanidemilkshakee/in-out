@@ -176,12 +176,18 @@ function RegistryWorkspace() {
   }
 
   return <AdminPageFrame title="Registry" metric={frameMetric}
-    preTitle={<div className="registry-segmented-shell"><div className="pill-segmented-group registry-segmented-group" role="tablist" aria-label="Registry data type">
-      {REGISTRY_TABS.map(item => <button key={item.id} type="button" role="tab" aria-selected={kind === item.id}
-        className={`pill-segmented-button ${kind === item.id ? "active" : ""}`}
-        onClick={() => { setKind(item.id); setPage(1); setSearch(""); setDebouncedSearch(""); setSortKey("name"); setSortDirection("asc"); }}>
-        {item.label}</button>)}
-    </div></div>}
+    preTitle={<div className="registry-segmented-shell">
+      <RegistryCreateDialog initialKind={kind} employees={[]} checkpoints={visible?.checkpoints ?? []} searchEmployees
+        onCreateEmployee={async input => { const result = await createEmployee(input); reload(); return result; }}
+        onCreateVisitor={async input => { const result = await createVisitor(input); reload(); return result; }}
+        onCreateHardware={async input => { const result = await createHardwareAsset(input); reload(); return result; }} />
+      <div className="registry-segmented-tabs"><div className="pill-segmented-group registry-segmented-group" role="tablist" aria-label="Registry data type">
+        {REGISTRY_TABS.map(item => <button key={item.id} type="button" role="tab" aria-selected={kind === item.id}
+          className={`pill-segmented-button ${kind === item.id ? "active" : ""}`}
+          onClick={() => { setKind(item.id); setPage(1); setSearch(""); setDebouncedSearch(""); setSortKey("name"); setSortDirection("asc"); }}>
+          {item.label}</button>)}
+      </div></div>
+    </div>}
     headerRight={<MetricTrendChart title={kind === "employee" ? "Working hours" : kind === "visitor" ? "Visitor movements" : "Hardware scans"}
       valueLabel={kind === "employee" ? "AVG WORKING HOURS" : kind === "visitor" ? "VISITOR MOVEMENTS" : "HARDWARE SCANS"}
       timeRange={timeRange} onTimeRangeChange={setTimeRange} color={kind === "employee" ? "#ea580c" : kind === "visitor" ? "#db2777" : "#8b5cf6"}
@@ -189,10 +195,6 @@ function RegistryWorkspace() {
   >
     <section className="registry-workspace"><div className="admin-panel workspace-main" aria-busy={loading}>
       <div className="filter-bar">
-        <RegistryCreateDialog initialKind={kind} employees={[]} checkpoints={visible?.checkpoints ?? []} searchEmployees
-          onCreateEmployee={async input => { const result = await createEmployee(input); reload(); return result; }}
-          onCreateVisitor={async input => { const result = await createVisitor(input); reload(); return result; }}
-          onCreateHardware={async input => { const result = await createHardwareAsset(input); reload(); return result; }} />
         <button className="admin-button admin-button--ghost ghost-button" type="button" onClick={() => void handleExport()} disabled={exporting || !visible?.total}>
           <Download />{exporting ? "Exporting…" : "Export"}</button>
         <label className="search-control registry-search-control"><span className="sr-only">Search</span>
@@ -200,7 +202,7 @@ function RegistryWorkspace() {
       </div>
       {error ? <p className="inline-note" role="alert">{error} <button type="button" onClick={reload}>Retry</button></p> : null}
       {kind === "employee" ? <EmployeeTable people={visible?.people ?? []} movements={visible?.movements ?? []} sessionsByPerson={sessionsByPerson}
-        timeRange={timeRange} averageHoursByPerson={visible?.averages ?? null} averageHoursLoading={loading} permissions={[]} alerts={[]} sort={sort} />
+        timeRange={timeRange} averageHoursByPerson={visible?.averages ?? null} averageHoursLoading={loading} alerts={[]} sort={sort} />
         : kind === "visitor" ? <PeopleTable title="Visitors" people={visible?.people ?? []} sort={sort} /> : <HardwareTable assets={visible?.hardwareAssets ?? []} sort={sort} />}
       <div className="pagination"><button type="button" disabled={page === 1 || loading} onClick={() => setPage(value => Math.max(1, value - 1))}>Previous</button>
         <span>Page {page} of {Math.max(1, Math.ceil((visible?.total ?? 0) / PAGE_SIZE))} · {visible?.total ?? 0} records</span>

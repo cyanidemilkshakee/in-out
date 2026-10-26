@@ -18,7 +18,7 @@ from pydantic import ValidationError
 import test_database as database_fixture
 from auth import verify_admin_request, verify_terminal_access_request
 from models import (Alert, AlertRule, CriticalEntryRestriction, CriticalAlertTrigger,
-    Subject, Person, HardwareAsset, PresenceState, AccessPermission, Movement, AuditEvent, ScanRequest)
+    Subject, Person, PresenceState, AccessPermission, Movement, AuditEvent, ScanRequest)
 from critical_entry_restrictions import activate_critical_entry_restrictions, entry_restrictions_for_subjects
 from permission_decisions import apply_permission_decision
 from schemas import BrowserScanPayload
@@ -57,17 +57,15 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
         return alert_id
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
 
     async def scan(self, body=None, *, key=None):
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
-            return await self.client.post("/v1/terminal/scans", json=body or {"barcode": "p1", "checkpointId": "cp-main"},
-                headers={"Idempotency-Key": str(key or uuid.uuid4())})
+        return await self.client.post("/v1/terminal/scans", json=body or {"barcode": "p1", "checkpointId": "cp-main"},
+            headers={"Idempotency-Key": str(key or uuid.uuid4())})
 
     async def release(self, alert_id, reason="Reviewed critical alert and verified entry may resume."):
-        with patch("routers.alerts.publish_data_changed", new=AsyncMock()):
-            return await self.client.post(f"/v1/alerts/{alert_id}/release-entry-restriction", json={"reason": reason})
+        return await self.client.post(f"/v1/alerts/{alert_id}/release-entry-restriction", json={"reason": reason})
 
     async def test_acknowledgement_keeps_hold_and_manual_pass_waits_for_explicit_release(self):
         self.authorize()
@@ -76,8 +74,7 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(denied.status_code, 200, denied.text)
         self.assertFalse(denied.json()["allowed"])
         self.assertEqual(denied.json()["decision"]["entryRestrictions"][0]["subjectId"], "p1")
-        with patch("routers.alerts.publish_presence_update", new=AsyncMock()):
-            acknowledged = await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
+        acknowledged = await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
         self.assertEqual(acknowledged.status_code, 200, acknowledged.text)
         self.assertTrue(acknowledged.json()["entryRestriction"]["active"])
         self.assertFalse((await self.scan()).json()["allowed"])
@@ -327,7 +324,6 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 db.add(AlertRule(id="rule-irregularity", data=data))
             await db.commit()
         with patch("workflows.activities.async_session", new=self.sessions), \
-             patch("workflows.activities.publish_presence_update", new=AsyncMock()), \
              patch("workflows.activities.datetime", wraps=datetime) as clock:
             clock.now.return_value = fixed_now
             self.assertEqual(await run_alert_rule_evaluation(), 1)

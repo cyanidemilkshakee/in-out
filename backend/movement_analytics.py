@@ -168,6 +168,7 @@ def build_activity_days(events, start: datetime, end: datetime):
 async def employee_activity(
     subjectId: str = Query(..., min_length=1, max_length=200),
     days: int = Query(7, ge=1, le=365),
+    allTime: bool = Query(False),
     endAt: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_read_db),
 ) -> dict[str, Any]:
@@ -175,22 +176,44 @@ async def employee_activity(
         raise HTTPException(404, "Employee not found")
     end = min(parse_bound(endAt), datetime.now(timezone.utc)) if endAt else datetime.now(timezone.utc)
     today_start = datetime.combine(end.astimezone(FACILITY_ZONE).date(), datetime.min.time(), FACILITY_ZONE).astimezone(timezone.utc)
-    try:
-        start = today_start - timedelta(days=days - 1)
-        # Both periods include the same portion of their final facility day.
-        previous_end = end - timedelta(days=days)
-        previous_start = start - timedelta(days=days)
-    except OverflowError as error:
-        raise HTTPException(422, "Date range is too large for a comparison period") from error
     base = select(Movement.direction, Movement.occurred_at).where(Movement.subject_id == subjectId,
         Movement.subject_type == "employee", Movement.result == "approved", canonical_movement_filter())
-    seed = (await db.execute(base.where(Movement.occurred_at < previous_start)
+    if allTime:
+        first_event = await db.scalar(select(func.min(Movement.occurred_at)).where(
+            Movement.subject_id == subjectId, Movement.subject_type == "employee",
+            Movement.result == "approved", canonical_movement_filter()))
+        if first_event:
+            start_date = first_event.astimezone(FACILITY_ZONE).date()
+            start = datetime.combine(start_date, datetime.min.time(), FACILITY_ZONE).astimezone(timezone.utc)
+        else:
+            start = today_start
+        previous_start = start
+        previous_end = start
+    else:
+        try:
+            start = today_start - timedelta(days=days - 1)
+            # Both periods include the same portion of their final facility day.
+            previous_end = end - timedelta(days=days)
+            previous_start = start - timedelta(days=days)
+        except OverflowError as error:
+            raise HTTPException(422, "Date range is too large for a comparison period") from error
+    seed = None if allTime else (await db.execute(base.where(Movement.occurred_at < previous_start)
         .order_by(Movement.occurred_at.desc(), Movement.id.desc()).limit(1))).first()
-    rows = await bounded_rows(db, base.where(Movement.occurred_at >= previous_start, Movement.occurred_at <= end)
+    rows_start = start if allTime else previous_start
+    rows = await bounded_rows(db, base.where(Movement.occurred_at >= rows_start, Movement.occurred_at <= end)
         .order_by(Movement.occurred_at, Movement.id), maximum=settings.DATA_ANALYTICS_MAX_ROWS)
     events = ([seed] if seed else []) + list(rows)
     current = build_activity_days(events, start, end)
-    previous = build_activity_days(events, previous_start, previous_end)
+    if allTime:
+        by_date = {day["date"]: day for day in current}
+        cursor = start.astimezone(FACILITY_ZONE).date()
+        last_date = end.astimezone(FACILITY_ZONE).date()
+        while cursor <= last_date:
+            key = cursor.isoformat()
+            by_date.setdefault(key, {"date": key, "workedHours": 0.0, "percentage": 0, "sessions": []})
+            cursor += timedelta(days=1)
+        current = [by_date[key] for key in sorted(by_date)]
+    previous = [] if allTime else build_activity_days(events, previous_start, previous_end)
     return {"days": current, "totalHours": sum(day["workedHours"] for day in current),
         "previousTotalHours": sum(day["workedHours"] for day in previous),
         "startAt": start.isoformat(), "endAt": end.isoformat(),

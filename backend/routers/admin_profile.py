@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_admin_request
 from database import get_db
+from data_limits import precharge_mutation_response
 from models import AdminAccount
-from redis_client import publish_data_changed
 from event_outbox import enqueue_changed
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
@@ -49,7 +49,10 @@ async def _identity_profile(db, admin):
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("profile:" + subject, 0))))
     account = await db.scalar(select(AdminAccount).where(AdminAccount.keycloak_subject == subject).with_for_update())
     if account:
-        account.settings = _review_note_policy(account.settings)
+        policy = _review_note_policy(account.settings)
+        if account.settings != policy:
+            account.settings = policy
+            db.info["profile_initialized"] = True
         return account
     # Preserve legacy preferences only when Keycloak verifies the matching email.
     email = admin.get("email")
@@ -73,10 +76,12 @@ async def _identity_profile(db, admin):
 @router.get("/profile")
 async def get_admin_profile(db: AsyncSession = Depends(get_db), admin: dict = Depends(verify_admin_request)) -> dict[str, Any]:
     account = await _identity_profile(db, admin)
+    response = _serialize_account(account)
     if db.info.get("profile_initialized"):
         await enqueue_changed(db)
+        await precharge_mutation_response(db, response)
     await db.commit()
-    return _serialize_account(account)
+    return response
 
 
 @router.patch("/profile")
@@ -89,8 +94,10 @@ async def update_admin_profile(payload: ProfileUpdateRequest, db: AsyncSession =
             value = _review_note_policy(value)
         setattr(account, key, value)
     await enqueue_changed(db)
+    response = _serialize_account(account)
+    await precharge_mutation_response(db, response)
     await db.commit()
-    return _serialize_account(account)
+    return response
 
 
 @router.patch("/profile/availability")
@@ -107,5 +114,7 @@ async def update_admin_availability(payload: AvailabilityUpdateRequest, db: Asyn
     account = await _identity_profile(db, admin)
     account.offline_until = offline_until
     await enqueue_changed(db)
+    response = {"offline_until": account.offline_until.isoformat() if account.offline_until else None}
+    await precharge_mutation_response(db, response)
     await db.commit()
-    return {"offline_until": account.offline_until.isoformat() if account.offline_until else None}
+    return response

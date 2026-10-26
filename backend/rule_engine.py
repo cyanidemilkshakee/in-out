@@ -239,14 +239,10 @@ class WorkdayStatus(TypedDict):
 # ---------------------------------------------------------------------------
 
 def _movement_timestamp(movement: MovementEvent) -> float:
-    """
-    Convert a movement event to a UNIX millisecond timestamp.
-    Port of movementTimestamp() in analyticsUtils.ts.
+    """Normalize a movement timestamp for scheduled rule evaluation.
 
-    Prefers `createdAt` (ISO-8601), falls back to parsing `date + time`
-    as a locale-style string (e.g. "Sep 8, 2026 1:44:38 PM").
-    Returns 0 when parsing fails — matching the TS behaviour of returning 0
-    for non-finite values.
+    Prefer the explicit ISO timestamp, then fall back to legacy date/time
+    fields. Return zero when neither representation can be parsed.
     """
     created_at = movement.get("createdAt")
     if created_at:
@@ -336,6 +332,8 @@ def evaluate_visitor_overstay_rules(
                 or visit.get("alertedEntryAt") == started_at):
             continue
         start_utc = started_at.astimezone(timezone.utc).isoformat()
+        local_start = started_at.astimezone(_IST)
+        start_label = f"{_local_date(started_at)} at {local_start.strftime('%I:%M %p').lstrip('0')} IST"
         identity = uuid.uuid5(uuid.NAMESPACE_URL, f"in-out:visitor-overstay:{visit['subjectId']}:{start_utc}")
         building = visit.get("buildingName") or visit.get("buildingId") or "an unrecorded zone"
         name = visit.get("subjectName") or visit.get("barcode") or visit["subjectId"]
@@ -349,7 +347,7 @@ def evaluate_visitor_overstay_rules(
             category=rule.get("category", "presence_anomaly"), ruleId=rule.get("id"),
             conditionKey="visitor_overstay", entryStartedAt=start_utc,
             entryBuildingId=visit.get("buildingId"),
-            explanation=f"The current visit began at {start_utc}; no approved exit has ended it. Repeated scans do not restart the visit clock.",
+            explanation=f"The current visit began on {start_label}; no approved exit has ended it. Repeated scans do not restart the visit clock.",
         ))
     return generated
 

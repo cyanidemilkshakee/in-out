@@ -6,7 +6,6 @@ import unittest
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, patch
-import importlib.util
 import asyncio
 import hashlib
 import json
@@ -120,12 +119,10 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             "valid_from": now.isoformat(), "valid_to": (now + timedelta(hours=2)).isoformat(), **fields}
 
     async def test_direct_visitor_grant_is_atomic_active_and_archived_without_workflow(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
         payload = self._direct_grant(subject_id="", request_type="visitor", barcode="direct-visitor",
             new_visitor={"name": "Direct visitor", "host": "Alice", "company": "Example"})
-        with patch("routers.permissions.publish_decision", new=AsyncMock()) as publish, \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock()) as temporal:
-            response = await self.client.post("/v1/permissions/grant", json=payload)
+        response = await self.client.post("/v1/permissions/grant", json=payload)
         self.assertEqual(response.status_code, 201, response.text)
         result = response.json()
         self.assertEqual(result["request"]["status"], "approved")
@@ -133,8 +130,6 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["person"]["status"], "pre_approved")
         self.assertEqual(result["permission"]["zones"], ["public", "secure"])
         self.assertEqual(result["request"]["decidedBy"], "grant-admin")
-        temporal.assert_not_awaited()
-        publish.assert_not_awaited()
         self.assertEqual(len(await self.durable_events("manual_review_decision", request_id=result["request"]["id"])), 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(PermissionRequestModel)
@@ -146,7 +141,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(result["request"]["subjectId"], [item["subjectId"] for item in directory["people"]])
 
     async def test_direct_existing_visitor_grant_decides_pending_permission_once(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
             db.add(Subject(id="pending-visitor", barcode="pending-visitor", kind="visitor",
@@ -157,10 +152,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                     "subjectId": "pending-visitor", "subjectName": "Guest", "createdAt": now.isoformat(),
                     "requestedZones": ["public"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
             await db.commit()
-        with patch("routers.permissions.publish_decision", new=AsyncMock()), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
-                subject_id="pending-visitor", request_type="visitor"))
+        response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
+            subject_id="pending-visitor", request_type="visitor"))
         self.assertEqual(response.status_code, 201, response.text)
         self.assertEqual(response.json()["request"]["id"], "pending-visitor-request")
         async with self.sessions() as db:
@@ -184,13 +177,11 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         await db.flush()
 
     async def test_direct_zone_grant_resolves_visitor_workflow_instead_of_leaving_timeout_revocation(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
         async with self.sessions() as db:
             await self._pending_visitor_grant_fixture(db)
             await db.commit()
-        with patch("routers.permissions.publish_decision", new=AsyncMock()), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(subject_id="grant-race-visitor"))
+        response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(subject_id="grant-race-visitor"))
         self.assertEqual(response.status_code, 201, response.text)
         self.assertEqual(response.json()["request"]["id"], "grant-race-request")
         self.assertEqual(response.json()["request"]["type"], "visitor")
@@ -203,7 +194,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next(item for item in directory["people"] if item["subjectId"] == "grant-race-visitor")["source"], "manual")
 
     async def test_direct_grant_waits_for_creator_and_reuses_newly_committed_pending_visitor(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
         async with self.sessions() as creator:
             await self._pending_visitor_grant_fixture(creator, include_request=False)
             await creator.commit()
@@ -214,20 +205,18 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                     "subjectName": "Race guest", "createdAt": now.isoformat(), "requester": "operator",
                     "requestedZones": ["public"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
             await creator.flush()
-            with patch("routers.permissions.publish_decision", new=AsyncMock()), \
-                 patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-                grant = asyncio.create_task(self.client.post("/v1/permissions/grant", json=self._direct_grant(subject_id="grant-race-visitor")))
-                await asyncio.sleep(0.05)
-                self.assertFalse(grant.done(), "Grant must wait for the subject creation/update transaction")
-                await creator.commit()
-                response = await asyncio.wait_for(grant, 5)
+            grant = asyncio.create_task(self.client.post("/v1/permissions/grant", json=self._direct_grant(subject_id="grant-race-visitor")))
+            await asyncio.sleep(0.05)
+            self.assertFalse(grant.done(), "Grant must wait for the subject creation/update transaction")
+            await creator.commit()
+            response = await asyncio.wait_for(grant, 5)
         self.assertEqual(response.status_code, 201, response.text)
         self.assertEqual(response.json()["request"]["id"], "grant-race-request")
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(PermissionRequestModel)), 1)
 
     async def test_direct_grant_returns_conflict_for_locked_pending_decision_without_partial_grant(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
         async with self.sessions() as db:
             await self._pending_visitor_grant_fixture(db)
             await db.commit()
@@ -241,10 +230,9 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(AccessPermission)), 0)
 
     async def test_direct_custody_grant_changes_carrier_without_expiring_or_changing_zones(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin"}
-        with patch("routers.permissions.publish_decision", new=AsyncMock()):
-            response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
-                subject_id="h1", request_type="hardware_custody", carrier_id="p1", carrier_name="Forged", hardware_id="h1"))
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
+        response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
+            subject_id="h1", request_type="hardware_custody", carrier_id="p1", carrier_name="Forged", hardware_id="h1"))
         self.assertEqual(response.status_code, 201, response.text)
         result = response.json()
         self.assertEqual(result["hardwareAsset"]["assignedEmployeeName"], "Alice")
@@ -257,7 +245,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(retry.status_code, 422, retry.text)
 
     async def test_invalid_direct_grants_and_effect_failure_leave_no_partial_identity_or_history(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
         for changes in ({"valid_to": "2126-10-06T10:00:00Z"}, {"requested_zones": []},
                         {"request_type": "manual_override"}, {"subject_id": "h1", "request_type": "hardware_custody", "carrier_id": "h1"}):
             response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(**changes))
@@ -296,8 +284,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             for model in (Movement, ScanRequest, PermissionRequestModel, PresenceState):
                 self.assertEqual(await db.scalar(select(func.count()).select_from(model)), 0)
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
-            honest = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "server-room"}, headers=headers)
+        honest = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "server-room"}, headers=headers)
         self.assertEqual(honest.status_code, 200, honest.text)
         self.assertFalse(honest.json()["allowed"])
         self.assertEqual(honest.json()["decision"]["event"]["denialCode"], "zone_not_permitted")
@@ -315,23 +302,21 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bundle["checkpoints"], [])
         self.assertIsNone(bundle["terminalAssignment"]["checkpointId"])
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
-            original = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-            self.assertEqual(original.status_code, 200, original.text)
-            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).json(), replay_receipt(original.json()))
-            async with self.sessions() as db:
-                await set_checkpoint_assignment(db, "browser:operator", "server-room", "admin")
-                await db.commit()
-            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
-            # Rewriting the old queued request must not create a second scan.
-            changed = await self.client.post("/v1/terminal/scans", json={**body, "checkpointId": "server-room"}, headers=headers)
-            self.assertEqual(changed.status_code, 409, changed.text)
-            async with self.sessions() as db:
-                await set_checkpoint_assignment(db, "browser:operator", None, "admin")
-                await db.commit()
-            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
-            publish.assert_not_awaited()
-            self.assertEqual(len(await self.durable_events("scan")), 1)
+        original = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).json(), replay_receipt(original.json()))
+        async with self.sessions() as db:
+            await set_checkpoint_assignment(db, "browser:operator", "server-room", "admin")
+            await db.commit()
+        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
+        # Rewriting the old queued request must not create a second scan.
+        changed = await self.client.post("/v1/terminal/scans", json={**body, "checkpointId": "server-room"}, headers=headers)
+        self.assertEqual(changed.status_code, 409, changed.text)
+        async with self.sessions() as db:
+            await set_checkpoint_assignment(db, "browser:operator", None, "admin")
+            await db.commit()
+        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
+        self.assertEqual(len(await self.durable_events("scan")), 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 2)
@@ -340,12 +325,13 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         from routers.dashboard import get_dashboard
         with patch("redis_client.get_redis_pool", side_effect=AssertionError("Dashboard must not use Redis")):
             async with self.sessions() as db:
-                before = await get_dashboard(db)
+                admin = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+                before = await get_dashboard(db, actor=admin)
             async with self.sessions() as db:
                 result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
                 await db.commit()
             async with self.sessions() as db:
-                after = await get_dashboard(db)
+                after = await get_dashboard(db, actor=admin)
             self.assertEqual(after["analytics"]["totalScans"], before["analytics"]["totalScans"] + 1)
             self.assertEqual(after["analytics"]["activeInside"], 1)
             self.assertEqual(after["recentMovements"][0]["id"], result["decision"]["event"]["id"])
@@ -389,17 +375,13 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             "windowId": str(uuid.uuid4()),
         })
         headers["X-InOut-Step-Up"] = step_up
-        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), \
-             patch("auth.verify_keycloak_token", return_value=actor) as token, \
-             patch("routers.keycloak_admin._request", side_effect=identity), \
-             patch("routers.keycloak_admin.publish_checkpoint_assignment", new=AsyncMock()) as publish:
+        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), patch("auth.verify_keycloak_token", return_value=actor) as token, patch("routers.keycloak_admin._request", side_effect=identity):
             response = await self.client.post("/v1/keycloak/users", headers=headers, json={
-                "username": "new-operator", "password": "isolated-test-password", "roles": ["operator"], "checkpointId": "server-room",
+                "username": "new-operator", "password": "Isolated9-test-password", "roles": ["operator"], "checkpointId": "server-room",
             })
             self.assertEqual(response.status_code, 201, response.text)
             self.assertEqual(response.json()["checkpointId"], "server-room")
             self.assertEqual(response.json()["roles"], ["operator"])
-            publish.assert_not_awaited()
             self.assertEqual((await self.durable_events("terminal_assignment"))[0]["terminalIdentity"], "browser:" + user_id)
             async with self.sessions() as db:
                 audit = await db.scalar(select(AuditEvent))
@@ -431,12 +413,10 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_retry_does_not_publish_an_old_presence_event(self):
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
         headers = {"Idempotency-Key": str(uuid.uuid4())}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
-            for _ in range(2):
-                response = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
-                self.assertEqual(response.status_code, 200, response.text)
-            publish.assert_not_awaited()
-            self.assertEqual(len(await self.durable_events("scan")), 1)
+        for _ in range(2):
+            response = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(await self.durable_events("scan")), 1)
 
     async def test_approval_window_is_persisted_and_dashboard_excludes_equipment(self):
         from routers.dashboard import get_dashboard
@@ -456,11 +436,12 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(datetime.fromisoformat(saved["validTo"]) - datetime.fromisoformat(saved["validFrom"]), timedelta(hours=8))
             db.add_all([PresenceState(subject_id="p1", state="inside"), PresenceState(subject_id="h1", state="inside")])
             await db.commit()
-            dashboard = await get_dashboard(db)
+            dashboard = await get_dashboard(db,
+                actor={"sub": "admin", "realm_access": {"roles": ["admin"]}})
             self.assertEqual(dashboard["analytics"]["activeInside"], 1)
 
     async def test_subject_deletion_preserves_history_and_deletes_unused_subject(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         async with self.sessions() as db:
             await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "operator")
             await db.commit()
@@ -484,19 +465,18 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["movements"], 0)
 
     async def test_browser_scan_retry_hardware_and_movement_filters(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         body = {"barcode": "p1", "checkpointId": "cp-main", "selectedHardwareIds": ["h1"], "scanType": "auto", "online": True}
         headers = {"Idempotency-Key": str(uuid.uuid4())}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
-            response = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-            self.assertEqual(response.status_code, 200, response.text)
-            result = response.json()
-            self.assertEqual(result["decision"]["event"]["subjectName"], "Alice")
-            self.assertTrue(result["updatedPeople"][0]["inside"])
-            self.assertTrue(result["updatedHardwareAssets"][0]["inside"])
-            retry = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-            self.assertEqual(retry.json(), replay_receipt(result))
+        response = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result["decision"]["event"]["subjectName"], "Alice")
+        self.assertTrue(result["updatedPeople"][0]["inside"])
+        self.assertTrue(result["updatedHardwareAssets"][0]["inside"])
+        retry = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+        self.assertEqual(retry.json(), replay_receipt(result))
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             # Cooldown has elapsed; auto mode must derive an exit from persisted presence.
@@ -527,7 +507,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.get("/v1/movements", params=params)).json()["total"], 0)
 
     async def test_movement_references_search_and_resolve_across_default_filters(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
         event_ids = [str(uuid.uuid4()), "MAN-" + uuid.uuid4().hex, "EVT-000123"]
         async with self.sessions() as db:
             for event_id in event_ids:
@@ -613,313 +593,292 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         return body, review.json()
 
     async def test_manual_approval_durations_gate_one_rescan_and_retries_do_not_extend_the_window(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock()), \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            for selected in (None, 15, 30, 60, 120, 240):
-                with self.subTest(selected=selected):
-                    body, review = await self._submit_unknown_manual_review("duration-" + str(selected))
-                    async with self.sessions() as db:
-                        request = await db.get(PermissionRequestModel, review["id"])
-                        # A pending review's old proposed dates never determine
-                        # the admin-selected one-visit approval window.
-                        request.data = {**request.data, "validFrom": "2000-01-01T00:00:00Z", "validTo": "2000-01-01T01:00:00Z"}
-                        audits_before = await db.scalar(select(func.count()).select_from(AuditEvent))
-                        await db.commit()
-                    before = datetime.now(timezone.utc)
-                    url = f"/v1/permission-requests/{review['id']}/decide"
-                    approval = {"decision": "approved", "reason": "Checked ID",
-                        **({"valid_for_minutes": selected} if selected is not None else {})}
-                    response = await self.client.post(url, json=approval)
-                    self.assertEqual(response.status_code, 200, response.text)
-                    result = response.json()
-                    approved = result["request"]
-                    start = datetime.fromisoformat(approved["validFrom"])
-                    end = datetime.fromisoformat(approved["validTo"])
-                    self.assertGreaterEqual(start, before)
-                    self.assertLessEqual(start, datetime.now(timezone.utc))
-                    self.assertEqual(start.isoformat(), approved["decidedAt"])
-                    self.assertEqual(end - start, timedelta(minutes=selected if selected is not None else 60))
-                    subject_id = approved["subjectId"]
-                    async with self.sessions() as db:
-                        request = await db.get(PermissionRequestModel, review["id"])
-                        self.assertEqual(request.data, approved)
-                        state = await db.get(PresenceState, subject_id)
-                        self.assertIsNone(state)
-                        self.assertFalse((await db.get(Person, subject_id)).data["inside"])
-                        self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), audits_before + 1)
-                    # Approval prepares one time-limited rescan; it does not
-                    # retroactively admit the person or change the denied scan.
-                    retry = await self.client.post(url, json={**approval, "valid_for_minutes": 15 if selected == 240 else 240})
-                    self.assertEqual(retry.status_code, 200, retry.text)
-                    self.assertEqual(retry.json()["request"], approved)
-                    async with self.sessions() as db:
-                        state = await db.get(PresenceState, subject_id)
-                        self.assertIsNone(state)
-                        self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), audits_before + 1)
-                        self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)
-                            .where(Movement.data["manualApprovalRequestId"].astext == review["id"])), 0)
-                    entered = await self.client.post("/v1/terminal/scans", json=body,
-                        headers={"Idempotency-Key": str(uuid.uuid4())})
-                    self.assertTrue(entered.json()["allowed"], entered.text)
-                    self.assertEqual(entered.json()["decision"]["event"]["scanType"], "manual")
-                    self.assertEqual(entered.json()["decision"]["event"]["manualApprovalRequestId"], review["id"])
-                    self.assertTrue(entered.json()["manualApprovalRequest"]["consumedAt"])
-                    async with self.sessions() as db:
-                        state = await db.get(PresenceState, subject_id)
-                        self.assertEqual(state.state, "inside")
-                        self.assertEqual(state.entry_override["validTo"], approved["validTo"])
-                        self.assertEqual(state.entry_override["requestId"], review["id"])
-                        self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)
-                            .where(Movement.data["manualApprovalRequestId"].astext == review["id"])), 1)
-                    exited = await self.client.post("/v1/terminal/scans", json=body,
-                        headers={"Idempotency-Key": str(uuid.uuid4())})
-                    self.assertTrue(exited.json()["allowed"], exited.text)
-                    self.assertEqual(exited.json()["decision"]["event"]["direction"], "exit")
-                    # A matching exit consumes the visit even while its selected
-                    # window is still open. Skip cooldown using a server clock,
-                    # not by extending or changing the saved access grant.
-                    next_scan = start + timedelta(seconds=20)
-                    self.assertLess(next_scan, end)
-                    async with self.sessions() as db:
-                        state = await db.get(PresenceState, subject_id)
-                        state.last_scan_timestamp = next_scan - timedelta(seconds=11)
-                        await db.commit()
-                    with patch("movement_logic.datetime", wraps=datetime) as policy_clock, \
-                         patch("terminal_scans.datetime", wraps=datetime) as scan_clock:
-                        policy_clock.now.return_value = next_scan
-                        scan_clock.now.return_value = next_scan
-                        reentry = await self.client.post("/v1/terminal/scans", json=body,
-                            headers={"Idempotency-Key": str(uuid.uuid4())})
-                    self.assertEqual(reentry.status_code, 200, reentry.text)
-                    self.assertFalse(reentry.json()["allowed"])
-                    self.assertNotEqual(reentry.json()["reason"], "Cooldown active")
-                    async with self.sessions() as db:
-                        state = await db.get(PresenceState, subject_id)
-                        self.assertEqual(state.state, "outside")
-                        self.assertIsNone(state.entry_override)
-
-    async def test_invalid_manual_durations_leave_pending_and_applied_requests_unchanged(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
-        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
-        invalid = (0, -1, 241, 1000000, 20, 45, True, False, 15.0, 15.5, "15")
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock()), \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            _, review = await self._submit_unknown_manual_review("invalid-duration")
-            url = f"/v1/permission-requests/{review['id']}/decide"
-            for status in ("pending", "approved"):
+        for selected in (None, 15, 30, 60, 120, 240):
+            with self.subTest(selected=selected):
+                body, review = await self._submit_unknown_manual_review("duration-" + str(selected))
                 async with self.sessions() as db:
-                    saved = dict((await db.get(PermissionRequestModel, review["id"])).data)
-                    movement_count = await db.scalar(select(func.count()).select_from(Movement))
-                    audit_count = await db.scalar(select(func.count()).select_from(AuditEvent))
-                    state = await db.get(PresenceState, saved["subjectId"]) if saved.get("subjectId") else None
-                    presence = (state.state, state.last_scan_timestamp, dict(state.entry_override)) if state else None
-                for duration in invalid:
-                    with self.subTest(status=status, duration=repr(duration)):
-                        response = await self.client.post(url, json={
-                            "decision": "approved", "reason": "Checked ID", "valid_for_minutes": duration,
-                        })
-                        self.assertEqual(response.status_code, 422, response.text)
-                        async with self.sessions() as db:
-                            with self.assertRaises(HTTPException) as error:
-                                await apply_permission_decision(db, review["id"], "approved", "test-admin", "Checked ID", valid_for_minutes=duration)
-                            self.assertEqual(error.exception.status_code, 422)
-                            await db.rollback()
+                    request = await db.get(PermissionRequestModel, review["id"])
+                    # A pending review's old proposed dates never determine
+                    # the admin-selected one-visit approval window.
+                    request.data = {**request.data, "validFrom": "2000-01-01T00:00:00Z", "validTo": "2000-01-01T01:00:00Z"}
+                    audits_before = await db.scalar(select(func.count()).select_from(AuditEvent))
+                    await db.commit()
+                before = datetime.now(timezone.utc)
+                url = f"/v1/permission-requests/{review['id']}/decide"
+                approval = {"decision": "approved", "reason": "Checked ID",
+                    **({"valid_for_minutes": selected} if selected is not None else {})}
+                response = await self.client.post(url, json=approval)
+                self.assertEqual(response.status_code, 200, response.text)
+                result = response.json()
+                approved = result["request"]
+                start = datetime.fromisoformat(approved["validFrom"])
+                end = datetime.fromisoformat(approved["validTo"])
+                self.assertGreaterEqual(start, before)
+                self.assertLessEqual(start, datetime.now(timezone.utc))
+                self.assertEqual(start.isoformat(), approved["decidedAt"])
+                self.assertEqual(end - start, timedelta(minutes=selected if selected is not None else 60))
+                subject_id = approved["subjectId"]
                 async with self.sessions() as db:
-                    self.assertEqual((await db.get(PermissionRequestModel, review["id"])).data, saved)
-                    self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), movement_count)
-                    self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), audit_count)
-                    if presence:
-                        state = await db.get(PresenceState, saved["subjectId"])
-                        self.assertEqual((state.state, state.last_scan_timestamp, state.entry_override), presence)
-                    else:
-                        # Approval creates the registered identity but does not
-                        # admit it or create presence until the one-time rescan.
-                        subject = await db.scalar(select(Subject).where(Subject.barcode == "invalid-duration"))
-                        if status == "pending":
-                            self.assertIsNone(subject)
-                        else:
-                            self.assertIsNotNone(subject)
-                if status == "pending":
-                    approved = await self.client.post(url, json={
-                        "decision": "approved", "reason": "Checked ID", "valid_for_minutes": 15,
-                    })
-                    self.assertEqual(approved.status_code, 200, approved.text)
-
-    async def test_expired_manual_approval_cannot_start_entry_but_allows_exit_after_a_valid_rescan(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
-        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock()), \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            body, review = await self._submit_unknown_manual_review("expired-manual-window")
-            url = f"/v1/permission-requests/{review['id']}/decide"
-            approved = await self.client.post(url, json={
-                "decision": "approved", "reason": "Checked ID", "valid_for_minutes": 15,
-            })
-            self.assertEqual(approved.status_code, 200, approved.text)
-            request = approved.json()["request"]
-            subject_id = request["subjectId"]
-            valid_to = datetime.fromisoformat(request["validTo"])
-            entry_at = valid_to - timedelta(seconds=5)
-            expired_at = valid_to + timedelta(seconds=1)
-            async with self.sessions() as db:
-                state = await db.get(PresenceState, subject_id)
-                self.assertIsNone(state)
-                self.assertFalse((await db.get(Person, subject_id)).data["inside"])
-            with patch("movement_logic.datetime", wraps=datetime) as policy_clock, \
-                 patch("terminal_scans.datetime", wraps=datetime) as scan_clock:
-                policy_clock.now.return_value = entry_at
-                scan_clock.now.return_value = entry_at
+                    request = await db.get(PermissionRequestModel, review["id"])
+                    self.assertEqual(request.data, approved)
+                    state = await db.get(PresenceState, subject_id)
+                    self.assertIsNone(state)
+                    self.assertFalse((await db.get(Person, subject_id)).data["inside"])
+                    self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), audits_before + 1)
+                # Approval prepares one time-limited rescan; it does not
+                # retroactively admit the person or change the denied scan.
+                retry = await self.client.post(url, json={**approval, "valid_for_minutes": 15 if selected == 240 else 240})
+                self.assertEqual(retry.status_code, 200, retry.text)
+                self.assertEqual(retry.json()["request"], approved)
+                async with self.sessions() as db:
+                    state = await db.get(PresenceState, subject_id)
+                    self.assertIsNone(state)
+                    self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), audits_before + 1)
+                    self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)
+                        .where(Movement.data["manualApprovalRequestId"].astext == review["id"])), 0)
                 entered = await self.client.post("/v1/terminal/scans", json=body,
                     headers={"Idempotency-Key": str(uuid.uuid4())})
-                self.assertEqual(entered.status_code, 200, entered.text)
                 self.assertTrue(entered.json()["allowed"], entered.text)
-                self.assertEqual(entered.json()["manualApprovalRequest"]["id"], review["id"])
-                policy_clock.now.return_value = expired_at
-                scan_clock.now.return_value = expired_at
+                self.assertEqual(entered.json()["decision"]["event"]["scanType"], "manual")
+                self.assertEqual(entered.json()["decision"]["event"]["manualApprovalRequestId"], review["id"])
+                self.assertTrue(entered.json()["manualApprovalRequest"]["consumedAt"])
+                async with self.sessions() as db:
+                    state = await db.get(PresenceState, subject_id)
+                    self.assertEqual(state.state, "inside")
+                    self.assertEqual(state.entry_override["validTo"], approved["validTo"])
+                    self.assertEqual(state.entry_override["requestId"], review["id"])
+                    self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)
+                        .where(Movement.data["manualApprovalRequestId"].astext == review["id"])), 1)
                 exited = await self.client.post("/v1/terminal/scans", json=body,
                     headers={"Idempotency-Key": str(uuid.uuid4())})
-                self.assertEqual(exited.status_code, 200, exited.text)
-                self.assertTrue(exited.json()["allowed"])
+                self.assertTrue(exited.json()["allowed"], exited.text)
                 self.assertEqual(exited.json()["decision"]["event"]["direction"], "exit")
-                policy_clock.now.return_value = expired_at + timedelta(seconds=11)
-                scan_clock.now.return_value = expired_at + timedelta(seconds=11)
-                denied = await self.client.post("/v1/terminal/scans", json=body,
-                    headers={"Idempotency-Key": str(uuid.uuid4())})
-                self.assertEqual(denied.status_code, 200, denied.text)
-                self.assertFalse(denied.json()["allowed"])
-                self.assertNotEqual(denied.json()["reason"], "Cooldown active")
-            retried = await self.client.post(url, json={
-                "decision": "approved", "reason": "Checked ID", "valid_for_minutes": 240,
-            })
-            self.assertEqual(retried.status_code, 200, retried.text)
-            self.assertEqual(retried.json()["request"]["validFrom"], request["validFrom"])
-            self.assertEqual(retried.json()["request"]["validTo"], request["validTo"])
-            async with self.sessions() as db:
-                state = await db.get(PresenceState, subject_id)
-                self.assertEqual(state.state, "outside")
-                self.assertIsNone(state.entry_override)
-                self.assertFalse((await db.get(Person, subject_id)).data["inside"])
-                self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)
-                    .where(Movement.data["manualApprovalRequestId"].astext == review["id"])), 1)
-                self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 1)
+                # A matching exit consumes the visit even while its selected
+                # window is still open. Skip cooldown using a server clock,
+                # not by extending or changing the saved access grant.
+                next_scan = start + timedelta(seconds=20)
+                self.assertLess(next_scan, end)
+                async with self.sessions() as db:
+                    state = await db.get(PresenceState, subject_id)
+                    state.last_scan_timestamp = next_scan - timedelta(seconds=11)
+                    await db.commit()
+                with patch("movement_logic.datetime", wraps=datetime) as policy_clock, \
+                     patch("terminal_scans.datetime", wraps=datetime) as scan_clock:
+                    policy_clock.now.return_value = next_scan
+                    scan_clock.now.return_value = next_scan
+                    reentry = await self.client.post("/v1/terminal/scans", json=body,
+                        headers={"Idempotency-Key": str(uuid.uuid4())})
+                self.assertEqual(reentry.status_code, 200, reentry.text)
+                self.assertFalse(reentry.json()["allowed"])
+                self.assertNotEqual(reentry.json()["reason"], "Cooldown active")
+                async with self.sessions() as db:
+                    state = await db.get(PresenceState, subject_id)
+                    self.assertEqual(state.state, "outside")
+                    self.assertIsNone(state.entry_override)
 
-    async def test_manual_unknown_entry_persists_and_exits_once(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+    async def test_invalid_manual_durations_leave_pending_and_applied_requests_unchanged(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
-        scan_body = {"barcode": "new-visitor", "checkpointId": "cp-main"}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock()), \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            denied = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
+        invalid = (0, -1, 241, 1000000, 20, 45, True, False, 15.0, 15.5, "15")
+        _, review = await self._submit_unknown_manual_review("invalid-duration")
+        url = f"/v1/permission-requests/{review['id']}/decide"
+        for status in ("pending", "approved"):
+            async with self.sessions() as db:
+                saved = dict((await db.get(PermissionRequestModel, review["id"])).data)
+                movement_count = await db.scalar(select(func.count()).select_from(Movement))
+                audit_count = await db.scalar(select(func.count()).select_from(AuditEvent))
+                state = await db.get(PresenceState, saved["subjectId"]) if saved.get("subjectId") else None
+                presence = (state.state, state.last_scan_timestamp, dict(state.entry_override)) if state else None
+            for duration in invalid:
+                with self.subTest(status=status, duration=repr(duration)):
+                    response = await self.client.post(url, json={
+                        "decision": "approved", "reason": "Checked ID", "valid_for_minutes": duration,
+                    })
+                    self.assertEqual(response.status_code, 422, response.text)
+                    async with self.sessions() as db:
+                        with self.assertRaises(HTTPException) as error:
+                            await apply_permission_decision(db, review["id"], "approved", "test-admin", "Checked ID", valid_for_minutes=duration)
+                        self.assertEqual(error.exception.status_code, 422)
+                        await db.rollback()
+            async with self.sessions() as db:
+                self.assertEqual((await db.get(PermissionRequestModel, review["id"])).data, saved)
+                self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), movement_count)
+                self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), audit_count)
+                if presence:
+                    state = await db.get(PresenceState, saved["subjectId"])
+                    self.assertEqual((state.state, state.last_scan_timestamp, state.entry_override), presence)
+                else:
+                    # Approval creates the registered identity but does not
+                    # admit it or create presence until the one-time rescan.
+                    subject = await db.scalar(select(Subject).where(Subject.barcode == "invalid-duration"))
+                    if status == "pending":
+                        self.assertIsNone(subject)
+                    else:
+                        self.assertIsNotNone(subject)
+            if status == "pending":
+                approved = await self.client.post(url, json={
+                    "decision": "approved", "reason": "Checked ID", "valid_for_minutes": 15,
+                })
+                self.assertEqual(approved.status_code, 200, approved.text)
+
+    async def test_expired_manual_approval_cannot_start_entry_but_allows_exit_after_a_valid_rescan(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
+        body, review = await self._submit_unknown_manual_review("expired-manual-window")
+        url = f"/v1/permission-requests/{review['id']}/decide"
+        approved = await self.client.post(url, json={
+            "decision": "approved", "reason": "Checked ID", "valid_for_minutes": 15,
+        })
+        self.assertEqual(approved.status_code, 200, approved.text)
+        request = approved.json()["request"]
+        subject_id = request["subjectId"]
+        valid_to = datetime.fromisoformat(request["validTo"])
+        entry_at = valid_to - timedelta(seconds=5)
+        expired_at = valid_to + timedelta(seconds=1)
+        async with self.sessions() as db:
+            state = await db.get(PresenceState, subject_id)
+            self.assertIsNone(state)
+            self.assertFalse((await db.get(Person, subject_id)).data["inside"])
+        with patch("movement_logic.datetime", wraps=datetime) as policy_clock, \
+             patch("terminal_scans.datetime", wraps=datetime) as scan_clock:
+            policy_clock.now.return_value = entry_at
+            scan_clock.now.return_value = entry_at
+            entered = await self.client.post("/v1/terminal/scans", json=body,
+                headers={"Idempotency-Key": str(uuid.uuid4())})
+            self.assertEqual(entered.status_code, 200, entered.text)
+            self.assertTrue(entered.json()["allowed"], entered.text)
+            self.assertEqual(entered.json()["manualApprovalRequest"]["id"], review["id"])
+            policy_clock.now.return_value = expired_at
+            scan_clock.now.return_value = expired_at
+            exited = await self.client.post("/v1/terminal/scans", json=body,
+                headers={"Idempotency-Key": str(uuid.uuid4())})
+            self.assertEqual(exited.status_code, 200, exited.text)
+            self.assertTrue(exited.json()["allowed"])
+            self.assertEqual(exited.json()["decision"]["event"]["direction"], "exit")
+            policy_clock.now.return_value = expired_at + timedelta(seconds=11)
+            scan_clock.now.return_value = expired_at + timedelta(seconds=11)
+            denied = await self.client.post("/v1/terminal/scans", json=body,
+                headers={"Idempotency-Key": str(uuid.uuid4())})
             self.assertEqual(denied.status_code, 200, denied.text)
             self.assertFalse(denied.json()["allowed"])
-            review = await self.client.post("/v1/terminal/manual-reviews", json={
-                **scan_body,
-                "direction": "entry",
-                "eventId": denied.json()["decision"]["event"]["id"],
-                "operatorNote": "Verified photo ID at the gate.",
-            })
-            self.assertEqual(review.status_code, 200, review.text)
-            self.assertEqual(review.json()["operatorNote"], "Verified photo ID at the gate.")
-            url = f"/v1/permission-requests/{review.json()['id']}/decide"
-            no_note = await self.client.post(url, json={"decision": "denied"})
-            self.assertEqual(no_note.status_code, 422, no_note.text)
-            approval = {"decision": "approved", "admin_id": "spoofed", "reason": "Checked ID"}
-            response = await self.client.post(url, json=approval)
-            self.assertEqual(response.status_code, 200, response.text)
-            result = response.json()
-            self.assertFalse(result["workflowSignaled"])
-            subject_id = result["request"]["subjectId"]
-            async with self.sessions() as db:
-                self.assertEqual((await db.get(Subject, subject_id)).barcode, "new-visitor")
-                self.assertFalse((await db.get(Person, subject_id)).data["inside"])
-                state = await db.get(PresenceState, subject_id)
-                self.assertIsNone(state)
-                self.assertEqual(result["auditEvent"]["actor"], "test-admin")
-                self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
-                resolved = await db.get(Movement, denied.json()["decision"]["event"]["id"])
-                self.assertEqual(resolved.result, "denied")
-                self.assertEqual(resolved.scan_type, "auto")
-            # Approval only prepares a pass; the terminal must rescan to admit.
-            entry_response = await self.client.post("/v1/terminal/scans", json=scan_body,
-                headers={"Idempotency-Key": str(uuid.uuid4())})
-            self.assertTrue(entry_response.json()["allowed"], entry_response.text)
-            self.assertEqual(entry_response.json()["decision"]["event"]["scanType"], "manual")
-            self.assertEqual(entry_response.json()["decision"]["event"]["manualApprovalRequestId"], review.json()["id"])
-            async with self.sessions() as db:
-                state = await db.get(PresenceState, subject_id)
-                self.assertEqual(state.state, "inside")
-                self.assertEqual(state.entry_override["requestId"], review.json()["id"])
-                self.assertTrue(state.entry_override["validTo"])
-                self.assertTrue((await db.get(Person, subject_id)).data["inside"])
-                self.assertEqual(await db.scalar(select(func.count()).select_from(Movement).where(
-                    Movement.data["manualApprovalRequestId"].astext == review.json()["id"])), 1)
-            exit_response = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
-            self.assertEqual(exit_response.status_code, 200, exit_response.text)
-            self.assertTrue(exit_response.json()["allowed"], exit_response.text)
-            self.assertEqual(exit_response.json()["decision"]["event"]["direction"], "exit")
-            retry = await self.client.post(url, json=approval)
-            self.assertEqual(retry.status_code, 200, retry.text)
-            self.assertEqual(retry.json()["request"]["validTo"], result["request"]["validTo"])
-            async with self.sessions() as db:
-                state = await db.get(PresenceState, subject_id)
-                self.assertEqual(state.state, "outside")
-                self.assertIsNone(state.entry_override)
-                self.assertFalse((await db.get(Person, subject_id)).data["inside"])
-                self.assertEqual(await db.scalar(select(func.count()).select_from(Movement).where(
-                    Movement.data["manualApprovalRequestId"].astext == review.json()["id"])), 1)
-                state.last_scan_timestamp = datetime.now(timezone.utc) - timedelta(seconds=11)
-                await db.commit()
-            reentry = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
-            self.assertFalse(reentry.json()["allowed"])
-            conflict = await self.client.post(url, json={**approval, "decision": "denied"})
-            self.assertEqual(conflict.status_code, 409)
+            self.assertNotEqual(denied.json()["reason"], "Cooldown active")
+        retried = await self.client.post(url, json={
+            "decision": "approved", "reason": "Checked ID", "valid_for_minutes": 240,
+        })
+        self.assertEqual(retried.status_code, 200, retried.text)
+        self.assertEqual(retried.json()["request"]["validFrom"], request["validFrom"])
+        self.assertEqual(retried.json()["request"]["validTo"], request["validTo"])
+        async with self.sessions() as db:
+            state = await db.get(PresenceState, subject_id)
+            self.assertEqual(state.state, "outside")
+            self.assertIsNone(state.entry_override)
+            self.assertFalse((await db.get(Person, subject_id)).data["inside"])
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)
+                .where(Movement.data["manualApprovalRequestId"].astext == review["id"])), 1)
+            self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 1)
+
+    async def test_manual_unknown_entry_persists_and_exits_once(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
+        scan_body = {"barcode": "new-visitor", "checkpointId": "cp-main"}
+        denied = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
+        self.assertEqual(denied.status_code, 200, denied.text)
+        self.assertFalse(denied.json()["allowed"])
+        review = await self.client.post("/v1/terminal/manual-reviews", json={
+            **scan_body,
+            "direction": "entry",
+            "eventId": denied.json()["decision"]["event"]["id"],
+            "operatorNote": "Verified photo ID at the gate.",
+        })
+        self.assertEqual(review.status_code, 200, review.text)
+        self.assertEqual(review.json()["operatorNote"], "Verified photo ID at the gate.")
+        url = f"/v1/permission-requests/{review.json()['id']}/decide"
+        no_note = await self.client.post(url, json={"decision": "denied"})
+        self.assertEqual(no_note.status_code, 422, no_note.text)
+        approval = {"decision": "approved", "admin_id": "spoofed", "reason": "Checked ID"}
+        response = await self.client.post(url, json=approval)
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertFalse(result["workflowSignaled"])
+        subject_id = result["request"]["subjectId"]
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(Subject, subject_id)).barcode, "new-visitor")
+            self.assertFalse((await db.get(Person, subject_id)).data["inside"])
+            state = await db.get(PresenceState, subject_id)
+            self.assertIsNone(state)
+            self.assertEqual(result["auditEvent"]["actor"], "test-admin")
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
+            resolved = await db.get(Movement, denied.json()["decision"]["event"]["id"])
+            self.assertEqual(resolved.result, "denied")
+            self.assertEqual(resolved.scan_type, "auto")
+        # Approval only prepares a pass; the terminal must rescan to admit.
+        entry_response = await self.client.post("/v1/terminal/scans", json=scan_body,
+            headers={"Idempotency-Key": str(uuid.uuid4())})
+        self.assertTrue(entry_response.json()["allowed"], entry_response.text)
+        self.assertEqual(entry_response.json()["decision"]["event"]["scanType"], "manual")
+        self.assertEqual(entry_response.json()["decision"]["event"]["manualApprovalRequestId"], review.json()["id"])
+        async with self.sessions() as db:
+            state = await db.get(PresenceState, subject_id)
+            self.assertEqual(state.state, "inside")
+            self.assertEqual(state.entry_override["requestId"], review.json()["id"])
+            self.assertTrue(state.entry_override["validTo"])
+            self.assertTrue((await db.get(Person, subject_id)).data["inside"])
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement).where(
+                Movement.data["manualApprovalRequestId"].astext == review.json()["id"])), 1)
+        exit_response = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
+        self.assertEqual(exit_response.status_code, 200, exit_response.text)
+        self.assertTrue(exit_response.json()["allowed"], exit_response.text)
+        self.assertEqual(exit_response.json()["decision"]["event"]["direction"], "exit")
+        retry = await self.client.post(url, json=approval)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(retry.json()["request"]["validTo"], result["request"]["validTo"])
+        async with self.sessions() as db:
+            state = await db.get(PresenceState, subject_id)
+            self.assertEqual(state.state, "outside")
+            self.assertIsNone(state.entry_override)
+            self.assertFalse((await db.get(Person, subject_id)).data["inside"])
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement).where(
+                Movement.data["manualApprovalRequestId"].astext == review.json()["id"])), 1)
+            state.last_scan_timestamp = datetime.now(timezone.utc) - timedelta(seconds=11)
+            await db.commit()
+        reentry = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
+        self.assertFalse(reentry.json()["allowed"])
+        conflict = await self.client.post(url, json={**approval, "decision": "denied"})
+        self.assertEqual(conflict.status_code, 409)
 
     async def test_manual_denial_reclassifies_original_scan_in_history_and_analytics(self):
         from routers.dashboard import get_dashboard
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         body = {"barcode": "unknown-manual-denial", "checkpointId": "cp-main"}
         key = str(uuid.uuid4())
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock()) as publish, \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            scan = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-            self.assertEqual(scan.status_code, 200, scan.text)
-            source = scan.json()["decision"]["event"]
-            self.assertEqual((source["result"], source["scanType"]), ("denied", "auto"))
-            review = await self.client.post("/v1/terminal/manual-reviews", json={
-                **body, "eventId": source["id"], "direction": "entry", "operatorNote": "No valid identification",
-            })
-            self.assertEqual(review.status_code, 200, review.text)
-            url = f"/v1/permission-requests/{review.json()['id']}/decide"
-            decision = {"decision": "denied", "reason": "Identification could not be verified"}
-            response = await self.client.post(url, json=decision)
-            self.assertEqual(response.status_code, 200, response.text)
-            event = response.json()["movement"]
-            self.assertEqual((event["id"], event["result"], event["scanType"]), (source["id"], "denied", "manual"))
-            self.assertEqual(event["createdAt"], source["createdAt"])
-            self.assertEqual(event["initialScanType"], "auto")
-            self.assertEqual(event["denialCode"], "manual_review")
-            publish.assert_not_awaited()
-            published = (await self.durable_events("manual_review_decision", request_id=review.json()["id"]))[-1]
-            self.assertEqual(published["movement"]["scanType"], "manual")
-            retry = await self.client.post(url, json=decision)
-            self.assertEqual(retry.status_code, 200, retry.text)
-            self.assertEqual(retry.json()["movement"], event)
-            # An original scan retry retains its immutable response, not a new event.
-            replay = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-            self.assertEqual(replay.json(), replay_receipt(scan.json()))
+        scan = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+        self.assertEqual(scan.status_code, 200, scan.text)
+        source = scan.json()["decision"]["event"]
+        self.assertEqual((source["result"], source["scanType"]), ("denied", "auto"))
+        review = await self.client.post("/v1/terminal/manual-reviews", json={
+            **body, "eventId": source["id"], "direction": "entry", "operatorNote": "No valid identification",
+        })
+        self.assertEqual(review.status_code, 200, review.text)
+        url = f"/v1/permission-requests/{review.json()['id']}/decide"
+        decision = {"decision": "denied", "reason": "Identification could not be verified"}
+        response = await self.client.post(url, json=decision)
+        self.assertEqual(response.status_code, 200, response.text)
+        event = response.json()["movement"]
+        self.assertEqual((event["id"], event["result"], event["scanType"]), (source["id"], "denied", "manual"))
+        self.assertEqual(event["createdAt"], source["createdAt"])
+        self.assertEqual(event["initialScanType"], "auto")
+        self.assertEqual(event["denialCode"], "manual_review")
+        published = (await self.durable_events("manual_review_decision", request_id=review.json()["id"]))[-1]
+        self.assertEqual(published["movement"]["scanType"], "manual")
+        retry = await self.client.post(url, json=decision)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(retry.json()["movement"], event)
+        # An original scan retry retains its immutable response, not a new event.
+        replay = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+        self.assertEqual(replay.json(), replay_receipt(scan.json()))
         for endpoint in ("/v1/movements", "/v1/movements/analytics"):
             manual = await self.client.get(endpoint, params={"scanType": "manual", "result": "denied"})
             automatic = await self.client.get(endpoint, params={"scanType": "auto", "result": "denied"})
@@ -934,7 +893,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 1)
             self.assertEqual(await db.scalar(select(func.count()).select_from(PresenceState)), 0)
             self.assertIsNone(await db.scalar(select(Subject).where(Subject.barcode == body["barcode"])))
-            dashboard = await get_dashboard(db)
+            dashboard = await get_dashboard(db,
+                actor={"sub": "test-admin", "realm_access": {"roles": ["admin"]}})
             self.assertEqual(dashboard["analytics"]["totalScans"], 1)
             self.assertEqual(dashboard["analytics"]["totalAutomatic"], 0)
             self.assertEqual(dashboard["analytics"]["totalManual"], 1)
@@ -981,58 +941,52 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_terminal_notification_dismissal_preserves_decision_and_history(self):
         from auth import verify_admin_or_operator_request
         operator = {"sub": "test-operator", "realm_access": {"roles": ["operator"]}}
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: operator
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: operator
         async with self.sessions() as db:
             person = await db.get(Person, "p1")
             person.data = {**person.data, "status": "restricted"}
             await db.commit()
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock()), \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            for outcome in ("denied", "approved"):
-                with self.subTest(outcome=outcome):
-                    async with self.sessions() as db:
-                        scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
-                        await db.commit()
-                        req_id = await self._create_review(db, "p1", "p1", scan["decision"]["event"])
-                    url = f"/v1/permission-requests/{req_id}"
-                    decided = await self.client.post(url + "/decide", json={"decision": outcome, "reason": "ID checked"})
-                    self.assertEqual(decided.status_code, 200, decided.text)
-                    self.assertNotIn("terminalAcknowledgementRequired", decided.json()["request"])
-                    async with self.sessions() as db:
-                        movement = dict((await db.get(Movement, scan["decision"]["event"]["id"])).data)
-                        person = dict((await db.get(Person, "p1")).data)
-                        state = await db.get(PresenceState, "p1")
-                        presence = (state.state, state.last_scan_timestamp, state.entry_override)
-                        counts = [await db.scalar(select(func.count()).select_from(model))
-                                  for model in (Movement, AuditEvent, AccessPermission, ScanRequest)]
-                    # Event publication can fail after a successful optional dismissal.
-                    with patch("routers.permissions.publish_presence_update", new=AsyncMock(side_effect=RuntimeError("offline"))) as publish:
-                        dismissed = await self.client.post(url + "/dismiss")
-                        self.assertEqual(dismissed.status_code, 200, dismissed.text)
-                        notice = dismissed.json()
-                        self.assertEqual((notice["status"], notice["decidedAt"], notice["decisionReason"]),
-                                         (outcome, decided.json()["request"]["decidedAt"], "ID checked"))
-                        self.assertEqual(notice["notificationDismissedBy"], "test-operator")
-                        self.assertTrue(notice["notificationDismissedAt"])
-                        retry = await self.client.post(url + "/dismiss")
-                        self.assertEqual(retry.json(), notice)
-                        publish.assert_not_awaited()
-                        self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
-                    bundle = await self.client.get("/v1/terminal/bundle")
-                    self.assertEqual(bundle.status_code, 200, bundle.text)
-                    self.assertEqual(next(item for item in bundle.json()["permissionRequests"] if item["id"] == req_id), notice)
-                    async with self.sessions() as db:
-                        self.assertEqual((await db.get(Movement, scan["decision"]["event"]["id"])).data, movement)
-                        self.assertEqual((await db.get(Person, "p1")).data, person)
-                        state = await db.get(PresenceState, "p1")
-                        self.assertEqual((state.state, state.last_scan_timestamp, state.entry_override), presence)
-                        self.assertEqual([await db.scalar(select(func.count()).select_from(model))
-                                          for model in (Movement, AuditEvent, AccessPermission, ScanRequest)], counts)
-                        self.assertEqual((await db.get(PermissionRequestModel, req_id)).data, notice)
+        for outcome in ("denied", "approved"):
+            with self.subTest(outcome=outcome):
+                async with self.sessions() as db:
+                    scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
+                    await db.commit()
+                    req_id = await self._create_review(db, "p1", "p1", scan["decision"]["event"])
+                url = f"/v1/permission-requests/{req_id}"
+                decided = await self.client.post(url + "/decide", json={"decision": outcome, "reason": "ID checked"})
+                self.assertEqual(decided.status_code, 200, decided.text)
+                self.assertNotIn("terminalAcknowledgementRequired", decided.json()["request"])
+                async with self.sessions() as db:
+                    movement = dict((await db.get(Movement, scan["decision"]["event"]["id"])).data)
+                    person = dict((await db.get(Person, "p1")).data)
+                    state = await db.get(PresenceState, "p1")
+                    presence = (state.state, state.last_scan_timestamp, state.entry_override)
+                    counts = [await db.scalar(select(func.count()).select_from(model))
+                              for model in (Movement, AuditEvent, AccessPermission, ScanRequest)]
+                # A retry keeps the dismissal idempotent while the outbox retains one event.
+                dismissed = await self.client.post(url + "/dismiss")
+                self.assertEqual(dismissed.status_code, 200, dismissed.text)
+                notice = dismissed.json()
+                self.assertEqual((notice["status"], notice["decidedAt"], notice["decisionReason"]),
+                                 (outcome, decided.json()["request"]["decidedAt"], "ID checked"))
+                self.assertEqual(notice["notificationDismissedBy"], "test-operator")
+                self.assertTrue(notice["notificationDismissedAt"])
+                retry = await self.client.post(url + "/dismiss")
+                self.assertEqual(retry.json(), notice)
+                self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
+                bundle = await self.client.get("/v1/terminal/bundle")
+                self.assertEqual(bundle.status_code, 200, bundle.text)
+                self.assertEqual(next(item for item in bundle.json()["permissionRequests"] if item["id"] == req_id), notice)
+                async with self.sessions() as db:
+                    self.assertEqual((await db.get(Movement, scan["decision"]["event"]["id"])).data, movement)
+                    self.assertEqual((await db.get(Person, "p1")).data, person)
+                    state = await db.get(PresenceState, "p1")
+                    self.assertEqual((state.state, state.last_scan_timestamp, state.entry_override), presence)
+                    self.assertEqual([await db.scalar(select(func.count()).select_from(model))
+                                      for model in (Movement, AuditEvent, AccessPermission, ScanRequest)], counts)
+                    self.assertEqual((await db.get(PermissionRequestModel, req_id)).data, notice)
 
     async def test_terminal_notification_dismissal_requires_assigned_checkpoint(self):
         from auth import verify_admin_or_operator_request
@@ -1052,15 +1006,13 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             assignment = await db.get(TerminalCheckpointAssignment, "browser:operator")
             assignment.checkpoint_id = "server-room"
             await db.commit()
-        with patch("routers.permissions.publish_presence_update", new=AsyncMock()) as publish:
-            accepted = await self.client.post(url)
-            self.assertEqual(accepted.status_code, 200, accepted.text)
-            self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
-            async with self.sessions() as db:
-                await db.delete(await db.get(TerminalCheckpointAssignment, "browser:operator"))
-                await db.commit()
-            self.assertEqual((await self.client.post(url)).status_code, 403)
-            publish.assert_not_awaited()
+        accepted = await self.client.post(url)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
+        async with self.sessions() as db:
+            await db.delete(await db.get(TerminalCheckpointAssignment, "browser:operator"))
+            await db.commit()
+        self.assertEqual((await self.client.post(url)).status_code, 403)
         actor = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         pending_id = None
         async with self.sessions() as db:
@@ -1179,19 +1131,17 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await db.scalar(select(Subject).where(Subject.barcode == "unknown-1")))
 
     async def test_visitor_permission_is_applied_without_temporal_and_survives_timeout(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         async with self.sessions() as db:
             db.add(Subject(id="v1", kind="visitor", barcode="visitor", person=Person(data={"name": "Visitor", "status": "pending_approval", "type": "visitor"})))
             await db.commit()
             req_id = await self._create_review(db, "visitor", "v1", kind="visitor")
-        with patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            response = await self.client.post(f"/v1/permission-requests/{req_id}/decide", json={
-                "decision": "approved",
-                "admin_id": "admin",
-                "reason": "Visitor identity and host were verified.",
-            })
-            self.assertEqual(response.status_code, 200, response.text)
+        response = await self.client.post(f"/v1/permission-requests/{req_id}/decide", json={
+            "decision": "approved",
+            "admin_id": "admin",
+            "reason": "Visitor identity and host were verified.",
+        })
+        self.assertEqual(response.status_code, 200, response.text)
         async with self.sessions() as db:
             self.assertEqual((await db.get(Person, "v1")).data["status"], "pre_approved")
             self.assertEqual((await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == "v1"))).data["state"], "active")
@@ -1217,7 +1167,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await db.commit()
 
     async def test_alerts_with_absent_optional_fields_remain_visible(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
             db.add(Alert(id="visible", created_at=now, data={"id": "visible", "title": "Restricted access", "status": "open"}))
@@ -1260,12 +1210,11 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             "eventId": denial["decision"]["event"]["id"],
             "operatorNote": "Verified at the gate before requesting review.",
         }
-        with patch("routers.terminal.get_temporal_client", new=AsyncMock()), patch("routers.terminal.publish_presence_update", new=AsyncMock()):
-            first, second = await asyncio.gather(*[self.client.post("/v1/terminal/manual-reviews", json=body) for _ in range(2)])
-            self.assertEqual(first.status_code, 200, first.text)
-            self.assertEqual(first.json()["id"], second.json()["id"])
-            bad = await self.client.post("/v1/terminal/manual-reviews", json={**body, "barcode": "someone-else"})
-            self.assertEqual(bad.status_code, 422)
+        first, second = await asyncio.gather(*[self.client.post("/v1/terminal/manual-reviews", json=body) for _ in range(2)])
+        self.assertEqual(first.status_code, 200, first.text)
+        self.assertEqual(first.json()["id"], second.json()["id"])
+        bad = await self.client.post("/v1/terminal/manual-reviews", json={**body, "barcode": "someone-else"})
+        self.assertEqual(bad.status_code, 422)
 
     async def test_hardware_scan_cannot_move_unrelated_assets(self):
         from fastapi import HTTPException
@@ -1275,19 +1224,19 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.status_code, 422)
 
     async def test_profile_isolation_and_explicit_availability(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a", "name": "Admin A", "email": "a@example.test"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a", "name": "Admin A", "email": "a@example.test", "realm_access": {"roles": ["admin"]}}
         first = await self.client.get("/v1/admin/profile")
         self.assertEqual(first.status_code, 200, first.text)
         updated = await self.client.patch("/v1/admin/profile", json={"avatarDataUrl": "data:image/png;base64,dGVzdA=="})
         self.assertEqual(updated.status_code, 200, updated.text)
         self.assertEqual(updated.json()["avatar_data_url"], "data:image/png;base64,dGVzdA==")
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-b", "name": "Admin B", "email": "b@example.test"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-b", "name": "Admin B", "email": "b@example.test", "realm_access": {"roles": ["admin"]}}
         second = await self.client.get("/v1/admin/profile")
         self.assertNotEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(second.json()["name"], "Admin B")
         self.assertEqual(second.json()["avatar_data_url"], "")
         self.assertEqual(second.json()["settings"], {"requireReviewNote": True})
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a", "realm_access": {"roles": ["admin"]}}
         again = await self.client.get("/v1/admin/profile")
         self.assertEqual(again.json()["offline_until"], None)
         expected_return = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
@@ -1367,7 +1316,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_registry_updates_cascade_to_permissions_and_keep_identity_consistent(self):
         from auth import verify_admin_or_operator_request
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         created = await self.client.post("/v1/registry/subjects", json={"kind": "employee", "barcode": "edit-me", "data": {"name": "Employee", "allowedZone": "public"}})
         self.assertEqual(created.status_code, 201, created.text)
         subject_id = created.json()["id"]
@@ -1395,7 +1344,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.status_code, 409)
 
     async def test_invalid_permission_grants_cannot_corrupt_saved_access(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         async with self.sessions() as db:
             db.add(AccessPermission(id="perm-p1", subject_id="p1", data={"id": "perm-p1", "subjectId": "p1", "state": "active", "zones": ["public"]}))
             await db.commit()
@@ -1453,7 +1402,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 1)
 
     async def test_notes_persist_and_blank_notes_are_rejected(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
         async with self.sessions() as db:
             scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
             await db.commit()
@@ -1546,6 +1495,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         payload = BrowserScanPayload(barcode="p1", checkpointId="main-gate")
         normalized = payload.model_dump(mode="json")
         normalized.pop("expected_operator_subject", None)
+        normalized.pop("queue_captured_at", None)
         normalized["barcode"] = payload.barcode.strip().lower()
         normalized["selected_hardware_ids"] = sorted(set(payload.selected_hardware_ids))
         old_hash = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()

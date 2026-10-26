@@ -20,13 +20,13 @@ export function ScheduledIrregularitySkips({ assignments, variant = "default" }:
   return <section className={`${styles.skipSchedule} ${variant === "profile" ? styles.skipScheduleProfile : ""}`} aria-labelledby={titleId}>
     <header className={styles.skipScheduleHeading}>
       <h3 id={titleId}>Scheduled irregularity skips</h3>
-      <span>Next six months</span>
+      {variant === "default" ? <span>Next six months</span> : null}
     </header>
     {scheduled.length ? <ul className={`${styles.skipScheduleList} scrollable-content`}>
       {scheduled.map((item) => <li key={item.subjectId}>
-        <strong>{item.subjectName}</strong>
+        {variant === "default" ? <strong>{item.subjectName}</strong> : null}
         <div className={styles.skipScheduleDates}>{item.dates.map((date) => <time key={date} dateTime={date}>{formatIrregularitySkipDate(date)}</time>)}</div>
       </li>)}
-    </ul> : <p className={styles.skipScheduleEmpty}>No leave dates scheduled in the next six months.</p>}
+    </ul> : <p className={styles.skipScheduleEmpty}>{variant === "profile" ? "No irregularity skips scheduled." : "No leave dates scheduled in the next six months."}</p>}
   </section>;
 }

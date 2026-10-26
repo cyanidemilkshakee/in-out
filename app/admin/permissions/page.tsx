@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import type { AccessPermission, PermissionRequest } from "../../../lib/types";
+import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
 import { formatFacilityZones } from "../../../lib/facilityZones";
 import { DEFAULT_MANUAL_REVIEW_MINUTES } from "../../../lib/manualReviewDuration";
 import { AccessDirectory } from "../../../frontend/components/admin/permissions/AccessDirectory";
@@ -272,7 +273,7 @@ export default function PermissionManagerPage() {
                 tabIndex={-1}
                 className={`${requestStyles.requestCard} ${selectedRequestId === request.id ? requestStyles.selected : ""}`}
                 request={request}
-                checkpointName={request.checkpoint || checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId}
+                checkpointName={normalizeCheckpointLabel(request.checkpoint) || checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId}
                 decisionNote={decisionNotes[request.id] ?? ""}
                 noteInvalid={Boolean(invalidDecisionNotes[request.id])}
                 noteInputRef={(node) => { decisionNoteRefs.current[request.id] = node; }}

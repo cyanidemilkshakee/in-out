@@ -3,6 +3,7 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, X } from "lucide-react";
 import type { Alert, Person } from "../../../../lib/types";
+import { normalizeCheckpointLabel } from "../../../../lib/normalizeDashboard";
 import { PersonStatusLabel } from "../PersonStatusLabel";
 import { alertTimestamp, formatAlertExplanation, formatAlertReviewDate, getAlertReviewState, getAlertWarningLevel, getOpenAlertWarningNumber, type AlertReviewFilter } from "./alertPresentation";
 
@@ -25,6 +26,7 @@ function AlertReviewCard({ alert, employeeStatus, onReview, hasEarlierUnreviewed
   const [error, setError] = useState("");
   const noteRef = useRef<HTMLInputElement>(null);
   const pending = useRef(false);
+  const checkpointLabel = normalizeCheckpointLabel(alert.checkpoint);
   const reviewState = getAlertReviewState(alert);
   const warningLevel = reviewState === "needs_review" ? getOpenAlertWarningNumber(alert) : getAlertWarningLevel(alert.severity);
   const warningLimitReached = (alert.warningCount ?? 0) >= 3;
@@ -55,7 +57,7 @@ function AlertReviewCard({ alert, employeeStatus, onReview, hasEarlierUnreviewed
         <PersonStatusLabel status={employeeStatus} />
         <small className="alert-activity-barcode">{alert.barcode}</small>
       </div>}
-      {alert.checkpoint && alert.checkpoint.trim().toLowerCase() !== "attendance policy" && <small>{alert.checkpoint}</small>}
+      {checkpointLabel && checkpointLabel.trim().toLowerCase() !== "attendance policy" && <small>{checkpointLabel}</small>}
       {showDescription && <p className="alert-activity-description">{formatAlertExplanation(alert)}</p>}
       {alert.review && <small className="alert-review-record">{alert.review.decision === "confirmed" ? "Accepted" : "Excused"}{alert.review.reviewedAt ? ` ${formatAlertReviewDate(alert.review.reviewedAt)}` : ""}{alert.review.reviewedBy ? ` · ${alert.review.reviewedBy}` : ""}</small>}
       {alert.review?.reason && <p className="alert-review-note"><strong>Review note:</strong> {alert.review.reason}</p>}

@@ -18,13 +18,13 @@ from schemas import ScanPayload
 
 
 class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
-    async def test_registered_dynamic_checkpoint_can_be_used_as_an_assignment(self):
+    async def test_registered_checkpoint_can_be_used_as_an_assignment(self):
         db = Mock(
             scalar=AsyncMock(return_value=TerminalCheckpointAssignment(
-                terminal_identity="browser:operator", checkpoint_id="cp-north-lobby")),
-            get=AsyncMock(return_value=Checkpoint(id="cp-north-lobby", data={"name": "North Lobby"})),
+                terminal_identity="browser:operator", checkpoint_id="cp-main")),
+            get=AsyncMock(return_value=Checkpoint(id="cp-main", data={"name": "Main Entrance"})),
         )
-        self.assertEqual(await require_checkpoint(db, "browser:operator", "cp-north-lobby"), "cp-north-lobby")
+        self.assertEqual(await require_checkpoint(db, "browser:operator", "cp-main"), "cp-main")
 
     async def test_operator_and_admin_without_step_up_cannot_change_assignments(self):
         app = FastAPI()
@@ -65,7 +65,7 @@ class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
             publish.assert_awaited_once_with(db, "browser:operator")
 
     async def test_operator_creation_without_assignment_rejects_before_keycloak_write(self):
-        payload = keycloak_admin.UserCreateRequest(username="operator", password="temporary-password", roles=["operator"])
+        payload = keycloak_admin.UserCreateRequest(username="operator", password="Temporary9-password", roles=["operator"])
         with patch("routers.keycloak_admin._request", new=AsyncMock()) as identity:
             with self.assertRaises(HTTPException) as error:
                 await keycloak_admin.create_user(payload, "token", Mock(), {

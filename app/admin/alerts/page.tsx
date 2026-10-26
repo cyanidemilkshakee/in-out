@@ -12,7 +12,7 @@ import { useDataActions, useDataState } from "../../../frontend/context/DataCont
 import styles from "./AlertsPage.module.css";
 
 export default function AlertsPage() {
-  const { alerts, alertRules, alertWarnings, alertRuleAssignments, alertSummary, people, permissions, movements, isLoading, error } = useDataState();
+  const { alerts, alertRules, alertWarnings, alertRuleAssignments, alertSummary, people, movements, isLoading, error } = useDataState();
   const { reviewAlert, resetAlertWarnings, setAlertRuleAssignments, evaluateAlertRules, refresh, queryAlerts } = useDataActions();
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationMessage, setEvaluationMessage] = useState("");
@@ -118,7 +118,6 @@ export default function AlertsPage() {
               warnings={personWarnings}
               alerts={alerts}
               people={people}
-              permissions={permissions}
               movements={movements}
               rules={alertRules}
               onReset={resetAlertWarnings}

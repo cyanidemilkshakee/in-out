@@ -4,33 +4,30 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, exc, or_, false
+from sqlalchemy import ARRAY, Text, bindparam, select, exc, or_, false
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import has_admin_role, verify_admin_or_operator_request, verify_admin_request
 from terminal_assignments import browser_identity, require_checkpoint
 from database import get_db, get_read_db
-from data_limits import bounded_rows
+from data_limits import bounded_rows, precharge_mutation_response
 from event_outbox import enqueue_presence, enqueue_workflow_start, enqueue_workflow_signal
 from models import (
     Subject, PermissionRequestModel, Checkpoint,
     AccessPermission, Person, HardwareAsset, AuditEvent,
 )
 from schemas import PermissionRequestCreate, PermissionGrantCreate, PermissionDecision
-from temporal_worker import get_temporal_client, TASK_QUEUE
 from permission_decisions import (review_source, require_recent_review_source, pending_manual_review,
-                                  publish_decision, enqueue_decision, permission_version, zone_permission_version,
+                                  enqueue_decision, permission_version, zone_permission_version,
                                   custody_version, has_unexpired_permission)
 from access_validation import (validate_window, validate_permission_window, validate_zones,
     require_registered_checkpoint, validate_registered_zones)
 from facility_zones import CHECKPOINT_IDS
-from redis_client import publish_presence_update
 from subject_metadata import current_subject_metadata
 from registry_validation import is_barcode_conflict
-from zone_access import (admin_zone_ids, checkpoint_zone_condition, require_checkpoint_scope,
+from zone_access import (admin_zone_ids, require_checkpoint_scope,
     require_subject_scope, subject_zone_condition, validate_zone_subset)
-import json
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +74,11 @@ async def grant_permission(
         if signal_visitor:
             await enqueue_workflow_signal(db, f"visitor-{result['request']['id']}", ["approved", payload.reason])
         await enqueue_decision(db, result)
+        await precharge_mutation_response(db, result)
         await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
     except exc.IntegrityError as error:
         await db.rollback()
         if is_barcode_conflict(error):
@@ -121,6 +122,7 @@ async def create_permission_request(
             PermissionRequestModel.data["status"].astext == "pending",
         ).order_by(PermissionRequestModel.created_at).limit(1))
         if existing:
+            await precharge_mutation_response(db, existing.data)
             return existing.data
         visitor_permission = await db.scalar(select(AccessPermission).where(
             AccessPermission.subject_id == subject.id).execution_options(populate_existing=True))
@@ -210,6 +212,7 @@ async def create_permission_request(
         direction = direction or (source.direction if source else None) or ("exit" if checkpoint.data.get("mode") == "exit" else "entry")
         existing = await pending_manual_review(db, subject.barcode, checkpoint.id, direction)
         if existing:
+            await precharge_mutation_response(db, existing.data)
             return existing.data
 
     data = {
@@ -266,6 +269,7 @@ async def create_permission_request(
     if payload.request_type in {"manual_override", "visitor"}:
         await enqueue_workflow_start(db, req_id, visitor=payload.request_type == "visitor")
     await enqueue_decision(db, {"request": data})
+    await precharge_mutation_response(db, data)
     await db.commit()
 
     return data
@@ -277,7 +281,7 @@ async def decide_permission_request(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(verify_admin_request)
 ):
-    from permission_decisions import apply_permission_decision, publish_decision
+    from permission_decisions import apply_permission_decision
 
     existing_request = await db.scalar(select(PermissionRequestModel).where(
         PermissionRequestModel.id == req_id).with_for_update())
@@ -312,8 +316,10 @@ async def decide_permission_request(
         await enqueue_workflow_signal(db, f"{prefix}-{req_id}", args)
         workflow_queued = True
     await enqueue_decision(db, result)
+    response = {**result, "workflowSignaled": False, "workflowQueued": workflow_queued}
+    await precharge_mutation_response(db, response)
     await db.commit()
-    return {**result, "workflowSignaled": False, "workflowQueued": workflow_queued}
+    return response
 
 
 @router.post("/v1/permission-requests/{req_id}/dismiss")
@@ -341,6 +347,7 @@ async def dismiss_permission_notification(
     if data.get("status") not in {"approved", "denied"}:
         raise HTTPException(status_code=409, detail="Awaiting a permission decision")
     if data.get("notificationDismissedAt"):
+        await precharge_mutation_response(db, data)
         return data
 
     data = {
@@ -350,6 +357,7 @@ async def dismiss_permission_notification(
     }
     req.data = data
     await enqueue_presence(db, {"type": "terminal_notification_dismissed", "requestId": req_id, "request": data})
+    await precharge_mutation_response(db, data)
     await db.commit()
     return data
 
@@ -378,12 +386,13 @@ async def list_permissions(
     from event_outbox import read_event_revision
     event_revision = await read_event_revision(db)
     zone_ids = await admin_zone_ids(db, _admin)
-    visible_subject_ids = list((await db.scalars(
+    visible_subject_rows = await bounded_rows(db,
         select(Subject.id).outerjoin(Person, Person.subject_id == Subject.id)
         .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
         .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
         .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id)
-    )).all())
+    )
+    visible_subject_ids = [row[0] for row in visible_subject_rows]
 
     async def fetch_permissions():
         requests = await fetch_requests()
@@ -409,7 +418,7 @@ async def list_permissions(
             str(row[0]) for row in manual_audit_rows if row[0]
         }
         permission_rows = await bounded_rows(db,
-            select(AccessPermission, Subject.kind)
+            select(AccessPermission, Subject.kind, Subject.barcode)
             .join(Subject, AccessPermission.subject_id == Subject.id)
             .where(Subject.id.in_(visible_subject_ids))
             .order_by(
@@ -422,7 +431,7 @@ async def list_permissions(
         people: list[dict[str, Any]] = []
         hardware: list[dict[str, Any]] = []
         seen_subject_ids: set[str] = set()
-        for permission, subject_kind in permission_rows:
+        for permission, subject_kind, subject_barcode in permission_rows:
             if subject_kind not in {"employee", "visitor", "hardware"}:
                 continue
             data = dict(permission.data or {})
@@ -431,6 +440,7 @@ async def list_permissions(
             seen_subject_ids.add(permission.subject_id)
             data.setdefault("id", permission.id)
             data.setdefault("subjectId", permission.subject_id)
+            data["barcode"] = subject_barcode
             if data.get("source") == "manual" or permission.subject_id in manually_managed_subject_ids:
                 data["source"] = "manual"
             elif permission.subject_id in request_managed_subject_ids:
@@ -442,8 +452,9 @@ async def list_permissions(
         return people, hardware, requests
 
     async def fetch_requests():
+        requested_zone_ids = bindparam("requested_zone_ids", value=list(zone_ids), type_=ARRAY(Text()))
         rows = await bounded_rows(db, select(PermissionRequestModel).where(or_(
-            PermissionRequestModel.data["requestedZones"].has_any(list(zone_ids)),
+            PermissionRequestModel.data["requestedZones"].has_any(requested_zone_ids),
             PermissionRequestModel.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
             PermissionRequestModel.subject_id.in_(visible_subject_ids) if visible_subject_ids else false(),
         )).order_by(PermissionRequestModel.created_at.desc()))

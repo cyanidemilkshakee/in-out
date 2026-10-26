@@ -10,6 +10,7 @@ import { FacilityZoneSelection } from "../permissions/FacilityZoneSelection";
 import { CreationDialog } from "./CreationDialog";
 import { RegistryEmployeePicker } from "./RegistryEmployeePicker";
 import styles from "../permissions/PermissionForm.module.css";
+import registryStyles from "./RegistryCreateDialog.module.css";
 
 export type RegistryCreateKind = "employee" | "visitor" | "hardware";
 
@@ -94,7 +95,7 @@ export function RegistryCreateDialog({
       : visitorDefaults(checkpoints, zones[0].id));
   }, [checkpoints, dialogOpen, zones]);
 
-  const title = kind === "employee" ? "Create Employee" : kind === "visitor" ? "Create Visitor" : "Create Hardware";
+  const title = kind === "employee" ? "Create employee" : kind === "visitor" ? "Create visitor" : "Create hardware";
   const submitLabel = title;
 
   function open() {
@@ -134,7 +135,7 @@ export function RegistryCreateDialog({
       onSubmit={submit}
       onOpenChange={setDialogOpen}
     >
-      <fieldset className={styles.typeSelector}>
+      <fieldset className={`${styles.typeSelector} ${registryStyles.typeSelector}`}>
         <legend>Record type</legend>
         <div className={styles.typeChoices}>
           {([
@@ -142,7 +143,7 @@ export function RegistryCreateDialog({
             ["visitor", "Visitor", UsersRound],
             ["hardware", "Hardware", Package],
           ] as const).map(([value, label, Icon]) => (
-            <label key={value} className={styles.typeChoice} data-selected={kind === value}>
+            <label key={value} className={`${styles.typeChoice} ${registryStyles.typeChoice}`} data-selected={kind === value}>
               <input type="radio" name="registryRecordType" value={value} checked={kind === value} onChange={() => changeKind(value)} />
               <Icon size={19} strokeWidth={1.7} aria-hidden="true" />
               <span>{label}</span>
@@ -151,14 +152,14 @@ export function RegistryCreateDialog({
         </div>
       </fieldset>
 
-      {kind === "employee" && <div className={styles.creationFields}>
+      {kind === "employee" && <div className={`${styles.creationFields} ${registryStyles.fields}`}>
         <label className={styles.field}><span>Name</span><input value={employeeForm.name} onChange={(event) => { setEmployeeForm((current) => ({ ...current, name: event.target.value })); setError(""); }} placeholder="Employee name" required autoFocus /></label>
         <label className={styles.field}><span>Barcode</span><input value={employeeForm.barcode} onChange={(event) => { setEmployeeForm((current) => ({ ...current, barcode: event.target.value })); setError(""); }} placeholder="Employee barcode" required /></label>
         <label className={styles.field}><span>Status</span><select value={employeeForm.status} onChange={(event) => setEmployeeForm((current) => ({ ...current, status: event.target.value as CreateEmployeeInput["status"] }))}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
         <div className={styles.creationFieldSpan}><FacilityZoneSelection label="Allowed zones" value={employeeForm.allowedZones ?? []} onChange={(allowedZones) => setEmployeeForm((current) => ({ ...current, allowedZones }))} /></div>
       </div>}
 
-      {kind === "visitor" && <div className={styles.creationFields}>
+      {kind === "visitor" && <div className={`${styles.creationFields} ${registryStyles.fields}`}>
         <label className={styles.field}><span>Name</span><input value={visitorForm.name} onChange={(event) => setVisitorForm((current) => ({ ...current, name: event.target.value }))} placeholder="Visitor name" required autoFocus /></label>
         <label className={styles.field}><span>Barcode</span><input value={visitorForm.barcode} autoCapitalize="none" spellCheck={false} onChange={(event) => setVisitorForm((current) => ({ ...current, barcode: event.target.value }))} placeholder="Visitor barcode" required /></label>
         <label className={styles.field}><span>Host</span><input value={visitorForm.host} onChange={(event) => setVisitorForm((current) => ({ ...current, host: event.target.value }))} placeholder="Host employee" required /></label>
@@ -172,7 +173,7 @@ export function RegistryCreateDialog({
         <label className={`${styles.field} ${styles.creationFieldSpan}`}><span>Purpose</span><textarea value={visitorForm.purpose ?? ""} onChange={(event) => setVisitorForm((current) => ({ ...current, purpose: event.target.value }))} placeholder="Purpose (optional)" maxLength={1000} rows={2} /></label>
       </div>}
 
-      {kind === "hardware" && <div className={styles.creationFields}>
+      {kind === "hardware" && <div className={`${styles.creationFields} ${registryStyles.fields}`}>
         <label className={styles.field}><span>Asset name</span><input value={hardwareForm.name} onChange={(event) => { setHardwareForm((current) => ({ ...current, name: event.target.value })); setError(""); }} placeholder="Hardware name" required autoFocus /></label>
         <label className={styles.field}><span>Barcode</span><input value={hardwareForm.barcode} onChange={(event) => { setHardwareForm((current) => ({ ...current, barcode: event.target.value })); setError(""); }} placeholder="Asset barcode" required /></label>
         <div className={styles.field}><span>Owner</span>{searchEmployees

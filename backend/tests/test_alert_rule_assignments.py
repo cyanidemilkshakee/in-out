@@ -52,14 +52,13 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = database_fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "assignment-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "assignment-admin", "realm_access": {"roles": ["admin"]}}
 
     async def save(self, subject_id, ids, revision=None):
         body = {"ruleIds": ids}
         if revision is not None:
             body["expectedRevision"] = revision
-        with patch("routers.alerts.publish_data_changed", new=AsyncMock()):
-            return await self.client.put(f"/v1/alert-rule-assignments/{subject_id}", json=body)
+        return await self.client.put(f"/v1/alert-rule-assignments/{subject_id}", json=body)
 
     async def seed_rule(self, rule_id="rule-irregularity", **changes):
         data = next(rule for rule in default_alert_rules() if rule["id"] == rule_id)
@@ -118,13 +117,11 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_identical_retry_is_idempotent_but_stale_different_selection_conflicts(self):
         self.authorize()
-        with patch("routers.alerts.publish_data_changed", new=AsyncMock()) as publish:
-            first = await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": ["rule-no-break", "rule-irregularity"], "expectedRevision": 0})
-            retry = await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": ["rule-irregularity", "rule-no-break"], "expectedRevision": 0})
+        first = await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": ["rule-no-break", "rule-irregularity"], "expectedRevision": 0})
+        retry = await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": ["rule-irregularity", "rule-no-break"], "expectedRevision": 0})
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json(), first.json())
-        publish.assert_not_awaited()
         async with self.sessions() as db:
             events = (await db.scalars(select(EventOutbox).where(EventOutbox.kind == "presence"))).all()
             self.assertEqual(len(events), 1)
@@ -161,10 +158,9 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.get("/v1/alert-rule-assignments", headers=headers)).status_code, 403)
             self.assertEqual((await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": []}, headers=headers)).status_code, 403)
 
-    async def test_commit_survives_publication_failure_and_rollback_removes_assignment_and_audit(self):
+    async def test_successful_assignment_commits_and_failed_flush_rolls_back(self):
         self.authorize()
-        with patch("routers.alerts.publish_data_changed", new=AsyncMock(side_effect=RuntimeError("publication unavailable"))):
-            response = await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": [], "expectedRevision": 0})
+        response = await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": [], "expectedRevision": 0})
         self.assertEqual(response.status_code, 200, response.text)
         async with self.sessions() as db:
             self.assertEqual((await db.get(AlertRuleAssignment, "p1")).rule_ids, [])
@@ -219,11 +215,9 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.save("p1", [], 0)).status_code, 200)
         fixed_now = datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc)
         with patch("workflows.activities.async_session", new=self.sessions), \
-             patch("workflows.activities.publish_presence_update", new=AsyncMock()) as publish, \
              patch("workflows.activities.datetime", wraps=datetime) as clock:
             clock.now.return_value = fixed_now
             self.assertEqual(await run_alert_rule_evaluation(), 0)
-            publish.assert_not_awaited()
             self.assertEqual((await self.save("p1", ["rule-irregularity"], 1)).status_code, 200)
             self.assertEqual(await run_alert_rule_evaluation(), 1)
             self.assertEqual(await run_alert_rule_evaluation(), 0)
@@ -238,7 +232,6 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
         await self.seed_rule(severity="critical")
         fixed_now = datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc)
         with patch("workflows.activities.async_session", new=self.sessions), \
-             patch("workflows.activities.publish_presence_update", new=AsyncMock()), \
              patch("workflows.activities.datetime", wraps=datetime) as clock:
             clock.now.return_value = fixed_now
             async with self.sessions() as db:

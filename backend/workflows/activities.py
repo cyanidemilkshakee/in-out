@@ -12,7 +12,6 @@ from temporalio import activity
 from sqlalchemy import select
 
 from database import async_session  # use the session factory directly in activities
-from redis_client import publish_presence_update
 from event_outbox import enqueue_presence, MAX_EVENT_BYTES
 
 
