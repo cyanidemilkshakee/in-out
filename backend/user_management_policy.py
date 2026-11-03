@@ -1,7 +1,8 @@
 """Role boundaries for application-managed identity accounts."""
 
 MASTER_ADMIN_ROLE = "master-admin"
-MANAGED_USER_ROLES = frozenset({"admin", "operator"})
+ZONE_ADMIN_ROLE = "zone-admin"
+MANAGED_USER_ROLES = frozenset({ZONE_ADMIN_ROLE, "operator"})
 OPERATOR_ACCESS_FIELDS = frozenset({"enabled", "checkpoint_id"})
 
 

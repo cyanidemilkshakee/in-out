@@ -5,3 +5,6 @@ FROM postgres:17-alpine
 RUN apk upgrade --no-cache \
     && rm /usr/local/bin/gosu
 USER postgres
+
+EXPOSE 1020
+CMD ["postgres", "-p", "1020"]

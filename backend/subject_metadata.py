@@ -7,6 +7,12 @@ from fastapi import HTTPException
 from config import settings
 
 
+_TERMINAL_METADATA_FIELDS = frozenset({
+    "id", "barcode", "name", "status", "type", "inside", "allowedZones", "allowedCheckpoints", "allowedZone",
+    "validFrom", "validTo", "host", "company", "hours", "category",
+})
+
+
 def validate_subject_metadata_size(data: dict[str, Any] | None) -> None:
     """Bound the complete compact UTF-8 JSON document without joining it.
 
@@ -19,6 +25,28 @@ def validate_subject_metadata_size(data: dict[str, Any] | None) -> None:
     size = 0
     encoder = json.JSONEncoder(ensure_ascii=False, allow_nan=False, separators=(",", ":"))
     try:
+        pending = [data or {}]
+        visited: set[int] = set()
+        while pending:
+            value = pending.pop()
+            if isinstance(value, str):
+                if "\x00" in value:
+                    raise HTTPException(422, "Subject metadata cannot contain PostgreSQL null characters.")
+            elif isinstance(value, dict):
+                identity = id(value)
+                if identity in visited:
+                    continue
+                visited.add(identity)
+                for key, item in value.items():
+                    if isinstance(key, str) and "\x00" in key:
+                        raise HTTPException(422, "Subject metadata cannot contain PostgreSQL null characters.")
+                    pending.append(item)
+            elif isinstance(value, (list, tuple)):
+                identity = id(value)
+                if identity in visited:
+                    continue
+                visited.add(identity)
+                pending.extend(value)
         for piece in encoder.iterencode(data or {}):
             # Individual JSON string tokens can be large; bound the temporary
             # UTF-8 byte buffer rather than encoding the whole token at once.
@@ -37,3 +65,9 @@ def current_subject_metadata(kind: str | None, data: dict[str, Any] | None) -> d
         current.pop("department", None)
         current.pop("accessLevel", None)
     return current
+
+
+def terminal_subject_metadata(kind: str | None, data: dict[str, Any] | None) -> dict[str, Any]:
+    """Expose only scan-relevant subject fields to terminal clients."""
+    current = current_subject_metadata(kind, data)
+    return {key: value for key, value in current.items() if key in _TERMINAL_METADATA_FIELDS}

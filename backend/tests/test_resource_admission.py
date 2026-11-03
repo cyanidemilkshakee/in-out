@@ -95,7 +95,7 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
             await started.wait()
             return {"type": "http.disconnect"}
         scope = {"type": "http", "method": "GET", "path": "/stream", "headers": [], "asgi": {"spec_version": "2.0"}}
-        claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["admin"]}}
+        claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["zone-admin"]}}
         with patch("routers.presence.acquire_stream_lease", new=AsyncMock(return_value="lease")), \
              patch("routers.presence.release_stream_lease", new=AsyncMock()) as release, \
              patch("routers.presence.renew_stream_lease", new=AsyncMock(return_value=True)), \
@@ -107,7 +107,7 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_response_send_failure_releases_lease(self):
         scope = {"type": "http", "method": "GET", "headers": [], "asgi": {"spec_version": "2.4"}}
-        claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["admin"]}}
+        claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["zone-admin"]}}
         closed, sent = [], []
         async def subscription():
             try:
@@ -145,7 +145,7 @@ class ResourceAdmissionTests(unittest.IsolatedAsyncioTestCase):
         async def next_renewal(_seconds):
             await blocked.wait()
         scope = {"type": "http", "method": "GET", "headers": [], "asgi": {"spec_version": "2.4"}}
-        claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["admin"]}}
+        claims = {"sub": "admin", "exp": time.time() + 300, "realm_access": {"roles": ["zone-admin"]}}
         request = Request(scope, receive=AsyncMock(return_value={"type": "http.request"}))
         with patch("routers.presence.acquire_stream_lease", new=AsyncMock(return_value="lease")), \
              patch("routers.presence.release_stream_lease", new=AsyncMock()) as release, \

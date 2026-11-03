@@ -6,6 +6,7 @@ import type { PersonSessionIndex } from '../../../../lib/analyticsUtils';
 import type { TimeRange } from '../../../../lib/dateRanges';
 import { eventTimestamp } from '../../../../lib/dateRanges';
 import { facilityZoneLabel, normalizeFacilityZones } from '../../../../lib/facilityZones';
+import { useOrganizationZones } from '../../../hooks/useOrganizationZones';
 import { PersonStatusLabel } from '../PersonStatusLabel';
 
 // Lazy-load the chart-heavy profile card — keeps chart.js out of the initial bundle
@@ -36,6 +37,7 @@ export function EmployeeTable({
   alerts: Alert[];
   sort?: { key: RegistrySortKey; direction: SortDirection; onChange: (key: RegistrySortKey) => void };
 }) {
+  const { zones: organizationZones } = useOrganizationZones();
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [localSortKey, setSortKey] = useState<EmployeeSortKey>("name");
   const [localSortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -135,7 +137,7 @@ export function EmployeeTable({
                   <td className="column-zones" data-label="Zones">
                     <div className="facility-zone-list">
                       {assignedZones.length
-                        ? assignedZones.map((zone) => <span className="facility-zone-tag" key={zone}>{facilityZoneLabel(zone)}</span>)
+                        ? assignedZones.map((zone) => <span className="facility-zone-tag" key={zone}>{facilityZoneLabel(zone, organizationZones)}</span>)
                         : "No zones assigned"}
                     </div>
                   </td>
@@ -180,7 +182,9 @@ export function EmployeeTable({
         <Suspense fallback={null}>
           <EmployeeProfileCard
             person={selectedPerson}
+            zoneLabels={organizationZones}
             sessions={sessionsByPerson.get(selectedPerson.id) ?? []}
+            permissions={permissions}
             alerts={alerts}
             movements={movements}
             onClose={() => setSelectedPerson(null)}

@@ -57,6 +57,7 @@ export type Person = {
   company?: string;
   phone?: string;
   allowedZones: string[];
+  allowedCheckpoints?: string[];
   status:
     | "active"
     | "inactive"
@@ -107,6 +108,7 @@ export type Checkpoint = {
   mode: "auto" | "manual" | "entry" | "exit";
   zone: string;
   zoneId?: string;
+  zoneName?: string;
   number?: number;
   gateType?: "front_gate" | "back_gate" | "custom";
   gateLabel?: string;
@@ -256,6 +258,7 @@ export type AccessPermission = {
   assignment: string;
   state: AccessState;
   zones: string[];
+  checkpoints?: string[];
   validFrom: string;
   validTo: string;
   source: "policy" | "manual" | "request";
@@ -273,6 +276,7 @@ export type PermissionRequest = {
   requester: string;
   purpose: string;
   requestedZones: string[];
+  requestedCheckpoints?: string[];
   validFrom: string;
   validTo: string;
   status: "pending" | "approved" | "denied";
@@ -309,10 +313,17 @@ export type TerminalVisitor = {
   host?: string;
   company?: string;
   allowedZones: string[];
+  allowedCheckpoints?: string[];
   validFrom?: string;
   validTo?: string;
   createdAt?: string;
   status: TerminalVisitorStatus;
+};
+
+export type TerminalVisitorPage = {
+  items: TerminalVisitor[];
+  nextCursor: string | null;
+  hasMore: boolean;
 };
 
 export type PermissionRequestInput = Omit<PermissionRequest, "id" | "status" | "createdAt"> & {
@@ -393,7 +404,7 @@ export type AppDataSnapshot = {
   alertRuleAssignments: AlertRuleAssignment[];
   alertSummary?: AlertCommandSummary;
   auditEvents: AuditEvent[];
-  adminAvailability?: { status: "available" | "offline"; availableAt: string | null };
+  adminAvailability?: { status: "available" | "offline"; availableAt: string | null; adminNames?: string[] };
   terminalAssignment?: { operatorSubject: string; checkpointId: string | null };
   terminalVisitors: TerminalVisitor[];
 };

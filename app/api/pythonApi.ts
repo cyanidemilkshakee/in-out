@@ -1,6 +1,7 @@
 import { apiRequestId, apiSession } from "./authSession"
 import { isActiveUserManagementStepUp, signStepUpProof } from "../../lib/userManagementStepUp"
 import type { AppSession } from "../../lib/keycloakSession"
+import { hasMasterAdminAccess } from "../../lib/applicationRoles"
 import { currentServerTiming } from "../../lib/serverTiming"
 import { upstreamRoute } from "../../lib/requestContext"
 
@@ -42,9 +43,17 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
     headers["Authorization"] = `Bearer ${accessToken}`
   }
 
-  if (/^\/v1\/keycloak\/users(?:\/|\?|$)/.test(path) || /^\/v1\/user-management\/(?:window|lock)$/.test(path) ||
-      (method === "POST" && path === "/v1/checkpoints")) {
-    if (!isActiveUserManagementStepUp(session)) throw new PythonApiError("Fresh re-authentication is required to manage users.", 403);
+  const protectedFacilityMutation = (method === "POST" || method === "DELETE") &&
+    /^\/v1\/(?:checkpoints|zones)(?:\/[^/?]+)?(?:\?.*)?$/.test(path);
+  if (!hasMasterAdminAccess(session.roles) &&
+      (/^\/v1\/keycloak\/users(?:\/|\?|$)/.test(path) || /^\/v1\/user-management\/(?:window|lock)$/.test(path) ||
+      protectedFacilityMutation)) {
+    if (!isActiveUserManagementStepUp(session)) throw new PythonApiError(
+      protectedFacilityMutation
+        ? "Fresh re-authentication is required to manage zones and checkpoints."
+        : "Fresh re-authentication is required to manage users.",
+      403,
+    );
     const secret = process.env.AUTH_SECRET;
     if (!secret) throw new PythonApiError("Authentication is not configured.", 503);
     headers["X-InOut-Step-Up"] = await signStepUpProof(session, accessToken, secret);
@@ -107,7 +116,9 @@ export async function callPythonApi(path: string, method: string, body?: unknown
   const response = await fetchPythonApi(path, method, body, idempotencyKey, options);
   const parseStartedAt = performance.now();
   try {
-    return await response.json();
+    const responseBody = await response.text();
+    if (!responseBody.trim()) return undefined;
+    return JSON.parse(responseBody);
   } catch (error) {
     if (!options?.signal?.aborted) console.error("[python-api] upstream returned invalid JSON", {
       method, route: upstreamRoute(path), request_id: responseRequestIds.get(response),

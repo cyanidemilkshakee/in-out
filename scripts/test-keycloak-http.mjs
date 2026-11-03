@@ -43,6 +43,7 @@ const presenceRequests = [];
 const identityRequests = [];
 const revokedWindows = new Set();
 const authorizationCodes = new Map();
+const interactionGrants = new Map();
 const { privateKey, publicKey } = await generateKeyPair("RS256");
 const signingKey = { ...await exportJWK(publicKey), kid: "synthetic-test-key", alg: "RS256", use: "sig" };
 let codeExchanges = 0;
@@ -55,8 +56,10 @@ let callbackSessionMismatch = false;
 const largeRefreshToken = randomBytes(2100).toString("base64url");
 
 let callbackSubject = "test-user";
-async function largeAdminAccessToken(subject = "test-user", authTime, sessionId) {
-  return new SignJWT({ typ: "Bearer", azp: "inout-frontend", realm_access: { roles: ["admin"] },
+let callbackRoles = ["zone-admin"];
+let callbackActionStatus = "success";
+async function largeAdminAccessToken(subject = "test-user", authTime, sessionId, roles = ["zone-admin"]) {
+  return new SignJWT({ typ: "Bearer", azp: "inout-frontend", realm_access: { roles },
     ...(authTime === undefined ? {} : { auth_time: authTime }),
     ...(sessionId === undefined ? {} : { sid: sessionId }),
     groups: Array.from({ length: 120 }, (_, index) => `/synthetic-group-${index}-${"x".repeat(38)}`) })
@@ -89,6 +92,10 @@ const upstream = createServer(async (req, res) => {
     const callback = new URL(url.searchParams.get("redirect_uri"));
     callback.searchParams.set("code", code);
     callback.searchParams.set("state", url.searchParams.get("state"));
+    if (url.searchParams.get("kc_action") === "UPDATE_PASSWORD" && callbackActionStatus !== undefined) {
+      callback.searchParams.set("kc_action", "UPDATE_PASSWORD");
+      callback.searchParams.set("kc_action_status", callbackActionStatus);
+    }
     res.writeHead(302, { Location: callback.href }).end();
     return;
   }
@@ -129,30 +136,46 @@ const upstream = createServer(async (req, res) => {
     res.end(JSON.stringify({ keys: [signingKey] }));
     return;
   }
-  if (req.url === "/realms/inout/protocol/openid-connect/token") {
+  if (req.url === "/realms/inout/protocol/openid-connect/token" || url.pathname.startsWith("/realms/inout/inout-auth/")) {
     let body = "";
     for await (const chunk of req) body += chunk;
-    const params = new URLSearchParams(body);
-    if (params.get("grant_type") === "password") {
-      assert.equal(params.get("client_id"), "inout-frontend");
-      assert.equal(params.get("client_secret"), "test-client-secret");
-      assert.ok(params.get("scope")?.split(" ").includes("openid"));
+    let params = new URLSearchParams(body);
+    let interaction;
+    if (url.pathname.startsWith("/realms/inout/inout-auth/")) {
+      assert.equal(req.headers.authorization, "Basic " + Buffer.from("inout-frontend:test-client-secret").toString("base64"));
+      interaction = JSON.parse(body);
+      if (url.pathname.endsWith("/token")) {
+        const grant = interactionGrants.get(interaction.code);
+        interactionGrants.delete(interaction.code);
+        assert.ok(grant, "Interaction code must exist and be single-use");
+        assert.equal(createHash("sha256").update(interaction.codeVerifier).digest("base64url"), grant.challenge);
+        res.end(JSON.stringify(grant.tokens));
+        return;
+      }
+      assert.ok(url.pathname.endsWith("/verify"));
+      assert.equal(interaction.mode, "login");
+      params = new URLSearchParams({ username: interaction.username, password: interaction.currentPassword, totp: interaction.otp || "" });
+    }
+    if (interaction) {
       const username = params.get("username");
       passwordGrants.push({ username, totp: params.get("totp") });
       if (username === "outage") {
-        res.writeHead(503).end(JSON.stringify({ error: "temporarily_unavailable", error_description: "SYNTHETIC_PRIVATE_PROVIDER_DETAIL" }));
+        res.writeHead(503).end(JSON.stringify({ error: "service_unavailable", private: "SYNTHETIC_PRIVATE_PROVIDER_DETAIL" }));
         return;
       }
-      if (username === "setup-required" || params.get("password") !== "correct-password" ||
+      if (params.get("password") !== "correct-password" ||
         (username === "synthetic-otp" && params.get("totp") !== "123456")) {
-        res.writeHead(400).end(JSON.stringify({ error: "invalid_grant", error_description: username === "setup-required"
-          ? "Account is not fully set up" : "SYNTHETIC_PRIVATE_PROVIDER_DETAIL" }));
+        res.writeHead(401).end(JSON.stringify({ error: "credentials", private: "SYNTHETIC_PRIVATE_PROVIDER_DETAIL" }));
+        return;
+      }
+      if (username === "setup-required") {
+        res.writeHead(409).end(JSON.stringify({ error: "account_setup_required" }));
         return;
       }
       const subject = username === "different-admin" ? "different-admin" : "test-user";
-      const role = username === "synthetic-operator" ? "operator" : "admin";
+      const role = username === "synthetic-operator" ? "operator" : "zone-admin";
       callbackAuthTime = Math.floor(Date.now() / 1000);
-      callbackAccessToken = role === "admin" ? await largeAdminAccessToken(subject, callbackAuthTime)
+      callbackAccessToken = role === "zone-admin" ? await largeAdminAccessToken(subject, callbackAuthTime)
         : await new SignJWT({ typ: "Bearer", azp: "inout-frontend", auth_time: callbackAuthTime, realm_access: { roles: [role] } })
           .setProtectedHeader({ alg: "RS256", kid: signingKey.kid }).setSubject(subject)
           .setIssuer(`${upstreamUrl}/realms/inout`).setAudience("inout-frontend")
@@ -167,10 +190,13 @@ const upstream = createServer(async (req, res) => {
         .setProtectedHeader({ alg: "RS256", kid: signingKey.kid }).setSubject(username === "mixed-subject" ? "other-user" : subject)
         .setIssuer(`${upstreamUrl}/realms/inout`).setAudience("inout-frontend")
         .setIssuedAt().setExpirationTime("10m").sign(privateKey);
-      res.end(JSON.stringify({ access_token: bearer, refresh_token: largeRefreshToken,
-        id_token: idToken, expires_in: 600, token_type: "Bearer" }));
+      const code = randomBytes(32).toString("base64url");
+      interactionGrants.set(code, { challenge: interaction.codeChallenge,
+        tokens: { access_token: bearer, refresh_token: largeRefreshToken, id_token: idToken, expires_in: 600, token_type: "Bearer" } });
+      res.end(JSON.stringify({ code, expiresIn: 30, subject }));
       return;
     }
+    assert.notEqual(params.get("grant_type"), "password", "App sign-in must never fall back to the password grant");
     if (params.get("grant_type") === "authorization_code") {
       const grant = authorizationCodes.get(params.get("code"));
       authorizationCodes.delete(params.get("code"));
@@ -181,7 +207,7 @@ const upstream = createServer(async (req, res) => {
       codeExchanges++;
       callbackAuthTime = Math.floor(Date.now() / 1000);
       const sessionId = randomUUID();
-      callbackAccessToken = await largeAdminAccessToken(callbackSubject, callbackAuthTime, sessionId);
+      callbackAccessToken = await largeAdminAccessToken(callbackSubject, callbackAuthTime, sessionId, callbackRoles);
       const idToken = await new SignJWT({ typ: "ID", azp: "inout-frontend", nonce: grant.nonce, auth_time: callbackAuthTime,
         sid: grant.mismatchedSession ? randomUUID() : sessionId,
         name: "Test user", email: "test@example.invalid" })
@@ -192,7 +218,7 @@ const upstream = createServer(async (req, res) => {
         id_token: idToken, expires_in: 600, token_type: "Bearer" }));
       return;
     }
-    assert.equal(params.get("grant_type"), "refresh_token", "Only password, code, and refresh grants are allowed in this fixture");
+    assert.equal(params.get("grant_type"), "refresh_token", "Only code and refresh grants are allowed in this fixture");
     refreshCalls++;
     const refresh = params.get("refresh_token");
     if (refresh === "revoked" || consumedRotationTokens.has(refresh)) {
@@ -201,7 +227,7 @@ const upstream = createServer(async (req, res) => {
     }
     const rotates = refresh?.startsWith("rotation-origin-");
     if (rotates) consumedRotationTokens.add(refresh);
-    const role = refresh === "operator-refresh" ? "operator" : "admin";
+    const role = refresh === "operator-refresh" ? "operator" : "zone-admin";
     res.end(JSON.stringify({ access_token: accessToken(role), refresh_token: rotates ? refresh.replace("origin", "next") : `${role}-refresh`, expires_in: 300, token_type: "Bearer" }));
     return;
   }
@@ -290,8 +316,8 @@ let startupError;
 app.on("error", (error) => { startupError = error; });
 
 async function sessionCookie(overrides = {}) {
-  const token = { sub: "test-user", name: "Test user", provider: "keycloak", roles: ["admin"],
-    access_token: accessToken("admin"), refresh_token: "admin-refresh", expires_at: 1, ...overrides };
+  const token = { sub: "test-user", name: "Test user", provider: "keycloak", roles: ["zone-admin"],
+    access_token: accessToken("zone-admin"), refresh_token: "admin-refresh", expires_at: 1, ...overrides };
   return `${cookieName}=${await encode({ token, secret, salt: cookieName })}`;
 }
 
@@ -393,6 +419,43 @@ async function submitCredentials(jar, credentials = {}, callbackUrl = "/admin") 
   return { response: signin, destination: new URL(data.url, appUrl) };
 }
 
+async function startPasswordAction(jar, action, { query = "", csrf = true, origin = appUrl } = {}) {
+  const csrfResponse = await request("/api/auth/csrf", jarHeader(jar));
+  assert.equal(csrfResponse.status, 200);
+  applyResponseCookies(jar, csrfResponse);
+  const { csrfToken } = await csrfResponse.json();
+  const response = await request(`/api/auth/signin/keycloak-password-${action}${query}`, jarHeader(jar), {
+    method: "POST", headers: { Origin: origin, "Content-Type": "application/x-www-form-urlencoded", "X-Auth-Return-Redirect": "1" },
+    body: new URLSearchParams({ ...(csrf ? { csrfToken } : {}),
+      callbackUrl: action === "setup" ? "/admin" : "/account?passwordChange=complete" }).toString(),
+  });
+  applyResponseCookies(jar, response);
+  return response;
+}
+
+function passwordActionAuthorization(response, jar, action) {
+  assert.equal(response.status, 200, "The browser SDK needs a JSON redirect response from the protected POST");
+  assert.equal(response.headers.get("cache-control"), "no-store, max-age=0");
+  for (const name of ["authjs.state", "authjs.pkce.code_verifier", "authjs.nonce"]) {
+    assert.ok(jar.has(name), "Password actions must issue actual encrypted OAuth checks");
+  }
+  return response.json().then(({ url }) => {
+    const destination = new URL(url);
+    assert.equal(destination.origin, upstreamUrl);
+    assert.equal(destination.pathname, "/realms/inout/protocol/openid-connect/auth");
+    assert.equal(destination.searchParams.get("redirect_uri"), `${appUrl}/api/auth/callback/keycloak-password-${action}`);
+    assert.equal(destination.searchParams.get("kc_action"), "UPDATE_PASSWORD");
+    assert.equal(destination.searchParams.get("prompt"), "login");
+    assert.equal(destination.searchParams.get("max_age"), "0");
+    assert.equal(destination.searchParams.get("code_challenge_method"), "S256");
+    assert.ok(destination.searchParams.get("state") && destination.searchParams.get("nonce"));
+    return destination;
+  });
+}
+
+const sessionJarEntries = (jar) => [...jar].filter(([name]) =>
+  name === cookieName || name.startsWith(`${cookieName}.`)).sort(([left], [right]) => left.localeCompare(right));
+
 function decodeJarSession(jar) {
   const direct = jar.get(cookieName);
   const chunks = [...jar].filter(([name]) => name.startsWith(`${cookieName}.`))
@@ -441,7 +504,7 @@ async function activeStepUpCookie(durationMinutes, authTime = Math.floor(Date.no
     step_up_expires_at: authTime + durationMinutes * 60, ...overrides });
 }
 
-function assertForwardedProof(captured, durationMinutes, authTime, before, after, bearer = accessToken("admin"), expiresAt = authTime + durationMinutes * 60) {
+function assertForwardedProof(captured, durationMinutes, authTime, before, after, bearer = accessToken("zone-admin"), expiresAt = authTime + durationMinutes * 60) {
   assert.ok(captured.authorization === `Bearer ${bearer}`, "Identity calls must forward the signed session's bearer");
   const proof = signedPayload(captured.proof, "inout:user-management-step-up:v1.");
   assert.deepEqual(Object.keys(proof).sort(), ["authTime", "durationMinutes", "expiresAt", "issuedAt", "tokenHash", "windowId"]);
@@ -486,7 +549,8 @@ try {
   }
   assert.ok(ready, "Isolated app readiness timed out");
   const providers = await (await request("/api/auth/providers")).json();
-  assert.deepEqual(Object.keys(providers).sort(), ["credentials", "keycloak"], "The app form and optional account setup are the configured sign-in paths");
+  assert.deepEqual(Object.keys(providers).sort(), ["credentials", "keycloak", "keycloak-password-change", "keycloak-password-setup"],
+    "Credentials, ordinary OIDC, and both fixed password-action providers must be configured");
   const loginHtml = await (await request("/login")).text();
   assert.ok(/name="username"/.test(loginHtml) && /name="password"/.test(loginHtml), "The app must render its own username and password form");
   assert.match(loginHtml, /<form(?=[^>]*method="post")(?=[^>]*action="\/api\/auth\/callback\/credentials")[^>]*>/i,
@@ -557,9 +621,98 @@ try {
   assert.equal(ownFormSession.auth_time, callbackAuthTime, "Fresh app sign-in must retain the provider's signed authentication time");
   assert.equal((await request("/api/profile", jarHeader(ownFormJar))).status, 200);
   const ownFormPublic = await (await request("/api/auth/session", jarHeader(ownFormJar))).json();
-  assert.deepEqual(ownFormPublic.roles, ["admin"]);
+  assert.deepEqual(ownFormPublic.roles, ["zone-admin"]);
   for (const name of ["access_token", "refresh_token", "id_token", "password", "otp"]) {
     assert.equal(JSON.stringify(ownFormPublic).includes(`"${name}"`), false, "Own-form public sessions must never expose credentials or provider tokens");
+  }
+  {
+    // Exercise the same CSRF-protected POST as next-auth/react signIn(). A GET
+    // to a provider-specific sign-in URL was the temporary-password regression.
+    for (const action of ["setup", "change"]) {
+      for (const query of ["?kc_action=DELETE_ACCOUNT", "?redirect_uri=https%3A%2F%2Funtrusted.invalid", "?client_id=other"]) {
+        const denied = await startPasswordAction(new Map(), action, { query });
+        assert.equal(denied.status, 400, "The browser cannot replace a password action's authorization contract");
+        assert.equal(denied.headers.getSetCookie().length, 0);
+      }
+      const wrongOrigin = await startPasswordAction(new Map(), action, { origin: "https://untrusted.invalid" });
+      assert.equal(wrongOrigin.status, 403);
+    }
+    const missingCsrfJar = new Map();
+    const missingCsrf = await startPasswordAction(missingCsrfJar, "setup", { csrf: false });
+    assert.equal(new URL((await missingCsrf.json()).url, appUrl).origin, appUrl);
+    assert.equal(missingCsrfJar.has("authjs.state"), false, "An invalid CSRF token cannot initiate provider authorization");
+
+    const masterCookie = await sessionCookie({ provider: "credentials", roles: ["master-admin"],
+      access_token: accessToken("master-admin"), expires_at: Math.floor(Date.now() / 1000) + 600 });
+    const masterJar = chunkedSessionJar(masterCookie);
+    for (const [action, jar, expectedError] of [
+      ["setup", new Map(masterJar), "password_setup_signout_required"],
+      ["setup", new Map([[intentCookieName, "synthetic-pending-intent"]]), "password_setup_signout_required"],
+      ["change", new Map(), "password_change_signin_required"],
+      ["change", new Map([...masterJar, [intentCookieName, "synthetic-pending-intent"]]), null],
+    ]) {
+      const originalSession = sessionJarEntries(jar);
+      const response = await startPasswordAction(jar, action);
+      assert.equal(response.status, 200, "Blocked SDK sign-ins must still return a local JSON destination");
+      const destination = new URL((await response.json()).url, appUrl);
+      assert.equal(destination.origin, appUrl);
+      if (expectedError) assert.equal(destination.searchParams.get("error"), expectedError);
+      else assert.equal(destination.searchParams.get("passwordChange"), "stepup_locked");
+      assert.deepEqual(sessionJarEntries(jar), originalSession, "Blocked actions must preserve the current account session");
+      assert.equal(jar.has("authjs.state"), false, "Blocked actions must never start an identity-provider session");
+    }
+
+    try {
+      callbackRoles = ["master-admin"];
+      for (const status of ["success", "cancelled", undefined]) {
+        callbackActionStatus = status;
+        const jar = new Map();
+        const destination = await passwordActionAuthorization(await startPasswordAction(jar, "setup"), jar, "setup");
+        const authorization = await fetch(destination, { redirect: "manual", signal: AbortSignal.timeout(20_000) });
+        assert.equal(authorization.status, 302);
+        const callback = new URL(authorization.headers.get("location"));
+        const completed = await request(callback.pathname + callback.search, jarHeader(jar));
+        applyResponseCookies(jar, completed);
+        const returned = new URL(completed.headers.get("location"), appUrl);
+        if (status === "success") {
+          assert.equal(returned.pathname, "/admin");
+          const session = await decodeJarSession(jar);
+          assert.equal(session.sub, "test-user");
+          assert.deepEqual(session.roles, ["master-admin"]);
+          assert.equal(jar.get(browserSsoCookieName), "1");
+        } else {
+          assert.equal(returned.pathname, "/login");
+          assert.equal(returned.searchParams.get("error"), status === "cancelled" ? "password_setup_cancelled" : "password_setup_unconfirmed");
+          assert.equal(sessionJarEntries(jar).length, 0, "Cancelled or unconfirmed setup cannot establish an app session");
+          assert.equal(jar.has(browserSsoCookieName), false);
+        }
+      }
+      for (const [status, subject, expectedResult] of [
+        ["success", "test-user", "complete"], ["cancelled", "test-user", "cancelled"],
+        [undefined, "test-user", "unconfirmed"], ["success", "different-user", "identity_mismatch"],
+      ]) {
+        callbackActionStatus = status;
+        callbackSubject = subject;
+        const jar = new Map(masterJar);
+        const originalSession = sessionJarEntries(jar);
+        const destination = await passwordActionAuthorization(await startPasswordAction(jar, "change"), jar, "change");
+        const authorization = await fetch(destination, { redirect: "manual", signal: AbortSignal.timeout(20_000) });
+        assert.equal(authorization.status, 302);
+        const callback = new URL(authorization.headers.get("location"));
+        const completed = await request(callback.pathname + callback.search, jarHeader(jar));
+        applyResponseCookies(jar, completed);
+        const returned = new URL(completed.headers.get("location"), appUrl);
+        assert.equal(returned.pathname, "/account");
+        assert.equal(returned.searchParams.get("passwordChange"), expectedResult);
+        if (expectedResult !== "complete") assert.deepEqual(sessionJarEntries(jar), originalSession,
+          "Cancellation, missing confirmation, and a different returned account must preserve the original encrypted session");
+        assert.equal((await decodeJarSession(jar)).sub, "test-user");
+      }
+    } finally {
+      callbackSubject = "test-user";
+      callbackRoles = ["zone-admin"];
+      callbackActionStatus = "success";
+    }
   }
   const otpJar = new Map();
   assert.equal((await submitCredentials(otpJar, { username: "synthetic-otp", otp: "123456" })).destination.pathname, "/admin");
@@ -582,7 +735,7 @@ try {
   const response = await request("/api/profile", await sessionCookie());
   assert.equal(response.status, 200);
   assert.equal(refreshCalls, 1, "API wrapper and upstream helper must share a single refresh");
-  assert.equal(upstreamTokens.at(-1), `Bearer ${accessToken("admin")}`);
+  assert.equal(upstreamTokens.at(-1), `Bearer ${accessToken("zone-admin")}`);
   const cookie = updatedCookie(response);
   const decoded = await decode({ token: cookie.slice(cookie.indexOf("=") + 1), secret, salt: cookieName });
   assert.ok(decoded.expires_at > Date.now() / 1000);
@@ -592,7 +745,7 @@ try {
   assert.equal((await request("/api/profile", oldPasswordSession)).status, 401, "Removed password-grant sessions must reauthenticate");
 
   const publicSession = await (await request("/api/auth/session", cookie)).json();
-  assert.deepEqual(publicSession.roles, ["admin"]);
+  assert.deepEqual(publicSession.roles, ["zone-admin"]);
   for (const name of ["access_token", "refresh_token", "id_token"]) {
     assert.equal(JSON.stringify(publicSession).includes(name), false, `Public session leaked ${name}`);
   }
@@ -607,7 +760,8 @@ try {
   assert.match(replacedCorrelation.headers.get("x-request-id"), /^[0-9a-f-]{36}$/);
   assert.equal(upstreamRequestIds.at(-1).id, replacedCorrelation.headers.get("x-request-id"));
   const account = await request("/account", cookie);
-  assert.equal(account.headers.get("location"), `${upstreamUrl}/realms/inout/account/`);
+  assert.equal(account.status, 200, "Account security must remain on the application's own account page");
+  assert.equal(account.headers.get("location"), null);
   const page = await request("/admin/profile", cookie);
   assert.equal(page.status, 200);
   const html = await page.text();
@@ -621,7 +775,7 @@ try {
   assert.ok(adminTerminalHtml.includes("Account security") && adminTerminalHtml.includes("Sign out"));
   assert.ok(adminTerminalHtml.includes('href="/admin/users"'), "Administrator terminal menu must link to user management");
   assert.ok(adminTerminalHtml.includes("No checkpoint assigned"), "An unassigned administrator must not inherit an operator checkpoint");
-  assert.equal(terminalTokens.at(-1), `Bearer ${accessToken("admin")}`);
+  assert.equal(terminalTokens.at(-1), `Bearer ${accessToken("zone-admin")}`);
 
   const denied = await request("/api/profile", await sessionCookie({ refresh_token: "revoked" }));
   assert.equal(denied.status, 401);
@@ -715,7 +869,9 @@ try {
     "A failed bearer refresh must still end browser SSO");
 
   const operator = await sessionCookie({ roles: ["operator"], access_token: accessToken("operator"), expires_at: Math.floor(Date.now() / 1000) + 300 });
-  assert.equal((await request("/account", operator)).headers.get("location"), `${upstreamUrl}/realms/inout/account/`);
+  const operatorAccount = await request("/account", operator);
+  assert.equal(operatorAccount.status, 200, "Operators must reach the application's local account-security page");
+  assert.equal(operatorAccount.headers.get("location"), null);
   const redirected = await request("/admin/profile", operator);
   assert.equal(new URL(redirected.headers.get("location")).pathname, "/terminal");
   const operatorTerminal = await request("/terminal", operator);
@@ -884,14 +1040,16 @@ try {
   ]) await assertIdentityBlocked(await activeStepUpCookie(60, stepUpNow - 30, invalid));
 
   const longAuthTime = Math.floor(Date.now() / 1000) - 6 * 60;
-  const longSession = await activeStepUpCookie(60, longAuthTime);
+  const longSession = await activeStepUpCookie(60, longAuthTime, {
+    roles: ["master-admin"], access_token: accessToken("master-admin"),
+  });
   const beforeMutation = Date.now();
   const identityMutation = await request("/api/keycloak", longSession, { method: "POST",
     headers: { "Content-Type": "application/json", Origin: appUrl },
     body: JSON.stringify({ action: "endSessions", userId: "synthetic-user" }) });
   assert.equal(identityMutation.status, 200);
   assert.equal(identityRequests.at(-1).method, "POST");
-  assertForwardedProof(identityRequests.at(-1), 60, longAuthTime, beforeMutation, Date.now());
+  assertForwardedProof(identityRequests.at(-1), 60, longAuthTime, beforeMutation, Date.now(), accessToken("master-admin"));
   await assertIdentityBlocked(longSession, 403, { method: "POST",
     headers: { "Content-Type": "application/json", Origin: "https://untrusted.example.invalid" },
     body: JSON.stringify({ action: "endSessions", userId: "synthetic-user" }) });
@@ -1028,7 +1186,7 @@ try {
       "Repeated successful re-authentication must replace chunks instead of growing stale session cookies");
     completedChunkCount = sessionChunks.length;
     const completedSession = await (await request("/api/auth/session", jarHeader(largeJar))).json();
-    assert.deepEqual(completedSession.roles, ["admin"]);
+    assert.deepEqual(completedSession.roles, ["zone-admin"]);
     assert.equal(completedSession.authTime, callbackAuthTime);
     assert.equal(completedSession.stepUpDurationMinutes, durationMinutes);
     const completedExpiry = (startedIntent.baseExpiresAt ?? callbackAuthTime) + durationMinutes * 60;

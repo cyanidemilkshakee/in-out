@@ -5,7 +5,7 @@ import type { AlertRule } from "../../../../lib/types";
 
 function ruleEligibility(rule: AlertRule) {
   if (rule.conditionKey === "cross_building_scan") return "Eligible: All employees and visitors";
-  if (rule.conditionKey === "visitor_overstay") return "Eligible: All visitors";
+  if (rule.conditionKey === "visitor_overstay") return "Eligible: All employees and visitors";
   const names = { employee: "Employees", visitor: "Visitors", hardware: "Hardware" };
   const assignment = rule.conditionKey === "no_break" || rule.conditionKey === "irregularity" ? " · Assigned per employee" : "";
   return `Eligible: ${(rule.eligibleSubjectTypes ?? ["employee"]).map((kind) => names[kind]).join(", ")}${assignment}`;

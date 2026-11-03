@@ -14,10 +14,10 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import has_admin_role, verify_admin_request
+from auth import has_admin_role, has_master_admin_role, verify_admin_request
 from database import get_db
 from event_outbox import enqueue_changed
-from models import AuditEvent, Checkpoint, OrganizationZone, PermissionRequestModel, TerminalCheckpointAssignment
+from models import AuditEvent, Checkpoint, PermissionRequestModel, TerminalCheckpointAssignment
 from user_management_locks import get_window_guard_db, require_unlocked_window
 from user_management_step_up import verified_user_management_window
 from zone_access import admin_zone_ids, require_checkpoint_scope, require_zone_scope
@@ -54,8 +54,9 @@ async def _checkpoint_admin_context(
     actor = await verify_admin_request(credentials, request)
     if not has_admin_role(actor):
         raise HTTPException(status_code=403, detail="Administrator access is required")
-    window = verified_user_management_window(credentials.credentials, actor, step_up, now=time.time())
-    await require_unlocked_window(guard_db, actor, window)
+    if not has_master_admin_role(actor):
+        window = verified_user_management_window(credentials.credentials, actor, step_up, now=time.time())
+        await require_unlocked_window(guard_db, actor, window)
     return actor
 
 
@@ -82,7 +83,7 @@ def _audit(checkpoint_id: str, name: str, zone_id: str, actor: dict[str, Any], a
         "subjectName": name,
         "zoneId": zone_id,
         "actor": actor.get("sub", "unknown"),
-        "role": "master-admin" if "master-admin" in (actor.get("realm_access", {}).get("roles") or []) else "admin",
+        "role": "master-admin" if "master-admin" in (actor.get("realm_access", {}).get("roles") or []) else "zone-admin",
         "reason": "Checkpoint configuration changed",
         "date": now.date().isoformat(),
         "time": now.strftime("%H:%M:%S"),

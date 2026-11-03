@@ -52,7 +52,7 @@ test("failed later pages and ignored offsets never masquerade as a complete dire
 test("combined Save sends profile, roles and checkpoint in one command and trusts the returned state", async () => {
   const original = globalThis.fetch;
   const calls: unknown[] = [];
-  const actual = { ...user(5), firstName: "Saved", roles: ["admin"] as const, checkpointId: null };
+  const actual = { ...user(5), firstName: "Saved", roles: ["zone-admin"] as const, checkpointId: null };
   globalThis.fetch = async (input, options) => {
     assert.equal(input, "/api/keycloak");
     assert.equal(options?.method, "POST");
@@ -60,7 +60,7 @@ test("combined Save sends profile, roles and checkpoint in one command and trust
     return Response.json({ data: actual });
   };
   try {
-    const input = { firstName: "Saved", email: "new@example.invalid", enabled: false, roles: ["admin"], checkpointId: null };
+    const input = { firstName: "Saved", email: "new@example.invalid", enabled: false, roles: ["zone-admin"], checkpointId: null };
     assert.deepEqual(await updateManagedUser("5", input), actual);
     assert.deepEqual(calls, [{ action: "updateUser", userId: "5", input }]);
   } finally { globalThis.fetch = original; }

@@ -9,8 +9,8 @@ const hasRole = (roles, expected) => roles.some((role) =>
 export async function configureMasterAdmin(api, { apply = false } = {}) {
   const get = async (path) => (await api(path)).json();
   let realmRoles = await get("/roles");
-  const adminRole = realmRoles.find((role) => role.name === "admin");
-  if (!adminRole?.id) throw new Error("The InOut admin realm role is missing");
+  const zoneAdminRole = realmRoles.find((role) => role.name === "zone-admin");
+  if (!zoneAdminRole?.id) throw new Error("The InOut zone-admin realm role is missing");
   let masterRole = realmRoles.find((role) => role.name === "master-admin");
   const [frontend] = await get("/clients?clientId=inout-frontend");
   if (!frontend?.id) throw new Error("The inout-frontend client is missing");
@@ -29,16 +29,16 @@ export async function configureMasterAdmin(api, { apply = false } = {}) {
     ? await get(`/roles/${encodeURIComponent(masterRole.name)}/composites`)
     : [];
   let scopeRoles = await get(`/clients/${encodeURIComponent(frontend.id)}/scope-mappings/realm`);
-  let needsAdminComposite = Boolean(masterRole && !hasRole(composites, adminRole));
+  let needsZoneAdminComposite = Boolean(masterRole && !hasRole(composites, zoneAdminRole));
   let needsFrontendScope = Boolean(masterRole && !hasRole(scopeRoles, masterRole));
 
-  if (apply && masterRole && needsAdminComposite) {
+  if (apply && masterRole && needsZoneAdminComposite) {
     await api(`/roles/${encodeURIComponent(masterRole.name)}/composites`, {
-      method: "POST", body: [adminRole],
+      method: "POST", body: [zoneAdminRole],
     });
     composites = await get(`/roles/${encodeURIComponent(masterRole.name)}/composites`);
-    needsAdminComposite = !hasRole(composites, adminRole);
-    if (needsAdminComposite) throw new Error("Keycloak did not add admin as a master-admin composite");
+    needsZoneAdminComposite = !hasRole(composites, zoneAdminRole);
+    if (needsZoneAdminComposite) throw new Error("Keycloak did not add zone-admin as a master-admin composite");
   }
   if (apply && masterRole && needsFrontendScope) {
     await api(`/clients/${encodeURIComponent(frontend.id)}/scope-mappings/realm`, {
@@ -49,11 +49,11 @@ export async function configureMasterAdmin(api, { apply = false } = {}) {
     if (needsFrontendScope) throw new Error("Keycloak did not expose master-admin in frontend tokens");
   }
 
-  const ready = Boolean(masterRole && !needsAdminComposite && !needsFrontendScope);
+  const ready = Boolean(masterRole && !needsZoneAdminComposite && !needsFrontendScope);
   return {
     ready,
     roleExists: Boolean(masterRole),
-    adminComposite: Boolean(masterRole) && !needsAdminComposite,
+    zoneAdminComposite: Boolean(masterRole) && !needsZoneAdminComposite,
     frontendScope: Boolean(masterRole) && !needsFrontendScope,
   };
 }
@@ -66,7 +66,7 @@ async function main() {
   const { api } = await connectLocalKeycloak();
   const result = await configureMasterAdmin(api, { apply: mode === "--apply" });
   console.log(`master-admin realm role: ${result.roleExists ? "present" : "missing"}`);
-  console.log(`inherits admin permissions: ${result.adminComposite ? "configured" : "missing"}`);
+  console.log(`inherits zone-admin permissions: ${result.zoneAdminComposite ? "configured" : "missing"}`);
   console.log(`frontend token scope: ${result.frontendScope ? "configured" : "missing"}`);
   console.log("No user was granted the master-admin role; assign it only to a designated trusted account in Keycloak.");
   if (!result.ready) process.exitCode = 1;

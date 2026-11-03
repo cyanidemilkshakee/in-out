@@ -4,33 +4,30 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select, exc, or_, false
+from sqlalchemy import String, select, exc, or_, false
+from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import has_admin_role, has_master_admin_role, verify_admin_or_operator_request, verify_admin_request
 from terminal_assignments import browser_identity, require_checkpoint
 from database import get_db, get_read_db
-from data_limits import bounded_rows
+from data_limits import bounded_rows, precharge_mutation_response
 from event_outbox import enqueue_presence, enqueue_workflow_start, enqueue_workflow_signal
 from models import (
     Subject, PermissionRequestModel, Checkpoint,
     AccessPermission, Person, HardwareAsset, AuditEvent,
 )
 from schemas import PermissionRequestCreate, PermissionGrantCreate, PermissionDecision
-from temporal_worker import get_temporal_client, TASK_QUEUE
 from permission_decisions import (review_source, require_recent_review_source, pending_manual_review,
-                                  publish_decision, enqueue_decision, permission_version, zone_permission_version,
+                                  enqueue_decision, permission_version, zone_permission_version,
                                   custody_version, has_unexpired_permission)
 from access_validation import (validate_window, validate_permission_window, validate_zones,
     require_registered_checkpoint, validate_registered_zones)
-from redis_client import publish_presence_update
 from subject_metadata import current_subject_metadata
 from registry_validation import is_barcode_conflict
-from zone_access import (admin_zone_ids, checkpoint_zone_condition, require_checkpoint_scope,
+from zone_access import (admin_zone_ids, require_checkpoint_scope,
     require_subject_scope, subject_zone_condition, validate_zone_subset)
-import json
-
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["permissions"])
@@ -62,6 +59,8 @@ async def grant_permission(
     allowed_zones = await admin_zone_ids(db, admin)
     checkpoint_id = await require_registered_checkpoint(db, payload.checkpoint_id)
     await require_checkpoint_scope(db, admin, checkpoint_id)
+    if payload.requested_checkpoints and (payload.request_type != "visitor" or payload.requested_checkpoints != [checkpoint_id]):
+        raise HTTPException(422, "Checkpoint-scoped access must target the selected visitor checkpoint")
     if payload.subject_id:
         await require_subject_scope(db, admin, payload.subject_id)
     if payload.request_type == "hardware_custody" and payload.carrier_id:
@@ -161,6 +160,9 @@ async def create_permission_request(
     valid_to = payload.valid_to or (now + timedelta(hours=1)).isoformat()
     if payload.request_type == "zone_access" and not payload.requested_zones:
         raise HTTPException(422, "Choose the complete requested zone set")
+    if payload.requested_checkpoints:
+        if payload.request_type != "visitor" or payload.requested_checkpoints != [checkpoint.id]:
+            raise HTTPException(422, "Checkpoint-scoped access must target the selected visitor checkpoint")
     requested_zones = payload.requested_zones or [checkpoint_zone]
     if has_admin_role(actor) and payload.request_type != "hardware_custody":
         actor_zones = await admin_zone_ids(db, actor)
@@ -233,6 +235,8 @@ async def create_permission_request(
         "status": "pending",
         "createdAt": now.isoformat()
     }
+    if payload.request_type == "visitor" and payload.requested_checkpoints:
+        data["requestedCheckpoints"] = [checkpoint.id]
     if payload.hardware_id:
         data["hardwareId"] = payload.hardware_id
     if payload.request_type == "visitor":
@@ -426,7 +430,7 @@ async def list_permissions(
             str(row[0]) for row in manual_audit_rows if row[0]
         }
         permission_rows = await bounded_rows(db,
-            select(AccessPermission, Subject.kind)
+            select(AccessPermission, Subject.kind, Subject.barcode)
             .join(Subject, AccessPermission.subject_id == Subject.id)
             .where(Subject.id.in_(visible_subject_ids))
             .order_by(
@@ -439,7 +443,7 @@ async def list_permissions(
         people: list[dict[str, Any]] = []
         hardware: list[dict[str, Any]] = []
         seen_subject_ids: set[str] = set()
-        for permission, subject_kind in permission_rows:
+        for permission, subject_kind, subject_barcode in permission_rows:
             if subject_kind not in {"employee", "visitor", "hardware"}:
                 continue
             data = dict(permission.data or {})
@@ -461,7 +465,7 @@ async def list_permissions(
 
     async def fetch_requests():
         rows = await bounded_rows(db, select(PermissionRequestModel).where(or_(
-            PermissionRequestModel.data["requestedZones"].has_any(list(zone_ids)),
+            PermissionRequestModel.data["requestedZones"].has_any(array(list(zone_ids), type_=String)),
             PermissionRequestModel.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
             PermissionRequestModel.subject_id.in_(visible_subject_ids) if visible_subject_ids else false(),
         )).order_by(PermissionRequestModel.created_at.desc()))

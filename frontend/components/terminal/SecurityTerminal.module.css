@@ -70,6 +70,10 @@
 .heading h1 { margin: 0; }
 .checkpointControl { display: grid; gap: 6px; }
 .checkpointControl > span:first-child { color: var(--ui-text-secondary); font-size: 13px; font-weight: var(--weight-semibold); text-transform: uppercase; letter-spacing: 0.5px; }
+.assignedLocation { display: grid; gap: 8px; min-width: 0; }
+.assignedLocation > div { display: grid; gap: 3px; min-width: 0; border: 1px solid var(--admin-line); border-radius: var(--radius); padding: 8px 12px; }
+.assignedLocation > div > span { color: var(--ui-text-secondary); font-size: 11px; font-weight: var(--weight-bold); letter-spacing: .45px; text-transform: uppercase; }
+.assignedLocation > div > strong { color: var(--ui-text-primary); font-size: var(--type-15); font-weight: var(--weight-bold); overflow-wrap: anywhere; }
 
 .connectionError { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-top: 16px; padding: 11px 15px; border: 1px solid var(--admin-line); color: var(--ui-text-danger); font-size: 14px; font-weight: var(--weight-medium); }
 .connectionError span { overflow-wrap: anywhere; }

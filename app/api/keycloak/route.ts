@@ -28,11 +28,12 @@ async function identityRequest(request: NextRequest) {
     if (!hasAdminAccess(session.roles)) {
       return NextResponse.json({ error: "Administrator access is required." }, { status: 403 });
     }
-    if (
+    const masterAdmin = hasMasterAdminAccess(session.roles);
+    if (!masterAdmin && (
       !isActiveUserManagementStepUp(session) ||
       request.cookies.has(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE) ||
       !await userManagementWindowUnlocked(session)
-    ) {
+    )) {
       return NextResponse.json(
         { error: "Fresh re-authentication is required to manage users.", code: "STEP_UP_REQUIRED" },
         { status: 403 },
@@ -51,8 +52,8 @@ async function identityRequest(request: NextRequest) {
     const body = requireObject(await readJsonBody(request), "Identity command");
     const action = body.action;
     if (typeof action !== "string") return NextResponse.json({ error: "Identity action is required." }, { status: 400 });
-    if (["createUser", "setRoles", "resetPassword", "endSessions"].includes(action) && !hasMasterAdminAccess(session.roles)) {
-      return NextResponse.json({ error: "Only a master-admin may create accounts, change roles, reset passwords, or end sessions." }, { status: 403 });
+    if (["setRoles", "resetPassword", "endSessions", "deleteUser"].includes(action) && !masterAdmin) {
+      return NextResponse.json({ error: "Only a master-admin may change roles, reset passwords, end sessions, or delete accounts." }, { status: 403 });
     }
     const userId = typeof body.userId === "string" ? body.userId : "";
     const options = { timeoutMs: identityCommandTimeoutMs(action) };
@@ -62,6 +63,10 @@ async function identityRequest(request: NextRequest) {
     else if (action === "setRoles" && userId) result = await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}/roles`, "PUT", body.input, undefined, options);
     else if (action === "resetPassword" && userId) result = await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}/password`, "PUT", body.input);
     else if (action === "endSessions" && userId) result = await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}/logout`, "POST");
+    else if (action === "deleteUser" && userId) {
+      await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}`, "DELETE");
+      result = { deleted: true };
+    }
     else return NextResponse.json({ error: "Identity action is invalid." }, { status: 400 });
     return NextResponse.json({ data: result });
   } catch (error) {

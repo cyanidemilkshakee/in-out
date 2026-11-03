@@ -60,6 +60,24 @@
   gap: 16px;
 }
 
+.formHint {
+  margin: 0;
+  color: var(--ui-text-secondary, #64746e);
+  font-size: var(--type-13, 13px);
+  line-height: 1.5;
+}
+
+.setupSignout {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.setupSignout form {
+  margin: 0;
+}
+
 .form :global(.identity-duration-select) {
   display: flex;
   flex-direction: column;
@@ -187,6 +205,27 @@
   text-decoration: underline;
 }
 
+.adminConsoleLink {
+  display: block;
+  width: 100%;
+  margin-top: 18px;
+  color: var(--ui-text-secondary, #64746e);
+  font-size: var(--type-13, 13px);
+  text-align: center;
+  text-decoration: none;
+}
+
+.adminConsoleLink:hover {
+  color: var(--ui-accent, #087443);
+  text-decoration: underline;
+}
+
+.adminConsoleLink:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ui-accent, #087443) 18%, transparent);
+  outline-offset: 4px;
+  border-radius: 3px;
+}
+
 .errorBanner {
   display: flex;
   align-items: center;
@@ -201,6 +240,38 @@
   line-height: 1.45;
 }
 
+.successBanner {
+  margin-bottom: 18px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--ui-text-positive, #087443) 35%, transparent);
+  border-radius: var(--radius, 9px);
+  background: color-mix(in srgb, var(--ui-text-positive, #087443) 8%, var(--surface, #fff));
+  color: var(--ui-text-positive, #087443);
+  font-size: var(--type-14, 14px);
+  line-height: 1.45;
+}
+
+.setupRecoveryCodes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--ui-border, #ccd8d3);
+  border-radius: var(--radius, 9px);
+}
+
+.setupRecoveryCodes > p,
+.setupRecoveryCodes > button {
+  grid-column: 1 / -1;
+}
+
+.setupRecoveryCodes code {
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--ui-surface-muted, #eaf0ed);
+  text-align: center;
+}
+
 @media (max-width: 480px) {
   .container {
     padding: 16px;
@@ -208,5 +279,9 @@
 
   .card {
     padding: 28px 22px;
+  }
+
+  .setupRecoveryCodes {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

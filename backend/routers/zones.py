@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import re
-import time
 import uuid
 from datetime import datetime, timezone
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
@@ -21,8 +20,6 @@ from models import (
     AuditEvent, Checkpoint, OrganizationZone, PermissionRequestModel, PresenceState,
     TerminalCheckpointAssignment, ZoneAdminAssignment,
 )
-from user_management_locks import get_window_guard_db, require_unlocked_window
-from user_management_step_up import verified_user_management_window
 from zone_access import admin_zone_ids
 
 router = APIRouter(prefix="/v1/zones", tags=["organization zones"])
@@ -47,16 +44,12 @@ class ZoneCreate(BaseModel):
 async def _master_admin_context(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
-    step_up: Annotated[str | None, Header(alias="X-InOut-Step-Up")] = None,
-    guard_db: AsyncSession = Depends(get_window_guard_db),
 ) -> dict[str, Any]:
     if credentials is None:
         raise HTTPException(status_code=401, detail="Bearer token required")
     actor = await verify_admin_request(credentials, request)
     if not has_master_admin_role(actor):
         raise HTTPException(status_code=403, detail="Only a master-admin can manage organization zones")
-    window = verified_user_management_window(credentials.credentials, actor, step_up, now=time.time())
-    await require_unlocked_window(guard_db, actor, window)
     return actor
 
 

@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { ArrowUpRight, Download, ShieldCheck, X } from "lucide-react";
-import type { AccessPermission, Alert, EmployeeActivity, MovementEvent, Person } from "../../../lib/types";
+import type { AccessPermission, Alert, EmployeeActivity, MovementEvent, OrganizationZone, Person } from "../../../lib/types";
 import { assertCsvBound, readExport } from "../../../lib/exportRead";
 import type { DayPattern } from "../../../lib/analyticsUtils";
 import { facilityZoneLabel, normalizeFacilityZones } from "../../../lib/facilityZones";
@@ -36,12 +36,14 @@ function alertTimestamp(alert: Alert) {
   return Number.isFinite(created) ? created : Number.isFinite(legacy) ? legacy : 0;
 }
 
-function formatProfileTime(value?: string, fallbackTime?: string) {
-  if (!value) return fallbackTime || "Not recorded";
+function formatProfileDate(value?: string) {
+  if (!value) return "Not recorded";
   const date = new Date(value);
-  return Number.isNaN(date.getTime())
-    ? fallbackTime || "Not recorded"
-    : date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  if (Number.isNaN(date.getTime())) return "Not recorded";
+  const dateLabel = date.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
+  return /[T ]\d{1,2}:\d{2}/.test(value)
+    ? `${dateLabel} · ${date.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`
+    : dateLabel;
 }
 
 function alertReviewLabel(alert: Alert) {
@@ -105,12 +107,15 @@ ChartJS.register(
 
 export function EmployeeProfileCard({
   person,
+  zoneLabels = [],
   permissions,
   alerts,
   movements,
   onClose,
 }: {
   person: Person;
+  zoneLabels?: readonly Pick<OrganizationZone, "id" | "name">[];
+  permissions: AccessPermission[];
   sessions: DayPattern[];
   alerts: Alert[];
   movements: MovementEvent[];
@@ -216,8 +221,40 @@ export function EmployeeProfileCard({
     }
   }
 
+  const loadMoreMovementLogs = useCallback(async () => {
+    if (historyLoading || movementLoadingMore || movementMorePending.current || movementLogs.length >= movementLogCount) return;
+    const controller = new AbortController();
+    movementMoreController.current?.abort();
+    movementMoreController.current = controller;
+    movementMorePending.current = true;
+    setMovementLoadingMore(true);
+    try {
+      const page = await queryMovements({ page: movementNextPage, pageSize: PROFILE_MOVEMENT_LIMIT, subject_id: person.id, includeChart: false }, controller.signal);
+      if (controller.signal.aborted || historyPerson.current !== person.id) return;
+      setMovementLogs((current) => {
+        const existingIds = new Set(current.map((movement) => movement.id));
+        return [...current, ...page.items.filter((movement) => !existingIds.has(movement.id))];
+      });
+      setMovementLogCount(page.total);
+      setMovementNextPage(page.page + 1);
+    } catch {
+      if (!controller.signal.aborted) setHistoryError("More movement history could not be loaded.");
+    } finally {
+      if (movementMoreController.current === controller) movementMoreController.current = null;
+      if (!controller.signal.aborted) {
+        movementMorePending.current = false;
+        setMovementLoadingMore(false);
+      }
+    }
+  }, [historyLoading, movementLoadingMore, movementLogs.length, movementLogCount, movementNextPage, person.id, queryMovements]);
+
   useEffect(() => {
     const movementLoadController = new AbortController();
+    movementMoreController.current?.abort();
+    movementMoreController.current = null;
+    movementMorePending.current = false;
+    setMovementLoadingMore(false);
+    setMovementNextPage(2);
     setHistoryLoading(true);
     setHistoryError("");
     if (historyPerson.current !== person.id) {
@@ -232,7 +269,10 @@ export function EmployeeProfileCard({
         setMovementLogCount(page.total);
       }).catch(() => { if (!movementLoadController.signal.aborted) setHistoryError("Some movement history could not be loaded."); })
       .finally(() => { if (!movementLoadController.signal.aborted) setHistoryLoading(false); });
-    return () => movementLoadController.abort();
+    return () => {
+      movementLoadController.abort();
+      movementMoreController.current?.abort();
+    };
   }, [person.id, queryMovements, subjectMovementRevision, profileRevision]);
 
   useEffect(() => {
@@ -341,39 +381,6 @@ export function EmployeeProfileCard({
     },
   };
 
-  const movementHistory = (
-    <section className="employee-profile-record-section employee-profile-movement-section scrollable-content" aria-label="Movement logs">
-      <div className="employee-profile-movement-header">
-        <h3>Movement logs</h3>
-        <span className="employee-profile-record-count">{movementLogCount} records</span>
-      </div>
-      {historyError ? <p className="employee-profile-history-error" role="status">{historyError}</p> : null}
-      {movementLogs.length ? <div className="employee-profile-movement-table-wrap" onScroll={(event) => {
-        const element = event.currentTarget;
-        if (element.scrollHeight - element.scrollTop - element.clientHeight < 80) void loadMoreMovementLogs();
-      }}>
-        <table className="employee-profile-movement-table">
-          <caption className="sr-only">Movement history for {person.name}</caption>
-          <thead><tr><th scope="col">Time</th><th scope="col">Movement</th><th scope="col">Checkpoint</th><th scope="col">Scan type</th><th scope="col">Result</th></tr></thead>
-          <tbody>{movementLogs.map((movement) => {
-            const timestamp = movement.createdAt || `${movement.date} ${movement.time}`;
-            const scanType = movement.manualReviewedAt ? "Manual review" : movement.scanType === "manual" ? "Manual scan" : movement.scanType === "auto" ? "Automatic" : "Not recorded";
-            return <tr key={movement.id}>
-              <td><time dateTime={movement.createdAt || undefined}>{formatProfileTime(timestamp, movement.time)}</time></td>
-              <td><span className="employee-profile-movement-direction">{movement.direction === "entry" ? "Entry" : "Exit"}</span></td>
-              <td>{normalizeCheckpointLabel(movement.checkpoint) || "Not recorded"}</td>
-              <td>{scanType}</td>
-              <td><span className="employee-profile-movement-result" data-result={movement.result}>{movement.result === "approved" ? "Allowed" : "Denied"}</span></td>
-            </tr>;
-          })}{movementLoadingMore && <tr><td colSpan={5} className="employee-profile-history-loading" role="status">Loading more movement logs…</td></tr>}</tbody>
-        </table>
-      </div> : <p className="employee-profile-empty">{historyLoading ? "Loading movement logs…" : "No movement logs recorded."}</p>}
-      {movementLogs.length > 0 && movementLogs.length < movementLogCount && <div className="employee-profile-movement-footer">
-        <button type="button" disabled={historyLoading || movementLoadingMore} onClick={() => void loadMoreMovementLogs()}>{movementLoadingMore ? "Loading…" : "Load more"}</button>
-      </div>}
-    </section>
-  );
-
   if (!mounted) return null;
 
   return createPortal(
@@ -400,15 +407,28 @@ export function EmployeeProfileCard({
           "--profile-shadow": darkTheme ? "0 24px 80px rgba(0, 0, 0, 0.48)" : "0 24px 60px rgba(45, 56, 54, 0.2)",
         } as CSSProperties}
         onClick={(e) => e.stopPropagation()}
+        onKeyDown={(event) => {
+          if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"].includes(event.key)) {
+            event.stopPropagation();
+          }
+        }}
         >
         <div className="employee-profile-header">
-          <h2 id="employee-profile-title">Employee Profile</h2>
-          {person.type === "employee" && <label className="employee-profile-enabled-toggle" data-enabled={employeeEnabled}>
-            <input type="checkbox" checked={employeeEnabled} disabled={employeeStatusBusy} onChange={(event) => void setEmployeeStatus(event.target.checked)} />
-            <strong>Enabled</strong>
-          </label>}
-          <div className="employee-profile-header-actions">
-            <div className="employee-profile-range-controls">
+          <div className="employee-profile-main-header">
+            <div className="employee-profile-identity">
+              <h2 id="employee-profile-identity-title">{person.name}</h2>
+              <div className="employee-profile-identity-meta">
+                <span className="employee-profile-identity-barcode">Barcode: {person.barcode}</span>
+                <span className="employee-profile-identity-zones" aria-label="Assigned zones">
+                  {assignedZones.length
+                    ? assignedZones.map((zone) => <span className="facility-zone-tag" key={zone}>{facilityZoneLabel(zone, zoneLabels)}</span>)
+                    : "No zones assigned"}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="employee-profile-period">
+            <div className="employee-profile-range-controls" role="group" aria-label="Profile time range">
               {(["1Y", "1M", "1W"] as const).map((range) => {
                 const isSelected = range === timeRange;
                 return (
@@ -425,20 +445,6 @@ export function EmployeeProfileCard({
               <input type="checkbox" checked={employeeEnabled} disabled={employeeStatusBusy} onChange={(event) => void setEmployeeStatus(event.target.checked)} />
               <strong>Enabled</strong>
             </label> : null}
-            <nav className="employee-profile-header-actions" aria-label="Employee profile actions">
-              <Link className="employee-profile-header-action" href={`/admin/permissions?subject=${encodeURIComponent(person.id)}`} aria-label="Manage permissions" title="Manage permissions">
-                <ShieldCheck size={19} aria-hidden="true" />
-              </Link>
-              <Link className="employee-profile-header-action" href={`/admin/logs?tab=alerts&subject=${encodeURIComponent(person.id)}`} aria-label="View alerts" title="View alerts">
-                <Bell size={19} aria-hidden="true" />
-              </Link>
-              <button className="employee-profile-header-action" type="button" onClick={toggleAlertHistory} aria-controls="employee-profile-alert-history" aria-expanded={showAlertHistory} aria-label={showAlertHistory ? "Hide alert history" : "View alert history"} title={showAlertHistory ? "Hide alert history" : "View alert history"}>
-                <History size={19} aria-hidden="true" />
-              </button>
-              <button className="employee-profile-header-action" type="button" onClick={() => void downloadMovementHistory()} disabled={historyLoading || movementLogCount === 0 || exportingHistory} aria-label={exportingHistory ? "Exporting movement history" : "Export movement history as CSV"} title={exportingHistory ? "Exporting movement history" : "Export movement history as CSV"}>
-                <Download size={19} aria-hidden="true" />
-              </button>
-            </nav>
             <button
               className="admin-button admin-button--icon icon-button employee-profile-close"
               type="button"
@@ -446,110 +452,40 @@ export function EmployeeProfileCard({
               aria-label="Close employee profile"
               title="Close employee profile"
             >
-              <X size={20} />
+              <X size={20} aria-hidden="true" />
             </button>
           </div>
           {employeeStatusError ? <p className="employee-profile-history-error" role="alert">{employeeStatusError}</p> : null}
         </div>
 
         <div className="employee-profile-body scrollable-content">
-        <div className="employee-profile-content scrollable-content">
-          <div className="employee-profile-details">
-            <div className="employee-profile-detail">
-              <div className="employee-profile-detail-label">Name</div>
-              <div className="employee-profile-detail-value" style={{ color: textColor }}>{person.name}</div>
-            </div>
-            <div className="employee-profile-detail">
-              <div className="employee-profile-detail-label">Barcode</div>
-              <div className="employee-profile-detail-value" style={{ color: textColor }}>{person.barcode}</div>
-            </div>
-            <div className="employee-profile-detail">
-              <div className="employee-profile-detail-label">Assigned zones</div>
-              <div className="employee-profile-detail-value">
-                <div className="facility-zone-list">
-                  {assignedZones.length
-                    ? assignedZones.map((zone) => <span className="facility-zone-tag" key={zone}>{facilityZoneLabel(zone)}</span>)
-                    : "No zones assigned"}
+          <div className="employee-profile-content">
+            <section className="employee-profile-average-section" aria-labelledby="employee-profile-average-title" aria-busy={activityLoading}>
+              <div className="employee-profile-section-title-row">
+                <div>
+                  <h3 id="employee-profile-average-title">Average working hours</h3>
+                  <span className="employee-profile-chart-period">Per day · {timeRange}</span>
                 </div>
               </div>
-            </div>
-          </div>
-          {employeeStatusError ? <p className="employee-profile-history-error" role="alert">{employeeStatusError}</p> : null}
-
-          <div className="employee-profile-summary-grid" aria-label="Employee record counts">
-            <article className="employee-profile-summary-card"><span>Permissions</span><strong>{permissionsLoading ? "…" : profilePermissions.length}</strong></article>
-            <article className="employee-profile-summary-card"><span>Alert triggers</span><strong>{alertTriggerCount}</strong></article>
-            <article className="employee-profile-summary-card"><span>Movement logs</span><strong>{movementLogCount}</strong></article>
-          </div>
-
-          <div className="employee-profile-hours-chart" aria-busy={activityLoading}>
-            <div className="employee-profile-chart-summary">
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: "2px", textAlign: "left" }}>
-                <div className="employee-profile-summary-number" style={{ color: textColor }}>
-                  {activityLoading ? "…" : displayedAverageHours}
-                </div>
-                <div className="employee-profile-summary-label" style={{ color: mutedColor }}>
-                  AVG HOURS / DAY · {timeRange}
+              <div className="employee-profile-chart-summary">
+                <div>
+                  <div className="employee-profile-summary-number" style={{ color: textColor }}>
+                    {activityLoading ? "…" : displayedAverageHours}
+                  </div>
+                  <div className="employee-profile-summary-label" style={{ color: mutedColor }}>
+                    HOURS PER DAY
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="employee-profile-hours-chart">
-              <div className="employee-profile-hours-chart-canvas">
-                <Line data={chartData} options={chartOptions} />
+              <div className="employee-profile-hours-chart">
+                <div className="employee-profile-hours-chart-canvas">
+                  <Line data={chartData} options={chartOptions} />
+                </div>
               </div>
-            </div>
-            {activityError ? <p className="employee-profile-history-error" role="status">{activityError}</p> : null}
-          </section>
-
-          <div className="employee-profile-work-pattern">
-            <WorkPatternChart timeRange={timeRange} sessions={completeSessions} endAt={activity?.endAt} />
-          </div>
-          {activityError ? <p className="employee-profile-history-error" role="status">{activityError}</p> : null}
-
-          <div className="employee-profile-record-grid">
-            <section className="employee-profile-record-section scrollable-content" aria-labelledby="employee-profile-permissions-title">
-              <div className="employee-profile-record-section-heading">
-                <h3 id="employee-profile-permissions-title">Employee permissions</h3>
-                <Link
-                  className="employee-profile-manage-permission"
-                  href={`/admin/permissions?subject=${encodeURIComponent(person.id)}`}
-                >
-                  <ShieldCheck size={16} aria-hidden="true" />
-                  Manage permissions
-                  <ArrowUpRight size={15} aria-hidden="true" />
-                </Link>
-              </div>
-              {profilePermissions.length ? <ul className="employee-profile-record-list">
-                {profilePermissions.slice(0, 3).map((permission) => <li key={permission.id}>
-                  <div className="employee-profile-record-heading"><strong>{permission.zones.length ? normalizeFacilityZones(permission.zones).map(facilityZoneLabel).join(" · ") : permission.assignment}</strong><span data-state={permission.state}>{permission.state.replaceAll("_", " ")}</span></div>
-                  <small>{formatProfileDate(permission.validFrom)} – {permission.validTo ? formatProfileDate(permission.validTo) : "No expiry"}</small>
-                  {permission.reason ? <p>{permission.reason}</p> : null}
-                </li>)}
-              </ul> : <p className="employee-profile-empty">No individual permission records.</p>}
-              {profilePermissions.length > 3 ? <p className="employee-profile-more-count">+{profilePermissions.length - 3} more</p> : null}
+              {activityError ? <p className="employee-profile-history-error" role="status">{activityError}</p> : null}
             </section>
 
-              <section className="employee-profile-record-section employee-profile-alert-section" aria-labelledby="employee-profile-alert-triggers-title">
-                <div className="employee-profile-record-section-heading">
-                  <h3 id="employee-profile-alert-triggers-title">Alert triggers</h3>
-                  <Link
-                    className="employee-profile-manage-permission"
-                    href={`/admin/logs?tab=alerts&subject=${encodeURIComponent(person.id)}`}
-                  >
-                    View alerts
-                    <ArrowUpRight size={15} aria-hidden="true" />
-                  </Link>
-                </div>
-                {profileAlerts.length ? <ul className="employee-profile-record-list">
-                  {profileAlerts.slice(0, PROFILE_ALERT_LIMIT).map((alert) => <li key={alert.id}>
-                    <div className="employee-profile-record-heading"><strong>{alert.title}</strong><span data-state={alert.review?.decision ?? alert.status}>{alertReviewLabel(alert)}</span></div>
-                    <small>{formatProfileDate(alert.createdAt || `${alert.date} ${alert.time}`)}{alert.severity !== "medium" ? ` · ${alert.severity}` : ""}</small>
-                  </li>)}
-                </ul> : <p className="employee-profile-empty">{historyLoading ? "Loading alert history…" : "No alert triggers recorded."}</p>}
-                {Math.max(alertTriggerCount, profileAlerts.length) > PROFILE_ALERT_LIMIT ? <p className="employee-profile-more-count">+{Math.max(alertTriggerCount, profileAlerts.length) - PROFILE_ALERT_LIMIT} more</p> : null}
-              </section>
-
-            <section className="employee-profile-record-section employee-profile-movement-section scrollable-content" aria-labelledby="employee-profile-movements-title">
+            <section className="employee-profile-movement-section" aria-labelledby="employee-profile-movements-title">
               <div className="employee-profile-movement-header">
                 <h3 id="employee-profile-movements-title">Movement logs</h3>
                 <button
@@ -562,11 +498,14 @@ export function EmployeeProfileCard({
                   <Download size={16} aria-hidden="true" /> {exportingHistory ? "Exporting…" : "Export CSV"}
                 </button>
               </div>
-              {movementLogs.length ? <div className="employee-profile-movement-table-wrap">
+              {movementLogs.length ? <div className="employee-profile-movement-table-wrap" role="region" aria-label="Movement history" tabIndex={0} onScroll={(event) => {
+                const element = event.currentTarget;
+                if (element.scrollHeight - element.scrollTop - element.clientHeight < 80) void loadMoreMovementLogs();
+              }}>
                 <table className="employee-profile-movement-table">
                   <caption className="sr-only">Movement history for {person.name}</caption>
                   <thead><tr><th scope="col">Date &amp; time</th><th scope="col">Direction</th><th scope="col">Checkpoint</th><th scope="col">Result</th><th scope="col">Scan</th><th scope="col">Details</th></tr></thead>
-                  <tbody>{movementLogs.slice(0, PROFILE_MOVEMENT_LIMIT).map((movement) => {
+                  <tbody>{movementLogs.map((movement) => {
                     const timestamp = movement.createdAt || `${movement.date} ${movement.time}`;
                     const details = movement.reason?.trim() || movement.denialCode?.replaceAll("_", " ") || (movement.result === "approved" ? "Access permitted" : "Access denied");
                     const scanType = movement.manualReviewedAt ? "Manual review" : movement.scanType === "manual" ? "Manual scan" : movement.scanType === "auto" ? "Automatic" : "Not recorded";
@@ -578,15 +517,68 @@ export function EmployeeProfileCard({
                       <td>{scanType}</td>
                       <td>{details}</td>
                     </tr>;
-                  })}</tbody>
+                  })}{movementLoadingMore && <tr><td colSpan={6} className="employee-profile-history-loading" role="status">Loading more movement logs…</td></tr>}</tbody>
                 </table>
               </div> : <p className="employee-profile-empty">{historyLoading ? "Loading movement logs…" : "No movement logs recorded."}</p>}
-              {Math.max(movementLogCount, movementLogs.length) > PROFILE_MOVEMENT_LIMIT ? <p className="employee-profile-more-count">+{Math.max(movementLogCount, movementLogs.length) - PROFILE_MOVEMENT_LIMIT} more</p> : null}
+              {movementLogs.length > 0 && movementLogs.length < movementLogCount ? <div className="employee-profile-movement-footer">
+                <span>{movementLogs.length} of {movementLogCount} records</span>
+                <button type="button" disabled={historyLoading || movementLoadingMore} onClick={() => void loadMoreMovementLogs()}>{movementLoadingMore ? "Loading…" : "Load more"}</button>
+              </div> : null}
             </section>
+
+            <section className="employee-profile-utilities" aria-label="Employee permissions and alert summary">
+              {historyError ? <p className="employee-profile-history-error" role="status">{historyError}</p> : null}
+              <dl className="employee-profile-summary-grid" aria-label="Employee record counts">
+                <div className="employee-profile-summary-item"><dt>Permissions</dt><dd>{permissionsLoading ? "…" : profilePermissions.length}</dd></div>
+                <div className="employee-profile-summary-item"><dt>Alert triggers</dt><dd>{alertTriggerCount}</dd></div>
+                <div className="employee-profile-summary-item"><dt>Movement logs</dt><dd>{movementLogCount}</dd></div>
+              </dl>
+              <div className="employee-profile-record-grid">
+                <section className="employee-profile-record-section scrollable-content" aria-labelledby="employee-profile-permissions-title">
+                  <div className="employee-profile-record-section-heading">
+                    <h3 id="employee-profile-permissions-title">Employee permissions</h3>
+                    <Link className="employee-profile-manage-permission" href={`/admin/permissions?subject=${encodeURIComponent(person.id)}`}>
+                      <ShieldCheck size={16} aria-hidden="true" />Manage permissions<ArrowUpRight size={15} aria-hidden="true" />
+                    </Link>
+                  </div>
+                  {profilePermissions.length ? <ul className="employee-profile-record-list">
+                    {profilePermissions.slice(0, 3).map((permission) => <li key={permission.id}>
+                      <div className="employee-profile-record-heading"><strong>{permission.zones.length ? normalizeFacilityZones(permission.zones).map((zone) => facilityZoneLabel(zone, zoneLabels)).join(" · ") : permission.assignment}</strong><span data-state={permission.state}>{permission.state.replaceAll("_", " ")}</span></div>
+                      <small>{formatProfileDate(permission.validFrom)} – {permission.validTo ? formatProfileDate(permission.validTo) : "No expiry"}</small>
+                      {permission.reason ? <p>{permission.reason}</p> : null}
+                    </li>)}
+                  </ul> : <p className="employee-profile-empty">{permissionsLoading ? "Loading permissions…" : "No individual permission records."}</p>}
+                  {profilePermissions.length > 3 ? <p className="employee-profile-more-count">+{profilePermissions.length - 3} more</p> : null}
+                </section>
+
+                <section className="employee-profile-record-section employee-profile-alert-section" aria-labelledby="employee-profile-alert-triggers-title">
+                  <div className="employee-profile-record-section-heading">
+                    <h3 id="employee-profile-alert-triggers-title">Alert triggers</h3>
+                    <Link className="employee-profile-manage-permission" href={`/admin/logs?tab=alerts&subject=${encodeURIComponent(person.id)}`}>
+                      View alerts<ArrowUpRight size={15} aria-hidden="true" />
+                    </Link>
+                  </div>
+                  {profileAlerts.length ? <ul className="employee-profile-record-list">
+                    {profileAlerts.slice(0, PROFILE_ALERT_LIMIT).map((alert) => <li key={alert.id}>
+                      <div className="employee-profile-record-heading"><strong>{alert.title}</strong><span data-state={alert.review?.decision ?? alert.status}>{alertReviewLabel(alert)}</span></div>
+                      <small>{formatProfileDate(alert.createdAt || `${alert.date} ${alert.time}`)}{alert.severity !== "medium" ? ` · ${alert.severity}` : ""}</small>
+                    </li>)}
+                  </ul> : <p className="employee-profile-empty">{historyLoading ? "Loading alert history…" : "No alert triggers recorded."}</p>}
+                  {Math.max(alertTriggerCount, profileAlerts.length) > PROFILE_ALERT_LIMIT ? <p className="employee-profile-more-count">+{Math.max(alertTriggerCount, profileAlerts.length) - PROFILE_ALERT_LIMIT} more</p> : null}
+                </section>
+              </div>
+            </section>
+
+            <section className="employee-profile-work-pattern-section" aria-label="Employee work pattern">
+              <div className="employee-profile-work-pattern-scroll scrollable-content">
+                <WorkPatternChart timeRange={timeRange} sessions={completeSessions} endAt={activity?.endAt} />
+              </div>
+            </section>
+
+            <div className="employee-profile-open-alerts-section">
+              <EmployeeProfileAlerts key={person.id} person={person.type === "employee" ? { ...person, status: employeeEnabled ? "active" : "inactive" } : person} initialAlerts={initialAlerts} onHistoryChanged={updateAlertHistory} />
+            </div>
           </div>
-          {historyError ? <p className="employee-profile-history-error" role="status">{historyError}</p> : null}
-        </div>
-        <EmployeeProfileAlerts key={person.id} person={person.type === "employee" ? { ...person, status: employeeEnabled ? "active" : "inactive" } : person} initialAlerts={initialAlerts} onHistoryChanged={updateAlertHistory} />
         </div>
       </div>
     </div>,

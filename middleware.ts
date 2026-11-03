@@ -1,12 +1,13 @@
 import { auth } from "./auth"
 import { NextResponse } from "next/server"
-import { hasAdminAccess } from "./lib/applicationRoles"
+import { hasAdminAccess, hasMasterAdminAccess } from "./lib/applicationRoles"
 
 export default auth((req) => {
   const session = req.auth as { access_token?: string; roles?: unknown } | null
   const isLoggedIn = !!session?.access_token
   const roles = Array.isArray(session?.roles) ? session.roles.filter((role): role is string => typeof role === "string") : []
   const isAdmin = hasAdminAccess(roles)
+  const isMasterAdmin = hasMasterAdminAccess(roles)
   const isOperator = roles.includes("operator")
   const canUseTerminal = isAdmin || isOperator
   const isAuthPage = req.nextUrl.pathname.startsWith('/login')
@@ -15,7 +16,8 @@ export default auth((req) => {
     req.nextUrl.searchParams.get('from') === '/admin/users'
   const isAdminPage = req.nextUrl.pathname.startsWith('/admin')
   const isTerminalPage = req.nextUrl.pathname.startsWith('/terminal')
-  const home = isAdmin ? '/admin/dashboard' : '/terminal'
+  const isUserManagementPage = req.nextUrl.pathname === '/admin/users' || req.nextUrl.pathname.startsWith('/admin/users/')
+  const home = isMasterAdmin ? '/admin/users' : isAdmin ? '/admin/dashboard' : '/terminal'
 
   if (isAuthPage) {
     if (isLoggedIn) {
@@ -35,6 +37,10 @@ export default auth((req) => {
     return NextResponse.redirect(
       new URL(`/login?from=${encodeURIComponent(from)}`, req.url)
     )
+  }
+
+  if (isMasterAdmin && ((isAdminPage && !isUserManagementPage) || isTerminalPage)) {
+    return NextResponse.redirect(new URL('/admin/users', req.url))
   }
 
   if (req.nextUrl.pathname === '/') {

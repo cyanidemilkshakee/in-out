@@ -4,8 +4,6 @@ import { callPythonApi, PythonApiError } from "../pythonApi";
 import { readJsonBody, RequestBodyError } from "../../../lib/requestJson";
 import { requireObject } from "../data/bff";
 import { hasAdminAccess, hasMasterAdminAccess } from "../../../lib/applicationRoles";
-import { isActiveUserManagementStepUp, USER_MANAGEMENT_STEP_UP_LOCK_COOKIE } from "../../../lib/userManagementStepUp";
-import { userManagementWindowUnlocked } from "../../../lib/serverUserManagement";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,11 +29,6 @@ async function zonesRequest(request: NextRequest) {
     if (!hasMasterAdminAccess(session.roles)) {
       return NextResponse.json({ error: "Only a master-admin can manage organization zones." }, { status: 403 });
     }
-    if (!isActiveUserManagementStepUp(session) || request.cookies.has(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE) ||
-        !await userManagementWindowUnlocked(session)) {
-      return NextResponse.json({ error: "Fresh re-authentication is required to manage organization zones.", code: "STEP_UP_REQUIRED" }, { status: 403 });
-    }
-
     if (request.method === "POST") {
       const body = requireObject(await readJsonBody(request), "Organization zone");
       return NextResponse.json({ data: await callPythonApi("/v1/zones", "POST", body) }, { status: 201 });

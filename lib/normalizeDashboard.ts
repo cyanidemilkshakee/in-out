@@ -17,6 +17,7 @@ import type {
   MovementEvent,
   PermissionRequest,
   TerminalVisitor,
+  TerminalVisitorPage,
 } from "./types";
 import type { DataScope } from "./types";
 import { canonicalCheckpointId, normalizeFacilityCheckpoints, normalizeFacilityZones, normalizeSubjectZones } from "./facilityZones";
@@ -186,6 +187,9 @@ export function normalizePermissionRequest(raw: unknown): PermissionRequest {
     requester: typeof request.requester === "string" ? request.requester : "Unknown requester",
     purpose: typeof request.purpose === "string" ? request.purpose : "Manual review requested",
     requestedZones,
+    requestedCheckpoints: Array.isArray(request.requestedCheckpoints)
+      ? request.requestedCheckpoints.filter((item): item is string => typeof item === "string").map(canonicalCheckpointId)
+      : undefined,
     validFrom: typeof request.validFrom === "string" ? request.validFrom : "",
     validTo: typeof request.validTo === "string" ? request.validTo : "",
     status,
@@ -236,6 +240,9 @@ export function normalizeAccessPermission(raw: unknown): AccessPermission {
     assignment: typeof permission.assignment === "string" ? permission.assignment : "Access permission",
     state,
     zones,
+    checkpoints: Array.isArray(permission.checkpoints)
+      ? permission.checkpoints.filter((item): item is string => typeof item === "string").map(canonicalCheckpointId)
+      : undefined,
     validFrom: typeof permission.validFrom === "string" ? permission.validFrom : "",
     validTo: typeof permission.validTo === "string" ? permission.validTo : "",
     source,
@@ -490,6 +497,9 @@ export function normalizeTerminalSnapshot(raw: unknown): AppDataSnapshot {
         ...(typeof visitor.host === "string" ? { host: visitor.host } : {}),
         ...(typeof visitor.company === "string" ? { company: visitor.company } : {}),
         allowedZones: normalizeFacilityZones(Array.isArray(visitor.allowedZones) ? visitor.allowedZones.filter((zone): zone is string => typeof zone === "string") : []),
+        ...(Array.isArray(visitor.allowedCheckpoints)
+          ? { allowedCheckpoints: visitor.allowedCheckpoints.filter((item): item is string => typeof item === "string").map(canonicalCheckpointId) }
+          : {}),
         ...(typeof visitor.validFrom === "string" ? { validFrom: visitor.validFrom } : {}),
         ...(typeof visitor.validTo === "string" ? { validTo: visitor.validTo } : {}),
         ...(typeof visitor.createdAt === "string" ? { createdAt: visitor.createdAt } : {}),

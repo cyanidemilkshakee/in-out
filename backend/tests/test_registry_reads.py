@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import test_database as fixture
 from auth import verify_admin_request
 from config import settings
-from models import AccessPermission, Alert, AuditEvent, HardwareAsset, Movement, Person, PresenceState, Subject
+from models import AccessPermission, Alert, AuditEvent, Movement, Person, PresenceState, Subject
 from movement_analytics import FACILITY_ZONE
 from registry_reads import trend_summary
 
@@ -36,12 +36,12 @@ class RegistryReadDatabaseTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "registry-read-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "registry-read-admin", "realm_access": {"roles": ["zone-admin"]}}
 
     async def seed_employees(self, count):
         async with self.sessions() as db:
             db.add_all([Subject(id=f"employee-{index:03}", kind="employee", barcode=f"EMP-{index:03}",
-                person=Person(data={"name": f"Employee {index:03}", "status": "active", "allowedZones": ["public"]}))
+                person=Person(data={"name": f"Employee {index:03}", "status": "active", "allowedZones": ["a"]}))
                 for index in range(count)])
             await db.flush()
             db.add(PresenceState(subject_id="employee-000", state="inside"))
@@ -76,9 +76,9 @@ class RegistryReadDatabaseTests(unittest.IsolatedAsyncioTestCase):
         await self.seed_employees(30)
         async with self.sessions() as db:
             db.add(Subject(id="literal", kind="employee", barcode="EMP-%_literal", person=Person(data={
-                "name": "Literal %_ name", "status": "active", "allowedZones": ["public"]})))
+                "name": "Literal %_ name", "status": "active", "allowedZones": ["a"]})))
             db.add(Subject(id="visitor-literal", kind="visitor", barcode="VIS-%_literal", person=Person(data={
-                "name": "Visitor %_ name", "status": "pending_approval", "host": "Alice", "allowedZones": ["public"]})))
+                "name": "Visitor %_ name", "status": "pending_approval", "host": "Alice", "allowedZones": ["a"]})))
             await db.commit()
         response = await self.client.get("/v1/registry/subjects", params={"kind": "employee", "search": "%_", "limit": 25})
         self.assertEqual(response.status_code, 200, response.text)
@@ -96,8 +96,8 @@ class RegistryReadDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
-            db.add_all([AccessPermission(id="p1-access", subject_id="p1", data={"id": "p1-access", "subjectId": "p1", "zones": ["public"]}),
-                AccessPermission(id="h1-access", subject_id="h1", data={"id": "h1-access", "subjectId": "h1", "zones": ["secure"]}),
+            db.add_all([AccessPermission(id="p1-access", subject_id="p1", data={"id": "p1-access", "subjectId": "p1", "zones": ["a"]}),
+                AccessPermission(id="h1-access", subject_id="h1", data={"id": "h1-access", "subjectId": "h1", "zones": ["b"]}),
                 Alert(id="unrelated-alert", data={"title": "Unrelated", "subjectId": "h1"}, created_at=now),
                 AuditEvent(id="unrelated-audit", data={"description": "Unrelated"}, created_at=now)])
             await db.commit()

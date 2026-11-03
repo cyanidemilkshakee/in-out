@@ -1,6 +1,7 @@
 """Authorization helpers for branch-scoped administrator operations."""
 from fastapi import HTTPException
-from sqlalchemy import false, or_, select
+from sqlalchemy import String, false, or_, select
+from sqlalchemy.dialects.postgresql import array
 
 from auth import has_admin_role, has_master_admin_role
 from models import (
@@ -68,20 +69,21 @@ def subject_zone_condition(zone_ids: tuple[str, ...] | list[str]):
     if not zones:
         return false()
     any_zone = list(zones)
+    zone_array = array(any_zone, type_=String)
     requested_subjects = select(PermissionRequestModel.subject_id).where(
         PermissionRequestModel.subject_id.is_not(None),
         PermissionRequestModel.data["status"].astext == "pending",
-        PermissionRequestModel.data["requestedZones"].has_any(any_zone),
-    )
+        PermissionRequestModel.data["requestedZones"].has_any(zone_array),
+    ).correlate(None)
     return or_(
         select(Person.subject_id).where(Person.subject_id == Subject.id,
-            or_(Person.data["allowedZones"].has_any(any_zone),
-                Person.data["allowedZone"].astext.in_(zones))).exists(),
+            or_(Person.data["allowedZones"].has_any(zone_array),
+                Person.data["allowedZone"].astext.in_(zones))).correlate(Subject).exists(),
         select(HardwareAsset.subject_id).where(HardwareAsset.subject_id == Subject.id,
-            or_(HardwareAsset.data["allowedZones"].has_any(any_zone),
-                HardwareAsset.data["allowedZone"].astext.in_(zones))).exists(),
+            or_(HardwareAsset.data["allowedZones"].has_any(zone_array),
+                HardwareAsset.data["allowedZone"].astext.in_(zones))).correlate(Subject).exists(),
         select(AccessPermission.subject_id).where(AccessPermission.subject_id == Subject.id,
-            AccessPermission.data["zones"].has_any(any_zone)).exists(),
+            AccessPermission.data["zones"].has_any(zone_array)).correlate(Subject).exists(),
         Subject.id.in_(requested_subjects),
     )
 
@@ -102,9 +104,6 @@ async def require_subject_scope(db, actor: dict, subject_id: str) -> Subject:
     zones = await admin_zone_ids(db, actor)
     subject = await db.scalar(
         select(Subject)
-        .outerjoin(Person, Person.subject_id == Subject.id)
-        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
-        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
         .where(Subject.id == subject_id, subject_zone_condition(zones))
         .options(selectinload(Subject.person), selectinload(Subject.hardware))
     )

@@ -7,10 +7,10 @@ import urllib.request
 deadline = time.monotonic() + 45
 while True:
     try:
-        with urllib.request.urlopen("http://temporal-ui:8080/", timeout=3) as response:
+        with urllib.request.urlopen("http://temporal-ui:1035/", timeout=3) as response:
             assert response.status == 200
             assert b"<html" in response.read(524288).lower()
-        with urllib.request.urlopen("http://temporal-ui:8080/api/v1/namespaces", timeout=3) as response:
+        with urllib.request.urlopen("http://temporal-ui:1035/api/v1/namespaces", timeout=3) as response:
             assert response.status == 200
             data = json.loads(response.read(524288))
             assert any(item.get("namespaceInfo", {}).get("name") == "default"

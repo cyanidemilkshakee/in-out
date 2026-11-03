@@ -10,7 +10,7 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
-  "passwordPolicy": "length(12) and maxLength(128) and notUsername and notEmail",
+  "passwordPolicy": "",
   "accessTokenLifespan": 300,
   "eventsEnabled": true,
   "eventsExpiration": 2592000,
@@ -43,19 +43,22 @@
       "clientAuthenticatorType": "client-secret",
       "secret": "${KEYCLOAK_CLIENT_SECRET}",
       "redirectUris": [
-        "${INOUT_APP_URL}/api/auth/callback/keycloak"
+        "${INOUT_APP_URL}/api/auth/callback/keycloak",
+        "${INOUT_APP_URL}/api/auth/callback/keycloak-password-setup",
+        "${INOUT_APP_URL}/api/auth/callback/keycloak-password-change"
       ],
       "webOrigins": [
         "${INOUT_APP_URL}"
       ],
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "publicClient": false,
       "protocol": "openid-connect",
       "fullScopeAllowed": false,
       "attributes": {
+        "inout.app-interactions.enabled": "true",
         "post.logout.redirect.uris": "${INOUT_APP_URL}/login##${INOUT_APP_URL}/logout/complete",
         "pkce.code.challenge.method": "S256"
       },
@@ -85,6 +88,23 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "inout-password-updates",
+      "name": "InOut password updates",
+      "description": "Server-only native password updates. Run the scoped password-update configuration command after realm import.",
+      "enabled": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET}",
+      "redirectUris": [],
+      "webOrigins": [],
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "fullScopeAllowed": false
     },
     {
       "clientId": "inout-postman",
@@ -138,18 +158,18 @@
   "scopeMappings": [
     {
       "client": "inout-frontend",
-      "roles": ["admin", "operator", "master-admin"]
+      "roles": ["zone-admin", "operator", "master-admin"]
     },
     {
       "client": "inout-postman",
-      "roles": ["admin", "operator"]
+      "roles": ["zone-admin", "operator"]
     }
   ],
   "roles": {
     "realm": [
       {
-        "name": "admin",
-        "description": "Full access to the InOut admin panel",
+        "name": "zone-admin",
+        "description": "InOut admin-panel access limited to assigned organization zones",
         "composite": true,
         "composites": {
           "client": {
@@ -163,7 +183,7 @@
         "description": "Manage admin and operator accounts and checkpoint assignments",
         "composite": true,
         "composites": {
-          "realm": ["admin"]
+          "realm": ["zone-admin"]
         }
       },
       {

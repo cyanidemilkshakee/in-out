@@ -87,7 +87,7 @@ try {
   // default-roles-inout assignment to supply account access implicitly.
   const inheritedDefaults = await (await api(`/users/${userId}/role-mappings/realm`)).json();
   if (inheritedDefaults.length) await api(`/users/${userId}/role-mappings/realm`, { method: "DELETE", body: inheritedDefaults });
-  for (const roleName of ["admin", "operator"]) {
+  for (const roleName of ["zone-admin", "operator"]) {
     const role = await (await api(`/roles/${roleName}`)).json();
     await api(`/users/${userId}/role-mappings/realm`, { method: "POST", body: [role] });
     const accessToken = await signIn();
@@ -116,20 +116,20 @@ try {
     const adminEndpoints = [
       "/v1/alerts?limit=1", "/v1/registry/subjects?kind=employee&limit=1", "/v1/alert-rule-assignments",
     ];
-    const requests = roleName === "admin" ? Array.from({ length: 6 }, () => adminEndpoints).flat() : adminEndpoints;
+    const requests = roleName === "zone-admin" ? Array.from({ length: 6 }, () => adminEndpoints).flat() : adminEndpoints;
     const statuses = await Promise.all(requests.map(async (path) => {
       const response = await fetch(`http://localhost:${apiPort}${path}`, {
         signal: AbortSignal.timeout(15_000), headers: { Authorization: `Bearer ${frontendToken}` },
       });
-      assert.equal(response.status, roleName === "admin" ? 200 : 403, `${roleName} parallel API check failed: ${path}`);
+      assert.equal(response.status, roleName === "zone-admin" ? 200 : 403, `${roleName} parallel API check failed: ${path}`);
       assert.equal(response.headers.get("X-RateLimit-Limit-Minute"), "300",
         "Real signed account requests must pass Kong's verified-credential limiter");
       await response.json();
       return response.status;
     }));
-    console.log(`${roleName}: scoped signed token and ${statuses.length} parallel admin-page API checks -> HTTP ${roleName === "admin" ? 200 : 403}`);
+    console.log(`${roleName}: scoped signed token and ${statuses.length} parallel admin-page API checks -> HTTP ${roleName === "zone-admin" ? 200 : 403}`);
     for (const [path, expectedStatus] of [
-      ["/v1/checkpoints", roleName === "admin" ? 200 : 403],
+      ["/v1/checkpoints", roleName === "zone-admin" ? 200 : 403],
       // Both supported application roles can operate the terminal.
       ["/v1/terminal/bundle", 200],
     ]) {

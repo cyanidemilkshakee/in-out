@@ -18,52 +18,6 @@ from zone_access import admin_zone_ids, subject_zone_condition
 router = APIRouter(prefix="/v1/dashboard", tags=["dashboard"])
 
 
-def _dashboard_payload(event_revision, analytics_result, recent_result, alerts_result,
-                      pending_decisions_result, presence_result) -> dict[str, Any]:
-    """Map the bounded query results into the API's response shape."""
-    row = analytics_result.mappings().one()
-    analytics = {
-        "totalScans": int(row["total"] or 0),
-        "totalApproved": int(row["approved"] or 0),
-        "totalDenied": int(row["denied"] or 0),
-        "totalEntries": int(row["entries"] or 0),
-        "totalExits": int(row["exits"] or 0),
-        "totalAutomatic": int(row["automatic"] or 0),
-        "totalManual": int(row["manual"] or 0),
-        "totalRestricted": int(row["restricted"] or 0),
-        "totalOtherDenied": int(row["other_denied"] or 0),
-    }
-
-    recent_movements = [dict(row) for row in recent_result.mappings().all()]
-    for movement in recent_movements:
-        occurred_at = movement.get("occurred_at")
-        if occurred_at is not None:
-            movement["occurred_at"] = occurred_at.isoformat()
-
-    open_alerts = [{
-        "id": alert["id"],
-        "created_at": alert["created_at"].isoformat() if alert["created_at"] else None,
-        "data": alert["data"],
-    } for alert in alerts_result.mappings().all()]
-    pending_decisions = [dict(row[0]) for row in pending_decisions_result.all()]
-
-    presence_counts = {"inside": 0, "outside": 0}
-    for presence in presence_result.mappings().all():
-        state = presence["state"]
-        if state in presence_counts:
-            presence_counts[state] = int(presence["cnt"] or 0)
-
-    analytics["activeInside"] = presence_counts["inside"]
-    return {
-        "eventRevision": event_revision,
-        "analytics": analytics,
-        "recentMovements": recent_movements,
-        "openAlerts": open_alerts,
-        "pendingDecisions": pending_decisions,
-        "presenceCounts": presence_counts,
-    }
-
-
 @router.get("")
 async def get_dashboard(
     db: AsyncSession = Depends(get_read_db),

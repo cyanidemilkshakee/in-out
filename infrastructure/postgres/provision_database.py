@@ -38,7 +38,7 @@ def required_password(name):
 async def connect(database="inout", *, user="inout", password=None):
     return await asyncpg.connect(
         host=os.environ.get("PROVISION_HOST", "postgres-primary"),
-        port=int(os.environ.get("PROVISION_PORT", "5432")),
+        port=int(os.environ.get("PROVISION_PORT", "1020")),
         user=user, password=password, database=database, timeout=10,
         command_timeout=30,
         # Errors must never include password-containing SQL statements.
@@ -97,6 +97,13 @@ async def verify_existing(connection, passwords):
               AND d.objid=c.oid AND d.deptype='e'))""")
     if bad_owners:
         raise RuntimeError("Application object ownership changed; maintenance is required")
+    temporary_privileges = await connection.fetchval("""SELECT
+        NOT has_database_privilege('inout_migrator','inout','TEMP') OR
+        has_database_privilege('inout_app','inout','TEMP') OR
+        has_database_privilege('inout_keycloak','inout','TEMP') OR
+        has_database_privilege('inout_temporal','inout','TEMP')""")
+    if temporary_privileges:
+        raise RuntimeError("Unexpected migration temporary-table privileges; maintenance is required")
     forbidden = await connection.fetchval("""SELECT
         has_schema_privilege('inout_app','public','CREATE') OR
         has_schema_privilege('inout_app','keycloak','USAGE') OR
@@ -185,6 +192,9 @@ async def provision(args):
         await connection.execute("REVOKE ALL ON DATABASE inout FROM PUBLIC")
         await connection.execute("REVOKE ALL ON DATABASE inout FROM inout_app, inout_migrator, inout_keycloak, inout_temporal")
         await connection.execute("GRANT CONNECT ON DATABASE inout TO inout_app, inout_migrator, inout_keycloak")
+        # A versioned backfill uses a transaction-scoped temporary table; only
+        # the migration role needs the database TEMP privilege.
+        await connection.execute("GRANT TEMPORARY ON DATABASE inout TO inout_migrator")
         # Install the only required trusted extension as the administrator;
         # migration clients do not receive database-wide CREATE privileges.
         await connection.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")

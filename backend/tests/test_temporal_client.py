@@ -65,14 +65,14 @@ class TemporalClientTests(unittest.IsolatedAsyncioTestCase):
     async def test_host_change_and_lifecycle_restart_get_new_clients(self):
         clients = [object(), object(), object()]
         with patch.object(temporal_worker.Client, "connect", new=AsyncMock(side_effect=clients)) as connect:
-            with patch.object(temporal_worker.settings, "TEMPORAL_HOST", "temporal-one:7233"):
+            with patch.object(temporal_worker.settings, "TEMPORAL_HOST", "temporal-one:1024"):
                 self.assertIs(await temporal_worker.get_temporal_client(), clients[0])
-            with patch.object(temporal_worker.settings, "TEMPORAL_HOST", "temporal-two:7233"):
+            with patch.object(temporal_worker.settings, "TEMPORAL_HOST", "temporal-two:1024"):
                 self.assertIs(await temporal_worker.get_temporal_client(), clients[1])
                 await temporal_worker.close_temporal_client()
                 self.assertIs(await temporal_worker.get_temporal_client(), clients[2])
             self.assertEqual([call.args[0] for call in connect.await_args_list],
-                ["temporal-one:7233", "temporal-two:7233", "temporal-two:7233"])
+                ["temporal-one:1024", "temporal-two:1024", "temporal-two:1024"])
 
     async def test_shutdown_cancels_pending_connection(self):
         started, cancelled = asyncio.Event(), asyncio.Event()
@@ -103,8 +103,8 @@ class TemporalClientLoopTests(unittest.TestCase):
 
     def test_http_import_does_not_load_workflow_worker(self):
         environment = {**os.environ,
-            "DATABASE_URL": "postgresql+asyncpg://test:test@127.0.0.1:5432/import_only",
-            "READ_DATABASE_URL": "postgresql+asyncpg://test:test@127.0.0.1:5432/import_only"}
+            "DATABASE_URL": "postgresql+asyncpg://test:test@127.0.0.1:1020/import_only",
+            "READ_DATABASE_URL": "postgresql+asyncpg://test:test@127.0.0.1:1020/import_only"}
         program = """import sys
 import main
 assert 'temporalio.worker' not in sys.modules

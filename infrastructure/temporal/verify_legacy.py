@@ -59,7 +59,7 @@ def connection_options():
     if not password:
         raise LegacyRejected("SQL_PASSWORD or TEMPORAL_DB_PASSWORD is required")
     return dict(host=os.environ.get("SQL_HOST", "postgres-primary"),
-                port=int(os.environ.get("SQL_PORT", "5432")), user="inout_temporal",
+                port=int(os.environ.get("SQL_PORT", "1020")), user="inout_temporal",
                 password=password, timeout=10, command_timeout=30,
                 server_settings={"application_name": "inout-temporal-legacy-verifier",
                                  "default_transaction_read_only": "on"})

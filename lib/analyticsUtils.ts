@@ -1,4 +1,5 @@
 import type { AnalyticsPeriod, MovementEvent, Person, ScanAnalytics } from "./types";
+import { eventTimestamp } from "./dateRanges";
 
 const RESTRICTED_DENIAL_CODES = new Set([
   "asset_restricted",
@@ -88,13 +89,13 @@ function facilityDecimalHour(timestamp: number) {
 function buildSessions(movements: MovementEvent[]): DayPattern[] {
   // Sort chronologically
   const sorted = [...movements].sort((a, b) => {
-    return movementTimestamp(a) - movementTimestamp(b);
+    return eventTimestamp(a) - eventTimestamp(b);
   });
 
   // Group by the facility's calendar day rather than the browser's local day.
   const grouped = new Map<string, { dateObj: Date; events: MovementEvent[] }>();
   for (const m of sorted) {
-    const timestamp = movementTimestamp(m);
+    const timestamp = eventTimestamp(m);
     if (!Number.isFinite(timestamp) || timestamp <= 0) continue;
     const key = facilityDayKey(timestamp);
     const group = grouped.get(key);
@@ -115,7 +116,7 @@ function buildSessions(movements: MovementEvent[]): DayPattern[] {
 
     for (let i = 0; i < events.length; i++) {
       const e = events[i];
-      const decTime = facilityDecimalHour(movementTimestamp(e));
+      const decTime = facilityDecimalHour(eventTimestamp(e));
       if (!Number.isFinite(decTime)) continue;
       
       if (e.direction === "entry" && currentEntry === null) {
@@ -125,9 +126,9 @@ function buildSessions(movements: MovementEvent[]): DayPattern[] {
         if (i > 0) {
           const prevExit = events[i - 1];
           if (prevExit.direction === "exit") {
-            const gapMs = movementTimestamp(e) - movementTimestamp(prevExit);
+            const gapMs = eventTimestamp(e) - eventTimestamp(prevExit);
             if (gapMs >= 0 && gapMs <= MAX_BREAK_DURATION_MS) {
-              const prevExitTime = facilityDecimalHour(movementTimestamp(prevExit));
+              const prevExitTime = facilityDecimalHour(eventTimestamp(prevExit));
               sessions.push({ start: prevExitTime, end: currentEntry, type: "break", zIndex: 2 });
             }
           }

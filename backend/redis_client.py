@@ -7,7 +7,6 @@ separate from the quota pool so stream sockets cannot exhaust admission.
 
 import asyncio
 from typing import AsyncIterator
-import logging
 import redis.asyncio as aioredis
 import anyio
 
@@ -17,7 +16,6 @@ _redis_pool: aioredis.Redis | None = None
 _redis_loop: asyncio.AbstractEventLoop | None = None
 _events_pool: aioredis.Redis | None = None
 _events_loop: asyncio.AbstractEventLoop | None = None
-logger = logging.getLogger(__name__)
 
 
 def get_redis_pool() -> aioredis.Redis:
@@ -88,16 +86,6 @@ async def publish_presence_update(payload: str) -> None:
     """Publish a JSON string to the presence broadcast channel."""
     redis = get_events_pool()
     await redis.publish(PRESENCE_CHANNEL, payload)
-
-
-async def publish_data_changed() -> None:
-    """Ask connected clients to refresh after a committed data mutation."""
-    try:
-        await publish_presence_update(json.dumps({"type": "data_changed"}))
-    except Exception:
-        # The mutation is already committed; a transient Redis issue must not
-        # turn a successful write into a failed API response.
-        logger.exception("Data changed; live publication failed")
 
 
 async def subscribe_presence(ready: asyncio.Event | None = None) -> AsyncIterator[str | None]:

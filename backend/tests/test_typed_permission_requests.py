@@ -8,7 +8,8 @@ from unittest.mock import AsyncMock, Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException
 from pydantic import ValidationError
-from models import Subject, Person, HardwareAsset, PermissionRequestModel, AccessPermission, Checkpoint, TerminalCheckpointAssignment
+from models import (Subject, Person, HardwareAsset, PermissionRequestModel, AccessPermission, Checkpoint,
+    OrganizationZone)
 from schemas import PermissionRequestCreate, ManualReviewPayload, PermissionDecision
 from routers.permissions import create_permission_request
 from routers.terminal import create_manual_review
@@ -27,7 +28,11 @@ def session():
     db.scalar = AsyncMock(return_value=None)
     rows = Mock()
     rows.all.return_value = []
-    db.scalars = AsyncMock(return_value=rows)
+    async def scalar_rows(query):
+        result = Mock()
+        result.all.return_value = ["a", "b"] if "organization_zones.id" in str(query) or "zone_admin_assignments.zone_id" in str(query) else []
+        return result
+    db.scalars = AsyncMock(side_effect=scalar_rows)
     db.get = AsyncMock(return_value=None)
     db.commit = AsyncMock()
     db.flush = AsyncMock()
@@ -77,19 +82,19 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
                 end = "2026-12-01T17:00:00+05:30"
                 req = PermissionRequestModel(id="req", subject_id="person", data={
                     "id": "req", "type": kind, "status": "pending", "subjectName": "Guest",
-                    "requestedZones": ["public", "secure"], "validFrom": start, "validTo": end,
+                    "requestedZones": ["a", "b"], "validFrom": start, "validTo": end,
                 })
                 subject = Subject(id="person", barcode="person", kind="visitor" if kind == "visitor" else "employee",
                     person=Person(data={"name": "Guest", "status": "pending_approval"}))
-                permission = AccessPermission(id="permission", subject_id="person", data={"zones": ["secure"]})
+                permission = AccessPermission(id="permission", subject_id="person", data={"zones": ["b"]})
                 if kind == "zone_access":
                     req.data["permissionVersion"] = zone_permission_version(permission, subject.person.data)
                 db = session()
                 db.scalar.side_effect = [req, None, subject, permission]
                 result = await apply_permission_decision(db, "req", "approved", "admin", "Checked", valid_for_minutes=60)
                 self.assertEqual((result["permission"]["validFrom"], result["permission"]["validTo"]), (start, end))
-                self.assertEqual(result["permission"]["zones"], ["public", "secure"])
-                self.assertEqual(subject.person.data["allowedZones"], ["public", "secure"])
+                self.assertEqual(result["permission"]["zones"], ["a", "b"])
+                self.assertEqual(subject.person.data["allowedZones"], ["a", "b"])
                 self.assertNotIn("terminalAcknowledgementRequired", result["request"])
 
     async def test_manual_approval_retains_admin_duration(self):
@@ -116,7 +121,7 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("notificationDismissedAt", approved)
 
     async def test_custody_approval_reassigns_employee_without_expiry_or_access_grant(self):
-        asset = HardwareAsset(subject_id="asset", data={"name": "Laptop", "assignedEmployeeId": "old", "allowedZones": ["public"]})
+        asset = HardwareAsset(subject_id="asset", data={"name": "Laptop", "assignedEmployeeId": "old", "allowedZones": ["a"]})
         subject = Subject(id="asset", barcode="asset", kind="hardware", hardware=asset)
         carrier = Subject(id="employee", barcode="employee", kind="employee")
         carrier_data = Person(subject_id="employee", data={"name": "Verified employee"})
@@ -131,22 +136,25 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         result = await apply_permission_decision(db, "req", "approved", "admin", "Checked", valid_for_minutes=60)
         self.assertEqual(asset.data["assignedEmployeeId"], "employee")
         self.assertEqual(asset.data["assignedEmployeeName"], "Verified employee")
-        self.assertEqual(asset.data["allowedZones"], ["public"])
+        self.assertEqual(asset.data["allowedZones"], ["a"])
         self.assertIsNone(result["permission"])
         self.assertEqual(result["request"]["validTo"], "")
 
     async def test_create_custody_validates_employee_and_captures_existing_assignment(self):
         subject = Subject(id="asset", kind="hardware", barcode="asset")
         asset = HardwareAsset(subject_id="asset", data={"name": "Laptop", "assignedEmployeeId": "old", "assignedEmployeeName": "Old employee"})
-        checkpoint = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"})
+        checkpoint = Checkpoint(id="cp-main", zone_id="a", data={"name": "Main Entrance", "zone": "a"})
         employee = Subject(id="employee", kind="employee", barcode="employee")
         person = Person(subject_id="employee", data={"name": "New employee"})
         db = session()
+        db.scalar.side_effect = [OrganizationZone(id="a", name="A", active=True),
+            OrganizationZone(id="a", name="A", active=True), Subject(id="asset"),
+            Subject(id="employee"), None]
         db.execute.side_effect = [scalar_result(subject), scalar_result(asset)]
-        db.get.side_effect = [checkpoint, checkpoint, subject, employee, employee, person]
+        db.get.side_effect = [checkpoint, checkpoint, checkpoint, employee, person]
         payload = PermissionRequestCreate(subject_id="asset", checkpoint_id="cp-main", request_type="hardware_custody", reason="Transfer", carrier_id="employee", carrier_name="Forged")
         with patch("routers.permissions.enqueue_decision", new=AsyncMock()) as enqueue:
-            result = await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["admin"]}})
+            result = await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}})
         self.assertEqual(result["previousCarrierName"], "Old employee")
         self.assertEqual(result["carrierName"], "New employee")
         self.assertEqual((result["validFrom"], result["validTo"], result["requestedZones"]), ("", "", []))
@@ -156,24 +164,28 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_custody_rejects_non_employee(self):
         db = session()
+        db.scalar.side_effect = [OrganizationZone(id="a", name="A", active=True),
+            OrganizationZone(id="a", name="A", active=True), Subject(id="asset")]
         db.execute.side_effect = [scalar_result(Subject(id="asset", kind="hardware", barcode="asset")), scalar_result(HardwareAsset(data={"name": "Laptop"}))]
-        checkpoint = Checkpoint(id="cp-main", data={"zone": "public"})
+        checkpoint = Checkpoint(id="cp-main", zone_id="a", data={"zone": "a"})
         asset_subject = Subject(id="asset", kind="hardware", barcode="asset")
         visitor = Subject(id="visitor", kind="visitor", barcode="visitor")
-        db.get.side_effect = [checkpoint, checkpoint, asset_subject, visitor]
+        db.get.side_effect = [checkpoint, checkpoint, checkpoint, visitor]
         payload = PermissionRequestCreate(subject_id="asset", checkpoint_id="cp-main", request_type="hardware_custody", reason="Transfer", carrier_id="visitor")
         with self.assertRaises(HTTPException) as error:
-            await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["admin"]}})
+            await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}})
         self.assertEqual(error.exception.status_code, 422)
         db.commit.assert_not_awaited()
 
     async def test_zone_request_requires_complete_zone_set(self):
         db = session()
+        db.scalar.side_effect = [OrganizationZone(id="a", name="A", active=True),
+            OrganizationZone(id="a", name="A", active=True), Subject(id="employee")]
         db.execute.side_effect = [scalar_result(Subject(id="employee", kind="employee", barcode="employee")), scalar_result(Person(data={"name": "Employee"}))]
-        db.get.return_value = Checkpoint(id="cp-main", data={"zone": "public"})
+        db.get.return_value = Checkpoint(id="cp-main", zone_id="a", data={"zone": "a"})
         payload = PermissionRequestCreate(subject_id="employee", checkpoint_id="cp-main", request_type="zone_access", reason="Lab access", requested_zones=[])
         with self.assertRaises(HTTPException) as error:
-            await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["admin"]}})
+            await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}})
         self.assertEqual(error.exception.status_code, 422)
         db.commit.assert_not_awaited()
 
@@ -181,10 +193,11 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         existing = PermissionRequestModel(id="existing", data={"id": "existing", "type": "visitor", "status": "pending"})
         db = session()
         db.execute.return_value = scalar_result(Subject(id="visitor", kind="visitor", barcode="visitor"))
-        db.scalar.return_value = existing
-        db.get.return_value = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"})
+        db.scalar.side_effect = [OrganizationZone(id="a", name="A", active=True),
+            OrganizationZone(id="a", name="A", active=True), existing]
+        db.get.return_value = Checkpoint(id="cp-main", zone_id="a", data={"name": "Main Entrance", "zone": "a"})
         payload = PermissionRequestCreate(subject_id="visitor", checkpoint_id="cp-main", request_type="visitor", reason="Visit")
-        result = await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["admin"]}})
+        result = await create_permission_request(payload, db, {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}})
         self.assertEqual(result["id"], "existing")
         db.add.assert_not_called()
 
@@ -196,13 +209,8 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_terminal_review_persists_before_publishing_pending_request(self):
         db = session()
-        db.scalar.side_effect = [
-            TerminalCheckpointAssignment(terminal_identity="browser:operator", checkpoint_id="cp-main"),
-            None,
-        ]
-        db.get.return_value = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"})
-        temporal = Mock()
-        temporal.start_workflow = AsyncMock()
+        db.scalar = AsyncMock(return_value=None)
+        db.get.return_value = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "a"})
         source = Mock(
             subject_id=None,
             occurred_at=datetime.now(timezone.utc),
@@ -215,7 +223,8 @@ class TypedPermissionRequestTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch("routers.terminal.review_source", new=AsyncMock(return_value=source)), \
              patch("routers.terminal.pending_manual_review", new=AsyncMock(return_value=None)), \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(return_value=temporal)), \
+             patch("routers.terminal.require_checkpoint", new=AsyncMock(return_value="cp-main")), \
+             patch("routers.terminal.validate_registered_zones", new=AsyncMock(return_value=["a"])), \
              patch("routers.terminal.enqueue_presence", new=AsyncMock()) as enqueue:
             request = await create_manual_review(payload, db, {"sub": "operator"})
         db.add.assert_called_once()

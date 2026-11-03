@@ -24,7 +24,7 @@ from terminal_assignments import require_checkpoint
 from redis_client import get_redis_pool, close_redis_pool
 from routers import presence, movements, registry, permissions
 from routers import dashboard, alerts, audit, checkpoints, terminal, admin_profile, keycloak_admin, zones
-from routers import user_management_auth, exports
+from routers import user_management_auth, exports, password_updates
 from temporal_worker import get_temporal_client, close_temporal_client
 
 logger = logging.getLogger(__name__)
@@ -103,6 +103,7 @@ app.include_router(keycloak_admin.router)
 app.include_router(terminal.router, dependencies=[Depends(verify_terminal_access_request)])
 app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(exports.router)
+app.include_router(password_updates.router)
 
 
 @app.post("/internal/gateway/identity", include_in_schema=False)

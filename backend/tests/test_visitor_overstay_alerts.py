@@ -27,7 +27,7 @@ NOW = datetime(2026, 10, 10, 9, tzinfo=timezone.utc)
 class VisitorOverstayRuleTests(unittest.TestCase):
     def _visit(self, **changes):
         return {"subjectId": "visitor", "subjectType": "visitor", "state": "inside",
-                "subjectName": "Guest", "barcode": "VISITOR", "buildingId": "main-building",
+                "subjectName": "Guest", "barcode": "VISITOR", "buildingId": "a",
                 "entryStartedAt": NOW - timedelta(hours=13), "alertedEntryAt": None, **changes}
 
     def test_unknown_malformed_future_and_nonvisitor_starts_are_not_invented(self):
@@ -55,11 +55,11 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixture.DatabaseTests.asyncSetUp
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
-    async def _visitor(self, subject_id="visitor", *, state="inside", building="main-building",
+    async def _visitor(self, subject_id="visitor", *, state="inside", building="a",
                        started_at=None, status="pre_approved", metadata_inside=False):
         async with self.sessions() as db:
             db.add(Subject(id=subject_id, kind="visitor", barcode=subject_id, person=Person(data={
-                "name": "Guest " + subject_id, "status": status, "allowedZones": ["public", "secure"],
+                "name": "Guest " + subject_id, "status": status, "allowedZones": ["a", "b"],
                 "inside": metadata_inside, "validTo": "2020-01-01T00:00:00Z" if status == "expired" else ""})))
             await db.flush()
             db.add(PresenceState(subject_id=subject_id, state=state, entry_building_id=building,
@@ -68,7 +68,6 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def _evaluate(self, now=NOW):
         with patch("workflows.activities.async_session", new=self.sessions), \
-             patch("workflows.activities.publish_presence_update", new=AsyncMock()), \
              patch("workflows.activities.datetime", wraps=datetime) as clock:
             clock.now.return_value = now
             return await run_alert_rule_evaluation()
@@ -91,15 +90,15 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_strict_twelve_hour_boundary_and_both_buildings(self):
         started_at = NOW - timedelta(hours=12)
         await self._visitor("main-visitor", started_at=started_at)
-        await self._visitor("secure-visitor", building="server-room-building", started_at=started_at)
+        await self._visitor("secure-visitor", building="b", started_at=started_at)
         self.assertEqual(await self._evaluate(), 0)
         self.assertEqual(await self._evaluate(NOW + timedelta(microseconds=1)), 2)
         self.assertEqual(await self._evaluate(NOW + timedelta(hours=1)), 0)
         async with self.sessions() as db:
             alerts = (await db.scalars(select(Alert))).all()
             self.assertEqual({row.data["entryBuildingId"] for row in alerts},
-                {"main-building", "server-room-building"})
-            self.assertEqual({row.data["checkpoint"] for row in alerts}, {"Main Entrance", "Server Room"})
+                {"a", "b"})
+            self.assertEqual({row.data["checkpoint"] for row in alerts}, {"A", "B"})
             self.assertTrue(all(row.data["subjectType"] == "visitor" for row in alerts))
             self.assertTrue(all(row.source_event_id is None for row in alerts))
 

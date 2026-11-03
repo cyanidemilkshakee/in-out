@@ -1,8 +1,11 @@
 import { boundedIdentityResponse, verifyKeycloakToken, verifyKeycloakTokenPair, type KeycloakTokenConfig } from "./keycloakTokenValidation"
+import { interactionChallenge, interactionVerifier, keycloakInteractionRequest, validInteractionSubject } from "./keycloakInteractions"
 
-export type CredentialsFailureCode = "credentials" | "account_setup_required" | "service_unavailable"
+export type CredentialsFailureCode = "credentials" | "account_setup_required" | "profile_setup_required" | "service_unavailable"
+export type CredentialsFailureStage = "verify_request" | "verify_http" | "verify_payload" |
+  "token_request" | "token_http" | "token_payload" | "token_validation" | "internal"
 export class KeycloakCredentialsError extends Error {
-  constructor(readonly code: CredentialsFailureCode) {
+  constructor(readonly code: CredentialsFailureCode, readonly stage?: CredentialsFailureStage, readonly providerStatus?: number) {
     super("Sign-in could not be completed.")
   }
 }
@@ -39,46 +42,63 @@ export async function authenticateKeycloakCredentials(
   }
   const startedAt = Math.floor(Date.now() / 1000)
   try {
-    const body = new URLSearchParams({
-      grant_type: "password", client_id: config.clientId, client_secret: config.clientSecret,
-      username: username.trim(), password, scope: "openid profile email",
-    })
-    if (otp) body.set("totp", otp)
-    const response = await boundedIdentityResponse(await fetcher(
-      `${(config.jwksIssuer || config.issuer).replace(/\/$/, "")}/protocol/openid-connect/token`, {
-        method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body, cache: "no-store", redirect: "error", signal: AbortSignal.timeout(10_000),
-      },
-    ))
-    if (!response.ok) {
-      if (response.status === 429 || response.status >= 500) throw new KeycloakCredentialsError("service_unavailable")
-      const error = await response.json().catch(() => null)
-      if (error?.error === "invalid_grant" && error?.error_description === "Account is not fully set up") {
-        throw new KeycloakCredentialsError("account_setup_required")
-      }
-      // Disabled accounts, bad passwords, absent/wrong OTPs, and unknown names
-      // deliberately receive the same public response.
-      throw new KeycloakCredentialsError("credentials")
+    const codeVerifier = interactionVerifier()
+    let proof: Response
+    try {
+      proof = await keycloakInteractionRequest(config, "verify", { mode: "login", username: username.trim(),
+        currentPassword: password, ...(otp ? { otp } : {}), codeChallenge: await interactionChallenge(codeVerifier) }, fetcher)
+    } catch {
+      throw new KeycloakCredentialsError("service_unavailable", "verify_request")
     }
-    const tokens = await response.json() as Record<string, unknown>
+    if (!proof.ok) {
+      if (proof.status === 429 || proof.status >= 500) throw new KeycloakCredentialsError("service_unavailable", "verify_http", proof.status)
+      const error = await proof.json().catch(() => null)
+      if (proof.status === 409 && error?.error === "account_setup_required") throw new KeycloakCredentialsError("account_setup_required")
+      if (proof.status === 409 && error?.error === "profile_setup_required") throw new KeycloakCredentialsError("profile_setup_required")
+      if (proof.status === 401 && error?.error === "credentials") throw new KeycloakCredentialsError("credentials")
+      throw new KeycloakCredentialsError("service_unavailable", "verify_http", proof.status)
+    }
+    let interaction: Record<string, unknown>
+    try { interaction = await proof.json() as Record<string, unknown> }
+    catch { throw new KeycloakCredentialsError("service_unavailable", "verify_payload") }
+    if (typeof interaction.code !== "string" || !/^[A-Za-z0-9_-]{43,256}$/.test(interaction.code) ||
+        !Number.isSafeInteger(interaction.expiresIn) || Number(interaction.expiresIn) <= 0 || Number(interaction.expiresIn) > 60 ||
+        !validInteractionSubject(interaction.subject)) throw new KeycloakCredentialsError("service_unavailable", "verify_payload")
+    let response: Response
+    try { response = await keycloakInteractionRequest(config, "token", { code: interaction.code, codeVerifier }, fetcher) }
+    catch { throw new KeycloakCredentialsError("service_unavailable", "token_request") }
+    if (!response.ok) {
+      if (response.status === 429 || response.status >= 500) throw new KeycloakCredentialsError("service_unavailable", "token_http", response.status)
+      // A consumed/expired code cannot be replayed and is never retried with
+      // the user's password. Ask for a new sign-in instead of minting a session.
+      throw new KeycloakCredentialsError("service_unavailable", "token_http", response.status)
+    }
+    let tokens: Record<string, unknown>
+    try { tokens = await response.json() as Record<string, unknown> }
+    catch { throw new KeycloakCredentialsError("service_unavailable", "token_payload") }
     if (typeof tokens.access_token !== "string" || typeof tokens.id_token !== "string" ||
         typeof tokens.refresh_token !== "string" || !tokens.refresh_token || tokens.refresh_token.length > 32 * 1024 ||
         typeof tokens.token_type !== "string" || tokens.token_type.toLowerCase() !== "bearer" ||
         !Number.isSafeInteger(tokens.expires_in) || Number(tokens.expires_in) <= 0 || Number(tokens.expires_in) > 86_400) {
-      throw new Error("Invalid identity response.")
+      throw new KeycloakCredentialsError("service_unavailable", "token_payload")
     }
-    const access = await verify(tokens.access_token, config, "access")
-    const identity = await verify(tokens.id_token, config, "id", access.sub)
-    await verifyKeycloakTokenPair(tokens.access_token, access, identity)
+    let access: VerifiedClaims
+    let identity: VerifiedClaims
+    try {
+      access = await verify(tokens.access_token, config, "access", interaction.subject)
+      identity = await verify(tokens.id_token, config, "id", access.sub)
+      await verifyKeycloakTokenPair(tokens.access_token, access, identity)
+    } catch {
+      throw new KeycloakCredentialsError("service_unavailable", "token_validation")
+    }
     if (!access.sub || Number(identity.iat) < startedAt - 30 || Number(access.iat) < startedAt - 30) {
-      throw new Error("Identity response does not match this sign-in.")
+      throw new KeycloakCredentialsError("service_unavailable", "token_validation")
     }
-    // Direct grants prove a new password verification. Some Keycloak versions
-    // omit auth_time for this grant; only here may the freshly signed iat stand
-    // in for it. Token refresh never creates a new authentication time.
-    const authTime = identity.auth_time ?? access.auth_time ?? identity.iat
+    // The custom provider explicitly records authentication time after proof.
+    // Token issuance time is not a substitute for evidence of authentication.
+    const authTime = identity.auth_time ?? access.auth_time
     if (!Number.isSafeInteger(authTime) || Number(authTime) < startedAt - 30 || Number(authTime) > Math.floor(Date.now() / 1000) + 30) {
-      throw new Error("Fresh authentication was not confirmed.")
+      throw new KeycloakCredentialsError("service_unavailable", "token_validation")
     }
     const realmAccess = access.realm_access as { roles?: unknown } | undefined
     const roles = Array.isArray(realmAccess?.roles) ? realmAccess.roles.filter((role): role is string => typeof role === "string") : []
@@ -91,7 +111,7 @@ export async function authenticateKeycloakCredentials(
   } catch (error) {
     if (error instanceof KeycloakCredentialsError) throw error
     // Never expose provider responses, tokens, user passwords or crypto errors.
-    throw new KeycloakCredentialsError("service_unavailable")
+    throw new KeycloakCredentialsError("service_unavailable", "internal")
   }
 }
 

@@ -1,0 +1,24 @@
+# Isolated custom-provider fixture; never combine with the app compose.yaml.
+services:
+  provision:
+    image: inout-native-password-runtime
+  tests:
+    image: inout-native-password-runtime
+  keycloak:
+    image: inout-keycloak-interactions:26.8.0
+  kong:
+    networks:
+      default: {}
+      interactions-test-edge: {}
+    ports:
+      - '127.0.0.1:1098:1014'
+      - '127.0.0.1:1099:1015'
+networks:
+  interactions-test-edge:
+    ipam:
+      config:
+        - subnet: ${INTERACTION_TEST_EDGE_SUBNET:-10.250.245.0/24}
+  default:
+    ipam:
+      config:
+        - subnet: ${INTERACTION_TEST_SUBNET:-10.250.244.0/24}

@@ -10,7 +10,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, Query, HTTPException
-from sqlalchemy import select, func, exc, delete, or_, false
+from sqlalchemy import String, select, func, exc, delete, and_, or_, false
+from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,11 +32,9 @@ from models import (
     Checkpoint,
 )
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
-from temporal_worker import get_temporal_client, TASK_QUEUE
 from access_validation import (require_registered_checkpoint, validate_window,
     validate_permission_window, validate_registered_zones)
-from permission_decisions import publish_decision, enqueue_decision, permission_version
-from redis_client import publish_data_changed
+from permission_decisions import enqueue_decision, permission_version
 from subject_metadata import current_subject_metadata, validate_subject_metadata_size
 from manual_review_policy import revised_access_data
 from registry_validation import (
@@ -43,7 +42,7 @@ from registry_validation import (
     is_barcode_conflict as _is_barcode_conflict,
     validated_metadata as _validated_metadata,
 )
-from zone_access import admin_zone_ids, require_checkpoint_scope, require_subject_scope, subject_zone_condition, validate_zone_subset
+from zone_access import admin_zone_ids, checkpoint_zone_condition, require_checkpoint_scope, require_subject_scope, subject_zone_condition, validate_zone_subset
 
 logger = logging.getLogger(__name__)
 
@@ -256,6 +255,7 @@ async def create_subject(
                 "assignment": "Temporary visitor" if payload.kind == "visitor" else payload.kind.title(),
                 "state": "pending_approval" if payload.kind == "visitor" else "active" if data["status"] == "active" else "revoked" if payload.kind == "employee" and data["status"] == "inactive" else "restricted",
                 "zones": data.get("allowedZones") or [],
+                **({"checkpoints": [visitor_checkpoint.id]} if payload.kind == "visitor" and visitor_checkpoint else {}),
                 "validFrom": data.get("validFrom") or "",
                 "validTo": data.get("validTo") or data.get("validUntil") or "",
                 "source": "request" if payload.kind == "visitor" else "policy",
@@ -281,6 +281,7 @@ async def create_subject(
             "checkpoint": checkpoint_name,
             "requester": actor.get("sub", "Terminal Operator"),
             "requestedZones": requested_zones,
+            "requestedCheckpoints": [checkpoint_id],
             "validFrom": data.get("validFrom") or now.isoformat(),
             "validTo": data.get("validTo") or data.get("validUntil") or now.isoformat(),
             "status": "pending",
@@ -550,6 +551,7 @@ async def registry_bundle(
     alerts = [alert.data for alert in (await db.execute(
         select(Alert)
         .where(~func.coalesce(excluded_alert, False), or_(
+            unscoped_alert,
             Alert.data["zoneId"].astext.in_(zone_ids),
             Alert.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
             Alert.data["subjectId"].astext.in_(visible_subject_ids) if visible_subject_ids else false(),
@@ -578,8 +580,14 @@ async def registry_bundle(
             "sync_state": movement.sync_state,
             "createdAt": (movement.data or {}).get("createdAt") or occurred_at,
         })
+    unscoped_audit = and_(
+        AuditEvent.data["zoneId"].astext.is_(None),
+        AuditEvent.data["subjectId"].astext.is_(None),
+        AuditEvent.data["checkpointId"].astext.is_(None),
+    )
     audit_rows = (await db.execute(
         select(AuditEvent).where(or_(
+            unscoped_audit,
             AuditEvent.data["zoneId"].astext.in_(zone_ids),
             AuditEvent.data["subjectId"].astext.in_(visible_subject_ids) if visible_subject_ids else false(),
             AuditEvent.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
@@ -616,7 +624,7 @@ async def registry_bundle(
         "permissionRequests": [row[0].data for row in await bounded_rows(db,
             select(PermissionRequestModel)
             .where(or_(
-                PermissionRequestModel.data["requestedZones"].has_any(list(zone_ids)),
+                PermissionRequestModel.data["requestedZones"].has_any(array(list(zone_ids), type_=String)),
                 PermissionRequestModel.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
                 PermissionRequestModel.subject_id.in_(visible_subject_ids) if visible_subject_ids else false(),
             ))

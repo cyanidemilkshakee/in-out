@@ -16,7 +16,7 @@ from sqlalchemy import select, func, delete
 import test_database as database_fixture
 from auth import verify_admin_request, verify_terminal_access_request
 from models import (Alert, AlertRule, AlertReview, WarningReset, Subject, Person,
-    AuditEvent, CriticalEntryRestriction, PresenceState, Movement, AlertRuleAssignment)
+    AuditEvent, CriticalEntryRestriction, PresenceState, Movement, AlertRuleAssignment, EventOutbox)
 from alert_reviews import AlertReviewInput, WarningResetInput, review_alert, reset_subject_warnings
 from critical_entry_restrictions import activate_critical_entry_restrictions
 
@@ -46,14 +46,14 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = database_fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "review-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "review-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
 
     async def create_alert(self, *, subject_id="p1", barcode=None, severity="medium", created_at=None, **extra):
         alert_id = "AL-" + uuid.uuid4().hex
         now = created_at or datetime.now(timezone.utc)
         data = {"id": alert_id, "title": "No break recorded", "reason": "Full workday without a break",
-            "severity": severity, "status": "open", "createdAt": now.isoformat(), **extra}
+            "severity": severity, "status": "open", "createdAt": now.isoformat(), "zoneId": "a", **extra}
         if subject_id is not None:
             data["subjectId"] = subject_id
         if barcode is not None:
@@ -75,8 +75,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         return await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
 
     async def acknowledge(self, alert_id):
-        with patch("routers.alerts.publish_presence_update", new=AsyncMock()):
-            return await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
+        return await self.client.patch(f"/v1/alerts/{alert_id}", json={"status": "acknowledged"})
 
     async def reset(self, subject_id="p1", reason="Warnings checked and entry may resume"):
         return await self.client.post(f"/v1/alert-warnings/{subject_id}/reset", json={"reason": reason})
@@ -185,7 +184,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         async with self.sessions() as db:
             db.add(Subject(id="v1", kind="visitor", barcode="VISITOR-1",
-                person=Person(data={"name": "Visitor One", "status": "active"})))
+                person=Person(data={"name": "Visitor One", "status": "active", "allowedZones": ["a", "b"]})))
             await db.commit()
 
         response = await self.client.get("/v1/alerts")
@@ -205,7 +204,8 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         today, _ = irregularity_skip_date_window()
         future = (today + timedelta(days=1)).isoformat()
         async with self.sessions() as db:
-            db.add(Subject(id="p2", kind="employee", barcode="EMP-2", person=Person(data={"name": "Bob", "status": "active"})))
+            db.add(Subject(id="p2", kind="employee", barcode="EMP-2",
+                person=Person(data={"name": "Bob", "status": "active", "allowedZones": ["a", "b"]})))
             await db.flush()
             db.add(AlertReview(alert_id="retained-warning", subject_id="p2", decision="confirmed", reason="Verified",
                 reviewed_at=now, reviewed_by="admin", alert_created_at=now,
@@ -219,8 +219,8 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(page["total"], 2)
         self.assertEqual([item["id"] for item in page["items"]], [first])
         self.assertEqual(page["summary"], {"openCount": 2, "confirmedWarnings": 1})
-        self.assertEqual([item["subjectId"] for item in page["warnings"]], ["p1"])
-        self.assertEqual([item["id"] for item in page["people"]], ["p1"])
+        self.assertEqual([item["subjectId"] for item in page["warnings"]], ["h1", "p1", "p2"])
+        self.assertEqual([item["id"] for item in page["people"]], ["p1", "p2"])
         self.assertEqual([(item["subjectId"], item["irregularitySkipDates"]) for item in page["assignments"]], [("p2", [future])])
         next_page = await self.client.get("/v1/alerts", params={"view": "command", "limit": 1, "offset": 1, "sortDirection": "asc"})
         self.assertEqual([item["id"] for item in next_page.json()["items"]], [second])
@@ -323,10 +323,9 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         await self.create_alert(severity="critical")
         async def scan():
-            with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
-                return await self.client.post("/v1/terminal/scans",
-                    json={"barcode": "p1", "checkpointId": "cp-main"},
-                    headers={"Idempotency-Key": str(uuid.uuid4())})
+            return await self.client.post("/v1/terminal/scans",
+                json={"barcode": "p1", "checkpointId": "cp-main"},
+                headers={"Idempotency-Key": str(uuid.uuid4())})
         blocked = await scan()
         self.assertFalse(blocked.json()["allowed"], blocked.text)
         async with self.sessions() as db:

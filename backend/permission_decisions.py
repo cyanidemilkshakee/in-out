@@ -12,8 +12,8 @@ from sqlalchemy.orm import selectinload
 from models import (Subject, Person, HardwareAsset, AccessPermission, PresenceState,
                     PermissionRequestModel, Movement, Checkpoint, AuditEvent)
 from movement_logic import _current_date, _current_time
-from access_validation import (parse_validity, validate_permission_window, validate_zones,
-    validate_registered_checkpoint, validate_registered_zones)
+from access_validation import (parse_validity, require_registered_checkpoint,
+    validate_permission_window, validate_registered_zones)
 from facility_zones import canonical_checkpoint_id, normalize_facility_document
 from schemas import manual_approval_minutes
 from manual_review_policy import MANUAL_REVIEW_TIMEOUT_MINUTES, manual_access_snapshot, revised_access_data
@@ -29,7 +29,7 @@ def permission_version(permission):
     """Bind a pending visitor request to the server-owned permission it reviewed."""
     if permission is None:
         return None
-    fields = ("state", "zones", "validFrom", "validTo", "source", "requestId")
+    fields = ("state", "zones", "checkpoints", "validFrom", "validTo", "source", "requestId")
     snapshot = json.dumps({"id": permission.id,
         "data": {key: (permission.data or {}).get(key) for key in fields}}, sort_keys=True)
     return hashlib.sha256(snapshot.encode()).hexdigest()
@@ -41,7 +41,7 @@ def zone_permission_version(permission, metadata):
         return permission_version(permission)
     metadata = metadata or {}
     snapshot = json.dumps({key: metadata.get(key) for key in
-        ("status", "allowedZones", "validFrom", "validTo")}, sort_keys=True)
+        ("status", "allowedZones", "allowedCheckpoints", "validFrom", "validTo")}, sort_keys=True)
     return hashlib.sha256(snapshot.encode()).hexdigest()
 
 
@@ -466,14 +466,34 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
                 zones = await validate_registered_zones(db, data.get("requestedZones") or [])
                 req.data = {**req.data, "requestedZones": zones}
                 permission.update(zones=zones, validFrom=data.get("validFrom", ""), validTo=data.get("validTo", ""))
+                if kind == "visitor":
+                    requested_checkpoints = data.get("requestedCheckpoints")
+                    if requested_checkpoints is not None:
+                        if not isinstance(requested_checkpoints, list) or len(requested_checkpoints) != 1:
+                            raise HTTPException(422, "Visitor access must target exactly one checkpoint")
+                        checkpoint_id = await require_registered_checkpoint(db, requested_checkpoints[0])
+                        checkpoint = await db.get(Checkpoint, checkpoint_id)
+                        if checkpoint is None or checkpoint.zone_id not in zones:
+                            raise HTTPException(422, "The selected checkpoint must belong to an allowed zone")
+                        requested_checkpoints = [checkpoint.id]
+                        req.data = {**req.data, "requestedCheckpoints": requested_checkpoints}
+                        permission["checkpoints"] = requested_checkpoints
+                    else:
+                        permission.pop("checkpoints", None)
             if not superseded:
                 permission = revised_access_data(perm.data, permission, permission=True, force=True)
                 perm.data = permission
             if metadata and not superseded:
-                metadata.data = revised_access_data(metadata.data,
-                    {**current_subject_metadata(subject.kind, metadata.data), "status": "pre_approved" if subject.kind == "visitor" and decision == "approved" else state,
-                     **({"allowedZones": permission["zones"], "validFrom": permission["validFrom"], "validTo": permission["validTo"]} if decision == "approved" else {})},
-                    force=True)
+                updated_metadata = {**current_subject_metadata(subject.kind, metadata.data),
+                    "status": "pre_approved" if subject.kind == "visitor" and decision == "approved" else state}
+                if decision == "approved":
+                    updated_metadata.update(allowedZones=permission["zones"], validFrom=permission["validFrom"], validTo=permission["validTo"])
+                    if subject.kind == "visitor":
+                        if permission.get("checkpoints"):
+                            updated_metadata["allowedCheckpoints"] = permission["checkpoints"]
+                        else:
+                            updated_metadata.pop("allowedCheckpoints", None)
+                metadata.data = revised_access_data(metadata.data, updated_metadata, force=True)
     req.data = {**req.data, "id": req.id, "status": decision, "decidedAt": data.get("decidedAt") or now.isoformat(),
                 "decidedBy": data.get("decidedBy") or actor, "decisionReason": reason, "appliedAt": now.isoformat()}
     audit_id = "AUD-" + uuid.uuid4().hex

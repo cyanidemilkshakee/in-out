@@ -19,6 +19,9 @@ def database_engine_options(configuration=settings):
     """Bound connection, checkout, server execution and transport waits."""
     return {
         "echo": False,
+        # SQLAlchemy can include parameter values in DBAPI exceptions unless
+        # this is enabled. These values may contain personal and access data.
+        "hide_parameters": True,
         "pool_size": 5,
         "max_overflow": 10,
         "pool_timeout": configuration.DATABASE_POOL_TIMEOUT_SECONDS,

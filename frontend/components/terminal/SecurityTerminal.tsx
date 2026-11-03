@@ -9,6 +9,7 @@ import type { Person, PermissionRequest, RecordScanInput, ScanDecision, Terminal
 import { DataServiceError } from "../../../services/httpDataService";
 import { useDateTimeNow } from "../../hooks/useDateTimeNow";
 import { formatRequestDate } from "../admin/permissions/requestPresentation";
+import { facilityZoneLabel } from "../../../lib/facilityZones";
 import {
   cacheTerminalConfig,
   enqueueTerminalScan,
@@ -96,8 +97,6 @@ export function SecurityTerminal({
   const [scanFeedback, setScanFeedback] = useState<{ outcome: "approved" | "denied"; key: number } | null>(null);
   const [dismissingRequestId, setDismissingRequestId] = useState<string | null>(null);
   const [notificationError, setNotificationError] = useState("");
-  const [visitorPageLoading, setVisitorPageLoading] = useState(false);
-  const [visitorPageError, setVisitorPageError] = useState("");
   const [visitorDialogOpen, setVisitorDialogOpen] = useState(false);
   const [registeredVisitor, setRegisteredVisitor] = useState<Person | null>(null);
   const barcodeInputRef = useRef<HTMLInputElement>(null);
@@ -114,6 +113,9 @@ export function SecurityTerminal({
     : ownedCache?.checkpoints.length === 1 ? ownedCache.checkpoints : [];
   const terminalHardwareAssets = hardwareAssets.length ? hardwareAssets : ownedCache?.hardwareAssets ?? [];
   const checkpoint = terminalCheckpoints[0];
+  const assignedZone = checkpoint
+    ? checkpoint.zoneName ?? facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone)
+    : "";
   // Only the live DataProvider snapshot creates a clock. Cached policy is evidence,
   // never a source for elapsed time after a browser reload.
   const replayClock = useMemo(() => sampleQueueServerClock(terminalReplayPolicy), [terminalReplayPolicy]);
@@ -147,8 +149,14 @@ export function SecurityTerminal({
   const estimatedAdminReturn = adminAvailability?.status === "offline" && adminAvailability.availableAt
     ? formatTerminalTime(adminAvailability.availableAt)
     : null;
+  const offlineAdminNames = adminAvailability?.adminNames ?? [];
+  const zoneAdminLabel = offlineAdminNames.length === 1
+    ? `Zone admin ${offlineAdminNames[0]}`
+    : offlineAdminNames.length > 1
+      ? `Zone admins ${offlineAdminNames.join(", ")}`
+      : "Your zone admin";
   const adminOfflineNotice = estimatedAdminReturn
-    ? `The administrator is offline. ${result === "pending" && !hasEntryRestriction ? "This permission may be picked up" : "Manual reviews may be picked up"} around ${estimatedAdminReturn}.`
+    ? `${zoneAdminLabel}${assignedZone ? ` for ${assignedZone}` : ""} ${offlineAdminNames.length > 1 ? "are" : "is"} offline. ${result === "pending" && !hasEntryRestriction ? "This permission may be picked up" : "Manual reviews may be picked up"} around ${estimatedAdminReturn}.`
     : null;
   const title = result === "recorded" ? "Previously recorded scan" : result === "scanning" ? "Checking access" : result === "queued" ? latestQueueHeld ? "Scan held for review" : "Scan queued for verification" : result === "pending" ? "Awaiting approval" : approvalAwaitingScan ? approvalExpired ? "Approval expired" : "Approval ready" : result === "approved" ? `${direction} allowed` : result === "denied" ? "Access denied" : "Ready to scan";
   const denialReason = decision?.event.reason?.trim();
@@ -442,8 +450,11 @@ export function SecurityTerminal({
           <div className={styles.headingCopy}><h1 id="terminal-title">Security terminal</h1></div>
           <button type="button" className={`${styles.secondaryButton} ${styles.registerVisitorButton}`} disabled={busy || !networkOnline} aria-haspopup="dialog" aria-expanded={visitorDialogOpen} onClick={() => { setRegisteredVisitor(null); setVisitorDialogOpen(true); }}><UserRound />Register visitor</button>
           <div className={styles.checkpointControl}>
-            <span>Assigned checkpoint</span>
-            <strong className={styles.assignedCheckpoint}>{checkpoint?.name ?? (isLoading ? "Loading assignment…" : "No checkpoint assigned")}</strong>
+            <span>Assigned location</span>
+            {checkpoint ? <div className={styles.assignedLocation}>
+              <div><span>Zone</span><strong>{assignedZone}</strong></div>
+              <div><span>Checkpoint</span><strong>{checkpoint.name}</strong></div>
+            </div> : <strong className={styles.assignedCheckpoint}>{isLoading ? "Loading assignment…" : "No checkpoint assigned"}</strong>}
             {!checkpoint && !isLoading && <small>
               No checkpoint is assigned to {accountName || accountEmail || "this account"}. Assignments are per signed-in account; ask an administrator to check this account in Manage users.
             </small>}
@@ -468,7 +479,7 @@ export function SecurityTerminal({
           {checkpoint && <section className={styles.visitorRoster} aria-labelledby="terminal-visitors-title">
             <header className={styles.visitorRosterHeader}>
               <h2 id="terminal-visitors-title">Expected visitors</h2>
-              <span>{checkpoint.name} · {visibleTerminalVisitors.length} registered</span>
+              <span>{assignedZone} · {checkpoint.name} · {visibleTerminalVisitors.length} registered</span>
             </header>
             <ul className={`${styles.visitorRosterList} scrollable-content`}>
               {visibleTerminalVisitors.length ? visibleTerminalVisitors.map((visitor) => (

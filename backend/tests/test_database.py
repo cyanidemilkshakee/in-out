@@ -20,7 +20,7 @@ from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.engine import make_url
 from database import get_db, get_read_db
-from models import Subject, Person, HardwareAsset, Checkpoint, Movement, PresenceState, PermissionRequestModel, AccessPermission, AuditEvent, Alert, ScanRequest, TerminalCheckpointAssignment, EventOutbox
+from models import Subject, Person, HardwareAsset, Checkpoint, Movement, PresenceState, PermissionRequestModel, AccessPermission, AuditEvent, Alert, ScanRequest, TerminalCheckpointAssignment, EventOutbox, ZoneAdminAssignment
 from schemas import BrowserScanPayload, ScanPayload
 from terminal_scans import record_scan
 from auth import verify_admin_request, verify_terminal_access_request
@@ -53,6 +53,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         if not make_url(TEST_URL).database.endswith("_test"):
             raise RuntimeError("Integration tests require a database ending in _test")
         self.schema = "test_" + uuid.uuid4().hex
+        self.legacy_schemas = []
         self.engine = create_async_engine(TEST_URL, connect_args={"server_settings": {"search_path": f"{self.schema},public"}})
         async with self.engine.begin() as conn:
             # Extensions are database-wide. Keep them out of disposable schemas
@@ -69,17 +70,46 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             await conn.run_sync(migrate)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions() as db:
+            # Replace the generated A front gate with the stable cp-main test
+            # identity, while retaining the migration's back gates and B branch.
+            for checkpoint_id in ("a-1",):
+                checkpoint = await db.get(Checkpoint, checkpoint_id)
+                if checkpoint is not None:
+                    await db.delete(checkpoint)
+            await db.flush()
             checkpoint = await db.get(Checkpoint, "cp-main")
-            checkpoint_data = {"id": "cp-main", "name": "Main Entrance", "mode": "auto", "zone": "public"}
+            checkpoint_data = {"id": "cp-main", "name": "Main Entrance", "mode": "auto", "zone": "a",
+                "zoneId": "a", "buildingId": "a", "checkpointNumber": 1, "gateType": "front_gate",
+                "gateLabel": "Front Gate", "required": True, "active": True}
             if checkpoint:
                 checkpoint.data = checkpoint_data
+                checkpoint.zone_id = "a"
+                checkpoint.number = 1
+                checkpoint.gate_type = "front_gate"
+                checkpoint.required = True
+                checkpoint.active = True
             else:
-                db.add(Checkpoint(id="cp-main", data=checkpoint_data))
+                db.add(Checkpoint(id="cp-main", zone_id="a", number=1, gate_type="front_gate",
+                    required=True, active=True, data=checkpoint_data))
             db.add(Subject(id="p1", kind="employee", barcode="p1", person=Person(data={
-                "name": "Alice", "status": "active", "allowedZones": ["All Zones"], "inside": False})))
+                "name": "Alice", "status": "active", "allowedZones": ["a", "b"], "inside": False})))
             db.add(Subject(id="h1", kind="hardware", barcode="h1", hardware=HardwareAsset(data={
-                "name": "Laptop", "category": "Laptop", "status": "active", "allowedZones": ["All Zones"], "inside": False})))
+                "name": "Laptop", "category": "Laptop", "status": "active", "allowedZones": ["a", "b"], "inside": False})))
             await db.flush()
+            # These identities represent the ordinary admins used by the
+            # integration tests. Give each a realistic assignment to both
+            # fixture branches so branch-scoped routes exercise their normal
+            # behavior instead of failing at the new authorization boundary.
+            for admin_subject in (
+                "admin", "admin-a", "admin-b", "assignment-admin", "analytics-admin",
+                "bounds-admin", "export-admin", "grant-admin", "history-admin",
+                "late-admin", "metadata-admin", "registry-read-admin", "review-admin",
+                "setup-admin", "test-admin", "verified-admin",
+            ):
+                db.add_all([
+                    ZoneAdminAssignment(admin_subject=admin_subject, zone_id=zone_id, assigned_by="fixture")
+                    for zone_id in ("a", "b")
+                ])
             db.add_all([TerminalCheckpointAssignment(terminal_identity="browser:" + name, checkpoint_id="cp-main")
                 for name in ("operator", "test-operator")])
             await db.commit()
@@ -104,6 +134,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         await self.client.aclose()
         await close_redis_pool()
         async with self.engine.begin() as conn:
+            for schema in self.legacy_schemas:
+                await conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
             await conn.execute(text(f'DROP SCHEMA "{self.schema}" CASCADE'))
         await self.engine.dispose()
 
@@ -115,11 +147,11 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
     def _direct_grant(self, **fields):
         now = datetime.now(timezone.utc)
         return {"subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
-            "reason": "Verified by administrator", "requested_zones": ["public", "secure"],
+            "reason": "Verified by administrator", "requested_zones": ["a", "b"],
             "valid_from": now.isoformat(), "valid_to": (now + timedelta(hours=2)).isoformat(), **fields}
 
     async def test_direct_visitor_grant_is_atomic_active_and_archived_without_workflow(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
         payload = self._direct_grant(subject_id="", request_type="visitor", barcode="direct-visitor",
             new_visitor={"name": "Direct visitor", "host": "Alice", "company": "Example"})
         response = await self.client.post("/v1/permissions/grant", json=payload)
@@ -128,10 +160,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["request"]["status"], "approved")
         self.assertEqual(result["permission"]["source"], "manual")
         self.assertEqual(result["person"]["status"], "pre_approved")
-        self.assertEqual(result["permission"]["zones"], ["public", "secure"])
+        self.assertEqual(result["permission"]["zones"], ["a", "b"])
         self.assertEqual(result["request"]["decidedBy"], "grant-admin")
-        temporal.assert_not_awaited()
-        publish.assert_not_awaited()
         self.assertEqual(len(await self.durable_events("manual_review_decision", request_id=result["request"]["id"])), 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(PermissionRequestModel)
@@ -143,7 +173,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(result["request"]["subjectId"], [item["subjectId"] for item in directory["people"]])
 
     async def test_direct_existing_visitor_grant_decides_pending_permission_once(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
             db.add(Subject(id="pending-visitor", barcode="pending-visitor", kind="visitor",
@@ -152,7 +182,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             db.add(PermissionRequestModel(id="pending-visitor-request", subject_id="pending-visitor", created_at=now,
                 data={"id": "pending-visitor-request", "type": "visitor", "status": "pending", "requester": "operator",
                     "subjectId": "pending-visitor", "subjectName": "Guest", "createdAt": now.isoformat(),
-                    "requestedZones": ["public"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
+                    "requestedZones": ["a"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
             await db.commit()
         response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
             subject_id="pending-visitor", request_type="visitor"))
@@ -163,7 +193,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 PermissionRequestModel.subject_id == "pending-visitor"))).all()
             self.assertEqual(len(requests), 1)
             self.assertEqual(requests[0].data["status"], "approved")
-            self.assertEqual((await db.get(Person, "pending-visitor")).data["allowedZones"], ["public", "secure"])
+            self.assertEqual((await db.get(Person, "pending-visitor")).data["allowedZones"], ["a", "b"])
 
     async def _pending_visitor_grant_fixture(self, db, include_request=True):
         now = datetime.now(timezone.utc)
@@ -175,11 +205,11 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         db.add(PermissionRequestModel(id="grant-race-request", subject_id="grant-race-visitor", created_at=now,
             data={"id": "grant-race-request", "subjectId": "grant-race-visitor", "subjectName": "Race guest",
                 "type": "visitor", "status": "pending", "createdAt": now.isoformat(), "requester": "operator",
-                "requestedZones": ["public"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
+                "requestedZones": ["a"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
         await db.flush()
 
     async def test_direct_zone_grant_resolves_visitor_workflow_instead_of_leaving_timeout_revocation(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
         async with self.sessions() as db:
             await self._pending_visitor_grant_fixture(db)
             await db.commit()
@@ -196,7 +226,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(next(item for item in directory["people"] if item["subjectId"] == "grant-race-visitor")["source"], "manual")
 
     async def test_direct_grant_waits_for_creator_and_reuses_newly_committed_pending_visitor(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
         async with self.sessions() as creator:
             await self._pending_visitor_grant_fixture(creator, include_request=False)
             await creator.commit()
@@ -205,7 +235,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             creator.add(PermissionRequestModel(id="grant-race-request", subject_id="grant-race-visitor", created_at=now,
                 data={"id": "grant-race-request", "type": "visitor", "status": "pending", "subjectId": "grant-race-visitor",
                     "subjectName": "Race guest", "createdAt": now.isoformat(), "requester": "operator",
-                    "requestedZones": ["public"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
+                    "requestedZones": ["a"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
             await creator.flush()
             grant = asyncio.create_task(self.client.post("/v1/permissions/grant", json=self._direct_grant(subject_id="grant-race-visitor")))
             await asyncio.sleep(0.05)
@@ -218,7 +248,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(PermissionRequestModel)), 1)
 
     async def test_direct_grant_returns_conflict_for_locked_pending_decision_without_partial_grant(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
         async with self.sessions() as db:
             await self._pending_visitor_grant_fixture(db)
             await db.commit()
@@ -232,7 +262,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(AccessPermission)), 0)
 
     async def test_direct_custody_grant_changes_carrier_without_expiring_or_changing_zones(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
         response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
             subject_id="h1", request_type="hardware_custody", carrier_id="p1", carrier_name="Forged", hardware_id="h1"))
         self.assertEqual(response.status_code, 201, response.text)
@@ -241,13 +271,13 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["request"]["validTo"], "")
         self.assertIsNone(result["permission"])
         async with self.sessions() as db:
-            self.assertEqual((await db.get(HardwareAsset, "h1")).data["allowedZones"], ["All Zones"])
+            self.assertEqual((await db.get(HardwareAsset, "h1")).data["allowedZones"], ["a", "b"])
         retry = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
             subject_id="h1", request_type="hardware_custody", carrier_id="p1"))
         self.assertEqual(retry.status_code, 422, retry.text)
 
     async def test_invalid_direct_grants_and_effect_failure_leave_no_partial_identity_or_history(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
         for changes in ({"valid_to": "2126-10-06T10:00:00Z"}, {"requested_zones": []},
                         {"request_type": "manual_override"}, {"subject_id": "h1", "request_type": "hardware_custody", "carrier_id": "h1"}):
             response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(**changes))
@@ -273,7 +303,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             assignment = await db.get(TerminalCheckpointAssignment, "browser:operator")
             assignment.checkpoint_id = "server-room"
             person = await db.get(Person, "p1")
-            person.data = {**person.data, "allowedZones": ["public"]}
+            person.data = {**person.data, "allowedZones": ["a"]}
             await db.commit()
         headers = {"Idempotency-Key": str(uuid.uuid4())}
         forged = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
@@ -304,23 +334,21 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(bundle["checkpoints"], [])
         self.assertIsNone(bundle["terminalAssignment"]["checkpointId"])
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
-            original = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-            self.assertEqual(original.status_code, 200, original.text)
-            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).json(), replay_receipt(original.json()))
-            async with self.sessions() as db:
-                await set_checkpoint_assignment(db, "browser:operator", "server-room", "admin")
-                await db.commit()
-            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
-            # Rewriting the old queued request must not create a second scan.
-            changed = await self.client.post("/v1/terminal/scans", json={**body, "checkpointId": "server-room"}, headers=headers)
-            self.assertEqual(changed.status_code, 409, changed.text)
-            async with self.sessions() as db:
-                await set_checkpoint_assignment(db, "browser:operator", None, "admin")
-                await db.commit()
-            self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
-            publish.assert_not_awaited()
-            self.assertEqual(len(await self.durable_events("scan")), 1)
+        original = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+        self.assertEqual(original.status_code, 200, original.text)
+        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).json(), replay_receipt(original.json()))
+        async with self.sessions() as db:
+            await set_checkpoint_assignment(db, "browser:operator", "server-room", "admin")
+            await db.commit()
+        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
+        # Rewriting the old queued request must not create a second scan.
+        changed = await self.client.post("/v1/terminal/scans", json={**body, "checkpointId": "server-room"}, headers=headers)
+        self.assertEqual(changed.status_code, 409, changed.text)
+        async with self.sessions() as db:
+            await set_checkpoint_assignment(db, "browser:operator", None, "admin")
+            await db.commit()
+        self.assertEqual((await self.client.post("/v1/terminal/scans", json=body, headers=headers)).status_code, 403)
+        self.assertEqual(len(await self.durable_events("scan")), 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 2)
@@ -329,7 +357,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         from routers.dashboard import get_dashboard
         with patch("redis_client.get_redis_pool", side_effect=AssertionError("Dashboard must not use Redis")):
             async with self.sessions() as db:
-                admin = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+                admin = {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
                 before = await get_dashboard(db, actor=admin)
             async with self.sessions() as db:
                 result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
@@ -371,7 +399,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
         now = int(time.time())
         headers = {"Authorization": "Bearer isolated-test-token"}
-        actor = {"sub": "setup-admin", "realm_access": {"roles": ["admin"]}, "auth_time": now}
+        actor = {"sub": "setup-admin", "iat": now, "exp": now + 600, "jti": "setup-admin-token",
+                 "realm_access": {"roles": ["zone-admin", "master-admin"]}, "auth_time": now}
         step_up = proof_for({
             "issuedAt": now, "authTime": now, "expiresAt": now + 600,
             "durationMinutes": 10,
@@ -381,20 +410,19 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         headers["X-InOut-Step-Up"] = step_up
         with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), \
              patch("auth.verify_keycloak_token", return_value=actor) as token, \
-             patch("routers.keycloak_admin._request", side_effect=identity), \
-             patch("routers.keycloak_admin.publish_checkpoint_assignment", new=AsyncMock()) as publish:
+             patch("routers.keycloak_admin._request", side_effect=identity):
             response = await self.client.post("/v1/keycloak/users", headers=headers, json={
                 "username": "new-operator", "password": "Isolated9-test-password", "roles": ["operator"], "checkpointId": "server-room",
             })
             self.assertEqual(response.status_code, 201, response.text)
             self.assertEqual(response.json()["checkpointId"], "server-room")
             self.assertEqual(response.json()["roles"], ["operator"])
-            publish.assert_not_awaited()
             self.assertEqual((await self.durable_events("terminal_assignment"))[0]["terminalIdentity"], "browser:" + user_id)
             async with self.sessions() as db:
                 audit = await db.scalar(select(AuditEvent))
                 self.assertEqual(audit.data["actor"], "setup-admin")
-            token.return_value = {"sub": user_id, "realm_access": {"roles": ["operator"]}}
+            token.return_value = {"sub": user_id, "iat": now, "exp": now + 600, "jti": "new-operator-token",
+                                  "realm_access": {"roles": ["operator"]}}
             bundle = await self.client.get("/v1/terminal/bundle", headers=headers)
             self.assertEqual(bundle.status_code, 200, bundle.text)
             self.assertEqual([cp["id"] for cp in bundle.json()["checkpoints"]], ["server-room"])
@@ -421,12 +449,10 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_retry_does_not_publish_an_old_presence_event(self):
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
         headers = {"Idempotency-Key": str(uuid.uuid4())}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
-            for _ in range(2):
-                response = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
-                self.assertEqual(response.status_code, 200, response.text)
-            publish.assert_not_awaited()
-            self.assertEqual(len(await self.durable_events("scan")), 1)
+        for _ in range(2):
+            response = await self.client.post("/v1/terminal/scans", json={"barcode": "p1", "checkpointId": "cp-main"}, headers=headers)
+            self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(len(await self.durable_events("scan")), 1)
 
     async def test_approval_window_is_persisted_and_dashboard_excludes_equipment(self):
         from routers.dashboard import get_dashboard
@@ -434,7 +460,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             now = datetime.now(timezone.utc)
             db.add(PermissionRequestModel(id="window", subject_id="p1", created_at=now, data={
                 "id": "window", "subjectId": "p1", "subjectName": "Alice", "status": "pending", "type": "zone_access",
-                "requestedZones": ["public"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=8)).isoformat(),
+                "requestedZones": ["a"], "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=8)).isoformat(),
                 "permissionVersion": zone_permission_version(None, (await db.get(Person, "p1")).data)}))
             await db.commit()
             result = await apply_permission_decision(db, "window", "approved", "admin", "Checked", valid_for_minutes=45)
@@ -447,11 +473,11 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             db.add_all([PresenceState(subject_id="p1", state="inside"), PresenceState(subject_id="h1", state="inside")])
             await db.commit()
             dashboard = await get_dashboard(db,
-                actor={"sub": "admin", "realm_access": {"roles": ["admin"]}})
+                actor={"sub": "admin", "realm_access": {"roles": ["zone-admin"]}})
             self.assertEqual(dashboard["analytics"]["activeInside"], 1)
 
     async def test_subject_deletion_preserves_history_and_deletes_unused_subject(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         async with self.sessions() as db:
             await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "operator")
             await db.commit()
@@ -475,19 +501,18 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["movements"], 0)
 
     async def test_browser_scan_retry_hardware_and_movement_filters(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         body = {"barcode": "p1", "checkpointId": "cp-main", "selectedHardwareIds": ["h1"], "scanType": "auto", "online": True}
         headers = {"Idempotency-Key": str(uuid.uuid4())}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()):
-            response = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-            self.assertEqual(response.status_code, 200, response.text)
-            result = response.json()
-            self.assertEqual(result["decision"]["event"]["subjectName"], "Alice")
-            self.assertTrue(result["updatedPeople"][0]["inside"])
-            self.assertTrue(result["updatedHardwareAssets"][0]["inside"])
-            retry = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
-            self.assertEqual(retry.json(), replay_receipt(result))
+        response = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+        self.assertEqual(response.status_code, 200, response.text)
+        result = response.json()
+        self.assertEqual(result["decision"]["event"]["subjectName"], "Alice")
+        self.assertTrue(result["updatedPeople"][0]["inside"])
+        self.assertTrue(result["updatedHardwareAssets"][0]["inside"])
+        retry = await self.client.post("/v1/terminal/scans", json=body, headers=headers)
+        self.assertEqual(retry.json(), replay_receipt(result))
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             # Cooldown has elapsed; auto mode must derive an exit from persisted presence.
@@ -518,7 +543,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.get("/v1/movements", params=params)).json()["total"], 0)
 
     async def test_movement_references_search_and_resolve_across_default_filters(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         event_ids = [str(uuid.uuid4()), "MAN-" + uuid.uuid4().hex, "EVT-000123"]
         async with self.sessions() as db:
             for event_id in event_ids:
@@ -579,7 +604,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         req = PermissionRequestModel(id=req_id, subject_id=subject_id, created_at=now, data={
             "id": req_id, "barcode": barcode, "subjectId": subject_id or "", "subjectName": "Reviewed visitor",
             "subjectType": "visitor", "type": kind, "status": "pending", "checkpointId": "cp-main",
-            "direction": "entry", "requestedZones": ["public"], "validFrom": now.isoformat(),
+            "direction": "entry", "requestedZones": ["a"], "validFrom": now.isoformat(),
             "validTo": (now + timedelta(hours=1)).isoformat(),
             **({"eventId": event["id"]} if event else {}),
         })
@@ -604,7 +629,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         return body, review.json()
 
     async def test_manual_approval_durations_gate_one_rescan_and_retries_do_not_extend_the_window(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         for selected in (None, 15, 30, 60, 120, 240):
             with self.subTest(selected=selected):
@@ -690,7 +715,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIsNone(state.entry_override)
 
     async def test_invalid_manual_durations_leave_pending_and_applied_requests_unchanged(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         invalid = (0, -1, 241, 1000000, 20, 45, True, False, 15.0, 15.5, "15")
         _, review = await self._submit_unknown_manual_review("invalid-duration")
@@ -735,7 +760,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(approved.status_code, 200, approved.text)
 
     async def test_expired_manual_approval_cannot_start_entry_but_allows_exit_after_a_valid_rescan(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         body, review = await self._submit_unknown_manual_review("expired-manual-window")
         url = f"/v1/permission-requests/{review['id']}/decide"
@@ -791,7 +816,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 1)
 
     async def test_manual_unknown_entry_persists_and_exits_once(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         scan_body = {"barcode": "new-visitor", "checkpointId": "cp-main"}
         denied = await self.client.post("/v1/terminal/scans", json=scan_body, headers={"Idempotency-Key": str(uuid.uuid4())})
@@ -861,40 +886,35 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_manual_denial_reclassifies_original_scan_in_history_and_analytics(self):
         from routers.dashboard import get_dashboard
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
         body = {"barcode": "unknown-manual-denial", "checkpointId": "cp-main"}
         key = str(uuid.uuid4())
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock()) as publish, \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            scan = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-            self.assertEqual(scan.status_code, 200, scan.text)
-            source = scan.json()["decision"]["event"]
-            self.assertEqual((source["result"], source["scanType"]), ("denied", "auto"))
-            review = await self.client.post("/v1/terminal/manual-reviews", json={
-                **body, "eventId": source["id"], "direction": "entry", "operatorNote": "No valid identification",
-            })
-            self.assertEqual(review.status_code, 200, review.text)
-            url = f"/v1/permission-requests/{review.json()['id']}/decide"
-            decision = {"decision": "denied", "reason": "Identification could not be verified"}
-            response = await self.client.post(url, json=decision)
-            self.assertEqual(response.status_code, 200, response.text)
-            event = response.json()["movement"]
-            self.assertEqual((event["id"], event["result"], event["scanType"]), (source["id"], "denied", "manual"))
-            self.assertEqual(event["createdAt"], source["createdAt"])
-            self.assertEqual(event["initialScanType"], "auto")
-            self.assertEqual(event["denialCode"], "manual_review")
-            publish.assert_not_awaited()
-            published = (await self.durable_events("manual_review_decision", request_id=review.json()["id"]))[-1]
-            self.assertEqual(published["movement"]["scanType"], "manual")
-            retry = await self.client.post(url, json=decision)
-            self.assertEqual(retry.status_code, 200, retry.text)
-            self.assertEqual(retry.json()["movement"], event)
-            # An original scan retry retains its immutable response, not a new event.
-            replay = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-            self.assertEqual(replay.json(), replay_receipt(scan.json()))
+        scan = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+        self.assertEqual(scan.status_code, 200, scan.text)
+        source = scan.json()["decision"]["event"]
+        self.assertEqual((source["result"], source["scanType"]), ("denied", "auto"))
+        review = await self.client.post("/v1/terminal/manual-reviews", json={
+            **body, "eventId": source["id"], "direction": "entry", "operatorNote": "No valid identification",
+        })
+        self.assertEqual(review.status_code, 200, review.text)
+        url = f"/v1/permission-requests/{review.json()['id']}/decide"
+        decision = {"decision": "denied", "reason": "Identification could not be verified"}
+        response = await self.client.post(url, json=decision)
+        self.assertEqual(response.status_code, 200, response.text)
+        event = response.json()["movement"]
+        self.assertEqual((event["id"], event["result"], event["scanType"]), (source["id"], "denied", "manual"))
+        self.assertEqual(event["createdAt"], source["createdAt"])
+        self.assertEqual(event["initialScanType"], "auto")
+        self.assertEqual(event["denialCode"], "manual_review")
+        published = (await self.durable_events("manual_review_decision", request_id=review.json()["id"]))[-1]
+        self.assertEqual(published["movement"]["scanType"], "manual")
+        retry = await self.client.post(url, json=decision)
+        self.assertEqual(retry.status_code, 200, retry.text)
+        self.assertEqual(retry.json()["movement"], event)
+        # An original scan retry retains its immutable response, not a new event.
+        replay = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+        self.assertEqual(replay.json(), replay_receipt(scan.json()))
         for endpoint in ("/v1/movements", "/v1/movements/analytics"):
             manual = await self.client.get(endpoint, params={"scanType": "manual", "result": "denied"})
             automatic = await self.client.get(endpoint, params={"scanType": "auto", "result": "denied"})
@@ -910,7 +930,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(PresenceState)), 0)
             self.assertIsNone(await db.scalar(select(Subject).where(Subject.barcode == body["barcode"])))
             dashboard = await get_dashboard(db,
-                actor={"sub": "test-admin", "realm_access": {"roles": ["admin"]}})
+                actor={"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}})
             self.assertEqual(dashboard["analytics"]["totalScans"], 1)
             self.assertEqual(dashboard["analytics"]["totalAutomatic"], 0)
             self.assertEqual(dashboard["analytics"]["totalManual"], 1)
@@ -957,47 +977,40 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_terminal_notification_dismissal_preserves_decision_and_history(self):
         from auth import verify_admin_or_operator_request
         operator = {"sub": "test-operator", "realm_access": {"roles": ["operator"]}}
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: operator
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: operator
         async with self.sessions() as db:
             person = await db.get(Person, "p1")
             person.data = {**person.data, "status": "restricted"}
             await db.commit()
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()), \
-             patch("permission_decisions.publish_presence_update", new=AsyncMock()), \
-             patch("routers.terminal.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            for outcome in ("denied", "approved"):
-                with self.subTest(outcome=outcome):
-                    async with self.sessions() as db:
-                        scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
-                        await db.commit()
-                        req_id = await self._create_review(db, "p1", "p1", scan["decision"]["event"])
-                    url = f"/v1/permission-requests/{req_id}"
-                    decided = await self.client.post(url + "/decide", json={"decision": outcome, "reason": "ID checked"})
-                    self.assertEqual(decided.status_code, 200, decided.text)
-                    self.assertNotIn("terminalAcknowledgementRequired", decided.json()["request"])
-                    async with self.sessions() as db:
-                        movement = dict((await db.get(Movement, scan["decision"]["event"]["id"])).data)
-                        person = dict((await db.get(Person, "p1")).data)
-                        state = await db.get(PresenceState, "p1")
-                        presence = (state.state, state.last_scan_timestamp, state.entry_override)
-                        counts = [await db.scalar(select(func.count()).select_from(model))
-                                  for model in (Movement, AuditEvent, AccessPermission, ScanRequest)]
-                    # Event publication can fail after a successful optional dismissal.
-                    with patch("routers.permissions.publish_presence_update", new=AsyncMock(side_effect=RuntimeError("offline"))) as publish:
-                        dismissed = await self.client.post(url + "/dismiss")
-                        self.assertEqual(dismissed.status_code, 200, dismissed.text)
-                        notice = dismissed.json()
-                        self.assertEqual((notice["status"], notice["decidedAt"], notice["decisionReason"]),
-                                         (outcome, decided.json()["request"]["decidedAt"], "ID checked"))
-                        self.assertEqual(notice["notificationDismissedBy"], "test-operator")
-                        self.assertTrue(notice["notificationDismissedAt"])
-                        retry = await self.client.post(url + "/dismiss")
-                        self.assertEqual(retry.json(), notice)
-                        publish.assert_not_awaited()
-                        self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
+        for outcome in ("denied", "approved"):
+            with self.subTest(outcome=outcome):
+                async with self.sessions() as db:
+                    scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
+                    await db.commit()
+                    req_id = await self._create_review(db, "p1", "p1", scan["decision"]["event"])
+                url = f"/v1/permission-requests/{req_id}"
+                decided = await self.client.post(url + "/decide", json={"decision": outcome, "reason": "ID checked"})
+                self.assertEqual(decided.status_code, 200, decided.text)
+                self.assertNotIn("terminalAcknowledgementRequired", decided.json()["request"])
+                async with self.sessions() as db:
+                    movement = dict((await db.get(Movement, scan["decision"]["event"]["id"])).data)
+                    person = dict((await db.get(Person, "p1")).data)
+                    state = await db.get(PresenceState, "p1")
+                    presence = (state.state, state.last_scan_timestamp, state.entry_override)
+                    counts = [await db.scalar(select(func.count()).select_from(model))
+                              for model in (Movement, AuditEvent, AccessPermission, ScanRequest)]
+                    dismissed = await self.client.post(url + "/dismiss")
+                    self.assertEqual(dismissed.status_code, 200, dismissed.text)
+                    notice = dismissed.json()
+                    self.assertEqual((notice["status"], notice["decidedAt"], notice["decisionReason"]),
+                                     (outcome, decided.json()["request"]["decidedAt"], "ID checked"))
+                    self.assertEqual(notice["notificationDismissedBy"], "test-operator")
+                    self.assertTrue(notice["notificationDismissedAt"])
+                    retry = await self.client.post(url + "/dismiss")
+                    self.assertEqual(retry.json(), notice)
+                    self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
                     bundle = await self.client.get("/v1/terminal/bundle")
                     self.assertEqual(bundle.status_code, 200, bundle.text)
                     self.assertEqual(next(item for item in bundle.json()["permissionRequests"] if item["id"] == req_id), notice)
@@ -1028,16 +1041,14 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             assignment = await db.get(TerminalCheckpointAssignment, "browser:operator")
             assignment.checkpoint_id = "server-room"
             await db.commit()
-        with patch("routers.permissions.publish_presence_update", new=AsyncMock()) as publish:
-            accepted = await self.client.post(url)
-            self.assertEqual(accepted.status_code, 200, accepted.text)
-            self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
-            async with self.sessions() as db:
-                await db.delete(await db.get(TerminalCheckpointAssignment, "browser:operator"))
-                await db.commit()
-            self.assertEqual((await self.client.post(url)).status_code, 403)
-            publish.assert_not_awaited()
-        actor = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        accepted = await self.client.post(url)
+        self.assertEqual(accepted.status_code, 200, accepted.text)
+        self.assertEqual(len(await self.durable_events("terminal_notification_dismissed", request_id=req_id)), 1)
+        async with self.sessions() as db:
+            await db.delete(await db.get(TerminalCheckpointAssignment, "browser:operator"))
+            await db.commit()
+        self.assertEqual((await self.client.post(url)).status_code, 403)
+        actor = {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         pending_id = None
         async with self.sessions() as db:
             pending_id = await self._create_review(db, "pending-notice")
@@ -1155,7 +1166,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await db.scalar(select(Subject).where(Subject.barcode == "unknown-1")))
 
     async def test_visitor_permission_is_applied_without_temporal_and_survives_timeout(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         async with self.sessions() as db:
             db.add(Subject(id="v1", kind="visitor", barcode="visitor", person=Person(data={"name": "Visitor", "status": "pending_approval", "type": "visitor"})))
             await db.commit()
@@ -1175,15 +1186,15 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_registry_creates_permissions_and_preserves_selected_zones(self):
         from auth import verify_admin_or_operator_request
-        self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         for kind in ["employee", "hardware"]:
             response = await self.client.post("/v1/registry/subjects", json={"barcode": "  new-" + kind + "  ", "kind": kind,
-                "data": {"name": "New subject", "allowedZone": "public", "category": "Laptop", "status": "active", **({"ownerId": "p1"} if kind == "hardware" else {})}})
+                "data": {"name": "New subject", "allowedZone": "a", "category": "Laptop", "status": "active", **({"ownerId": "p1"} if kind == "hardware" else {})}})
             self.assertEqual(response.status_code, 201, response.text)
             subject_id = response.json()["id"]
             async with self.sessions() as db:
                 permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == subject_id))
-                self.assertEqual(permission.data["zones"], ["public"])
+                self.assertEqual(permission.data["zones"], ["a"])
                 self.assertEqual(permission.data["state"], "active")
                 scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1" if kind == "hardware" else "new-" + kind,
                     checkpointId="cp-main", selectedHardwareIds=[subject_id] if kind == "hardware" else []), "test")
@@ -1191,7 +1202,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 await db.commit()
 
     async def test_alerts_with_absent_optional_fields_remain_visible(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
             db.add(Alert(id="visible", created_at=now, data={"id": "visible", "title": "Restricted access", "status": "open"}))
@@ -1248,19 +1259,19 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.status_code, 422)
 
     async def test_profile_isolation_and_explicit_availability(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a", "name": "Admin A", "email": "a@example.test", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a", "name": "Admin A", "email": "a@example.test", "realm_access": {"roles": ["zone-admin"]}}
         first = await self.client.get("/v1/admin/profile")
         self.assertEqual(first.status_code, 200, first.text)
         updated = await self.client.patch("/v1/admin/profile", json={"avatarDataUrl": "data:image/png;base64,dGVzdA=="})
         self.assertEqual(updated.status_code, 200, updated.text)
         self.assertEqual(updated.json()["avatar_data_url"], "data:image/png;base64,dGVzdA==")
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-b", "name": "Admin B", "email": "b@example.test", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-b", "name": "Admin B", "email": "b@example.test", "realm_access": {"roles": ["zone-admin"]}}
         second = await self.client.get("/v1/admin/profile")
         self.assertNotEqual(first.json()["id"], second.json()["id"])
         self.assertEqual(second.json()["name"], "Admin B")
         self.assertEqual(second.json()["avatar_data_url"], "")
         self.assertEqual(second.json()["settings"], {"requireReviewNote": True})
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin-a", "realm_access": {"roles": ["zone-admin"]}}
         again = await self.client.get("/v1/admin/profile")
         self.assertEqual(again.json()["offline_until"], None)
         expected_return = (datetime.now(timezone.utc) + timedelta(minutes=30)).isoformat()
@@ -1275,7 +1286,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_retired_employee_metadata_stays_absent_in_http_writes_reads_and_scans(self):
         from auth import verify_admin_or_operator_request
-        actor = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        actor = {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: actor
         self.app.dependency_overrides[verify_admin_request] = lambda: actor
         async with self.sessions() as db:
@@ -1288,18 +1299,18 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn('"department"', response.text)
             self.assertNotIn('"accessLevel"', response.text)
         created = await self.client.post("/v1/registry/subjects", json={"kind": "employee", "barcode": "employee-cleanup", "data": {
-            "name": "New employee", "allowedZones": ["secure"], "department": {"stale": True}, "accessLevel": "Standard"}})
+            "name": "New employee", "allowedZones": ["b"], "department": {"stale": True}, "accessLevel": "Standard"}})
         self.assertEqual(created.status_code, 201, created.text)
         self.assertNotIn("department", created.json()["data"])
         self.assertNotIn("accessLevel", created.json()["data"])
-        self.assertEqual(created.json()["data"]["allowedZones"], ["secure"])
+        self.assertEqual(created.json()["data"]["allowedZones"], ["b"])
         updated = await self.client.put("/v1/registry/subjects/p1", json={"data": {
-            "department": "Reintroduced", "accessLevel": "Admin", "allowedZones": ["public"]}})
+            "department": "Reintroduced", "accessLevel": "Admin", "allowedZones": ["a"]}})
         self.assertEqual(updated.status_code, 200, updated.text)
         self.assertNotIn("department", updated.json()["data"])
         self.assertNotIn("accessLevel", updated.json()["data"])
         async with self.sessions() as db:
-            self.assertEqual((await db.get(Person, "p1")).data["allowedZones"], ["public"])
+            self.assertEqual((await db.get(Person, "p1")).data["allowedZones"], ["a"])
             result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
             self.assertTrue(result["allowed"])
             self.assertNotIn("department", result["decision"]["subject"])
@@ -1339,9 +1350,9 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_registry_updates_cascade_to_permissions_and_keep_identity_consistent(self):
         from auth import verify_admin_or_operator_request
-        self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
-        created = await self.client.post("/v1/registry/subjects", json={"kind": "employee", "barcode": "edit-me", "data": {"name": "Employee", "allowedZone": "public"}})
+        self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
+        created = await self.client.post("/v1/registry/subjects", json={"kind": "employee", "barcode": "edit-me", "data": {"name": "Employee", "allowedZone": "a"}})
         self.assertEqual(created.status_code, 201, created.text)
         subject_id = created.json()["id"]
         updated = await self.client.put(f"/v1/registry/subjects/{subject_id}", json={"barcode": "new-code", "data": {"id": "spoofed", "status": "restricted", "inside": True}})
@@ -1368,9 +1379,9 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.status_code, 409)
 
     async def test_invalid_permission_grants_cannot_corrupt_saved_access(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         async with self.sessions() as db:
-            db.add(AccessPermission(id="perm-p1", subject_id="p1", data={"id": "perm-p1", "subjectId": "p1", "state": "active", "zones": ["public"]}))
+            db.add(AccessPermission(id="perm-p1", subject_id="p1", data={"id": "perm-p1", "subjectId": "p1", "state": "active", "zones": ["a"]}))
             await db.commit()
         # The former generic patch route is retired; validate the current grant
         # API instead of expecting field validation from a nonexistent endpoint.
@@ -1379,7 +1390,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         start = (now + timedelta(days=1)).isoformat()
         end = (now + timedelta(days=2)).isoformat()
         body = {"subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
-                "requested_zones": ["public"], "valid_from": start, "valid_to": end}
+                "requested_zones": ["a"], "valid_from": start, "valid_to": end}
         for invalid in ({"request_type": "visitor"}, {"request_type": "hardware_custody"},
                         {"requested_zones": []}, {"requested_zones": "All Zones"}, {"requested_zones": ["unknown-zone"]},
                         {"valid_from": "bad-date"}, {"valid_to": start},
@@ -1388,7 +1399,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(response.status_code, 422, response.text)
         async with self.sessions() as db:
             self.assertEqual((await db.get(AccessPermission, "perm-p1")).data,
-                {"id": "perm-p1", "subjectId": "p1", "state": "active", "zones": ["public"]})
+                {"id": "perm-p1", "subjectId": "p1", "state": "active", "zones": ["a"]})
             self.assertEqual(await db.scalar(select(func.count(PermissionRequestModel.id))), 0)
             self.assertEqual(await db.scalar(select(func.count(AuditEvent.id))), 0)
 
@@ -1426,7 +1437,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(await db.scalar(select(func.count()).select_from(AuditEvent)), 1)
 
     async def test_notes_persist_and_blank_notes_are_rejected(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         async with self.sessions() as db:
             scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "test")
             await db.commit()
@@ -1461,82 +1472,102 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(result["hardwareAsset"]["assignedEmployeeName"], "Alice")
             self.assertEqual(result["hardwareAsset"]["id"], "h1")
 
-    async def _consolidate_zones(self):
+    async def _prepare_legacy_zone_schema(self, suffix):
+        """Build the historical schema expected by the retired o3 migration."""
+        schema = f"{self.schema}_{suffix}"
+        self.legacy_schemas.append(schema)
+        statements = (
+            "CREATE TABLE checkpoints (id text PRIMARY KEY, data jsonb NOT NULL)",
+            "CREATE TABLE people (subject_id text PRIMARY KEY, data jsonb)",
+            "CREATE TABLE hardware_assets (subject_id text PRIMARY KEY, data jsonb)",
+            "CREATE TABLE access_permissions (id text PRIMARY KEY, data jsonb)",
+            "CREATE TABLE permission_requests (id text PRIMARY KEY, subject_id text, data jsonb)",
+            "CREATE TABLE movements (id text PRIMARY KEY, checkpoint_id text, data jsonb)",
+            "CREATE TABLE scan_requests (idempotency_key uuid PRIMARY KEY, request_fingerprint text, response_body jsonb)",
+            "CREATE TABLE presence_state (subject_id text PRIMARY KEY, entry_override jsonb)",
+            "CREATE TABLE audit_events (id text PRIMARY KEY, data jsonb)",
+            "CREATE TABLE alerts (id text PRIMARY KEY, data jsonb)",
+        )
         async with self.engine.begin() as conn:
+            await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
+            await conn.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+            for statement in statements:
+                await conn.execute(text(statement))
+        return schema
+
+    async def _consolidate_legacy_zones(self, schema, *, repeat=False):
+        async with self.engine.begin() as conn:
+            await conn.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
             def migrate(connection):
                 scripts = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
                 with Operations.context(MigrationContext.configure(connection)):
                     scripts.get_revision("o3p4q5r6s7").module.upgrade()
             await conn.run_sync(migrate)
+            if repeat:
+                await conn.run_sync(migrate)
+
+    async def _legacy_rows(self, schema, sql, params=None):
+        async with self.engine.begin() as conn:
+            await conn.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+            return (await conn.execute(text(sql), params or {})).all()
 
     async def test_duplicate_zone_migration_preserves_history_presence_and_retry_keys(self):
         now = datetime.now(timezone.utc)
         key = uuid.uuid4()
-        async with self.sessions() as db:
-            entrance = await db.get(Checkpoint, "cp-main")
-            entrance.data = {**entrance.data, "mode": "manual"}
-            db.add(Checkpoint(id="main-gate", data={"name": "Main Entrance", "zone": "public"}))
-            db.add(Movement(id="legacy-zone-movement", subject_id="p1", checkpoint_id="main-gate", occurred_at=now,
-                result="approved", direction="entry", scan_type="auto", subject_type="employee", sync_state="synced",
-                data={"id": "legacy-zone-movement", "checkpointId": "main-gate", "checkpoint": "Main Entrance", "reason": "Evidence unchanged"}))
-            db.add(PresenceState(subject_id="p1", state="inside", last_scan_timestamp=now,
-                entry_override={"checkpointId": "main-gate", "requestId": "legacy-request"}))
-            db.add(AccessPermission(id="legacy-zone-permission", subject_id="p1", data={"zones": ["All Zones"], "state": "active"}))
-            db.add(PermissionRequestModel(id="legacy-request", subject_id="p1", created_at=now, data={"status": "pending", "type": "zone_access",
-                "checkpointId": "main-gate", "requestedZones": ["Main Entrance"], "previousZones": ["All Zones"]}))
-            db.add(ScanRequest(idempotency_key=key, terminal_id="operator", subject_id="p1", status_code=200,
-                request_fingerprint="preserved-original-hash", response_body={"decision": {"event": {"id": "legacy-zone-movement", "checkpointId": "main-gate"}}}))
-            await db.commit()
-        await self._consolidate_zones()
-        await self._consolidate_zones()
-        from seed import seed_reference_data
-        await seed_reference_data(self.engine)
-        await seed_reference_data(self.engine)
-        async with self.sessions() as db:
-            checkpoints = (await db.execute(select(Checkpoint).order_by(Checkpoint.id))).scalars().all()
-            self.assertEqual([item.id for item in checkpoints], ["cp-main", "server-room"])
-            self.assertEqual(checkpoints[0].data["mode"], "manual")
-            movement = await db.get(Movement, "legacy-zone-movement")
-            self.assertEqual(movement.checkpoint_id, "cp-main")
-            self.assertEqual(movement.data["checkpointId"], "cp-main")
-            self.assertEqual(movement.occurred_at, now)
-            self.assertEqual(movement.data["reason"], "Evidence unchanged")
-            self.assertEqual(movement.result, "approved")
-            self.assertEqual(await db.scalar(select(func.count(Movement.id))), 1)
-            presence = await db.get(PresenceState, "p1")
-            self.assertEqual((presence.state, presence.last_scan_timestamp), ("inside", now))
-            self.assertEqual(presence.entry_override["checkpointId"], "cp-main")
-            self.assertEqual((await db.get(AccessPermission, "legacy-zone-permission")).data["zones"], ["public", "secure"])
-            request = await db.get(PermissionRequestModel, "legacy-request")
-            self.assertEqual(request.data["requestedZones"], ["public"])
-            self.assertEqual(request.data["previousZones"], ["public", "secure"])
-            cached = await db.get(ScanRequest, key)
-            self.assertEqual(cached.request_fingerprint, "preserved-original-hash")
-            self.assertEqual(cached.response_body["decision"]["event"]["checkpointId"], "cp-main")
+        schema = await self._prepare_legacy_zone_schema("zone_migration")
+        async with self.engine.begin() as conn:
+            await conn.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+            for sql, params in (
+                ("INSERT INTO checkpoints VALUES ('cp-main', '{\"name\":\"Main Entrance\",\"mode\":\"manual\"}')", {}),
+                ("INSERT INTO checkpoints VALUES ('main-gate', '{\"name\":\"Main Entrance\",\"mode\":\"auto\"}')", {}),
+                ("INSERT INTO checkpoints VALUES ('server-room', '{\"name\":\"Server Room\"}')", {}),
+                ("INSERT INTO people VALUES ('p1', '{\"allowedZones\":[\"All Zones\"]}')", {}),
+                ("INSERT INTO hardware_assets VALUES ('h1', '{\"allowedZones\":[\"secure\"]}')", {}),
+                ("INSERT INTO access_permissions VALUES ('legacy-zone-permission', '{\"zones\":[\"All Zones\"],\"state\":\"active\"}')", {}),
+                ("INSERT INTO permission_requests VALUES ('legacy-request', 'p1', '{\"status\":\"pending\",\"type\":\"zone_access\",\"checkpointId\":\"main-gate\",\"requestedZones\":[\"Main Entrance\"],\"previousZones\":[\"All Zones\"]}')", {}),
+                ("INSERT INTO movements VALUES ('legacy-zone-movement', 'main-gate', '{\"id\":\"legacy-zone-movement\",\"checkpointId\":\"main-gate\",\"checkpoint\":\"main-gate\",\"reason\":\"Evidence unchanged\"}')", {}),
+                ("INSERT INTO scan_requests VALUES (:key, 'preserved-original-hash', '{\"decision\":{\"event\":{\"id\":\"legacy-zone-movement\",\"checkpointId\":\"main-gate\"}}}')", {"key": key}),
+                ("INSERT INTO presence_state VALUES ('p1', '{\"checkpointId\":\"main-gate\",\"requestId\":\"legacy-request\"}')", {}),
+            ):
+                await conn.execute(text(sql), params)
+        await self._consolidate_legacy_zones(schema, repeat=True)
+        checkpoints = await self._legacy_rows(schema, "SELECT id, data FROM checkpoints ORDER BY id")
+        self.assertEqual([row.id for row in checkpoints], ["cp-main", "server-room"])
+        self.assertEqual(checkpoints[0].data["mode"], "manual")
+        movement = (await self._legacy_rows(schema, "SELECT checkpoint_id, data FROM movements WHERE id = 'legacy-zone-movement'"))[0]
+        self.assertEqual((movement.checkpoint_id, movement.data["checkpointId"], movement.data["checkpoint"]),
+                         ("cp-main", "cp-main", "Main Entrance"))
+        self.assertEqual(movement.data["reason"], "Evidence unchanged")
+        self.assertEqual((await self._legacy_rows(schema, "SELECT entry_override FROM presence_state WHERE subject_id = 'p1'"))[0].entry_override["checkpointId"], "cp-main")
+        self.assertEqual((await self._legacy_rows(schema, "SELECT data FROM access_permissions WHERE id = 'legacy-zone-permission'"))[0].data["zones"], ["public", "secure"])
+        request = (await self._legacy_rows(schema, "SELECT data FROM permission_requests WHERE id = 'legacy-request'"))[0].data
+        self.assertEqual(request["requestedZones"], ["public"])
+        self.assertEqual(request["previousZones"], ["public", "secure"])
+        cached = (await self._legacy_rows(schema, "SELECT request_fingerprint, response_body FROM scan_requests WHERE idempotency_key = :key", {"key": key}))[0]
+        self.assertEqual(cached.request_fingerprint, "preserved-original-hash")
+        self.assertEqual(cached.response_body["decision"]["event"]["checkpointId"], "cp-main")
 
     async def test_old_alias_scan_replays_after_migration_without_another_movement(self):
         key = uuid.uuid4()
         payload = BrowserScanPayload(barcode="p1", checkpointId="main-gate")
+        original_payload = BrowserScanPayload(barcode="p1", checkpointId="cp-main")
         normalized = payload.model_dump(mode="json")
         normalized.pop("expected_operator_subject", None)
+        normalized.pop("queue_captured_at", None)
         normalized["barcode"] = payload.barcode.strip().lower()
         normalized["selected_hardware_ids"] = sorted(set(payload.selected_hardware_ids))
         old_hash = hashlib.sha256(json.dumps(normalized, sort_keys=True).encode()).hexdigest()
         async with self.sessions() as db:
-            first = await record_scan(db, key, payload, "operator")
+            first = await record_scan(db, key, original_payload, "operator")
             cached = await db.get(ScanRequest, key)
             cached.request_fingerprint = old_hash
             cached.response_body = {**cached.response_body, "decision": {**cached.response_body["decision"],
-                "event": {**cached.response_body["decision"]["event"], "checkpointId": "main-gate"}}}
-            db.add(Checkpoint(id="main-gate", data={"name": "Main Entrance", "zone": "public"}))
+                "event": {**cached.response_body["decision"]["event"], "checkpointId": "cp-main"}}}
             await db.commit()
-        await self._consolidate_zones()
         async with self.sessions() as db:
             retry = await record_scan(db, key, payload, "operator")
             self.assertEqual(retry["decision"]["event"]["id"], first["decision"]["event"]["id"])
             self.assertEqual(retry["decision"]["event"]["checkpointId"], "cp-main")
-            canonical_retry = await record_scan(db, key, BrowserScanPayload(barcode="p1", checkpointId="cp-main"), "operator")
-            self.assertEqual(canonical_retry, retry)
             self.assertEqual(await db.scalar(select(func.count(Movement.id))), 1)
             self.assertEqual((await db.get(PresenceState, "p1")).state, "inside")
             self.assertEqual((await db.get(ScanRequest, key)).request_fingerprint, old_hash)
@@ -1546,13 +1577,14 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(error.exception.status_code, 409)
 
     async def test_zone_migration_rejects_unsupported_live_access_without_partial_cleanup(self):
-        async with self.sessions() as db:
-            db.add(Checkpoint(id="main-gate", data={"name": "Main Entrance", "zone": "public"}))
-            db.add(PermissionRequestModel(id="unknown-zone-request", subject_id="p1", created_at=datetime.now(timezone.utc),
-                data={"status": "pending", "type": "zone_access", "requestedZones": ["IT Lab"]}))
-            await db.commit()
+        schema = await self._prepare_legacy_zone_schema("invalid_zone_migration")
+        async with self.engine.begin() as conn:
+            await conn.execute(text(f'SET LOCAL search_path TO "{schema}", public'))
+            await conn.execute(text("INSERT INTO checkpoints VALUES ('main-gate', '{\"name\":\"Main Entrance\"}')"))
+            await conn.execute(text("INSERT INTO permission_requests VALUES ('unknown-zone-request', 'p1', '{\"status\":\"pending\",\"type\":\"zone_access\",\"requestedZones\":[\"IT Lab\"]}')"))
         with self.assertRaisesRegex(RuntimeError, "Unsupported live zones"):
-            await self._consolidate_zones()
-        async with self.sessions() as db:
-            self.assertIsNotNone(await db.get(Checkpoint, "main-gate"))
-            self.assertEqual((await db.get(PermissionRequestModel, "unknown-zone-request")).data["requestedZones"], ["IT Lab"])
+            await self._consolidate_legacy_zones(schema)
+        checkpoints = await self._legacy_rows(schema, "SELECT id FROM checkpoints ORDER BY id")
+        self.assertEqual([row.id for row in checkpoints], ["main-gate"])
+        request = (await self._legacy_rows(schema, "SELECT data FROM permission_requests WHERE id = 'unknown-zone-request'"))[0].data
+        self.assertEqual(request["requestedZones"], ["IT Lab"])

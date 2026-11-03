@@ -292,7 +292,7 @@
 .role-admin .dashboard-overview {
   display: grid;
   gap: 0;
-  margin: 0 0 0 30px;
+  margin: 0;
   padding: 0;
 }
 
@@ -3382,8 +3382,9 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   width: 250px;
 }
 
-.role-admin .admin-navigation-rail.is-open:not(.is-dashboard) {
+.role-admin .admin-navigation-rail.is-open {
   background: var(--admin-surface-strong);
+  box-shadow: 12px 0 28px rgba(16, 24, 40, 0.08);
 }
 
 .role-admin .admin-rail-brand,
@@ -4699,15 +4700,6 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   }
 }
 
-@media (min-width: 768px) {
-  .role-admin .admin-rail-slot:has(.admin-navigation-rail.is-dashboard) {
-    width: 0;
-    min-width: 0;
-    flex: 0 0 0;
-    background: transparent;
-  }
-}
-
 @media (min-width: 1600px) {
   .role-admin .dashboard-overview .dashboard-log-section {
     margin-left: 16px;
@@ -5076,7 +5068,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 
   .employee-profile-movement-table {
     width: 100% !important;
-    min-width: 0 !important;
+    min-width: 720px !important;
     table-layout: fixed !important;
   }
 }
@@ -5084,10 +5076,8 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
 /* Dashboard uses the fluid layout below the large-desktop threshold. */
 @media (max-width: 1599px) {
   .role-admin .dashboard-overview {
-    width: calc(100% - 72px);
     min-width: 0;
-    margin: 0 0 0 72px;
-    transition: margin-left 220ms cubic-bezier(0.2, 0, 0, 1), width 220ms cubic-bezier(0.2, 0, 0, 1);
+    margin: 0;
   }
 
   .role-admin .dashboard-chart-viewport {
@@ -5421,6 +5411,7 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
     table-layout: auto;
   }
 }
+}
 
 @media (max-width: 767px) {
   .role-admin .dashboard-overview {
@@ -5571,21 +5562,86 @@ html[data-admin-theme="dark"] .role-admin .admin-theme-toggle:hover {
   }
 }
 
-.role-admin .admin-navigation-rail.is-dashboard.is-open {
+.role-admin .admin-shell-layout[data-master-admin="true"] {
+  flex-direction: column;
+}
+
+.role-admin .master-admin-topbar {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex: 0 0 68px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
+  padding: 0 clamp(16px, 3vw, 36px);
+  border-bottom: 1px solid var(--admin-line);
   background: var(--admin-bg);
-  box-shadow: 12px 0 28px rgba(16, 24, 40, 0.08);
 }
 
-@media (min-width: 768px) and (max-width: 1599px) {
-  .role-admin .admin-shell-layout:has(.admin-navigation-rail.is-dashboard.is-open) .dashboard-overview {
-    width: calc(100% - 250px);
-    margin-left: 250px;
+.role-admin .master-admin-brand {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  color: var(--admin-text);
+  font-size: 16px;
+  font-weight: 800;
+  letter-spacing: .08em;
+  text-decoration: none;
+}
+
+.role-admin .master-admin-brand span {
+  color: var(--ui-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.role-admin .master-admin-signout {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border: 1px solid var(--admin-line);
+  border-radius: 10px;
+  background: var(--admin-bg);
+  color: var(--ui-text-primary);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 650;
+  cursor: pointer;
+  transition: border-color 150ms ease, background-color 150ms ease;
+}
+
+.role-admin .master-admin-signout:hover,
+.role-admin .master-admin-signout:focus-visible {
+  border-color: var(--ui-border-hover);
+  background: var(--admin-surface);
+}
+
+.role-admin .admin-shell-layout[data-master-admin="true"] .admin-scroll-surface {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+@media (max-width: 767px) {
+  .role-admin .admin-shell-layout[data-master-admin="true"] .admin-scroll-surface {
+    height: auto !important;
+    padding-bottom: 0;
   }
-}
 
-@media (min-width: 1600px) {
-  .role-admin .admin-shell-layout:has(.admin-navigation-rail.is-dashboard.is-open) .dashboard-overview {
-    width: calc(100% - 178px);
-    margin-left: 208px;
+  .role-admin .master-admin-topbar {
+    flex-basis: 60px;
+    padding-inline: 14px;
+  }
+
+  .role-admin .master-admin-brand span {
+    display: none;
   }
 }

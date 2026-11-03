@@ -46,12 +46,12 @@ test("same-named realm or other-client roles cannot be used for the repair", () 
   assert.throws(() => missingAccountRoles([], roles.map((role) => ({ ...role, clientRole: false })), clientId));
 });
 
-test("application roles grant self-service access while only admins receive user-management access", () => {
+test("application roles grant self-service access while only zone admins receive user-management access", () => {
   const realm = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
-  const admin = realm.roles.realm.find((candidate) => candidate.name === "admin");
+  const zoneAdmin = realm.roles.realm.find((candidate) => candidate.name === "zone-admin");
   const operator = realm.roles.realm.find((candidate) => candidate.name === "operator");
-  assert.equal(admin.composite, true);
-  assert.deepEqual(admin.composites, { client: {
+  assert.equal(zoneAdmin.composite, true);
+  assert.deepEqual(zoneAdmin.composites, { client: {
     account: ["manage-account", "view-profile"],
     "realm-management": ["manage-users", "query-users", "view-users", "view-realm"],
   } });
@@ -72,14 +72,14 @@ test("API audience repair does not silently replace conflicting custom settings"
   assert.throws(() => missingApiAudienceMapper([{ name: "api-audience", config: {} }]), /conflicting settings/);
 });
 
-const appRealmRoles = ["admin", "operator"].map((name) => ({ id: `realm-${name}`, name, clientRole: false, composite: true }));
+const appRealmRoles = ["zone-admin", "operator"].map((name) => ({ id: `realm-${name}`, name, clientRole: false, composite: true }));
 
 test("application client templates scope master-admin only to the frontend", () => {
   const realm = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
   for (const clientId of ["inout-frontend", "inout-postman"]) {
     assert.equal(realm.clients.find((client) => client.clientId === clientId).fullScopeAllowed, false);
     assert.deepEqual(realm.scopeMappings.find((mapping) => mapping.client === clientId).roles,
-      clientId === "inout-frontend" ? ["admin", "operator", "master-admin"] : ["admin", "operator"]);
+      clientId === "inout-frontend" ? ["zone-admin", "operator", "master-admin"] : ["zone-admin", "operator"]);
   }
 });
 
@@ -115,7 +115,7 @@ test("existing-realm scope repair installs mappings before disabling scope and i
   assert.deepEqual(writes.filter((write) => write.method === "PUT").map((write) => write.body), [{ fullScopeAllowed: false }, { fullScopeAllowed: false }]);
   for (const [index, client] of clients.entries()) {
     assert.deepEqual(client, { ...originalClients[index], fullScopeAllowed: false });
-    assert.deepEqual(mappings.get(client.id).map((role) => role.name), ["custom", "admin", "operator"]);
+    assert.deepEqual(mappings.get(client.id).map((role) => role.name), ["custom", "zone-admin", "operator"]);
   }
   await applyApplicationClientScopes(api, await prepareApplicationClientScopes(api, clients));
   assert.equal(writes.length, 4, "A second repair must perform no writes");
@@ -136,15 +136,15 @@ test("failed scope installation leaves full scope enabled", async () => {
 });
 
 test("frontend scope validation retains application, account and delegated administrator claims", () => {
-  const token = { realm_access: { roles: ["admin", "operator"] }, resource_access: {
+  const token = { realm_access: { roles: ["zone-admin", "operator"] }, resource_access: {
     account: { roles: ["manage-account", "view-profile"] },
     "realm-management": { roles: ["manage-users", "query-users", "view-users", "view-realm"] },
   } };
-  assert.deepEqual(missingFrontendRoleClaims(token, ["admin"]), []);
+  assert.deepEqual(missingFrontendRoleClaims(token, ["zone-admin"]), []);
   assert.deepEqual(missingFrontendRoleClaims(token, ["operator"]), []);
   const withoutManagement = { ...token, resource_access: { account: token.resource_access.account } };
   assert.deepEqual(missingFrontendRoleClaims(withoutManagement, ["operator"]), []);
-  assert.deepEqual(missingFrontendRoleClaims(withoutManagement, ["admin"]), [
+  assert.deepEqual(missingFrontendRoleClaims(withoutManagement, ["zone-admin"]), [
     "realm-management:manage-users", "realm-management:query-users", "realm-management:view-users", "realm-management:view-realm",
   ]);
   assert.deepEqual(missingFrontendRoleClaims({}, ["operator"]), ["realm:operator", "account:manage-account", "account:view-profile"]);

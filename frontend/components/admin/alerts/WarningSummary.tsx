@@ -15,9 +15,7 @@ export function WarningSummary({ warnings, alerts, selectedSubject, onReset, onV
   onReset: (subjectId: string, reason: string) => Promise<void>;
   onViewHistory?: () => void;
   isLoading?: boolean;
-  className?: string;
 }) {
-  const profileSummary = className.includes("employee-profile-warning-summary");
   const [reason, setReason] = useState("");
   const [invalidReason, setInvalidReason] = useState(false);
   const [busy, setBusy] = useState(false);

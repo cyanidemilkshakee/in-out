@@ -12,17 +12,16 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 import uuid
 from auth import verify_terminal_access_request
 from database import get_db
-from data_limits import bounded_rows
+from data_limits import bounded_rows, precharge_mutation_response
 from config import settings
 from schemas import BrowserScanPayload, ManualReviewPayload
 from terminal_scans import record_scan
+from terminal_response import project_terminal_scan_response
 from event_outbox import enqueue_presence, enqueue_workflow_start
-from redis_client import publish_presence_update
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from models import AccessPermission, AdminAccount, Checkpoint, HardwareAsset, Subject, Person, PermissionRequestModel, Movement
-from temporal_worker import get_temporal_client, TASK_QUEUE
+from models import AccessPermission, AdminAccount, Checkpoint, HardwareAsset, Subject, Person, PermissionRequestModel, Movement, OrganizationZone, ZoneAdminAssignment
 from permission_decisions import review_source, require_recent_review_source, pending_manual_review
 from access_validation import validate_registered_zones
 from facility_zones import normalize_facility_document
@@ -65,7 +64,7 @@ async def scan(payload: BrowserScanPayload,
             "request": result.get("manualApprovalRequest"),
         })
     await db.commit()
-    return result
+    return project_terminal_scan_response(result)
 
 
 @router.post("/manual-reviews")
@@ -143,6 +142,9 @@ async def get_terminal_bundle(
     checkpoint_record = await db.get(Checkpoint, checkpoint_id)
     checkpoint_config = checkpoint_record.data if checkpoint_record else None
     checkpoint_zone = checkpoint_record.zone_id if checkpoint_record and checkpoint_record.active else None
+    checkpoint_zone_name = await db.scalar(
+        select(OrganizationZone.name).where(OrganizationZone.id == checkpoint_zone)
+    ) if checkpoint_zone else None
 
     async def fetch_hardware_assets() -> list[dict[str, Any]]:
         if checkpoint_zone is None:
@@ -172,6 +174,7 @@ async def get_terminal_bundle(
     async def fetch_checkpoints() -> list[dict[str, Any]]:
         result = await db.execute(select(Checkpoint).where(Checkpoint.id == checkpoint_id))
         return [{**(c.data or {}), "id": c.id, "zone": c.zone_id, "zoneId": c.zone_id,
+            "zoneName": checkpoint_zone_name,
             "number": c.number, "gateType": c.gate_type, "required": c.required,
             "active": c.active} for c in result.scalars().all()]
 
@@ -200,6 +203,10 @@ async def get_terminal_bundle(
             ),
             Person.data["allowedZones"].contains([checkpoint_zone]),
         ))
+    visitor_eligibility.extend((
+        AccessPermission.data["checkpoints"].contains([checkpoint_id]),
+        Person.data["allowedCheckpoints"].contains([checkpoint_id]),
+    ))
     visitor_rows = await bounded_rows(db,
         select(Subject, Person, AccessPermission)
         .join(Person, Person.subject_id == Subject.id)
@@ -219,8 +226,17 @@ async def get_terminal_bundle(
         if not isinstance(zones, list):
             zones = []
         zones = [zone for zone in zones if isinstance(zone, str)]
+        checkpoint_scope = permission_data.get("checkpoints")
+        if not isinstance(checkpoint_scope, list):
+            checkpoint_scope = metadata.get("allowedCheckpoints")
+        if not isinstance(checkpoint_scope, list) and registration_request:
+            checkpoint_scope = registration_request.get("requestedCheckpoints")
+        if not isinstance(checkpoint_scope, list):
+            checkpoint_scope = []
+        checkpoint_scope = [item for item in checkpoint_scope if isinstance(item, str)]
+        checkpoint_allowed = checkpoint_id in checkpoint_scope if checkpoint_scope else checkpoint_zone in zones
         permission_state = permission_data.get("state")
-        if not registration_request and not (permission_state == "active" and checkpoint_zone in zones):
+        if not registration_request and not (permission_state == "active" and checkpoint_allowed):
             continue
 
         valid_from = permission_data.get("validFrom") or metadata.get("validFrom") or (registration_request or {}).get("validFrom")
@@ -257,6 +273,7 @@ async def get_terminal_bundle(
             "host": metadata.get("host") if isinstance(metadata.get("host"), str) else "",
             "company": metadata.get("company") if isinstance(metadata.get("company"), str) else "",
             "allowedZones": zones,
+            "allowedCheckpoints": checkpoint_scope,
             "validFrom": valid_from if isinstance(valid_from, str) else "",
             "validTo": valid_to if isinstance(valid_to, str) else "",
             "createdAt": metadata.get("createdAt") if isinstance(metadata.get("createdAt"), str) else "",
@@ -296,12 +313,21 @@ async def get_terminal_bundle(
         }
         for movement in movement_result.scalars().all()
     ]
-    offline_until = await db.scalar(
-        select(AdminAccount.offline_until)
-        .where(AdminAccount.offline_until.is_not(None), AdminAccount.offline_until > datetime.now(timezone.utc))
-        .order_by(AdminAccount.offline_until.asc())
-        .limit(1)
-    )
+    zone_admin_result = await db.execute(
+        select(AdminAccount.name, AdminAccount.nickname, AdminAccount.offline_until)
+        .join(ZoneAdminAssignment, ZoneAdminAssignment.admin_subject == AdminAccount.keycloak_subject)
+        .where(ZoneAdminAssignment.zone_id == checkpoint_zone)
+        .order_by(AdminAccount.name, AdminAccount.nickname)
+    ) if checkpoint_zone else None
+    zone_admin_rows = list(zone_admin_result.all()) if zone_admin_result is not None else []
+    now = datetime.now(timezone.utc)
+    offline_zone_admins = [
+        (name or nickname or "Zone admin", offline_until)
+        for name, nickname, offline_until in zone_admin_rows
+        if offline_until is not None and offline_until > now
+    ]
+    all_zone_admins_offline = bool(zone_admin_rows) and len(offline_zone_admins) == len(zone_admin_rows)
+    available_at = min((offline_until for _, offline_until in offline_zone_admins), default=None) if all_zone_admins_offline else None
 
     return {
         "eventRevision": event_revision,
@@ -316,8 +342,9 @@ async def get_terminal_bundle(
         "movements":   movements,
         "permissionRequests": permission_requests,
         "adminAvailability": {
-            "status": "offline" if offline_until else "available",
-            "availableAt": offline_until.isoformat() if offline_until else None,
+            "status": "offline" if all_zone_admins_offline else "available",
+            "availableAt": available_at.isoformat() if available_at else None,
+            "adminNames": [name for name, _ in offline_zone_admins] if all_zone_admins_offline else [],
         },
     }
 

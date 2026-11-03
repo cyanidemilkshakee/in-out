@@ -1,6 +1,6 @@
 -- TLS validation belongs to Kong's TLS listener. Never trust certificate
 -- identity supplied by a caller, including callers on the Docker network.
-local Handler = { PRIORITY = 10000, VERSION = "1.5.0" }
+local Handler = { PRIORITY = 10000, VERSION = "1.5.1" }
 
 local function bounded_body()
   -- Read native body metadata; get_headers() truncates after 100 fields and
@@ -42,6 +42,9 @@ local function public_identity_path(path)
   -- routes even if an operator later enables it in the realm settings.
   local lower = string.lower(path)
   if lower:find("^/realms/[^/]+/scim/") or lower:find("^/realms/[^/]+/scim$") then return false end
+  -- App authentication interactions are a confidential server-to-server API.
+  -- Keep them off the browser identity listener even with a valid client secret.
+  if lower:find("^/realms/[^/]+/inout%-auth/") or lower:find("^/realms/[^/]+/inout%-auth$") then return false end
   -- Keycloak's public OIDC/account endpoints and their assets. All other
   -- roots, including Admin REST, Admin Console, health and metrics, stay
   -- internal even when the caller possesses a realm-management bearer token.
@@ -91,7 +94,7 @@ end
 
 local function login_action_path(path)
   path = normalized_route_path(path)
-  return path == "/login" or path:find("^/api/auth/callback$") or
+  return path == "/login" or path == "/api/auth/password/update" or path == "/api/auth/profile/complete" or path:find("^/api/auth/callback$") or
     path:find("^/api/auth/callback/") or path:find("^/api/auth/signin$") or
     path:find("^/api/auth/signin/")
 end
@@ -119,15 +122,25 @@ function Handler:rewrite()
     return kong.response.exit(404, { message = "Not found" })
   end
   local port = ngx.var.server_port
-  if port == "8000" and ngx.req.get_method() == "POST" and
+  -- The separate admin hostname makes Keycloak's generic /admin landing
+  -- return 404 in current releases. Canonicalize only the enabled maintenance
+  -- socket; a relative location retains its public host and published port.
+  local method = ngx.req.get_method()
+  if port == "1015" and (method == "GET" or method == "HEAD") and
+     (raw_path == "/" or raw_path == "/admin" or raw_path == "/admin/") then
+    return kong.response.exit(302, nil, {
+      ["Location"] = "/admin/master/console/", ["Cache-Control"] = "no-store",
+    })
+  end
+  if port == "1012" and ngx.req.get_method() == "POST" and
      login_action_path(raw_path) and noncanonical_path(raw_path) then
     return kong.response.exit(400, { message = "Noncanonical login path" })
   end
-  if port == "8005" and ngx.req.get_method() == "POST" and
+  if port == "1014" and ngx.req.get_method() == "POST" and
      identity_login_action_path(raw_path) and noncanonical_path(raw_path) then
     return kong.response.exit(400, { message = "Noncanonical identity login path" })
   end
-  if port == "8002" or port == "8443" then
+  if port == "1013" or port == "1016" then
     -- FastAPI decodes reserved escapes that expression routing preserves.
     -- API paths are static ASCII/UUID segments; reject alternate spellings
     -- before they can select an ordinary rather than sensitive-action quota.
@@ -147,7 +160,7 @@ function Handler:access()
   if internal_path(raw_path) or internal_path(kong.request.get_path()) then
     return kong.response.exit(404, { message = "Not found" })
   end
-  if ngx.var.server_port == "8005" then
+  if ngx.var.server_port == "1014" then
     if not public_identity_path(raw_path) or not public_identity_path(kong.request.get_path()) then
       return kong.response.exit(404, { message = "Not found" })
     end
@@ -174,7 +187,7 @@ function Handler:access()
 
   local path = kong.request.get_path()
   if path ~= "/v1/scans" and path ~= "/v1/scans/" then return end
-  if ngx.var.server_port ~= "8443" or ngx.var.ssl_client_verify ~= "SUCCESS" then
+  if ngx.var.server_port ~= "1016" or ngx.var.ssl_client_verify ~= "SUCCESS" then
     return kong.response.exit(401, { message = "A verified terminal client certificate is required" })
   end
   local secret = os.getenv("INOUT_TERMINAL_SECRET")

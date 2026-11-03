@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { applicationSignInReady, configureApplicationSignIn } from "../scripts/configure-keycloak-app-sign-in.mjs";
+import { applicationSignInReady, configureApplicationSignIn as configureSignIn } from "../scripts/configure-keycloak-app-sign-in.mjs";
+
+const configureApplicationSignIn = (api, options = {}) => configureSignIn(api, { providerReady: async () => true, ...options });
 
 function fixture(overrides = {}) {
   const original = { id: "frontend-id", clientId: "inout-frontend", enabled: true, publicClient: false,
@@ -41,8 +43,8 @@ test("application repair enables its form and stock setup, preserving provider s
   assert.equal(await configureApplicationSignIn(state.api, { apply: true, log: state.log }), true);
   assert.equal(applicationSignInReady(state.client), true);
   assert.deepEqual(state.writes, [{ standardFlowEnabled: true, implicitFlowEnabled: false,
-    directAccessGrantsEnabled: true, serviceAccountsEnabled: false,
-    attributes: { ...state.original.attributes, "pkce.code.challenge.method": "S256" } }, { loginTheme: "keycloak.v2" }]);
+    directAccessGrantsEnabled: false, serviceAccountsEnabled: false,
+    attributes: { ...state.original.attributes, "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true" } }, { loginTheme: "keycloak.v2" }]);
   for (const field of ["secret", "redirectUris", "webOrigins", "protocolMappers"]) assert.deepEqual(state.client[field], state.original[field]);
   assert.equal(await configureApplicationSignIn(state.api, { apply: true, log: state.log }), true);
   assert.equal(state.writes.length, 2, "A repeated repair must not rewrite the client or realm");
@@ -52,16 +54,16 @@ test("application repair enables its form and stock setup, preserving provider s
 });
 
 test("already configured application sign-in performs no writes", async () => {
-  const state = fixture({ standardFlowEnabled: true, implicitFlowEnabled: false, directAccessGrantsEnabled: true,
-    serviceAccountsEnabled: false, attributes: { "pkce.code.challenge.method": "S256" } });
+  const state = fixture({ standardFlowEnabled: true, implicitFlowEnabled: false, directAccessGrantsEnabled: false,
+    serviceAccountsEnabled: false, attributes: { "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true" } });
   state.realm.loginTheme = "keycloak.v2";
   assert.equal(await configureApplicationSignIn(state.api, { apply: true, log: state.log }), true);
   assert.deepEqual(state.writes, []);
 });
 
 test("removing only the previous realm login leaves an already configured client untouched", async () => {
-  const state = fixture({ standardFlowEnabled: true, implicitFlowEnabled: false, directAccessGrantsEnabled: true,
-    serviceAccountsEnabled: false, attributes: { "pkce.code.challenge.method": "S256" } });
+  const state = fixture({ standardFlowEnabled: true, implicitFlowEnabled: false, directAccessGrantsEnabled: false,
+    serviceAccountsEnabled: false, attributes: { "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true" } });
   assert.equal(await configureApplicationSignIn(state.api, { apply: true, log: state.log }), true);
   assert.deepEqual(state.writes, [{ loginTheme: "keycloak.v2" }]);
   assert.deepEqual(state.client, state.original);
@@ -98,9 +100,18 @@ test("new realms enable the confidential application form while Postman remains 
   assert.equal(realm.loginTheme, undefined, "New realms must use Keycloak's built-in fallback");
   for (const clientId of ["inout-frontend", "inout-postman"]) {
     const client = realm.clients.find(candidate => candidate.clientId === clientId);
-    assert.equal(client.directAccessGrantsEnabled, clientId === "inout-frontend");
+    assert.equal(client.directAccessGrantsEnabled, false);
     assert.equal(client.implicitFlowEnabled, false);
     assert.equal(client.attributes["pkce.code.challenge.method"], "S256");
+  }
+});
+
+test("an absent or rejected extension probe never changes a working legacy client", async () => {
+  for (const providerReady of [undefined, async () => false, async () => { throw new Error("Unavailable synthetic provider"); }]) {
+    const state = fixture({ directAccessGrantsEnabled: true });
+    await assert.rejects(configureSignIn(state.api, { apply: true, providerReady, log() {} }));
+    assert.deepEqual(state.writes, []);
+    assert.equal(state.client.directAccessGrantsEnabled, true);
   }
 });
 

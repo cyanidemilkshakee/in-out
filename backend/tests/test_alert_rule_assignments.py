@@ -52,7 +52,7 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = database_fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "assignment-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "assignment-admin", "realm_access": {"roles": ["zone-admin"]}}
 
     async def save(self, subject_id, ids, revision=None):
         body = {"ruleIds": ids}
@@ -75,8 +75,9 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
         await self.seed_rule("rule-no-break", id="forged-rule-id", enabled=False)
         async with self.sessions() as db:
             db.add(Subject(id="visitor", kind="visitor", barcode="VIS-1",
-                person=Person(data={"id": "p1", "type": "employee", "name": "Visitor"})))
-            (await db.get(HardwareAsset, "h1")).data = {"id": "p1", "type": "employee", "name": "Laptop"}
+                person=Person(data={"id": "p1", "type": "employee", "name": "Visitor", "allowedZones": ["a"]})))
+            (await db.get(HardwareAsset, "h1")).data = {
+                "id": "p1", "type": "employee", "name": "Laptop", "allowedZones": ["a"]}
             db.add_all([
                 AlertRule(id="retired", data={"conditionKey": "unauthorized_hardware_carrier", "enabled": True}),
                 AlertRule(id="not-implemented", data={"conditionKey": "invented", "enabled": True}),
@@ -122,7 +123,6 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json(), first.json())
-        publish.assert_not_awaited()
         async with self.sessions() as db:
             events = (await db.scalars(select(EventOutbox).where(EventOutbox.kind == "presence"))).all()
             self.assertEqual(len(events), 1)
@@ -138,7 +138,8 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_selections_refuse_unknown_subjects_visitors_hardware_and_forged_ids(self):
         self.authorize()
         async with self.sessions() as db:
-            db.add(Subject(id="visitor", kind="visitor", barcode="VIS-1", person=Person(data={"name": "Guest"})))
+            db.add(Subject(id="visitor", kind="visitor", barcode="VIS-1",
+                person=Person(data={"name": "Guest", "allowedZones": ["a"]})))
             await db.commit()
         for subject_id, ids, status in (("missing", [], 404), ("visitor", [], 422),
             ("h1", ["rule-no-break"], 422), ("p1", ["rule-unauthorized-hardware"], 422),
@@ -154,7 +155,10 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def test_assignment_reads_and_writes_require_admin(self):
         self.assertEqual((await self.client.get("/v1/alert-rule-assignments")).status_code, 401)
         self.assertEqual((await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": []})).status_code, 401)
-        with patch("auth.verify_keycloak_token", return_value={"sub": "operator", "realm_access": {"roles": ["operator"]}}):
+        now = int(datetime.now(timezone.utc).timestamp())
+        with patch("auth.verify_keycloak_token", return_value={"sub": "operator", "iat": now,
+                   "exp": now + 300, "jti": "assignment-operator-token",
+                   "realm_access": {"roles": ["operator"]}}):
             headers = {"Authorization": "Bearer synthetic-operator"}
             self.assertEqual((await self.client.get("/v1/alert-rule-assignments", headers=headers)).status_code, 403)
             self.assertEqual((await self.client.put("/v1/alert-rule-assignments/p1", json={"ruleIds": []}, headers=headers)).status_code, 403)
@@ -181,7 +185,7 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         async with self.sessions() as db:
             db.add_all([Subject(id=f"employee-{index}", kind="employee", barcode=f"EMP-{index}",
-                person=Person(data={"name": f"Employee {index}"})) for index in range(30)])
+                person=Person(data={"name": f"Employee {index}", "allowedZones": ["a"]})) for index in range(30)])
             await db.commit()
         statements = []
         def record_query(_conn, _cursor, statement, _parameters, _context, _executemany):
@@ -194,12 +198,13 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
             event.remove(self.engine.sync_engine, "before_cursor_execute", record_query)
         self.assertEqual(response.status_code, 200, response.text)
         self.assertEqual(len(response.json()["subjects"]), 32)
-        self.assertLessEqual(len(statements), 4, "Rule directory reads must not perform a query for every subject")
+        self.assertLessEqual(len(statements), 5, "Rule directory reads must not perform a query for every subject")
 
     async def test_assignment_cascades_only_with_a_deletable_subject_and_keeps_audit_evidence(self):
         self.authorize()
         async with self.sessions() as db:
-            db.add(Subject(id="unused", kind="employee", barcode="UNUSED", person=Person(data={"name": "Unused"})))
+            db.add(Subject(id="unused", kind="employee", barcode="UNUSED",
+                person=Person(data={"name": "Unused", "allowedZones": ["a"]})))
             await db.commit()
         self.assertEqual((await self.save("unused", [], 0)).status_code, 200)
         async with self.sessions() as db:

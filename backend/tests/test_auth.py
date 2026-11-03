@@ -7,7 +7,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 from pathlib import Path
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -47,7 +47,7 @@ class AuthenticationTests(unittest.TestCase):
     def claims(self):
         return {"sub": "user-123", "iss": auth.settings.KEYCLOAK_ISSUER, "aud": "inout-frontend", "exp": int(time.time()) + 300,
                 "iat": int(time.time()), "jti": "access-token-123",
-                "typ": "Bearer", "realm_access": {"roles": ["admin"]}}
+                "typ": "Bearer", "realm_access": {"roles": ["zone-admin"]}}
 
     def token(self, claims=None, kid="old", header_kid=None):
         return jwt.encode(self.claims() if claims is None else claims, self.signers[kid], algorithm="RS256", headers={"kid": header_kid or kid})
@@ -86,7 +86,7 @@ class AuthenticationTests(unittest.TestCase):
         self.assertTrue(auth.has_admin_role(payload))
         self.assertTrue(auth.has_master_admin_role(payload))
         self.assertFalse(auth.has_operator_role(payload))
-        self.assertFalse(auth.has_master_admin_role({"realm_access": {"roles": ["admin"]}}))
+        self.assertFalse(auth.has_master_admin_role({"realm_access": {"roles": ["zone-admin"]}}))
 
     def test_invalid_signature_and_mislabelled_kid_are_rejected(self):
         with patch("auth.httpx.get", return_value=self.response("old", "new")):

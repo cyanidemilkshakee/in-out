@@ -55,11 +55,19 @@ class Database:
         self.queries = []
         self.loaded = []
         self.scalar = AsyncMock(side_effect=lambda query: 0 if "event_stream_state" in str(query) else "p1")
-        self.get = AsyncMock(return_value=SimpleNamespace(data={"mode": "auto"}))
+        async def get_row(model, identity, **kwargs):
+            if model.__name__ == "Checkpoint":
+                return SimpleNamespace(id=identity, data={}, zone_id="a", active=True)
+            return SimpleNamespace(data={"mode": "auto"})
+        self.get = AsyncMock(side_effect=get_row)
         self.commit = AsyncMock()
         self.flush = AsyncMock()
         self.info = {}
         self.added = []
+
+    async def scalars(self, query):
+        # Zone-scoped endpoints need an administrator's active zone list.
+        return Result(["a", "b"])
 
     async def execute(self, query):
         self.queries.append(query)
@@ -78,6 +86,10 @@ async def call_endpoint(endpoint, **overrides):
     values = {name: parameter.default.default
               for name, parameter in inspect.signature(endpoint).parameters.items()
               if isinstance(parameter.default, Param)}
+    admin = {"sub": "bounds-admin", "realm_access": {"roles": ["master-admin", "zone-admin"]}}
+    for name in ("actor", "_actor", "_admin"):
+        if name in inspect.signature(endpoint).parameters:
+            values[name] = admin
     values.update(overrides)
     return await endpoint(**values)
 
@@ -123,14 +135,16 @@ class DataQueryBoundsTests(unittest.IsolatedAsyncioTestCase):
         for prior_results in ([], [[]], [[], [], [], [], [], []]):
             with self.subTest(source=len(prior_results)):
                 db = Database(*prior_results, [(None,)] * 100)
-                await self.rejected(registry.registry_bundle(db=db), db)
+                await self.rejected(registry.registry_bundle(db=db, actor={
+                    "sub": "bounds-admin", "realm_access": {"roles": ["master-admin"]}}), db)
 
     async def test_permissions_directory_rejects_every_complete_source(self):
         # Requests, distinct manual-assignment IDs, access rows, subjects.
         for count in range(4):
             with self.subTest(source=count):
                 db = Database(*([[]] * count), [(None,)] * 100)
-                await self.rejected(permissions.list_permissions(db=db, _admin={}), db)
+                await self.rejected(permissions.list_permissions(db=db, _admin={
+                    "sub": "bounds-admin", "realm_access": {"roles": ["master-admin"]}}), db)
 
     async def test_rule_directory_rejects_catalog_subjects_and_override_excess(self):
         for count in range(3):
@@ -213,12 +227,14 @@ class DataQueryBoundsTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_complete_presence_rejects_excess_and_preserves_valid_entries(self):
         db = Database([(None, None)] * 100)
-        await self.rejected(presence.get_presence_snapshot(db=db, _actor={}), db)
+        await self.rejected(presence.get_presence_snapshot(db=db, actor={
+            "sub": "bounds-admin", "realm_access": {"roles": ["master-admin", "zone-admin"]}}), db)
         now = datetime.now(timezone.utc)
         db = Database([(SimpleNamespace(subject_id="p1", state="inside",
             last_scan_timestamp=now, updated_at=now),
             SimpleNamespace(kind="employee", barcode="EMP-1"))])
-        result = await presence.get_presence_snapshot(db=db, _actor={})
+        result = await presence.get_presence_snapshot(db=db, actor={
+            "sub": "bounds-admin", "realm_access": {"roles": ["master-admin", "zone-admin"]}})
         self.assertEqual((result[0].subject_id, result[0].barcode, result[0].state),
                          ("p1", "EMP-1", "inside"))
 
@@ -256,30 +272,33 @@ class DataQueryBoundsTests(unittest.IsolatedAsyncioTestCase):
                 # perform the additional source lookup before the same read.
                 db = Database([("note",)] * 100)
                 db.scalar = AsyncMock(side_effect=lookups)
-                await self.rejected(movements.get_movement_notes(event_id, db=db), db)
+                with patch("routers.movements._require_movement_scope", new=AsyncMock()):
+                    await self.rejected(movements.get_movement_notes(event_id, db=db, actor={
+                        "sub": "bounds-admin", "realm_access": {"roles": ["master-admin"]}}), db)
                 self.assertEqual(db.scalar.await_count, len(lookups))
                 self.assertIn(physical_id, db.queries[-1].compile().params.values())
 
                 db = Database([("note",)] * 100)
                 db.scalar = AsyncMock(side_effect=lookups)
-                with patch("routers.movements.publish_data_changed", new=AsyncMock()) as publish:
+                with patch("routers.movements._require_movement_scope", new=AsyncMock()):
                     await self.rejected(movements.add_movement_note(event_id,
-                        movements.NoteRequest(note="new note"), db=db, _admin={}), db)
+                        movements.NoteRequest(note="new note"), db=db, _admin={
+                            "sub": "bounds-admin", "realm_access": {"roles": ["master-admin"]}}), db)
                 self.assertEqual(db.scalar.await_count, len(lookups))
                 self.assertEqual(len(db.added), 1)
                 self.assertEqual(db.added[0].event_id, physical_id)
                 self.assertIn(physical_id, db.queries[-1].compile().params.values())
                 db.flush.assert_awaited_once()
                 db.commit.assert_not_awaited()
-                publish.assert_not_awaited()
 
     async def test_empty_snapshots_keep_existing_complete_contracts(self):
-        registry_data = await registry.registry_bundle(db=Database())
+        admin = {"sub": "bounds-admin", "realm_access": {"roles": ["master-admin"]}}
+        registry_data = await registry.registry_bundle(db=Database(), actor=admin)
         self.assertEqual(set(registry_data), {"eventRevision", "people", "hardwareAssets", "alerts", "permissions",
             "movements", "auditEvents", "permissionRequests", "checkpoints"})
         self.assertEqual(registry_data.pop("eventRevision"), 0)
         self.assertTrue(all(value == [] for value in registry_data.values()))
-        permission_data = await permissions.list_permissions(db=Database(), _admin={})
+        permission_data = await permissions.list_permissions(db=Database(), _admin=admin)
         self.assertEqual(set(permission_data), {"eventRevision", "people", "hardware", "requests", "subjects", "checkpoints"})
         self.assertEqual(permission_data.pop("eventRevision"), 0)
         self.assertTrue(all(value == [] for value in permission_data.values()))
@@ -304,7 +323,8 @@ class DataQueryBoundsDatabaseTests(unittest.IsolatedAsyncioTestCase):
         import test_database as fixtures
         await fixtures.DatabaseTests.asyncSetUp(self)
         from auth import verify_admin_request
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "bounds-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "bounds-admin", "realm_access": {"roles": ["zone-admin"]}}
 
     async def asyncTearDown(self):
         import test_database as fixtures
@@ -326,8 +346,7 @@ class DataQueryBoundsDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(hardware.status_code, 200, hardware.text)
         projected_id = hardware.json()["items"][0]["id"]
         self.assertNotEqual(source_id, projected_id)
-        with patch.object(settings, "DATA_SNAPSHOT_MAX_ROWS", 3), \
-             patch("routers.movements.publish_data_changed", new=AsyncMock()) as publish:
+        with patch.object(settings, "DATA_SNAPSHOT_MAX_ROWS", 3):
             for event_id in (source_id, projected_id):
                 with self.subTest(event_id=event_id):
                     notes_url = f"/v1/movements/{event_id}/notes"
@@ -339,7 +358,6 @@ class DataQueryBoundsDatabaseTests(unittest.IsolatedAsyncioTestCase):
                     self.assertIn("complete read", rejected.json()["detail"])
                     async with self.sessions() as db:
                         self.assertEqual(await db.scalar(select(func.count()).select_from(MovementNote)), 3)
-            publish.assert_not_awaited()
 
     async def test_sql_grouping_aggregates_full_alert_history_and_bucket_overflow_is_explicit(self):
         from datetime import timedelta
@@ -398,7 +416,8 @@ class DataQueryBoundsDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((warning["subjectName"], warning["count"]), ("Alice", 8))
                 self.assertFalse(any("people.data AS people_data" in query for query in queries))
                 async with self.sessions() as db:
-                    db.add_all([Subject(id=f"extra-{index}", kind="employee", barcode=f"EXTRA-{index}")
+                    db.add_all([Subject(id=f"extra-{index}", kind="employee", barcode=f"EXTRA-{index}",
+                        person=Person(data={"name": f"Extra {index}", "allowedZones": ["a"]}))
                         for index in range(2)])
                     await db.commit()
                 rejected = await self.client.get("/v1/alerts", params={"limit": 1})

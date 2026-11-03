@@ -10,9 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_admin_request
 from database import get_db
-from data_limits import precharge_mutation_response
 from models import AdminAccount
-from redis_client import publish_data_changed
 from event_outbox import enqueue_changed
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
@@ -80,7 +78,7 @@ async def get_admin_profile(db: AsyncSession = Depends(get_db), admin: dict = De
     if db.info.get("profile_initialized"):
         await enqueue_changed(db)
     await db.commit()
-    return response
+    return _serialize_account(account)
 
 
 @router.patch("/profile")

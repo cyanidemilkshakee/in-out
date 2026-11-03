@@ -20,9 +20,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from auth import verify_admin_request
 from database import get_db, get_read_db
-from data_limits import bounded_rows
+from data_limits import bounded_rows, precharge_mutation_response
 from event_outbox import enqueue_changed, enqueue_presence
-from models import AccessPermission, Alert, AlertReview, Checkpoint, HardwareAsset, Person, Subject
+from models import AccessPermission, Alert, AlertReview, Checkpoint, CriticalAlertTrigger, HardwareAsset, Person, Subject
 from critical_entry_restrictions import release_critical_entry_restriction
 from alert_reviews import (
     AlertReviewInput, WarningResetInput, acknowledge_alert, enrich_alert_documents, review_alert, reset_subject_warnings,
@@ -31,9 +31,7 @@ from alert_rule_assignments import (
     AlertRuleAssignmentInput, alert_rule_catalog, list_alert_rule_assignments, replace_alert_rule_assignment,
 )
 from alert_queries import command_center_assignments, confirmed_people_warning_total, focused_alert_people, current_subject_warning_documents
-from redis_client import publish_data_changed, publish_presence_update
 from zone_access import admin_zone_ids, require_alert_scope, require_subject_scope, subject_zone_condition
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -158,7 +156,13 @@ async def list_alerts(
         | records.c.data["title"].astext.ilike("Unknown barcode%")
         | records.c.data["title"].astext.ilike("Access decision denied")
     )
+    unscoped_alert = and_(
+        records.c.data["zoneId"].astext.is_(None),
+        records.c.data["checkpointId"].astext.is_(None),
+        records.c.data["subjectId"].astext.is_(None),
+    )
     branch_filter = or_(
+        unscoped_alert,
         records.c.data["zoneId"].astext.in_(zone_ids),
         records.c.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
         records.c.data["subjectId"].astext.in_(visible_subject_ids),
@@ -352,7 +356,14 @@ async def release_entry_restriction(
     admin: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """Lift a critical hold explicitly, without changing normal access or presence."""
-    await require_alert_scope(db, admin, alert_id)
+    # The source alert may have been purged by retention. The durable trigger
+    # marker is the authority for release and remains bound to its subject.
+    marker = await db.get(CriticalAlertTrigger, alert_id)
+    if marker is None:
+        raise HTTPException(status_code=404, detail="Entry restriction not found")
+    if marker.subject_id is None:
+        raise HTTPException(status_code=422, detail="This alert has no registered subject entry restriction")
+    await require_subject_scope(db, admin, marker.subject_id)
     result = await release_critical_entry_restriction(db, alert_id, admin.get("sub", "unknown"), payload.reason)
     await enqueue_changed(db)
     await db.commit()

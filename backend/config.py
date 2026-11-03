@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     # Database
     # A deployment must supply its provisioned credential; no usable password
     # is embedded in the fallback used by import-only tooling and unit tests.
-    DATABASE_URL: str = "postgresql+asyncpg://inout_app@db:5432/inout"
+    DATABASE_URL: str = "postgresql+asyncpg://inout_app@db:1020/inout"
     READ_DATABASE_URL: str = ""
     DATABASE_STATEMENT_CACHE_SIZE: int = Field(default=100, ge=0, le=1000)
     DATABASE_CONNECT_TIMEOUT_SECONDS: float = Field(default=5, ge=0.1, le=30)
@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     DATABASE_LOCK_TIMEOUT_MS: int = Field(default=3_000, ge=50, le=30_000)
 
     # Redis (Phase 2)
-    REDIS_URL: str = "redis://localhost:1004/0"
+    REDIS_URL: str = "redis://localhost:1021/0"
     QUOTA_REDIS_URL: str = ""
     EVENTS_REDIS_URL: str = ""
     QUOTA_REDIS_MAX_CONNECTIONS: int = Field(default=64, ge=4, le=512)
@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     MOVEMENT_RETENTION_DAYS: int = Field(default=0, ge=0)
 
     # Temporal (Phase 4)
-    TEMPORAL_HOST: str = "temporal:7233"
+    TEMPORAL_HOST: str = "temporal:1024"
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

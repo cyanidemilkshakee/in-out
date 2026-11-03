@@ -57,7 +57,8 @@ class RequestAdmissionTests(unittest.IsolatedAsyncioTestCase):
     def claims(token, **kwargs):
         if token not in {"alice", "bob"}:
             raise HTTPException(401, "Invalid token")
-        return {"sub": token, "exp": time.time() + 300,
+        return {"sub": token, "iat": int(time.time()), "jti": "request-admission-" + token,
+                "exp": time.time() + 300,
                 "realm_access": {"roles": ["operator"]}}
 
     async def test_successful_and_anonymous_requests_have_no_app_frequency_counter(self):

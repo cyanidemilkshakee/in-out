@@ -9,13 +9,13 @@ const subject = "synthetic-subject"
 const intentId = "b6054cab-bd97-4b4e-845b-a86dcf7a3910"
 // Cryptographic validation has separate signed-key coverage. These refresh unit
 // cases inject a validator that asserts the caller binds the prior principal.
-const config = { issuer: "http://keycloak:1105/realms/inout", clientId: "inout-frontend", clientSecret: "test-secret",
+const config = { issuer: "http://keycloak:1022/realms/inout", clientId: "inout-frontend", clientSecret: "test-secret",
   validateAccessToken: async (value: string, expectedSubject: string | undefined) => {
     assert.equal(expectedSubject, subject)
     assert.equal(subjectFromAccessToken(value), expectedSubject)
   } }
 const accessToken = (roles: unknown, extra: Record<string, unknown> = {}) => `header.${Buffer.from(JSON.stringify({ sub: subject, realm_access: { roles }, ...extra })).toString("base64url")}.signature`
-const expired: RoleToken = { sub: subject, access_token: accessToken(["admin"]), refresh_token: "refresh", expires_at: 1, roles: ["admin"] }
+const expired: RoleToken = { sub: subject, access_token: accessToken(["zone-admin"]), refresh_token: "refresh", expires_at: 1, roles: ["zone-admin"] }
 
 test("expired sessions without refresh tokens fail closed", async () => {
   const result = await refreshKeycloakToken({ ...expired, refresh_token: undefined }, config, fetch, now)
@@ -47,7 +47,7 @@ test("refresh updates roles and preserves a refresh token when none is returned"
 })
 
 test("rotated refresh tokens are retained", async () => {
-  const result = await refreshKeycloakToken(expired, config, async () => Response.json({ access_token: accessToken(["admin"]), refresh_token: "rotated", expires_in: 300, token_type: "Bearer" }), now)
+  const result = await refreshKeycloakToken(expired, config, async () => Response.json({ access_token: accessToken(["zone-admin"]), refresh_token: "rotated", expires_in: 300, token_type: "Bearer" }), now)
   assert.equal(result.refresh_token, "rotated")
 })
 
@@ -76,10 +76,10 @@ test("rejected refreshed bearer validation clears credentials and cannot unlock 
   let validations = 0
   const result = await refreshKeycloakToken(expired, { ...config, validateAccessToken: async (value, expectedSubject) => {
     validations++
-    assert.equal(value, accessToken(["admin"]))
+    assert.equal(value, accessToken(["zone-admin"]))
     assert.equal(expectedSubject, subject)
     throw new Error("synthetic-private-provider-response")
-  } }, async () => Response.json({ access_token: accessToken(["admin"]), refresh_token: "rotated", expires_in: 300, token_type: "Bearer" }), now)
+  } }, async () => Response.json({ access_token: accessToken(["zone-admin"]), refresh_token: "rotated", expires_in: 300, token_type: "Bearer" }), now)
   assert.equal(validations, 1)
   assert.equal(result.error, "RefreshTokenError")
   assert.equal(result.access_token, undefined)
@@ -90,7 +90,7 @@ test("rejected refreshed bearer validation clears credentials and cannot unlock 
 
 test("refresh cannot switch account or authentication time within a step-up window", async () => {
   const old = { ...expired, auth_time: 1900, step_up_expires_at: 5500, step_up_duration_minutes: 60 }
-  for (const bearer of [accessToken(["admin"], { sub: "other-subject" }), accessToken(["admin"], { auth_time: 1901 })]) {
+  for (const bearer of [accessToken(["zone-admin"], { sub: "other-subject" }), accessToken(["zone-admin"], { auth_time: 1901 })]) {
     const result = await refreshKeycloakToken(old, config,
       async () => Response.json({ access_token: bearer, expires_in: 300, token_type: "Bearer" }), now)
     assert.equal(result.error, "RefreshTokenError")
@@ -105,7 +105,7 @@ test("public sessions omit provider credentials while the server can forward acc
   const publicSession = keycloakSession(session, expired, false)
   assert.equal("access_token" in publicSession, false)
   assert.equal("refresh_token" in publicSession, false)
-  assert.deepEqual(publicSession.roles, ["admin"])
+  assert.deepEqual(publicSession.roles, ["zone-admin"])
   assert.equal(keycloakSession(session, expired, true).access_token, expired.access_token)
   assert.equal(keycloakSession(session, expired, true).refresh_token, expired.refresh_token)
 })
@@ -128,9 +128,9 @@ test("malformed role claims never grant access", () => {
 test("auth time is extracted only from valid numeric claims", () => {
   const token = `header.${Buffer.from(JSON.stringify({ auth_time: 1234 })).toString("base64url")}.signature`
   assert.equal(authTimeFromToken(token), 1234)
-  assert.equal(authTimeFromToken(accessToken(["admin"])), undefined)
+  assert.equal(authTimeFromToken(accessToken(["zone-admin"])), undefined)
   for (const invalid of [0, -1, 1.5, "1234", true, null]) {
-    assert.equal(authTimeFromToken(accessToken(["admin"], { auth_time: invalid })), undefined)
+    assert.equal(authTimeFromToken(accessToken(["zone-admin"], { auth_time: invalid })), undefined)
   }
 })
 
@@ -225,7 +225,7 @@ test("server step-up proofs bind the selected expiry to the exact bearer token",
 test("access-token refresh preserves the selected step-up window without renewing it", async () => {
   const stepUp = { ...expired, auth_time: 1900, step_up_expires_at: 5800, step_up_duration_minutes: 60,
     step_up_extension_seconds: 300, step_up_window_id: intentId, step_up_intent_id: "b6054cab-bd97-4b4e-845b-a86dcf7a3911" }
-  const result = await refreshKeycloakToken(stepUp, config, async () => Response.json({ access_token: accessToken(["admin"]), expires_in: 300, token_type: "Bearer" }), now)
+  const result = await refreshKeycloakToken(stepUp, config, async () => Response.json({ access_token: accessToken(["zone-admin"]), expires_in: 300, token_type: "Bearer" }), now)
   assert.equal(result.auth_time, 1900)
   assert.equal(result.step_up_expires_at, 5800)
   assert.equal(result.step_up_duration_minutes, 60)
@@ -239,7 +239,7 @@ test("access-token refresh preserves the selected step-up window without renewin
 })
 
 test("callback destination and issued cookie are required before checking the new admin session", () => {
-  const requestUrl = "http://internal:3000/api/auth/callback/keycloak"
+  const requestUrl = "http://internal:1018/api/auth/callback/keycloak"
   const authUrl = "https://app.test"
   const cookies = ["authjs.session-token=new-session; Path=/; HttpOnly"]
   assert.equal(isSuccessfulUserManagementCallback("https://app.test/admin/users", requestUrl, cookies, authUrl), true)

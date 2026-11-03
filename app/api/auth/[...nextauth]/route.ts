@@ -1,4 +1,4 @@
-import { NextRequest } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { decode } from "next-auth/jwt";
 import { handlers } from "../../../../auth";
 import { isSuccessfulUserManagementCallback, USER_MANAGEMENT_STEP_UP_COOKIE, USER_MANAGEMENT_STEP_UP_LOCK_COOKIE, verifyStepUpIntent } from "../../../../lib/userManagementStepUp";
@@ -13,8 +13,28 @@ function secureCookie(request: NextRequest) {
   }
 }
 
+async function requestSessionToken(request: NextRequest) {
+  const secret = process.env.AUTH_SECRET;
+  if (!secret) return null;
+  const cookies = request.cookies.getAll().map(({ name, value }) => `${name}=${value};`);
+  const issued = issuedAuthSession(cookies, secureCookie(request));
+  if (!issued) return null;
+  try { return await decode({ token: issued.value, secret, salt: issued.salt }); }
+  catch { return null; }
+}
+
+function localRedirect(request: NextRequest, path: string, origin: string) {
+  const destination = new URL(path, origin).href;
+  if (request.method === "POST" && request.headers.get("x-auth-return-redirect") === "1") {
+    return publicJson({ url: destination });
+  }
+  const response = NextResponse.redirect(destination, 303);
+  response.headers.set("Cache-Control", "no-store");
+  return response;
+}
+
 async function recordBrowserSso(request: NextRequest, response: Response) {
-  if (request.nextUrl.pathname !== "/api/auth/callback/keycloak" || response.status < 200 || response.status >= 400) return response;
+  if (!["/api/auth/callback/keycloak", "/api/auth/callback/keycloak-password-setup", "/api/auth/callback/keycloak-password-change"].includes(request.nextUrl.pathname) || response.status < 200 || response.status >= 400) return response;
   const secret = process.env.AUTH_SECRET;
   if (!secret) return response;
   try {
@@ -32,6 +52,76 @@ async function recordBrowserSso(request: NextRequest, response: Response) {
     // Failed, incomplete, and malformed callbacks must not create SSO state.
   }
   return response;
+}
+
+async function preserveSessionForPasswordChange(request: NextRequest, response: Response, origin: string) {
+  if (request.nextUrl.pathname !== "/api/auth/callback/keycloak-password-change" || response.status < 200 || response.status >= 400) return response;
+  const cookies = response.headers.getSetCookie();
+  const issued = issuedAuthSession(cookies, secureCookie(request));
+  const actionStatus = request.nextUrl.searchParams.get("kc_action_status");
+  if (!issued && actionStatus !== "cancelled" && actionStatus !== "success") return response;
+
+  let returnedSubject: string | null = null;
+  if (issued) {
+    try {
+      const decoded = await decode({ token: issued.value, secret: process.env.AUTH_SECRET!, salt: issued.salt });
+      if (decoded && typeof decoded === "object" && "sub" in decoded && typeof decoded.sub === "string") {
+        returnedSubject = decoded.sub;
+      }
+    }
+    catch { /* Treat an unreadable new session as an unconfirmed action. */ }
+  }
+  const currentToken = await requestSessionToken(request);
+  const currentSubject = typeof currentToken?.sub === "string" ? currentToken.sub : null;
+  const action = request.nextUrl.searchParams.get("kc_action");
+  const reason = actionStatus === "cancelled" ? "cancelled"
+    : action !== "UPDATE_PASSWORD" || actionStatus !== "success" ? "unconfirmed"
+    : !currentSubject ? "session_expired"
+    : !returnedSubject ? "unconfirmed"
+    : returnedSubject !== currentSubject ? "identity_mismatch"
+    : null;
+  if (!reason) return response;
+
+  // Keep the existing account's encrypted session cookie. Auth.js has already
+  // validated OAuth state and cleared the one-time callback cookies.
+  const headers = new Headers(response.headers);
+  headers.delete("set-cookie");
+  for (const cookie of cookies) {
+    const name = cookie.slice(0, cookie.indexOf("="));
+    if (/^(?:__Secure-)?authjs\.session-token(?:\.\d+)?$/.test(name)) continue;
+    headers.append("set-cookie", cookie);
+  }
+  const destination = reason === "session_expired"
+    ? "/login?from=%2Faccount&error=password_change_signin_required"
+    : `/account?passwordChange=${reason === "cancelled" ? "cancelled" : reason === "identity_mismatch" ? "identity_mismatch" : "unconfirmed"}`;
+  headers.set("Location", new URL(destination, origin).href);
+  headers.set("Cache-Control", "no-store, max-age=0");
+  headers.delete("Content-Length");
+  return new Response(null, { status: 303, headers });
+}
+
+async function requireSuccessfulPasswordSetup(request: NextRequest, response: Response, origin: string) {
+  if (request.nextUrl.pathname !== "/api/auth/callback/keycloak-password-setup" || response.status < 200 || response.status >= 400) return response;
+  const action = request.nextUrl.searchParams.get("kc_action");
+  const actionStatus = request.nextUrl.searchParams.get("kc_action_status");
+  if (action === "UPDATE_PASSWORD" && actionStatus === "success") return response;
+
+  // Do not establish an application session unless Keycloak confirms the
+  // temporary password action completed. Keep Auth.js's callback-cookie
+  // cleanup, but discard any session cookie minted from an incomplete action.
+  const headers = new Headers(response.headers);
+  const cookies = response.headers.getSetCookie();
+  headers.delete("set-cookie");
+  for (const cookie of cookies) {
+    const name = cookie.slice(0, cookie.indexOf("="));
+    if (/^(?:__Secure-)?authjs\.session-token(?:\.\d+)?$/.test(name)) continue;
+    headers.append("set-cookie", cookie);
+  }
+  const error = actionStatus === "cancelled" ? "password_setup_cancelled" : "password_setup_unconfirmed";
+  headers.set("Location", new URL(`/login?error=${error}`, origin).href);
+  headers.set("Cache-Control", "no-store, max-age=0");
+  headers.delete("Content-Length");
+  return new Response(null, { status: 303, headers });
 }
 
 async function clearStepUpAfterSignIn(request: NextRequest, response: Response) {
@@ -97,6 +187,22 @@ function publicJson(value: unknown, response?: Response, status = response?.stat
 
 async function publicResponse(request: NextRequest, response: Response, origin: string) {
   if (response.status >= 400) {
+    if (request.nextUrl.pathname === "/api/auth/error") {
+      const error = request.nextUrl.searchParams.get("error");
+      return localRedirect(request, `/login?error=${error === "Configuration" ? "Configuration" : "auth_failed"}`, origin);
+    }
+    if (request.nextUrl.pathname === "/api/auth/callback/keycloak-password-setup") {
+      const headers = responseHeaders(response);
+      const cookies = response.headers.getSetCookie();
+      headers.delete("set-cookie");
+      for (const cookie of cookies) {
+        const name = cookie.slice(0, cookie.indexOf("="));
+        if (/^(?:__Secure-)?authjs\.session-token(?:\.\d+)?$/.test(name)) continue;
+        headers.append("set-cookie", cookie);
+      }
+      headers.set("Location", new URL("/login?error=password_setup_unconfirmed", origin).href);
+      return new Response(null, { status: 303, headers });
+    }
     const sanitized = publicJson({ error: "Authentication could not be completed." }, response);
     sanitized.headers.delete("Location");
     return sanitized;
@@ -105,7 +211,7 @@ async function publicResponse(request: NextRequest, response: Response, origin: 
     return publicJson(publicAuthSession(await response.json()), response);
   }
   const providerIssuer = process.env.KEYCLOAK_ISSUER_PUBLIC || process.env.KEYCLOAK_ISSUER;
-  const authorizationUrl = request.nextUrl.pathname === "/api/auth/signin/keycloak" && providerIssuer
+  const authorizationUrl = ["/api/auth/signin/keycloak", "/api/auth/signin/keycloak-password-setup", "/api/auth/signin/keycloak-password-change"].includes(request.nextUrl.pathname) && providerIssuer
     ? `${providerIssuer.replace(/\/$/, "")}/protocol/openid-connect/auth`
     : undefined;
   const location = response.headers.get("location");
@@ -128,11 +234,36 @@ async function publicResponse(request: NextRequest, response: Response, origin: 
 async function handleAuth(request: NextRequest, method: "GET" | "POST") {
   try {
     const boundary = await prepareAuthRequest(request, process.env.AUTH_URL || process.env.NEXTAUTH_URL);
+    const path = request.nextUrl.pathname;
+    if (method === "GET" && path === "/api/auth/signin/keycloak-password-setup") {
+      return localRedirect(request, "/login?error=password_setup_use_login", boundary.origin);
+    }
+    if (method === "GET" && path === "/api/auth/signin/keycloak-password-change") {
+      return localRedirect(request, "/account", boundary.origin);
+    }
+    if (method === "GET" && path === "/api/auth/signin/keycloak") {
+      return localRedirect(request, "/login?error=signin_use_login", boundary.origin);
+    }
+    if (request.nextUrl.pathname === "/api/auth/signin/keycloak-password-setup") {
+      const hasAppSession = request.cookies.getAll().some(({ name }) =>
+        /^(?:__Secure-)?authjs\.session-token(?:\.\d+)?$/.test(name));
+      if (hasAppSession || request.cookies.has(USER_MANAGEMENT_STEP_UP_COOKIE)) {
+        return localRedirect(request, "/login?error=password_setup_signout_required", boundary.origin);
+      }
+    }
+    if (request.nextUrl.pathname === "/api/auth/signin/keycloak-password-change") {
+      const session = await requestSessionToken(request);
+      if (!session?.sub || session.error) return localRedirect(request, "/login?from=%2Faccount&error=password_change_signin_required", boundary.origin);
+      if (request.cookies.has(USER_MANAGEMENT_STEP_UP_COOKIE)) return localRedirect(request, "/account?passwordChange=stepup_locked", boundary.origin);
+    }
     const boundedRequest = boundary.body === undefined ? request : new NextRequest(request.url, {
       method, headers: request.headers, body: boundary.body, signal: request.signal,
     });
-    const response = await publicResponse(boundedRequest, await handlers[method](boundedRequest), boundary.origin);
-    return clearStepUpAfterSignIn(boundedRequest, await recordBrowserSso(boundedRequest, response));
+    const authResponse = await publicResponse(boundedRequest, await handlers[method](boundedRequest), boundary.origin);
+    const setupSafeResponse = await requireSuccessfulPasswordSetup(boundedRequest, authResponse, boundary.origin);
+    const withBrowserSso = await recordBrowserSso(boundedRequest, setupSafeResponse);
+    const accountSafeResponse = await preserveSessionForPasswordChange(boundedRequest, withBrowserSso, boundary.origin);
+    return clearStepUpAfterSignIn(boundedRequest, accountSafeResponse);
   } catch (error) {
     return publicJson({ error: error instanceof AuthRequestError ? error.message : "Authentication could not be completed." },
       undefined, error instanceof AuthRequestError ? error.status : 500);

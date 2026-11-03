@@ -30,3 +30,6 @@ tsconfig.test.json
 .next-*
 **/__pycache__
 *.tsbuildinfo
+# Keep unrelated Daybreak tooling outside the application image context.
+**/[Dd][Aa][Yy][Bb][Rr][Ee][Aa][Kk]
+**/[Dd][Aa][Yy][Bb][Rr][Ee][Aa][Kk]/**

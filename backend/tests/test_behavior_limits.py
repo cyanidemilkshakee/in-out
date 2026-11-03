@@ -120,7 +120,8 @@ class UnknownScanAdmissionTests(unittest.IsolatedAsyncioTestCase):
         db.add = Mock()
         db.execute.return_value = result
         checkpoint = SimpleNamespace(id="cp-main", data={"name": "Main Entrance", "mode": "entry"})
-        db.get.side_effect = [cached] if cached else [None, checkpoint]
+        # Receipt lookup, registered-checkpoint validation, then scan payload.
+        db.get.side_effect = [cached] if cached else [None, checkpoint, checkpoint]
         return db
 
     async def test_fresh_unknown_scan_rejection_writes_no_movement_or_receipt(self):

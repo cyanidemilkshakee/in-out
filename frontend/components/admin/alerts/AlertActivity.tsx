@@ -3,18 +3,21 @@
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, Check, X } from "lucide-react";
 import type { Alert, Person } from "../../../../lib/types";
+import { normalizeCheckpointLabel } from "../../../../lib/normalizeDashboard";
 import { PersonStatusLabel } from "../PersonStatusLabel";
 import { alertTimestamp, formatAlertExplanation, formatAlertReviewDate, getAlertReviewState, getAlertWarningLevel, getOpenAlertWarningNumber, type AlertReviewFilter } from "./alertPresentation";
 
 type ReviewDecision = "confirmed" | "excused";
 type ReviewHandler = (alertId: string, decision: ReviewDecision, reason?: string) => Promise<Alert>;
 
-function AlertReviewCard({ alert, employeeStatus, onReview, hasEarlierUnreviewedAlert, disabled }: {
+function AlertReviewCard({ alert, employeeStatus, onReview, hasEarlierUnreviewedAlert, disabled, showSubjectDetails, showDescription }: {
   alert: Alert;
   employeeStatus?: Person["status"];
   onReview: ReviewHandler;
   hasEarlierUnreviewedAlert: boolean;
   disabled: boolean;
+  showSubjectDetails: boolean;
+  showDescription: boolean;
 }) {
   const [reason, setReason] = useState("");
   const [invalidReason, setInvalidReason] = useState(false);
@@ -74,7 +77,7 @@ function AlertReviewCard({ alert, employeeStatus, onReview, hasEarlierUnreviewed
   </article>;
 }
 
-export function AlertActivity({ alerts, people, onReview, filter, isLoading = false, disabled = false, emptyMessage, className = "", totalCount, pagination }: {
+export function AlertActivity({ alerts, people, onReview, filter, isLoading = false, disabled = false, emptyMessage, className = "", totalCount, pagination, showSubjectDetails = true, showDescription = true }: {
   alerts: Alert[];
   people: Person[];
   onReview: ReviewHandler;
@@ -85,6 +88,8 @@ export function AlertActivity({ alerts, people, onReview, filter, isLoading = fa
   className?: string;
   totalCount?: number;
   pagination?: ReactNode;
+  showSubjectDetails?: boolean;
+  showDescription?: boolean;
 }) {
   const titleId = useId();
   const sortedAlerts = useMemo(() => [...alerts].sort((a, b) => {
@@ -114,7 +119,7 @@ export function AlertActivity({ alerts, people, onReview, filter, isLoading = fa
           const alertTime = alertTimestamp(alert);
           return sameSubject && (candidateTime < alertTime || (candidateTime === alertTime && candidate.id < alert.id));
         });
-        return <AlertReviewCard key={alert.id} alert={alert} employeeStatus={(alert.subjectId ? employeeStatuses.get(alert.subjectId) : undefined) ?? employeeStatusesByBarcode.get(alert.barcode)} onReview={onReview} hasEarlierUnreviewedAlert={hasEarlierUnreviewedAlert} disabled={disabled || isLoading} />;
+        return <AlertReviewCard key={alert.id} alert={alert} employeeStatus={(alert.subjectId ? employeeStatuses.get(alert.subjectId) : undefined) ?? employeeStatusesByBarcode.get(alert.barcode)} onReview={onReview} hasEarlierUnreviewedAlert={hasEarlierUnreviewedAlert} disabled={disabled || isLoading} showSubjectDetails={showSubjectDetails} showDescription={showDescription} />;
       }) : <div className="alert-activity-empty"><AlertTriangle size={22} aria-hidden="true" /><strong>{isLoading ? "Loading alerts…" : emptyMessage ?? `No ${filter === "needs_review" ? "open alerts" : "alert records"} match these filters.`}</strong>{!isLoading && !emptyMessage && <span>Try another review status, time range, or search.</span>}</div>}
     </div>
     {pagination}

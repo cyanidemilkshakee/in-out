@@ -7,6 +7,7 @@ import logging
 
 import anyio
 from fastapi import HTTPException
+from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse
 
 from config import settings
@@ -66,6 +67,14 @@ async def bounded_rows(db, stmt, maximum=None):
     if len(rows) > maximum:
         raise HTTPException(422, "Too many records for one complete read; use pagination or a shorter filtered range")
     return rows
+
+
+async def precharge_mutation_response(_db, content) -> None:
+    """Reject an oversized response before a mutation commits or runs work."""
+    body = JSONResponse(content=jsonable_encoder(content)).body
+    if len(body) > settings.MAX_DATA_RESPONSE_BYTES:
+        raise HTTPException(413,
+            "Data response is too large; use pagination or a shorter filtered range")
 
 
 class DataLimitsMiddleware:

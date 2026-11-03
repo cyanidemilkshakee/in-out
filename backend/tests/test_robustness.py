@@ -2,7 +2,7 @@ import unittest
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
@@ -21,7 +21,7 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
                 closed.append(True)
         request = AsyncMock()
         with patch("routers.presence.subscribe_presence", messages):
-            self.assertEqual([event async for event in _sse_event_generator(request, 0, {"realm_access": {"roles": ["admin"]}})], [])
+            self.assertEqual([event async for event in _sse_event_generator(request, 0, {"realm_access": {"roles": ["zone-admin"]}})], [])
         self.assertEqual(closed, [True])
 
     async def test_chunked_body_limits_and_payload_delivery(self):
@@ -44,11 +44,16 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
         calls = []
         async def identity(token, method, path, payload=None):
             calls.append((method, path, payload))
-            return httpx.Response(200, json=[{"name": "admin"}] if path.endswith("role-mappings/realm") else user)
+            return httpx.Response(200, json=[{"name": "zone-admin"}] if path.endswith("role-mappings/realm") else user)
         with patch("routers.keycloak_admin._request", side_effect=identity):
             db = AsyncMock()
             db.get.return_value = None
-            await keycloak_admin.update_user("user", keycloak_admin.UserUpdateRequest(email="new@example.org"), "token", db, {"sub": "admin"})
+            zones = MagicMock()
+            zones.__iter__.return_value = iter(["a"])
+            zones.all.return_value = ["a"]
+            db.scalars.return_value = zones
+            await keycloak_admin.update_user("user", keycloak_admin.UserUpdateRequest(email="new@example.org"), "token", db,
+                {"sub": "admin", "realm_access": {"roles": ["zone-admin", "master-admin"]}})
         self.assertFalse(next(payload for method, _, payload in calls if method == "PUT")["emailVerified"])
 
     async def test_password_whitespace_is_preserved_and_roles_update_only_differences(self):
@@ -58,10 +63,10 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
         async def identity(token, method, path, payload=None):
             calls.append((method, path, payload))
             if path.startswith("roles/"):
-                return httpx.Response(200, json={"id": "admin", "name": "admin"})
-            return httpx.Response(200, json=[{"id": "admin", "name": "admin"}])
+                return httpx.Response(200, json={"id": "zone-admin", "name": "zone-admin"})
+            return httpx.Response(200, json=[{"id": "zone-admin", "name": "zone-admin"}])
         with patch("routers.keycloak_admin._request", side_effect=identity):
-            self.assertEqual(await keycloak_admin._replace_roles("token", "user", ["admin"]), ["admin"])
+            self.assertEqual(await keycloak_admin._replace_roles("token", "user", ["zone-admin"]), ["zone-admin"])
         self.assertTrue(all(method == "GET" for method, _, _ in calls))
 
     async def test_invalid_step_up_times_fail_closed(self):

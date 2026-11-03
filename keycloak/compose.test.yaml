@@ -12,7 +12,7 @@ services:
     tmpfs:
       - /var/lib/postgresql/data:uid=70,gid=70,mode=0700
     healthcheck:
-      test: [CMD-SHELL, "pg_isready -U inout -d inout"]
+      test: [CMD-SHELL, "pg_isready -p 1020 -U inout -d inout"]
       interval: 2s
       timeout: 3s
       retries: 20
@@ -22,6 +22,7 @@ services:
     environment:
       PROVISION_HOST: postgres
       POSTGRES_PASSWORD: isolated-keycloak-administrator-0000000000000
+      PROVISION_PORT: "1020"
       APP_DB_PASSWORD: isolated-keycloak-app-0000000000000000000000
       MIGRATION_DB_PASSWORD: isolated-keycloak-migration-000000000000000
       KEYCLOAK_DB_PASSWORD: isolated-keycloak-identity-0000000000000000
@@ -47,20 +48,22 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: isolated-keycloak-test-master-password
       KC_DB: postgres
       KC_DB_SCHEMA: keycloak
-      KC_DB_URL: jdbc:postgresql://postgres:5432/inout
+      KC_DB_URL: jdbc:postgresql://postgres:1020/inout
       KC_DB_USERNAME: inout_keycloak
       KC_DB_PASSWORD: isolated-keycloak-identity-0000000000000000
-      KC_HTTP_PORT: "1105"
+      KC_HTTP_PORT: "1022"
+      KC_HTTP_MANAGEMENT_PORT: "1023"
       KC_HEALTH_ENABLED: "true"
-      KC_HOSTNAME: http://auth.fixture:8005
-      KC_HOSTNAME_ADMIN: http://admin.auth.fixture:8006
+      KC_HOSTNAME: http://auth.fixture:1014
+      KC_HOSTNAME_ADMIN: http://admin.auth.fixture:1015
       KC_PROXY_HEADERS: xforwarded
       KEYCLOAK_CLIENT_SECRET: isolated-keycloak-test-client-secret
-      INOUT_APP_URL: http://app.fixture:3000
+      INOUT_APP_URL: http://app.fixture:1018
     volumes:
       - ./realm-inout.json:/opt/keycloak/data/import/inout-realm.json:ro
     healthcheck:
-      test: [CMD-SHELL, "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"]
+      # Aggregate readiness can fail while individual body checks still say UP.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/1023; printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; read -r task_http_version task_health_status task_reason <&3; case \"$$task_http_version:$$task_health_status\" in HTTP/1.0:200|HTTP/1.1:200) exit 0;; *) exit 1;; esac"]
       interval: 5s
       timeout: 5s
       # First import creates the full schema and can exceed five minutes on a
@@ -88,7 +91,7 @@ services:
       - ../infrastructure/redis/start-redis.sh:/usr/local/bin/inout-start-redis.sh:ro
     tmpfs: ['/run/inout-redis:uid=999,gid=1000,mode=0700']
     healthcheck:
-      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_GATEWAY_PASSWORD redis-cli --user inout-gateway ping | grep -q PONG']
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_GATEWAY_PASSWORD redis-cli -p 1021 --user inout-gateway ping | grep -q PONG']
       interval: 2s
       timeout: 5s
       retries: 30
@@ -105,10 +108,10 @@ services:
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_ROUTER_FLAVOR: expressions
       KONG_TRUSTED_IPS: ""
-      KONG_PROXY_LISTEN: "0.0.0.0:8005, 0.0.0.0:8006"
+      KONG_PROXY_LISTEN: "0.0.0.0:1014, 0.0.0.0:1015"
       KONG_ADMIN_LISTEN: "off"
-      KONG_STATUS_LISTEN: "127.0.0.1:8100"
-      KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity,inout-ingress-limit
+      KONG_STATUS_LISTEN: "127.0.0.1:1017"
+      KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity
       KONG_NGINX_MAIN_ENV: INOUT_GATEWAY_REDIS_PASSWORD
       INOUT_GATEWAY_REDIS_PASSWORD: isolated-keycloak-gateway-00000000000000000
       KONG_PROXY_ACCESS_LOG: "off"
@@ -116,7 +119,6 @@ services:
       - ../gateway/kong.yml:/etc/kong/kong.yml:ro
       - ../gateway/plugins/inout-terminal-identity:/usr/local/share/lua/5.1/kong/plugins/inout-terminal-identity:ro
       - ../gateway/plugins/inout-rate-identity:/usr/local/share/lua/5.1/kong/plugins/inout-rate-identity:ro
-      - ../gateway/plugins/inout-ingress-limit:/usr/local/share/lua/5.1/kong/plugins/inout-ingress-limit:ro
     networks:
       default:
         aliases: [auth.fixture, admin.auth.fixture]

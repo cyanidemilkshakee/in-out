@@ -13,9 +13,9 @@ import subprocess
 
 
 TARGETS = {
-    "postgres-primary": (5432, {"app-db", "identity-db", "temporal-db"}),
-    "redis": (6379, {"cache"}),
-    "temporal": (7233, {"workflow", "temporal-db"}),
+    "postgres-primary": (1020, {"app-db", "identity-db", "temporal-db"}),
+    "redis": (1021, {"cache"}),
+    "temporal": (1024, {"workflow", "temporal-db"}),
 }
 ROOT = Path(__file__).resolve().parents[2]
 

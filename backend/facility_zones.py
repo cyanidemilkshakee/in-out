@@ -1,6 +1,5 @@
 """Branch and numbered-checkpoint helpers shared by access policy and seed data."""
 import hashlib
-import itertools
 import json
 import re
 

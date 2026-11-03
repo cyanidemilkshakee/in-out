@@ -9,6 +9,7 @@ body_contacts = {}
 identity_states = {}
 identity_lock = threading.Lock()
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 class FixtureServer(ThreadingHTTPServer):
     # Concurrent replica tests should exercise Kong's quota, rather than the
@@ -40,6 +41,23 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
+        url = urlsplit(self.path)
+        if url.path.endswith('/__fixture/redirect/') or parse_qs(url.query).get('__fixture_redirect') == ['1']:
+            # Model an ASGI application's absolute slash-normalization redirect.
+            # The marker lets anchored operation routes use their real paths.
+            scheme = self.headers.get('X-Forwarded-Proto', 'http')
+            scheme = scheme if scheme in ('http', 'https') else 'http'
+            path = url.path[:-1] if url.path.endswith('/') else url.path + '/canonical'
+            location = urlunsplit((scheme, self.headers.get('Host', ''), path, url.query, ''))
+            body = json.dumps({'method': self.command,
+                               'body': getattr(self, '_fixture_body', b'').decode()}).encode()
+            self.send_response(307)
+            self.send_header('Location', location)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path == '/__fixture/body-count':
             body = json.dumps({'contacts': body_contacts.get(self.server.server_port, 0)}).encode()
             self.send_response(200)
@@ -100,14 +118,13 @@ class Handler(BaseHTTPRequestHandler):
             return
         body_contacts[self.server.server_port] = body_contacts.get(self.server.server_port, 0) + 1
         length = int(self.headers.get('Content-Length', 0))
-        if length:
-            self.rfile.read(length)
+        self._fixture_body = self.rfile.read(length) if length else b''
         self.do_GET()
 
     do_PUT = do_POST
     do_PATCH = do_POST
     do_DELETE = do_POST
 
-for port in (3000, 1102, 1105):
+for port in (1018, 1019, 1022):
     threading.Thread(target=FixtureServer(('0.0.0.0', port), Handler).serve_forever, daemon=True).start()
 threading.Event().wait()

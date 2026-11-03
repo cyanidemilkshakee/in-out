@@ -11,7 +11,7 @@ from subject_metadata import current_subject_metadata
 from rule_engine import default_alert_rules
 
 DATABASE_URL = os.getenv(
-    "DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:1003/inout"
+    "DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:1020/inout"
 )
 
 
@@ -27,7 +27,7 @@ async def seed_reference_data(engine) -> None:
             await conn.execute(text("""
                 INSERT INTO checkpoints (id, data, zone_id, number, gate_type, required, active)
                 VALUES (:id, CAST(:data AS jsonb), :zone_id, :number, :gate_type, :required, true)
-                ON CONFLICT (id) DO NOTHING
+                ON CONFLICT DO NOTHING
             """), {"id": checkpoint["id"], "data": json.dumps({**checkpoint, "online": True}),
                 "zone_id": checkpoint["zone"], "number": checkpoint["number"],
                 "gate_type": checkpoint["gateType"], "required": checkpoint["required"]})

@@ -11,8 +11,8 @@ return {
           -- Never send the authentication secret/token through a public route
           -- or follow a redirect supplied by an upstream response.
           { identity_url = { type = "string", required = true,
-              default = "http://python-api:1102/internal/gateway/identity",
-              one_of = { "http://python-api:1102/internal/gateway/identity" } } },
+              default = "http://python-api:1019/internal/gateway/identity",
+              one_of = { "http://python-api:1019/internal/gateway/identity" } } },
           { cache_ttl = { type = "number", default = 30, between = { 1, 30 } } },
           { timeout_ms = { type = "integer", default = 5000, between = { 100, 15000 } } },
           { connect_timeout_ms = { type = "integer", default = 1000, between = { 100, 5000 } } },

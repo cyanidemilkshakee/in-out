@@ -24,7 +24,7 @@ services:
       POSTGRES_PASSWORD: isolated-admin-credential-000000000000000000
     tmpfs: ['/var/lib/postgresql/data:uid=70,gid=70,mode=0700', /tmp, '/var/run/postgresql:uid=70,gid=70,mode=3777']
     healthcheck:
-      test: [CMD-SHELL, pg_isready -U inout -d inout]
+      test: [CMD-SHELL, pg_isready -p 1020 -U inout -d inout]
       interval: 2s
       timeout: 3s
       retries: 20
@@ -41,7 +41,7 @@ services:
     networks: [app-db]
     image: inout-security-infra-runtime
     environment:
-      DATABASE_URL: postgresql+asyncpg://inout_migrator:isolated-migration-credential-0000000000000@postgres-primary:5432/inout
+      DATABASE_URL: postgresql+asyncpg://inout_migrator:isolated-migration-credential-0000000000000@postgres-primary:1020/inout
     volumes: [./postgres:/maintenance:ro]
     command: [sh, -c, "alembic upgrade head && python /maintenance/provision_database.py --runtime-grants-only"]
     depends_on:
@@ -59,7 +59,7 @@ services:
     volumes: [./redis/start-redis.sh:/usr/local/bin/inout-start-redis.sh:ro]
     tmpfs: ['/run/inout-redis:uid=999,gid=1000,mode=0700']
     healthcheck:
-      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_QUOTA_PASSWORD redis-cli --user inout-quota ping | grep -q PONG']
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_QUOTA_PASSWORD redis-cli -p 1021 --user inout-quota ping | grep -q PONG']
       interval: 2s
       timeout: 3s
       retries: 20
@@ -69,15 +69,26 @@ services:
     image: temporalio/auto-setup:1.26.2
     environment:
       DB: postgres12
-      DB_PORT: '5432'
+      DB_PORT: '1020'
       POSTGRES_USER: inout_temporal
       POSTGRES_PWD: isolated-workflow-credential-00000000000000
       POSTGRES_SEEDS: postgres-primary
       SKIP_DB_CREATE: 'true'
       BIND_ON_IP: 0.0.0.0
-      TEMPORAL_ADDRESS: temporal:7233
+      FRONTEND_GRPC_PORT: '1024'
+      FRONTEND_HTTP_PORT: '1025'
+      FRONTEND_MEMBERSHIP_PORT: '1026'
+      INTERNAL_FRONTEND_GRPC_PORT: '1027'
+      INTERNAL_FRONTEND_MEMBERSHIP_PORT: '1028'
+      MATCHING_GRPC_PORT: '1029'
+      MATCHING_MEMBERSHIP_PORT: '1030'
+      HISTORY_GRPC_PORT: '1031'
+      HISTORY_MEMBERSHIP_PORT: '1032'
+      WORKER_GRPC_PORT: '1033'
+      WORKER_MEMBERSHIP_PORT: '1034'
+      TEMPORAL_ADDRESS: temporal:1024
     healthcheck:
-      test: [CMD-SHELL, 'temporal operator cluster health --address 127.0.0.1:7233 | grep -q SERVING']
+      test: [CMD-SHELL, 'temporal operator cluster health --address 127.0.0.1:1024 | grep -q SERVING']
       interval: 5s
       timeout: 5s
       retries: 30

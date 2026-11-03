@@ -9,7 +9,7 @@
     { "key": "base", "value": "http://localhost:1002", "type": "string" },
     { "key": "keycloak_issuer", "value": "http://auth.localhost:1005/realms/inout", "type": "string" },
     { "key": "postman_client_id", "value": "inout-postman", "type": "string" },
-    { "key": "terminal_base", "value": "https://localhost:10443", "type": "string" }
+    { "key": "terminal_base", "value": "https://localhost:1011", "type": "string" }
   ],
   "auth": {
     "type": "oauth2",
@@ -41,7 +41,7 @@
 
     {
       "name": "Scans — mTLS Hardware Terminal",
-      "description": "Enable compose.mtls.yaml. Configure a client certificate/key and trusted server CA in Postman for localhost:10443. Kong derives terminal identity from the verified certificate; never supply gateway identity headers or the gateway secret. Idempotency-Key is mandatory.",
+      "description": "Enable compose.mtls.yaml. Configure a client certificate/key and trusted server CA in Postman for localhost:1011. Kong derives terminal identity from the verified certificate; never supply gateway identity headers or the gateway secret. Idempotency-Key is mandatory.",
       "item": [
         {
           "name": "POST /v1/scans — Process scan (mTLS)",

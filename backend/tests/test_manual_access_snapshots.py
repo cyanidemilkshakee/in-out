@@ -3,7 +3,6 @@ import asyncio
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
 
 import test_database as fixture
 from auth import verify_admin_request
@@ -29,14 +28,14 @@ class ManualAccessSnapshotTests(unittest.IsolatedAsyncioTestCase):
             window = {"validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()} if active_person else {}
             person.data = {**person.data, "status": "active" if active_person else "restricted", **window}
             if active_person:
-                person.data["allowedZones"] = ["public"]
+                person.data["allowedZones"] = ["a"]
             if with_permission:
                 db.add(AccessPermission(id="p1-access", subject_id="p1", data={
-                    "state": "active" if active_person else "restricted", "zones": ["public"],
+                    "state": "active" if active_person else "restricted", "zones": ["a"],
                     "validFrom": "", "validTo": "", **window}))
                 if hardware:
                     db.add(AccessPermission(id="h1-access", subject_id="h1", data={
-                        "state": "active", "zones": ["public"], "validFrom": "", "validTo": ""}))
+                        "state": "active", "zones": ["a"], "validFrom": "", "validTo": ""}))
             if hardware:
                 asset = await db.get(HardwareAsset, "h1")
                 asset.data = {**asset.data, "ownerId": "p1", "assignedEmployeeId": "reviewed-other-owner" if active_person else "p1",
@@ -54,9 +53,8 @@ class ManualAccessSnapshotTests(unittest.IsolatedAsyncioTestCase):
             return payload, request_id, dict(result["request"]["accessSnapshots"])
 
     async def update(self, subject_id, data):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
-            response = await self.client.put(f"/v1/registry/subjects/{subject_id}", json={"data": data})
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
+        response = await self.client.put(f"/v1/registry/subjects/{subject_id}", json={"data": data})
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["data"]
 
@@ -84,7 +82,7 @@ class ManualAccessSnapshotTests(unittest.IsolatedAsyncioTestCase):
         payload, request_id, snapshots = await self.approve(hardware=True)
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
-            for subject_id, patch_data in (("p1", {"zones": ["secure"]}),
+            for subject_id, patch_data in (("p1", {"zones": ["b"]}),
                                           ("h1", {"validFrom": now.isoformat(),
                                                    "validTo": (now + timedelta(hours=2)).isoformat()})):
                 with self.subTest(subject_id=subject_id):
@@ -112,12 +110,11 @@ class ManualAccessSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_same_access_regrant_invalidates_older_manual_approval(self):
         payload, request_id, snapshots = await self.approve(hardware=True, active_person=True)
         reviewed = snapshots["p1"]["permission"]
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
-        with patch("routers.permissions.publish_decision", new=AsyncMock()):
-            granted = await self.client.post("/v1/permissions/grant", json={
-                "subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
-                "reason": "Replacement access", "requested_zones": ["public"],
-                "valid_from": reviewed["validFrom"], "valid_to": reviewed["validTo"]})
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
+        granted = await self.client.post("/v1/permissions/grant", json={
+            "subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
+            "reason": "Replacement access", "requested_zones": ["a"],
+            "valid_from": reviewed["validFrom"], "valid_to": reviewed["validTo"]})
         self.assertEqual(granted.status_code, 201, granted.text)
         for field in ("state", "zones", "validFrom", "validTo"):
             self.assertEqual(granted.json()["permission"][field], reviewed[field])
@@ -142,15 +139,15 @@ class ManualAccessSnapshotTests(unittest.IsolatedAsyncioTestCase):
     async def test_custody_transfer_and_revert_invalidates_unused_approval(self):
         payload, request_id, _ = await self.approve(hardware=True)
         async with self.sessions() as db:
-            db.add(Subject(id="p2", barcode="p2", kind="employee", person=Person(data={"name": "Bob"})))
+            db.add(Subject(id="p2", barcode="p2", kind="employee",
+                person=Person(data={"name": "Bob", "allowedZones": ["a", "b"]})))
             await db.commit()
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         revisions = []
         for carrier_id in ("p2", "p1"):
-            with patch("routers.permissions.publish_decision", new=AsyncMock()):
-                transferred = await self.client.post("/v1/permissions/grant", json={
-                    "subject_id": "h1", "checkpoint_id": "cp-main", "request_type": "hardware_custody",
-                    "carrier_id": carrier_id, "reason": "Reviewed custody transfer"})
+            transferred = await self.client.post("/v1/permissions/grant", json={
+                "subject_id": "h1", "checkpoint_id": "cp-main", "request_type": "hardware_custody",
+                "carrier_id": carrier_id, "reason": "Reviewed custody transfer"})
             self.assertEqual(transferred.status_code, 201, transferred.text)
             revisions.append(transferred.json()["hardwareAsset"]["accessRevision"])
         self.assertNotEqual(revisions[0], revisions[1])
@@ -170,7 +167,7 @@ class ManualAccessSnapshotTests(unittest.IsolatedAsyncioTestCase):
             entered = await record_scan(db, uuid.uuid4(), payload, "browser:operator")
             self.assertTrue(entered["allowed"], entered)
             await db.commit()
-        await self.update("p1", {"status": "inactive", "allowedZones": ["secure"]})
+        await self.update("p1", {"status": "inactive", "allowedZones": ["b"]})
         async with self.sessions() as db:
             exited = await record_scan(db, uuid.uuid4(), payload, "browser:operator")
             self.assertTrue(exited["allowed"], exited)

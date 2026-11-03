@@ -18,7 +18,7 @@ class ZoneRetirementTests(unittest.IsolatedAsyncioTestCase):
             scalar=AsyncMock(side_effect=[zone, None, "visitor-1"]),
             commit=AsyncMock(),
         )
-        actor = {"sub": "master", "realm_access": {"roles": ["master-admin", "admin"]}}
+        actor = {"sub": "master", "realm_access": {"roles": ["master-admin", "zone-admin"]}}
 
         with patch("routers.zones.enqueue_changed", new=AsyncMock()) as enqueue:
             with self.assertRaises(HTTPException) as error:

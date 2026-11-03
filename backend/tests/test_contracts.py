@@ -3,7 +3,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException
@@ -47,11 +47,13 @@ class ContractTests(unittest.TestCase):
 
     def test_terminal_access_allows_admins_and_operators(self):
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="test-token")
-        for role, roles in (("operator", ["operator"]), ("admin", ["admin"]), ("admin", ["admin", "operator"])):
-            with patch("auth.verify_keycloak_token", return_value={"sub": role, "realm_access": {"roles": roles}}):
+        for role, roles in (("operator", ["operator"]), ("zone-admin", ["zone-admin"]), ("zone-admin", ["zone-admin", "operator"])):
+            with patch("auth.verify_keycloak_token", return_value={"sub": role, "realm_access": {"roles": roles}}), \
+                    patch("token_revocation.assert_token_active", new=AsyncMock()):
                 self.assertEqual(asyncio.run(verify_terminal_access_request(credentials))["sub"], role)
         for roles in ([],):
-            with patch("auth.verify_keycloak_token", return_value={"realm_access": {"roles": roles}}):
+            with patch("auth.verify_keycloak_token", return_value={"realm_access": {"roles": roles}}), \
+                    patch("token_revocation.assert_token_active", new=AsyncMock()):
                 with self.assertRaises(HTTPException) as error:
                     asyncio.run(verify_terminal_access_request(credentials))
                 self.assertEqual(error.exception.status_code, 403)

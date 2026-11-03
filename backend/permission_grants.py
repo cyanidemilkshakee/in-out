@@ -87,6 +87,11 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
         if kind == "zone_access" and not payload.requested_zones:
             raise HTTPException(422, "Choose the complete resulting zone set")
         zones = validate_zones(payload.requested_zones or [checkpoint.zone_id], known_zone_ids=known_zone_ids)
+        if kind == "visitor" and payload.requested_checkpoints:
+            if payload.requested_checkpoints != [checkpoint.id]:
+                raise HTTPException(422, "Visitor access must target the selected checkpoint only")
+            if zones != [checkpoint.zone_id]:
+                raise HTTPException(422, "Visitor checkpoint access must use the selected checkpoint's zone")
         valid_from = payload.valid_from or now.isoformat()
         valid_to = "" if permanent_access else payload.valid_to
         validate_permission_window(valid_from, valid_to, now=now, permanent=permanent_access)
@@ -106,6 +111,11 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
         "requestedZones": zones, "validFrom": valid_from, "validTo": valid_to,
         "status": "pending", "createdAt": (existing.data or {}).get("createdAt") if existing else now.isoformat(),
         "origin": "permission_manager"}
+    if kind == "visitor":
+        if payload.requested_checkpoints:
+            data["requestedCheckpoints"] = [checkpoint.id]
+        else:
+            data.pop("requestedCheckpoints", None)
     if permanent_access:
         data["permanentAccess"] = True
     if carrier:

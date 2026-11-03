@@ -3,7 +3,6 @@ import asyncio
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
 
 from sqlalchemy import func, select
 
@@ -24,7 +23,7 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
     asyncSetUp = fixture.DatabaseTests.asyncSetUp
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
-    async def _presence(self, subject_id="p1", *, state="inside", building="main-building"):
+    async def _presence(self, subject_id="p1", *, state="inside", building="a"):
         timestamp = datetime.now(timezone.utc) - timedelta(minutes=15)
         override = {"requestId": "previous-admission", "hardwareIds": []}
         async with self.sessions() as db:
@@ -61,7 +60,7 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(Subject(id="visitor", kind="visitor", barcode="visitor",
                 person=Person(data={"name": "Visitor", "status": "pre_approved",
-                                   "allowedZones": ["public", "secure"], "inside": False})))
+                                   "allowedZones": ["a", "b"], "inside": False})))
             # Both rules are global presence checks, including people whose
             # individually selectable attendance rules have been disabled.
             db.add(AlertRuleAssignment(subject_id="p1", rule_ids=[], revision=1, updated_by="test-admin"))
@@ -85,7 +84,7 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
                         alert = await db.scalar(select(Alert).where(Alert.source_event_id == event["id"]))
                         self.assertEqual(alert.data, alert_data)
                         presence = await db.get(PresenceState, subject_id)
-                        self.assertEqual((presence.state, presence.entry_building_id), ("inside", "main-building"))
+                        self.assertEqual((presence.state, presence.entry_building_id), ("inside", "a"))
                         self.assertEqual(presence.last_scan_timestamp, timestamp)
                         self.assertEqual(presence.entry_override, override)
                         self.assertEqual(presence.entry_started_at, timestamp)
@@ -95,15 +94,15 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(await db.scalar(select(func.count()).select_from(CriticalAlertTrigger)), 0)
 
     async def test_other_direction_and_building_are_detected_from_locked_presence(self):
-        await self._presence(building="server-room-building")
+        await self._presence(building="b")
         result, emitted = await self._record(checkpoint="cp-main")
         self.assertEqual(result["decision"]["event"]["denialCode"], "cross_building_access")
         self.assertEqual(len(emitted), 1)
-        self.assertIn("Server Room", emitted[0]["reason"])
-        self.assertIn("Main Entrance", emitted[0]["reason"])
+        self.assertIn("B", emitted[0]["reason"])
+        self.assertIn("A", emitted[0]["reason"])
 
     async def test_matching_building_outside_and_unknown_entry_building_do_not_raise_alert(self):
-        for state, building in (("inside", "server-room-building"), ("outside", None), ("inside", None)):
+        for state, building in (("inside", "b"), ("outside", None), ("inside", None)):
             with self.subTest(state=state, building=building):
                 await self._presence(state=state, building=building)
                 _, emitted = await self._record()
@@ -120,7 +119,7 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(emitted, [])
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Alert)), 0)
-            self.assertEqual((await db.get(PresenceState, "h1")).entry_building_id, "main-building")
+            self.assertEqual((await db.get(PresenceState, "h1")).entry_building_id, "a")
             self.assertEqual((await db.get(PresenceState, "p1")).state, "outside")
 
     async def test_person_and_carried_hardware_conflicts_raise_only_primary_person_alert(self):
@@ -149,7 +148,7 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_malformed_saved_policies_cannot_crash_scan_or_override_displayed_default(self):
         await self._presence()
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         async with self.sessions() as db:
             disabled_policy = {"conditionKey": "cross_building_scan", "enabled": False}
             db.add_all([
@@ -181,13 +180,11 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         key = str(uuid.uuid4())
         body = {"barcode": "p1", "checkpointId": "server-room"}
-        with patch("routers.terminal.publish_presence_update", new=AsyncMock()) as publish:
-            first = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
-            retry = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+        first = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
+        retry = await self.client.post("/v1/terminal/scans", json=body, headers={"Idempotency-Key": key})
         self.assertEqual(first.status_code, 200, first.text)
         self.assertEqual(retry.status_code, 200, retry.text)
         self.assertEqual(retry.json(), fixture.replay_receipt(first.json()))
-        publish.assert_not_awaited()
         async with self.sessions() as db:
             events = (await db.scalars(select(EventOutbox).where(EventOutbox.kind == "presence"))).all()
             self.assertEqual(len(events), 1)
@@ -223,7 +220,7 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
             for model in (Movement, ScanRequest, Alert):
                 self.assertEqual(await db.scalar(select(func.count()).select_from(model)), 0)
             presence = await db.get(PresenceState, "p1")
-            self.assertEqual((presence.state, presence.entry_building_id), ("inside", "main-building"))
+            self.assertEqual((presence.state, presence.entry_building_id), ("inside", "a"))
             self.assertEqual(presence.last_scan_timestamp, timestamp)
             self.assertEqual(presence.entry_override, override)
             self.assertEqual(presence.entry_started_at, timestamp)
@@ -236,9 +233,9 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(Subject(id="visitor", kind="visitor", barcode="visitor",
                 person=Person(data={"name": "Visitor", "status": "pre_approved",
-                    "allowedZones": ["public", "secure"], "inside": True})))
+                    "allowedZones": ["a", "b"], "inside": True})))
             await db.flush()
-            db.add(PresenceState(subject_id="visitor", state="inside", entry_building_id="main-building",
+            db.add(PresenceState(subject_id="visitor", state="inside", entry_building_id="a",
                 last_scan_timestamp=now - timedelta(minutes=15), entry_started_at=entry_started,
                 visitor_overstay_alerted_entry_at=entry_started))
             db.add(Movement(id=source_id, subject_id="visitor", checkpoint_id="cp-main",
@@ -270,7 +267,7 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(Subject(id="visitor", kind="visitor", barcode="visitor",
                 person=Person(data={"name": "Visitor", "status": "pre_approved",
-                    "allowedZones": ["public", "secure"], "inside": False})))
+                    "allowedZones": ["a", "b"], "inside": False})))
             await db.flush()
             db.add(PresenceState(subject_id="visitor", state="outside",
                 visitor_overstay_alerted_entry_at=previous_entry))

@@ -31,7 +31,7 @@ def connection_options():
     if not password:
         raise InitializationRejected("SQL_PASSWORD or TEMPORAL_DB_PASSWORD is required")
     return dict(host=os.environ.get("SQL_HOST", "postgres-primary"),
-                port=int(os.environ.get("SQL_PORT", "5432")), user="inout_temporal",
+                port=int(os.environ.get("SQL_PORT", "1020")), user="inout_temporal",
                 password=password, timeout=10, command_timeout=30)
 
 

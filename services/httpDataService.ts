@@ -148,8 +148,7 @@ export class HttpDataService implements DataService {
   }
 
   async queryMovements(query: MovementQuery, signal?: AbortSignal) {
-    const params = new URLSearchParams({
-      resource: "movements",
+    const params = resourceParams("movements", query, {
       page: String(query.page),
       pageSize: String(query.pageSize),
     }, ["page", "pageSize"]);

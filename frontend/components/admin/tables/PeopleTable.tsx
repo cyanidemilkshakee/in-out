@@ -105,7 +105,7 @@ export function PeopleTable({
                     </span>
                   </td>
                   <td className="column-requests" data-label="Requests">
-                    {person.status === "pending_approval" ? <Link className="admin-button admin-button--secondary secondary-button compact-button" href={`/admin/permissions?subject=${encodeURIComponent(person.id)}`} aria-label={`View approval request for ${person.name}`}>View approval</Link> : <Link className="admin-button admin-button--secondary secondary-button compact-button" href={`/admin/permissions?subject=${encodeURIComponent(person.id)}&requestType=zone_access`} aria-label={`Request zone access for ${person.name}`}>Request zone access</Link>}
+                    {person.status === "pending_approval" ? <Link className="admin-button admin-button--secondary secondary-button compact-button" href={`/admin/permissions?subject=${encodeURIComponent(person.id)}`} aria-label={`View approval request for ${person.name}`}>View approval</Link> : <Link className="admin-button admin-button--secondary secondary-button compact-button" href={`/admin/permissions?subject=${encodeURIComponent(person.id)}&requestType=visitor`} aria-label={`Manage checkpoint access for ${person.name}`}>Checkpoint access</Link>}
                   </td>
                 </tr>
               );

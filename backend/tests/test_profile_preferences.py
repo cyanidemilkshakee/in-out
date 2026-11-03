@@ -1,6 +1,5 @@
 """Profile preference writes preserve identity email, including email-less admins."""
 import unittest
-from unittest.mock import AsyncMock, patch
 
 import test_database as fixture
 from auth import verify_admin_request
@@ -18,12 +17,11 @@ class ProfilePreferenceTests(unittest.IsolatedAsyncioTestCase):
         loaded = await self.client.get("/v1/admin/profile")
         self.assertEqual(loaded.status_code, 200, loaded.text)
         self.assertEqual(loaded.json()["email"], "")
-        with patch("routers.admin_profile.publish_data_changed", new=AsyncMock()):
-            saved = await self.client.patch("/v1/admin/profile", json={
-                "name": "Operations Admin", "nickname": "operations",
-                "avatarDataUrl": "data:image/png;base64,dGVzdA==",
-                "settings": {"requireReviewNote": True},
-            })
+        saved = await self.client.patch("/v1/admin/profile", json={
+            "name": "Operations Admin", "nickname": "operations",
+            "avatarDataUrl": "data:image/png;base64,dGVzdA==",
+            "settings": {"requireReviewNote": True},
+        })
         self.assertEqual(saved.status_code, 200, saved.text)
         self.assertEqual(saved.json()["email"], "")
         self.assertEqual(saved.json()["name"], "Operations Admin")
@@ -36,9 +34,8 @@ class ProfilePreferenceTests(unittest.IsolatedAsyncioTestCase):
             "sub": "email-admin", "preferred_username": "ops", "email": "admin@example.test",
         }
         await self.client.get("/v1/admin/profile")
-        with patch("routers.admin_profile.publish_data_changed", new=AsyncMock()):
-            saved = await self.client.patch("/v1/admin/profile", json={
-                "name": "New Name", "nickname": "new-name", "avatarDataUrl": "",
-            })
+        saved = await self.client.patch("/v1/admin/profile", json={
+            "name": "New Name", "nickname": "new-name", "avatarDataUrl": "",
+        })
         self.assertEqual(saved.status_code, 200, saved.text)
         self.assertEqual(saved.json()["email"], "admin@example.test")

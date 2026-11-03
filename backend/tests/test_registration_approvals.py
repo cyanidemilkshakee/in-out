@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from models import Subject, AccessPermission, PermissionRequestModel, Checkpoint, TerminalCheckpointAssignment
+from models import Subject, AccessPermission, PermissionRequestModel, Checkpoint, OrganizationZone, TerminalCheckpointAssignment
 from schemas import SubjectCreate
 from routers.registry import create_subject
 
@@ -29,7 +29,14 @@ def session():
     db = Mock()
     db.no_autoflush = no_autoflush()
     db.execute = AsyncMock()
-    db.scalar = AsyncMock(return_value=TerminalCheckpointAssignment(terminal_identity="browser:operator", checkpoint_id="cp-main"))
+    async def scalar(query, *args, **kwargs):
+        if "organization_zones" in str(query):
+            return OrganizationZone(id="a", name="A", active=True)
+        return TerminalCheckpointAssignment(terminal_identity="browser:operator", checkpoint_id="cp-main")
+    db.scalar = AsyncMock(side_effect=scalar)
+    db.get = AsyncMock(side_effect=lambda model, identity, **kwargs:
+        Checkpoint(id=identity, zone_id="a", active=True,
+            data={"name": "Main Entrance", "zone": "a"}) if model is Checkpoint else None)
     rows = Mock()
     rows.all.return_value = []
     db.scalars = AsyncMock(return_value=rows)
@@ -56,7 +63,8 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_visitor_registration_commits_identity_permission_and_request_together(self):
         db = session()
-        db.execute.return_value = scalar_result(Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"}))
+        db.execute.return_value = scalar_result(Checkpoint(id="cp-main", zone_id="a",
+            data={"name": "Main Entrance", "zone": "a"}))
         added, events = [], []
         db.add.side_effect = added.append
 
@@ -78,10 +86,8 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
 
         db.commit.side_effect = commit
         db.refresh.side_effect = refresh
-        temporal = Mock(start_workflow=AsyncMock())
         with patch("routers.registry.enqueue_decision", new=AsyncMock(side_effect=enqueue)), \
-             patch("routers.registry.enqueue_workflow_start", new=AsyncMock()) as start, \
-             patch("routers.registry.get_temporal_client", new=AsyncMock(return_value=temporal)):
+             patch("routers.registry.enqueue_workflow_start", new=AsyncMock()) as start:
             result = await create_subject(self.visitor(), db, {"sub": "operator", "realm_access": {"roles": ["operator"]}})
 
         subject = next(row for row in added if isinstance(row, Subject))
@@ -95,7 +101,7 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(permission.subject_id, subject.id)
         self.assertEqual(permission.data["state"], "pending_approval")
         self.assertEqual(request.subject_id, subject.id)
-        self.assertEqual(request.data["requestedZones"], ["public", "secure"])
+        self.assertEqual(request.data["requestedZones"], ["a"])
         self.assertEqual(request.data["validTo"], subject.person.data["validTo"])
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
@@ -105,7 +111,7 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_barcode_rolls_back_registration_without_publication(self):
         db = session()
-        db.execute.return_value = scalar_result(Checkpoint(id="cp-main", data={"zone": "public"}))
+        db.execute.return_value = scalar_result(Checkpoint(id="cp-main", zone_id="a", data={"zone": "a"}))
         db.commit.side_effect = IntegrityError("INSERT subjects", {}, ValueError("duplicate barcode"))
         with patch("routers.registry.enqueue_decision", new=AsyncMock()):
             with self.assertRaises(HTTPException) as error:

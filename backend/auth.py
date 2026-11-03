@@ -23,7 +23,7 @@ from starlette.concurrency import run_in_threadpool
 
 from config import settings
 from behavior_limits import enforce_behavior_admission
-from user_management_policy import MASTER_ADMIN_ROLE
+from user_management_policy import MASTER_ADMIN_ROLE, ZONE_ADMIN_ROLE
 
 logger = logging.getLogger(__name__)
 
@@ -158,7 +158,7 @@ def verify_keycloak_token(token: str, signing_keys: list[dict] | None = None) ->
             algorithms=["RS256"],
             issuer=settings.KEYCLOAK_ISSUER,
             audience=settings.KEYCLOAK_AUDIENCE,
-            options={"require": ["exp", "iss", "aud", "sub"]},
+            options={"require": ["exp", "iat", "jti", "iss", "aud", "sub"]},
         )
         # ID tokens are intended for the OIDC client, never for API access.
         if payload.get("typ") != "Bearer" or not isinstance(payload.get("sub"), str) or not payload["sub"]:
@@ -182,9 +182,9 @@ def _realm_roles(payload: dict[str, Any]) -> list[str]:
 
 
 def has_admin_role(payload: dict[str, Any]) -> bool:
-    """Return True for app-wide administrators, including master-admin."""
+    """Return True for zone-admins and master-admins."""
     roles = _realm_roles(payload)
-    return "admin" in roles or MASTER_ADMIN_ROLE in roles
+    return ZONE_ADMIN_ROLE in roles or MASTER_ADMIN_ROLE in roles
 
 
 def has_master_admin_role(payload: dict[str, Any]) -> bool:
@@ -218,6 +218,10 @@ async def verify_authenticated_request(
     # a refresh again. Malformed headers still use the standard 401 verifier.
     payload = await run_in_threadpool(verify_keycloak_token, credentials.credentials,
                                      **({"signing_keys": signing_keys} if signing_keys is not None else {}))
+    # A valid Keycloak signature is not sufficient after an administrator has
+    # revoked the token or invalidated all tokens for this account.
+    from token_revocation import assert_token_active
+    await assert_token_active(payload)
     if request is not None:
         identity = "principal:" + settings.KEYCLOAK_ISSUER + ":" + payload["sub"]
         state = request.scope.setdefault("state", {})
@@ -259,7 +263,7 @@ async def verify_admin_request(
 ) -> dict[str, Any]:
     """
     FastAPI dependency — validates the Keycloak Bearer token and enforces
-    the 'admin' or 'master-admin' realm role.
+    the 'zone-admin' or 'master-admin' realm role.
 
     Authentication is mandatory in every environment.
     """
@@ -281,7 +285,7 @@ async def verify_terminal_access_request(
     """Allow administrators and terminal operators to use terminal routes."""
     payload = await verify_authenticated_request(credentials, request)
     if not has_admin_role(payload) and not has_operator_role(payload):
-        raise HTTPException(status_code=403, detail="Terminal access requires the admin or operator realm role")
+        raise HTTPException(status_code=403, detail="Terminal access requires the zone-admin or operator realm role")
     return payload
 
 

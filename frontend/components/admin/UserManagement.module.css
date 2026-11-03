@@ -10,22 +10,23 @@
   font-size: 17px;
 }
 
-.header, .headerActions, .titleRow, .cardHeader, .editorHeader,
-.selectedIdentity, .dialogHeader, .unlockBar, .unlockStatus,
+.header, .titleRow, .cardHeader, .editorHeader,
+.selectedIdentity, .unlockBar, .unlockStatus,
 .accessControls, .filterRow { display: flex; align-items: center; }
-.header { justify-content: space-between; gap: 24px; }
+.header { justify-content: space-between; flex-wrap: wrap; gap: 16px 24px; }
 .heading { min-width: 0; }
 .header h1 { margin: 0; font-size: clamp(29px, calc(2.7vw + 1px), 37px); font-weight: 800; line-height: 1.15; letter-spacing: -.045em; }
-.headerActions { gap: 10px; flex-shrink: 0; }
+.description { max-width: 780px; margin: 8px 0 0; color: var(--ui-text-secondary); font-size: 16px; line-height: 1.5; }
+.scopeSummary { display: flex; align-items: flex-start; gap: 7px; max-width: 780px; margin: 8px 0 0; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.45; }
+.scopeSummary > svg { flex: 0 0 auto; margin-top: 2px; }
+.scopeSummary > strong { flex: 0 0 auto; color: var(--ui-text-primary); }
 .secondaryButton, .dangerButton, .primaryButton, .searchButton, .clearButton {
   display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  min-height: 40px; padding: 8px 13px; border: 1px solid transparent;
+  min-height: 44px; padding: 9px 14px; border: 1px solid transparent;
   border-radius: 10px; background: transparent; color: var(--ui-text-primary);
   font: inherit; font-size: 16px; font-weight: 600; line-height: 1.4; cursor: pointer;
   transition: border-color 150ms ease, background-color 150ms ease;
 }
-.iconActionButton { display: inline-flex; flex: 0 0 40px; align-items: center; justify-content: center; width: 40px; min-width: 40px; min-height: 40px; padding: 0; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ui-text-secondary); cursor: pointer; transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease; }
-.iconActionButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-inset); color: var(--ui-text-primary); }
 .secondaryButton { background: var(--user-surface); }
 .secondaryButton:hover:not(:disabled), .clearButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-inset); }
 .primaryButton { background: var(--admin-text); color: var(--ui-text-inverse); }
@@ -34,50 +35,135 @@
 .clearButton { color: var(--ui-text-secondary); border-color: transparent; }
 .dangerButton { color: var(--ui-text-danger); background: color-mix(in srgb, var(--ui-text-danger) 3%, transparent); }
 .dangerButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: color-mix(in srgb, var(--ui-text-danger) 8%, transparent); }
-.unlockBar { justify-self: end; width: fit-content; justify-content: flex-end; gap: 12px; padding: 0; border: 0; border-radius: 0; background: transparent; }
-.unlockStatus { gap: 9px; min-width: 0; }
-.unlockStatus > svg { flex-shrink: 0; color: var(--ui-text-positive); }
-.countdown { font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 700; letter-spacing: -.025em; }
+.unlockBar { justify-content: space-between; flex-wrap: wrap; gap: 12px 24px; min-width: 0; padding: 12px 16px; border: 1px solid var(--admin-line); border-radius: 14px; background: var(--user-surface); }
+.unlockStatus { gap: 10px; min-width: 0; }
+.unlockIcon { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border-radius: 10px; background: color-mix(in srgb, var(--ui-text-positive) 9%, transparent); color: var(--ui-text-positive); }
+.unlockLabel { color: var(--ui-text-secondary); font-size: 16px; }
+.countdown { min-width: 5ch; color: var(--ui-text-primary); font-variant-numeric: tabular-nums; font-size: 21px; font-weight: 750; letter-spacing: -.025em; }
+.unlockStatus[data-expiring="true"] .countdown { color: var(--ui-text-warning); }
 .accessControls { flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .page .accessControls :global(.identity-duration-select) { display: flex; align-items: center; gap: 10px; min-width: 0; color: var(--ui-text-secondary); font-size: 16px; font-weight: 500; }
-.accessControls :global(.identity-duration-select) > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.page .accessControls :global(.identity-duration-select) select { min-height: 40px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; background: var(--user-surface); color: var(--ui-text-primary); font: inherit; font-size: 16px; transition: border-color 150ms ease; }
+.accessControls :global(.identity-duration-select) > span { color: var(--ui-text-secondary); }
+.page .accessControls :global(.identity-duration-select) select { min-height: 44px; padding: 8px 10px; border: 1px solid transparent; border-radius: 9px; background: var(--user-inset); color: var(--ui-text-primary); font: inherit; font-size: 16px; transition: border-color 150ms ease; }
 .accessControls :global(.identity-duration-select) select:hover:not(:disabled) { border-color: var(--ui-border-hover); }
-.accessControls > button { width: 40px; min-width: 40px; min-height: 40px; padding: 0; }
+.accessControls > button { width: auto; min-width: 44px; min-height: 44px; padding: 8px 12px; }
 .workspace { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: 16px; min-width: 0; }
-.panel { min-width: 0; overflow: hidden; border: 1px solid transparent; border-radius: 14px; background: var(--user-surface); transition: border-color 150ms ease; }
-.panel:hover { border-color: var(--ui-border-hover); }
+.panel { container: user-panel / inline-size; min-width: 0; overflow: hidden; border: 1px solid var(--admin-line); border-radius: 16px; background: var(--user-surface); }
 .checkpointPanel { display: grid; gap: 14px; padding: 16px; }
+.checkpointHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
 .checkpointHeader h2 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.3; letter-spacing: -.025em; }
 .checkpointHeader p { margin: 4px 0 0; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.45; }
-.checkpointForm { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 12px; padding-block: 14px; border-block: 1px solid var(--admin-line); }
+.listAddAction { position: relative; display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; padding: 0; border: 1px solid var(--admin-line); border-radius: 11px; background: var(--user-surface); color: var(--ui-text-secondary); cursor: pointer; transition: border-color 150ms ease, background-color 150ms ease, color 150ms ease, transform 150ms ease; }
+.listAddAction:hover:not(:disabled), .listAddAction[aria-expanded="true"] { border-color: var(--ui-border-hover); background: var(--user-inset); color: var(--ui-text-primary); }
+.listAddAction:active:not(:disabled) { transform: scale(.97); }
+.listAddAction > svg { width: 19px; height: 19px; }
+.listSectionHeader, .accountListHeader { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; }
+.listSectionHeader > div { display: flex; align-items: center; gap: 9px; min-width: 0; }
+.listSectionHeader h3, .listSectionHeader h4, .accountListHeader h4 { display: flex; align-items: center; gap: 9px; margin: 0; color: var(--ui-text-primary); font-size: 17px; font-weight: 700; line-height: 1.35; }
+.listSectionHeader h4, .accountListHeader h4 { color: var(--ui-text-secondary); font-size: 14px; }
+.accountListHeading { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.requiredSetupBadge { display: inline-flex; align-items: center; min-height: 22px; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--ui-text-danger) 22%, transparent); border-radius: 999px; background: color-mix(in srgb, var(--ui-text-danger) 8%, transparent); color: var(--ui-text-danger); font-size: 11px; font-weight: 750; line-height: 1.25; }
+.inlineCreateBox { display: grid; gap: 12px; min-width: 0; padding: 14px; border: 1px solid var(--admin-line); border-radius: 13px; background: color-mix(in srgb, var(--user-inset) 58%, var(--user-surface)); }
+.inlineCreateHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.inlineCreateHeader > div { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.inlineCreateHeader h5 { margin: 0; color: var(--ui-text-primary); font-size: 17px; font-weight: 750; line-height: 1.35; }
+.inlineCreateHeader p { margin: 2px 0 0; color: var(--ui-text-secondary); font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; }
+.inlineCreateHeader .creationFormIcon { flex-basis: 38px; width: 38px; height: 38px; border-radius: 11px; }
+.inlineCreateBox > .checkpointForm { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.inlineCreateBox .checkpointFormActions { padding-top: 3px; }
+.fixedZoneField { min-height: 46px; align-content: center; gap: 2px; padding: 7px 12px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--user-inset); }
+.fixedZoneField > span { color: var(--ui-text-secondary); font-size: 12px; }
+.fixedZoneField > strong { color: var(--ui-text-primary); font-size: 15px; font-weight: 650; }
+.checkpointForm { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: 14px; margin: 0; padding: 18px; border: 1px solid var(--admin-line); border-radius: 14px; background: var(--user-surface); box-shadow: 0 6px 20px color-mix(in srgb, var(--admin-text) 4%, transparent); }
+.creationFormHeader { display: flex; align-items: center; grid-column: 1 / -1; gap: 11px; min-width: 0; padding-bottom: 12px; border-bottom: 1px solid var(--admin-line); }
+.creationFormIcon { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; border: 1px solid var(--admin-line); border-radius: 12px; background: var(--user-inset); color: var(--admin-text); }
+.creationFormHeader h3 { margin: 0; color: var(--ui-text-primary); font-size: 18px; font-weight: 750; line-height: 1.3; }
+.creationFormHeader p { margin: 2px 0 0; color: var(--ui-text-secondary); font-size: 13px; line-height: 1.35; }
 .checkpointFormActions { display: flex; grid-column: 1 / -1; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
-.checkpointList { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
-.checkpointItem { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 10px 12px; border: 1px solid var(--admin-line); border-radius: 9px; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.4; }
-.checkpointName { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--ui-text-primary); }
+.checkpointList { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 0; padding: 0; list-style: none; }
+.checkpointCard { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(280px, 1.2fr); align-items: start; gap: 18px; min-width: 0; padding: 14px; border: 1px solid var(--admin-line); border-radius: 12px; background: var(--user-surface); }
+.checkpointCardInfo { display: grid; align-content: start; justify-items: start; gap: 7px; min-width: 0; }
+.checkpointName { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ui-text-primary); }
 .checkpointName > svg { flex: 0 0 auto; color: var(--ui-text-secondary); }
-.checkpointName > strong { min-width: 0; overflow-wrap: anywhere; }
-.checkpointName > small { color: var(--ui-text-secondary); font-size: 13px; white-space: nowrap; }
-.directoryHeader { display: grid; gap: 14px; padding: 16px; border-bottom: 1px solid var(--admin-line); }
+.checkpointName > strong { min-width: 0; font-size: 17px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.checkpointMeta { color: var(--ui-text-secondary); font-size: 14px; line-height: 1.4; }
+.checkpointCardInfo > .dangerButton { min-height: 34px; margin-top: 3px; padding: 6px 9px; font-size: 14px; }
+.checkpointOperators { display: grid; gap: 8px; min-width: 0; }
+.checkpointOperators h4 { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; color: var(--ui-text-secondary); font-size: 14px; font-weight: 700; line-height: 1.4; }
+.checkpointOperators h4 > span { display: inline-grid; place-items: center; min-width: 23px; height: 23px; padding-inline: 5px; border-radius: 7px; background: var(--user-inset); color: var(--ui-text-primary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.checkpointOperators > p { margin: 0; padding: 9px 10px; border-radius: 8px; background: var(--user-inset); color: var(--ui-text-secondary); font-size: 14px; line-height: 1.4; }
+.checkpointOperatorList { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.checkpointOperator { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; padding: 8px 10px; border-radius: 8px; background: var(--user-inset); }
+.checkpointOperatorIdentity { display: grid; gap: 2px; min-width: 0; }
+.checkpointOperatorIdentity > strong, .checkpointOperatorIdentity > small { min-width: 0; overflow-wrap: anywhere; }
+.checkpointOperatorIdentity > strong { color: var(--ui-text-primary); font-size: 15px; font-weight: 700; line-height: 1.35; }
+.checkpointOperatorIdentity > small { color: var(--ui-text-secondary); font-size: 13px; line-height: 1.35; }
+.directoryHeader { display: grid; gap: 20px; padding: 20px; border-bottom: 1px solid var(--admin-line); }
 .titleRow { justify-content: space-between; gap: 14px; }
 .titleRow > div { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.directoryHeader h2 { margin: 0; font-size: 22px; font-weight: 700; line-height: 1.3; letter-spacing: -.025em; }
-.sectionIcon, .emptyIcon, .dialogIcon { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; border: 1px solid transparent; border-radius: 10px; color: var(--ui-text-secondary); background: var(--user-inset); transition: border-color 150ms ease; }
-.sectionIcon:hover, .emptyIcon:hover, .dialogIcon:hover { border-color: var(--ui-border-hover); }
-.search { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 3px 4px 3px 11px; border: 1px solid transparent; border-radius: 10px; background: var(--user-inset); transition: border-color 150ms ease; }
+.directoryHeader h2 { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0; font-size: 23px; font-weight: 750; line-height: 1.3; letter-spacing: -.025em; }
+.directoryCount { display: inline-grid; place-items: center; flex: 0 0 auto; min-width: 27px; min-height: 27px; padding: 3px 7px; border: 1px solid var(--admin-line); border-radius: 8px; background: var(--user-inset); color: var(--ui-text-secondary); font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.directoryToolbar { display: flex; align-items: center; gap: 16px; min-width: 0; }
+.directoryDescription { margin: 4px 0 0; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.45; }
+.sectionIcon, .emptyIcon { display: grid; place-items: center; flex: 0 0 36px; width: 36px; height: 36px; border: 1px solid transparent; border-radius: 10px; color: var(--ui-text-secondary); background: var(--user-inset); transition: border-color 150ms ease; }
+.sectionIcon:hover, .emptyIcon:hover { border-color: var(--ui-border-hover); }
+.search { display: flex; align-items: center; flex: 1; gap: 8px; min-width: 0; margin: 0; padding: 3px 4px 3px 13px; border: 1px solid var(--admin-line); border-radius: 11px; background: var(--user-inset); transition: border-color 150ms ease; }
 .search:hover { border-color: var(--ui-border-hover); }
 .search input { width: 100%; min-width: 0; flex: 1; min-height: 38px; padding: 5px 0; border: 0; outline: 0; background: transparent; color: var(--ui-text-primary); font: inherit; font-size: 16px; }
 .search:focus-within { outline: 2px solid color-mix(in srgb, var(--ui-text-info) 45%, transparent); outline-offset: 2px; }
-.searchButton { width: 36px; min-width: 36px; min-height: 36px; padding: 0; border-radius: 8px; background: var(--user-surface); }
-.clearButton { flex-shrink: 0; min-height: 36px; padding: 6px 8px; }
+.searchButton { width: 40px; min-width: 40px; min-height: 40px; padding: 0; border-radius: 8px; background: var(--user-surface); }
+.clearButton { flex-shrink: 0; min-width: 40px; min-height: 40px; padding: 6px; }
 .filterRow { justify-content: space-between; flex-wrap: wrap; gap: 10px; }
 .stateFilter { display: flex; align-items: center; gap: 9px; color: var(--ui-text-secondary); font-size: 16px; }
 .stateFilter[role="group"] { max-width: 100%; gap: 4px; padding: 4px; border: 1px solid transparent; border-radius: 10px; background: var(--user-inset); transition: border-color 150ms ease; }
 .stateFilter[role="group"]:hover { border-color: var(--ui-border-hover); }
-.stateFilter button { min-width: 0; min-height: 32px; padding: 6px 10px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--ui-text-secondary); font: inherit; font-size: 15px; font-weight: 600; line-height: 1.4; cursor: pointer; }
-.stateFilter button[aria-pressed="true"] { border-color: transparent; background: var(--user-surface); color: var(--ui-text-primary); }
-.stateFilter button:hover:not(:disabled) { border-color: var(--ui-border-hover); color: var(--ui-text-primary); }
+.stateFilter button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 0; min-height: 38px; padding: 7px 12px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--ui-text-secondary); font: inherit; font-size: 15px; font-weight: 650; line-height: 1.4; white-space: nowrap; cursor: pointer; }
+.stateFilter button > span { font-size: 12px; font-weight: 750; font-variant-numeric: tabular-nums; opacity: .75; }
+.stateFilter button[aria-pressed="true"] { background: var(--admin-text); color: var(--ui-text-inverse); }
+.stateFilter button:hover:not(:disabled) { border-color: var(--ui-border-hover); }
 .directoryGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; padding: 14px; min-width: 0; max-height: min(78dvh, 950px); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-line) transparent; }
+.zoneDirectory { grid-template-columns: minmax(0, 1fr); gap: 20px; max-height: none; padding: 20px; overflow: visible; }
+.zoneListSection { display: grid; align-content: start; gap: 14px; min-width: 0; padding: 16px; border: 1px solid var(--admin-line); border-radius: 14px; background: color-mix(in srgb, var(--user-inset) 42%, var(--user-surface)); }
+.zoneListItems { display: grid; gap: 12px; min-width: 0; }
+.zoneCard { display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, .42fr); align-items: start; gap: 20px 24px; min-width: 0; padding: 20px; border: 1px solid var(--admin-line); border-radius: 14px; background: var(--user-surface); }
+.zoneDetails { display: grid; align-content: start; gap: 12px; min-width: 0; }
+.zoneHeading { display: flex; grid-column: 1 / -1; align-items: center; gap: 12px; min-width: 0; padding-bottom: 16px; border-bottom: 1px solid var(--admin-line); }
+.zoneTitle { display: flex; align-items: center; gap: 11px; min-width: 0; }
+.zoneIcon { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; border: 1px solid var(--admin-line); border-radius: 12px; background: var(--user-inset); color: var(--ui-text-primary); }
+.zoneHeading h3 { min-width: 0; margin: 0; color: var(--ui-text-primary); font-size: 23px; font-weight: 750; line-height: 1.3; letter-spacing: -.025em; overflow-wrap: anywhere; }
+.zoneSummary { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; color: var(--ui-text-secondary); font-size: 14px; line-height: 1.4; white-space: nowrap; }
+.retireButton { flex: 0 0 40px; width: 40px; min-height: 40px; padding: 0; background: transparent; color: var(--ui-text-secondary); }
+.retireButton:hover:not(:disabled) { color: var(--ui-text-danger); }
+.checkpointNumber { display: inline-grid; place-items: center; flex: 0 0 32px; width: 32px; height: 32px; border-radius: 8px; background: var(--user-inset); color: var(--ui-text-secondary); font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.zoneCheckpointList .checkpointCard { grid-template-columns: minmax(170px, .7fr) minmax(0, 1fr); gap: 16px; padding: 14px; border-radius: 11px; background: var(--user-inset); }
+.zoneCheckpointList .checkpointCardInfo { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.zoneCheckpointList .checkpointName { flex: 1 1 100%; }
+.zoneCheckpointList .checkpointMeta { margin-left: 40px; font-size: 13px; }
+.zoneCheckpointList .retireButton { margin-left: auto; }
+.zoneCheckpointList .checkpointCardInfo > .retireButton { min-height: 40px; margin-top: 0; padding: 0; }
+.zoneCheckpointSummary { display: grid; gap: 10px; min-width: 0; }
+.zoneCheckpointList { display: grid; gap: 8px; min-width: 0; }
+.zoneEmpty { color: var(--ui-text-secondary); font-size: 14px; }
+.zoneAccountGroups { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.zoneAccountGroup { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.zoneAccountGroup h4, .checkpointOperators h4 { line-height: 1.4; }
+.accountCount { display: inline-grid; place-items: center; min-width: 23px; height: 23px; padding-inline: 5px; border-radius: 7px; background: var(--user-inset); color: var(--ui-text-primary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.zoneAccountGroup > p { margin: 0; color: var(--ui-text-secondary); font-size: 14px; line-height: 1.4; }
+.zoneAccountList, .globalAccountList { display: grid; gap: 6px; min-width: 0; }
+.zoneAccount { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; min-height: 64px; padding: 10px; border: 1px solid transparent; border-radius: 10px; background: var(--user-inset); color: var(--ui-text-primary); font: inherit; text-align: left; cursor: pointer; transition: border-color 150ms ease, background-color 150ms ease; }
+.zoneAccount:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-surface); }
+.zoneAccount[data-selected="true"] { border-color: color-mix(in srgb, var(--ui-text-info) 45%, var(--admin-line)); background: color-mix(in srgb, var(--ui-text-info) 7%, var(--user-surface)); }
+.accountAvatar { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--user-surface); color: var(--ui-text-primary); font-size: 13px; font-weight: 750; }
+.accountAvatar[data-enabled="false"] { color: var(--ui-text-secondary); }
+.accountChevron { flex: 0 0 auto; color: var(--ui-text-secondary); }
+.zoneAccount .statusBadge { margin-left: auto; padding: 4px 6px; font-size: 12px; }
+.zoneAccount .statusBadge::before { content: ""; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.zoneAccountIdentity { display: grid; gap: 2px; min-width: 0; }
+.zoneAccountIdentity > strong { overflow-wrap: anywhere; font-size: 16px; font-weight: 700; line-height: 1.35; }
+.zoneAccountIdentity > small { overflow-wrap: anywhere; color: var(--ui-text-secondary); font-size: 13px; line-height: 1.35; }
+.globalAccounts { display: grid; gap: 14px; min-width: 0; padding: 20px; border: 1px solid var(--admin-line); border-radius: 14px; background: var(--user-surface); }
+.globalAccounts h3 { display: flex; align-items: center; gap: 10px; margin: 0; font-size: 18px; font-weight: 700; line-height: 1.35; }
+.globalAccountList { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .userCard { display: grid; align-content: start; gap: 12px; width: 100%; min-width: 0; padding: 15px; border: 1px solid transparent; border-radius: 11px; background: var(--user-surface); color: var(--ui-text-primary); font: inherit; text-align: left; cursor: pointer; transition: border-color 150ms ease, background-color 150ms ease; }
 .userCard[data-selected="true"] { background: color-mix(in srgb, var(--ui-text-info) 3%, var(--user-surface)); }
 .userCard:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-inset); }
@@ -96,7 +182,7 @@
 .roleList { display: flex; align-items: center; flex-wrap: wrap; flex: 0 1 auto; gap: 7px; min-width: 0; min-height: 0; }
 .roleBadge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border: 1px solid transparent; border-radius: 6px; background: var(--user-inset); font-size: 14px; font-weight: 600; line-height: 1.35; transition: border-color 150ms ease; }
 .roleBadge:hover { border-color: var(--ui-border-hover); }
-.roleBadge[data-role="admin"] { color: var(--ui-text-info); }
+.roleBadge[data-role="zone-admin"], .roleBadge[data-role="master-admin"] { color: var(--ui-text-info); }
 .checkpointLine { display: flex; align-items: flex-start; gap: 6px; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
 .checkpointLine > svg { flex-shrink: 0; margin-top: 2px; }
 .editor { min-width: 0; max-height: min(82dvh, calc(100dvh - 48px)); overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--admin-line) transparent; scroll-margin-top: 24px; }
@@ -116,17 +202,18 @@
 .draftBadge { display: inline-block; color: var(--ui-text-warning); font-size: 15px; line-height: 1.5; }
 .editorBody { display: grid; gap: 22px; padding: 18px; min-width: 0; }
 .securityPanel { display: grid; gap: 16px; min-width: 0; padding-top: 20px; border-top: 1px solid var(--admin-line); }
+.securityHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.securityHeader h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 18px; font-weight: 750; }
+.securityHeader .dangerButton { min-height: 40px; padding: 7px 10px; font-size: 14px; }
 .passwordForm { display: grid; gap: 12px; min-width: 0; }
 .passwordForm > .field { max-width: 520px; }
-.securityActionRow { display: flex; align-items: center; justify-content: space-between; gap: 16px; min-width: 0; }
+.securityActionRow { display: flex; align-items: center; justify-content: flex-end; gap: 16px; min-width: 0; }
+.securityHeader > .securityActionRow { flex-wrap: wrap; gap: 8px; }
 .field { display: grid; min-width: 0; gap: 6px; color: var(--ui-text-primary); font-size: 16px; font-weight: 600; }
-.field input { width: 100%; min-width: 0; min-height: 42px; padding: 9px 11px; border: 1px solid transparent; border-radius: 9px; background: var(--user-surface); color: var(--ui-text-primary); font: inherit; font-weight: 400; transition: border-color 150ms ease; }
+.field input, .field select { width: 100%; min-width: 0; min-height: 46px; box-sizing: border-box; padding: 10px 12px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--user-inset); color: var(--ui-text-primary); font: inherit; font-weight: 400; transition: border-color 150ms ease; }
+.field select option { background: var(--admin-bg); color: var(--ui-text-primary); }
 .field input:hover:not(:disabled) { border-color: var(--ui-border-hover); }
 .field input:user-invalid { outline: 1px solid var(--ui-text-danger); }
-.formMessage { margin: 0 0 20px; padding: 13px 15px; border: 1px solid transparent; border-radius: 10px; color: var(--ui-text-secondary); font-size: 16px; font-weight: 400; line-height: 1.5; transition: border-color 150ms ease; }
-.formMessage:hover { border-color: var(--ui-border-hover); }
-.formMessage[data-kind="error"] { color: var(--ui-text-danger); background: color-mix(in srgb, var(--ui-text-danger) 4%, transparent); }
-.formMessage[data-kind="success"] { color: var(--ui-text-positive); }
 .checkRow { display: flex; align-items: flex-start; gap: 9px; font-size: 16px; line-height: 1.4; }
 .checkRow input { flex: 0 0 18px; width: 18px; height: 18px; margin: 3px 0 0; accent-color: var(--admin-text); }
 .emptyState { display: grid; justify-items: center; gap: 8px; padding: 36px 20px; color: var(--ui-text-secondary); font-size: 16px; line-height: 1.5; text-align: center; }
@@ -139,40 +226,66 @@
 .statusMessage[data-kind="success"] { color: var(--ui-text-positive); background: color-mix(in srgb, var(--ui-text-positive) 4%, var(--user-surface)); }
 .statusMessage > svg { flex-shrink: 0; margin-top: 3px; }
 .page > .statusMessage { position: sticky; top: 12px; z-index: 4; }
-.createDialog { width: min(820px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); margin: auto; padding: 0; overflow: hidden; border: 1px solid transparent; border-radius: 16px; background: var(--admin-bg); color: var(--ui-text-primary); box-shadow: 0 24px 80px rgba(0, 0, 0, .18); transition: border-color 150ms ease; }
-.createDialog:hover { border-color: var(--ui-border-hover); }
-.createDialog[open] { display: flex; flex-direction: column; }
-.createDialog::backdrop { background: rgba(10, 20, 18, .42); backdrop-filter: blur(5px); }
-.dialogHeader { flex-shrink: 0; align-items: center; gap: 12px; padding: 17px 20px; border-bottom: 1px solid var(--admin-line); }
-.dialogHeader > div:not(.dialogIcon) { flex: 1; min-width: 0; }
-.dialogHeader h2 { margin: 0; font-size: 25px; font-weight: 700; line-height: 1.25; letter-spacing: -.03em; }
-.dialogIcon { width: 48px; height: 48px; flex-basis: 48px; border-radius: 14px; }
-.dialogBody { min-width: 0; min-height: 0; padding: 20px; overflow-y: auto; scrollbar-width: thin; }
-.dialogBody > .statusMessage { margin-bottom: 20px; }
-.closeButton { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; padding: 0; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ui-text-secondary); cursor: pointer; }
+.closeButton { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; padding: 0; border: 1px solid transparent; border-radius: 10px; background: transparent; color: var(--ui-text-secondary); cursor: pointer; }
 .closeButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--user-inset); }
-.page :is(button, select, input):focus-visible, .createDialog :is(button, select, input):focus-visible { outline: 2px solid var(--ui-text-info); outline-offset: 3px; }
-.page :is(button, select, input):disabled, .createDialog :is(button, select, input):disabled { opacity: .55; cursor: not-allowed; }
+.page :is(button, select, input):focus-visible { outline: 2px solid var(--ui-text-info); outline-offset: 3px; }
+.page :is(button, select, input):disabled { opacity: .55; cursor: not-allowed; }
 .loadingIcon { animation: rotate 1s linear infinite; }
 @keyframes rotate { to { transform: rotate(360deg); } }
 
 @media (min-width: 1101px) {
-  .workspace[data-selected="true"] { grid-template-columns: minmax(310px, .7fr) minmax(0, 1.3fr); }
+  .workspace[data-selected="true"] { grid-template-columns: minmax(0, 1fr) minmax(360px, .7fr); }
   .workspace[data-selected="true"] .directoryGrid { grid-template-columns: minmax(0, 1fr); }
+  .workspace[data-selected="true"] .zoneAccountGroups, .workspace[data-selected="true"] .globalAccountList { grid-template-columns: minmax(0, 1fr); }
+  .workspace[data-selected="true"] .zoneDirectory { max-height: min(82dvh, calc(100dvh - 48px)); overflow-y: auto; }
   .editor { position: sticky; top: 24px; }
 }
 @media (max-width: 1250px) {
-  .directoryGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .directoryGrid:not(.zoneDirectory) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container user-panel (max-width: 780px) {
+  .directoryHeader { gap: 16px; }
+  .titleRow { flex-wrap: wrap; }
+  .directoryToolbar { flex-wrap: wrap; gap: 12px; }
+  .search { flex-basis: 100%; }
+  .filterRow { width: 100%; }
+  .zoneCard { grid-template-columns: minmax(0, 1fr); gap: 18px; padding: 16px; }
+  .zoneListSection { padding: 14px; }
+  .zoneHeading { flex-wrap: wrap; gap: 8px 12px; }
+  .zoneTitle { flex: 1; }
+  .zoneHeading > .retireButton { order: 1; }
+  .zoneSummary { order: 2; flex-basis: 100%; flex-wrap: wrap; margin-left: 51px; white-space: normal; }
+  .zoneCheckpointList .checkpointCard { grid-template-columns: minmax(0, 1fr); }
+  .zoneCheckpointList .checkpointCardInfo { flex-wrap: nowrap; }
+  .zoneCheckpointList .checkpointName { flex: 1; }
+  .zoneCheckpointList .checkpointMeta { flex: 0 0 auto; margin-left: 0; }
+  .zoneAccountGroups { padding-top: 16px; border-top: 1px solid var(--admin-line); }
+  .globalAccountList { grid-template-columns: minmax(0, 1fr); }
+}
+@container user-panel (max-width: 400px) {
+  .zoneDirectory { padding: 12px; gap: 14px; }
+  .zoneCard, .globalAccounts { padding: 12px; }
+  .zoneHeading h3 { font-size: 21px; }
+  .zoneSummary { margin-left: 0; font-size: 13px; }
+  .zoneCheckpointList .checkpointCard { gap: 12px; padding: 10px; }
+  .zoneCheckpointList .checkpointCardInfo { flex-wrap: wrap; }
+  .zoneCheckpointList .checkpointName { flex-basis: 100%; }
+  .accountChevron { display: none; }
+  .zoneAccount { gap: 8px; padding: 9px 8px; }
+  .accountAvatar { flex-basis: 30px; width: 30px; height: 30px; border-radius: 8px; }
+  .directoryHeader h2 { font-size: 21px; }
+  .directoryHeader .sectionIcon { display: none; }
+  .stateFilter { width: 100%; }
+  .stateFilter button { flex: 1; gap: 5px; padding-inline: 8px; }
 }
 @media (max-width: 767px) {
   .page { gap: 16px; padding: 18px 12px calc(28px + var(--mobile-admin-nav-height)); }
   .header { flex-wrap: wrap; gap: 14px; }
-  .headerActions { margin-left: auto; }
   .unlockBar { gap: 12px; }
   .accessControls { justify-content: flex-end; }
   .accessControls :global(.identity-duration-select) { width: auto; }
   .accessControls :global(.identity-duration-select) select { width: auto; }
-  .accessControls > button { flex: 0 0 40px; }
+  .accessControls > button { flex: 0 1 auto; }
   .directoryHeader, .editorHeader { padding: 14px; }
   .directoryHeader h2 { font-size: 21px; }
   .directoryGrid { padding: 12px; gap: 9px; }
@@ -180,13 +293,18 @@
   .userName { font-size: 19px; }
   .editorHeading { font-size: 22px; }
   .editorBody { padding: 14px; }
-  .dialogHeader { padding: 15px 16px; gap: 10px; }
-  .dialogHeader h2 { font-size: 23px; }
-  .dialogIcon { width: 36px; height: 36px; flex-basis: 36px; border-radius: 10px; }
-  .dialogBody { padding: 16px; }
   .checkpointForm { grid-template-columns: minmax(0, 1fr); }
   .checkpointFormActions { grid-column: auto; }
 }
+@media (max-width: 600px) {
+  .unlockBar { padding: 12px; }
+  .accessControls { width: 100%; }
+  .page .accessControls :global(.identity-duration-select) { justify-content: space-between; width: 100%; }
+  .accessControls > button { flex: 1; }
+  .editor { max-height: none; overflow: visible; }
+}
+@media (max-width: 650px) { .checkpointCard { grid-template-columns: minmax(0, 1fr); gap: 12px; }.zoneCard { padding: 13px; } }
+@media (max-width: 650px) { .zoneAccountGroups, .globalAccountList { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 650px) { .directoryGrid { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 400px) {
   .search { flex-wrap: nowrap; }
@@ -194,9 +312,6 @@
   .searchButton { width: 36px; }
   .filterRow { align-items: flex-start; flex-direction: column; }
   .stateFilter { width: 100%; justify-content: space-between; }
-  .dialogIcon { display: none; }
-  .dialogHeader { padding-inline: 18px; }
-  .dialogBody { padding: 18px; }
 }
 @media (max-width: 500px) { .securityActionRow { flex-direction: row; gap: 8px; }.securityActionRow > button { padding-inline: 8px; white-space: nowrap; } }
-@media (prefers-reduced-motion: reduce) { .loadingIcon { animation: none; }.userCard, .iconActionButton, .secondaryButton, .primaryButton, .dangerButton { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .loadingIcon { animation: none; }.userCard, .secondaryButton, .primaryButton, .dangerButton { transition: none; } }

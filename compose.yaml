@@ -13,12 +13,12 @@ services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
       KONG_ROUTER_FLAVOR: expressions
-      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8002, 0.0.0.0:8005"
+      KONG_PROXY_LISTEN: "0.0.0.0:1012, 0.0.0.0:1013, 0.0.0.0:1014"
       KONG_ADMIN_LISTEN: "off"
       # Metrics are reachable only from private container networks; this port
       # is not published on the host or included in the public proxy listeners.
-      KONG_STATUS_LISTEN: "0.0.0.0:8100"
-      KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity,inout-ingress-limit
+      KONG_STATUS_LISTEN: "0.0.0.0:1017"
+      KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity
       KONG_NGINX_MAIN_ENV: "INOUT_TERMINAL_SECRET; env INOUT_UPLOAD_DEADLINE_SECONDS; env INOUT_GATEWAY_IDENTITY_SECRET; env INOUT_GATEWAY_REDIS_PASSWORD"
       INOUT_UPLOAD_DEADLINE_SECONDS: ${INOUT_UPLOAD_DEADLINE_SECONDS:-30}
       INOUT_TERMINAL_SECRET: ${KONG_TERMINAL_SECRET:-}
@@ -45,11 +45,10 @@ services:
       - ./gateway/kong.yml:/etc/kong/kong.yml:ro
       - ./gateway/plugins/inout-terminal-identity:/usr/local/share/lua/5.1/kong/plugins/inout-terminal-identity:ro
       - ./gateway/plugins/inout-rate-identity:/usr/local/share/lua/5.1/kong/plugins/inout-rate-identity:ro
-      - ./gateway/plugins/inout-ingress-limit:/usr/local/share/lua/5.1/kong/plugins/inout-ingress-limit:ro
     ports:
-      - "127.0.0.1:${APP_PORT:-1008}:8000"
-      - "127.0.0.1:${PYTHON_API_PORT:-1002}:8002"
-      - "127.0.0.1:${KEYCLOAK_PORT:-1005}:8005"
+      - "127.0.0.1:${APP_PORT:-1008}:1012"
+      - "127.0.0.1:${PYTHON_API_PORT:-1002}:1013"
+      - "127.0.0.1:${KEYCLOAK_PORT:-1005}:1014"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 5s
@@ -64,6 +63,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+        # Refresh Kong's DNS cache when Compose recreates the identity service.
+        restart: true
       redis:
         condition: service_healthy
     restart: unless-stopped
@@ -85,7 +86,7 @@ services:
       - /var/run/postgresql:uid=70,gid=70,mode=3777
     networks: [test]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U test -d inout_test"]
+      test: ["CMD-SHELL", "pg_isready -p 1020 -U test -d inout_test"]
       interval: 2s
       timeout: 3s
       retries: 15
@@ -97,10 +98,10 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     read_only: true
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command: ["redis-server", "--port", "1021", "--save", "", "--appendonly", "no"]
     networks: [test]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-p", "1021", "ping"]
       interval: 2s
       timeout: 3s
       retries: 15
@@ -117,15 +118,15 @@ services:
     volumes:
       - ./backend:/app:ro
     environment:
-      TEST_DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
-      DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
-      READ_DATABASE_URL: postgresql+asyncpg://test:test@db-test:5432/inout_test
+      TEST_DATABASE_URL: postgresql+asyncpg://test:test@db-test:1020/inout_test
+      DATABASE_URL: postgresql+asyncpg://test:test@db-test:1020/inout_test
+      READ_DATABASE_URL: postgresql+asyncpg://test:test@db-test:1020/inout_test
       DATABASE_CONNECT_TIMEOUT_SECONDS: ${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       DATABASE_POOL_TIMEOUT_SECONDS: ${DATABASE_POOL_TIMEOUT_SECONDS:-5}
       DATABASE_STATEMENT_TIMEOUT_MS: ${DATABASE_STATEMENT_TIMEOUT_MS:-15000}
       DATABASE_LOCK_TIMEOUT_MS: ${DATABASE_LOCK_TIMEOUT_MS:-3000}
-      REDIS_URL: redis://redis-test:6379/0
-      TEST_REDIS_URL: redis://redis-test:6379/0
+      REDIS_URL: redis://redis-test:1021/0
+      TEST_REDIS_URL: redis://redis-test:1021/0
     networks: [test]
     command: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
     depends_on:
@@ -152,7 +153,7 @@ services:
       - pg-primary-data:/var/lib/postgresql/data
     healthcheck:
       # TCP excludes the temporary Unix-socket-only initialization server.
-      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U inout -d inout"]
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 1020 -U inout -d inout"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -172,6 +173,7 @@ services:
     environment:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
       PROVISION_ADMIN_PASSWORD: ${POSTGRES_CURRENT_PASSWORD:-${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}}
+      PROVISION_PORT: 1020
       APP_DB_PASSWORD: ${APP_DB_PASSWORD:?Generate APP_DB_PASSWORD}
       MIGRATION_DB_PASSWORD: ${MIGRATION_DB_PASSWORD:?Generate MIGRATION_DB_PASSWORD}
       KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?Generate KEYCLOAK_DB_PASSWORD}
@@ -202,7 +204,7 @@ services:
     tmpfs:
       - /run/inout-redis:uid=999,gid=1000,mode=0700
     healthcheck:
-      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_QUOTA_PASSWORD redis-cli --user inout-quota ping | grep -q PONG']
+      test: [CMD-SHELL, 'REDISCLI_AUTH=$$REDIS_QUOTA_PASSWORD redis-cli -p 1021 --user inout-quota ping | grep -q PONG']
       interval: 5s
       timeout: 3s
       retries: 5
@@ -225,23 +227,26 @@ services:
       - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
       - KC_DB=postgres
       - KC_DB_SCHEMA=keycloak
-      - KC_DB_URL=jdbc:postgresql://postgres-primary:5432/inout
+      - KC_DB_URL=jdbc:postgresql://postgres-primary:1020/inout
       - KC_DB_USERNAME=inout_keycloak
       - KC_DB_PASSWORD=${KEYCLOAK_DB_PASSWORD:?Generate KEYCLOAK_DB_PASSWORD}
-      - KC_HTTP_PORT=1105
+      - KC_HTTP_PORT=1022
+      - KC_HTTP_MANAGEMENT_PORT=1023
       - KC_HEALTH_ENABLED=true
       - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
+      - KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET=${KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET:-}
       - INOUT_APP_URL=${AUTH_URL:-http://app.localhost:${APP_PORT:-1008}}
       # Keep identity cookies on a separate host from the app; cookies ignore ports.
       - KC_HOSTNAME=http://auth.localhost:${KEYCLOAK_PORT:-1005}
-      # The separate maintenance listener is enabled only with
-      # compose.keycloak-admin.yaml; /admin is blocked on the public listener.
+      # /admin stays blocked on the public listener; the separate admin
+      # gateway below is loopback-bound and forwards to this internal host.
       - KC_HOSTNAME_ADMIN=http://auth.localhost:${KEYCLOAK_ADMIN_PORT:-1009}
       - KC_PROXY_HEADERS=xforwarded
     volumes:
       - ./keycloak/realm-inout.json:/opt/keycloak/data/import/inout-realm.json:ro
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000; echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; cat <&3 | grep -q '\"status\": \"UP\"'"]
+      # Aggregate readiness can fail while individual body checks still say UP.
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/1023; printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3; read -r task_http_version task_health_status task_reason <&3; case \"$$task_http_version:$$task_health_status\" in HTTP/1.0:200|HTTP/1.1:200) exit 0;; *) exit 1;; esac"]
       interval: 10s
       timeout: 5s
       retries: 12
@@ -250,6 +255,48 @@ services:
     depends_on:
       db-provision:
         condition: service_completed_successfully
+    restart: unless-stopped
+
+  keycloak-admin:
+    networks: [edge, web]
+    image: inout-kong:${KONG_VERSION:-3.9.3}
+    build:
+      context: ./gateway
+      args:
+        KONG_VERSION: ${KONG_VERSION:-3.9.3}
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      KONG_ROUTER_FLAVOR: expressions
+      KONG_PROXY_LISTEN: "0.0.0.0:1015"
+      KONG_ADMIN_LISTEN: "off"
+      KONG_STATUS_LISTEN: "127.0.0.1:1017"
+      KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity
+      KONG_NGINX_MAIN_ENV: "INOUT_GATEWAY_REDIS_PASSWORD"
+      INOUT_GATEWAY_REDIS_PASSWORD: ${REDIS_GATEWAY_PASSWORD:?Generate REDIS_GATEWAY_PASSWORD}
+      KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: 1m
+      KONG_NGINX_HTTP_CLIENT_HEADER_BUFFER_SIZE: 16k
+      KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 64k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: "8 64k"
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+    volumes:
+      - ./gateway/kong.yml:/etc/kong/kong.yml:ro
+      - ./gateway/plugins/inout-terminal-identity:/usr/local/share/lua/5.1/kong/plugins/inout-terminal-identity:ro
+      - ./gateway/plugins/inout-rate-identity:/usr/local/share/lua/5.1/kong/plugins/inout-rate-identity:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_ADMIN_PORT:-1009}:1015"
+    depends_on:
+      keycloak:
+        condition: service_healthy
+        restart: true
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
     restart: unless-stopped
 
   backend-init:
@@ -262,12 +309,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql+asyncpg://inout_migrator:${MIGRATION_DB_PASSWORD:?Generate MIGRATION_DB_PASSWORD}@postgres-primary:5432/inout
+      - DATABASE_URL=postgresql+asyncpg://inout_migrator:${MIGRATION_DB_PASSWORD:?Generate MIGRATION_DB_PASSWORD}@postgres-primary:1020/inout
       - DATABASE_CONNECT_TIMEOUT_SECONDS=${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       - DATABASE_POOL_TIMEOUT_SECONDS=${DATABASE_POOL_TIMEOUT_SECONDS:-5}
       - DATABASE_STATEMENT_TIMEOUT_MS=${DATABASE_STATEMENT_TIMEOUT_MS:-15000}
       - DATABASE_LOCK_TIMEOUT_MS=${DATABASE_LOCK_TIMEOUT_MS:-3000}
-      - TEMPORAL_HOST=temporal:7233
+      - TEMPORAL_HOST=temporal:1024
     volumes:
       - ./infrastructure/postgres/provision_database.py:/maintenance/provision_database.py:ro
     # One idempotent bootstrap job: schema, reference data, then the durable
@@ -290,20 +337,20 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql+asyncpg://inout_app:${APP_DB_PASSWORD:?Generate APP_DB_PASSWORD}@postgres-primary:5432/inout
+      - DATABASE_URL=postgresql+asyncpg://inout_app:${APP_DB_PASSWORD:?Generate APP_DB_PASSWORD}@postgres-primary:1020/inout
       - DATABASE_STATEMENT_CACHE_SIZE=${DATABASE_STATEMENT_CACHE_SIZE:-100}
       - DATABASE_CONNECT_TIMEOUT_SECONDS=${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       - DATABASE_POOL_TIMEOUT_SECONDS=${DATABASE_POOL_TIMEOUT_SECONDS:-5}
       - DATABASE_STATEMENT_TIMEOUT_MS=${DATABASE_STATEMENT_TIMEOUT_MS:-15000}
       - DATABASE_LOCK_TIMEOUT_MS=${DATABASE_LOCK_TIMEOUT_MS:-3000}
-      - QUOTA_REDIS_URL=redis://inout-quota:${REDIS_QUOTA_PASSWORD:?Generate REDIS_QUOTA_PASSWORD}@redis:6379/0
-      - EVENTS_REDIS_URL=redis://inout-events:${REDIS_EVENTS_PASSWORD:?Generate REDIS_EVENTS_PASSWORD}@redis:6379/0
-      - TEMPORAL_HOST=temporal:7233
+      - QUOTA_REDIS_URL=redis://inout-quota:${REDIS_QUOTA_PASSWORD:?Generate REDIS_QUOTA_PASSWORD}@redis:1021/0
+      - EVENTS_REDIS_URL=redis://inout-events:${REDIS_EVENTS_PASSWORD:?Generate REDIS_EVENTS_PASSWORD}@redis:1021/0
+      - TEMPORAL_HOST=temporal:1024
       - KONG_TERMINAL_SECRET=${KONG_TERMINAL_SECRET:-}
       - KONG_IDENTITY_SECRET=${KONG_IDENTITY_SECRET:?Generate KONG_IDENTITY_SECRET}
       - KEYCLOAK_ISSUER=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
-      - KEYCLOAK_JWKS_BASE=http://keycloak:1105/realms/inout
-      - KEYCLOAK_ADMIN_BASE=http://keycloak:1105
+      - KEYCLOAK_JWKS_BASE=http://keycloak:1022/realms/inout
+      - KEYCLOAK_ADMIN_BASE=http://keycloak:1022
       - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
       - KEYCLOAK_JWKS_CACHE_TTL=${KEYCLOAK_JWKS_CACHE_TTL:-300}
       - KEYCLOAK_STEP_UP_SIGNING_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
@@ -329,7 +376,7 @@ services:
       - ALERT_EVALUATION_MAX_ALERTS=${ALERT_EVALUATION_MAX_ALERTS:-50000}
       - ALERT_EVALUATION_MAX_RULES=${ALERT_EVALUATION_MAX_RULES:-1000}
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:1102/health/ready')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:1019/health/ready')\""]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -358,17 +405,17 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     environment:
-      - DATABASE_URL=postgresql+asyncpg://inout_app:${APP_DB_PASSWORD:?Generate APP_DB_PASSWORD}@postgres-primary:5432/inout
+      - DATABASE_URL=postgresql+asyncpg://inout_app:${APP_DB_PASSWORD:?Generate APP_DB_PASSWORD}@postgres-primary:1020/inout
       - DATABASE_STATEMENT_CACHE_SIZE=${DATABASE_STATEMENT_CACHE_SIZE:-100}
       - DATABASE_CONNECT_TIMEOUT_SECONDS=${DATABASE_CONNECT_TIMEOUT_SECONDS:-5}
       - DATABASE_POOL_TIMEOUT_SECONDS=${DATABASE_POOL_TIMEOUT_SECONDS:-5}
       - DATABASE_STATEMENT_TIMEOUT_MS=${DATABASE_STATEMENT_TIMEOUT_MS:-15000}
       - DATABASE_LOCK_TIMEOUT_MS=${DATABASE_LOCK_TIMEOUT_MS:-3000}
-      - QUOTA_REDIS_URL=redis://inout-quota:${REDIS_QUOTA_PASSWORD:?Generate REDIS_QUOTA_PASSWORD}@redis:6379/0
-      - EVENTS_REDIS_URL=redis://inout-events:${REDIS_EVENTS_PASSWORD:?Generate REDIS_EVENTS_PASSWORD}@redis:6379/0
-      - TEMPORAL_HOST=temporal:7233
+      - QUOTA_REDIS_URL=redis://inout-quota:${REDIS_QUOTA_PASSWORD:?Generate REDIS_QUOTA_PASSWORD}@redis:1021/0
+      - EVENTS_REDIS_URL=redis://inout-events:${REDIS_EVENTS_PASSWORD:?Generate REDIS_EVENTS_PASSWORD}@redis:1021/0
+      - TEMPORAL_HOST=temporal:1024
       - KEYCLOAK_ISSUER=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
-      - KEYCLOAK_JWKS_BASE=http://keycloak:1105/realms/inout
+      - KEYCLOAK_JWKS_BASE=http://keycloak:1022/realms/inout
       - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
       - QUOTA_REDIS_MAX_CONNECTIONS=${QUOTA_REDIS_MAX_CONNECTIONS:-64}
       - EVENTS_REDIS_MAX_CONNECTIONS=${EVENTS_REDIS_MAX_CONNECTIONS:-160}
@@ -394,23 +441,25 @@ services:
       context: .
       dockerfile: Dockerfile
     environment:
-      - PYTHON_API_URL=http://kong:8002
+      - PYTHON_API_URL=http://kong:1013
       - AUTH_TRUST_HOST=true
       - AUTH_URL=${AUTH_URL:-http://app.localhost:${APP_PORT:-1008}}
       - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
       - KEYCLOAK_CLIENT_ID=inout-frontend
       - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
-      - KEYCLOAK_ACCOUNT_SETUP_CLIENT_ID=${KEYCLOAK_ACCOUNT_SETUP_CLIENT_ID:-inout-account-setup}
-      - KEYCLOAK_ACCOUNT_SETUP_CLIENT_SECRET=${KEYCLOAK_ACCOUNT_SETUP_CLIENT_SECRET:-}
+      - PASSWORD_UPDATE_LOCK_API_URL=http://python-api:1019
       - KEYCLOAK_ISSUER=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
-      - KEYCLOAK_JWKS_BASE=http://keycloak:1105/realms/inout
+      - KEYCLOAK_JWKS_BASE=http://keycloak:1022/realms/inout
       - KEYCLOAK_ISSUER_PUBLIC=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
-      - PORT=${APP_INTERNAL_PORT:-3000}
+      - KEYCLOAK_ADMIN_CONSOLE_URL=${KEYCLOAK_ADMIN_CONSOLE_URL:-}
+      # Container listeners are fixed in Kong and health checks. Only the
+      # published APP_PORT may change; ignore legacy internal-port overrides.
+      - PORT=1018
       - PUBLIC_PORT=${APP_PORT:-1008}
     # Next can initialize while the database, API and identity provider start.
     # Kong still waits for all four healthy upstreams before publishing traffic.
     healthcheck:
-      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:1018/api/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -434,6 +483,7 @@ services:
     tmpfs: [/tmp]
     environment:
       SQL_HOST: postgres-primary
+      SQL_PORT: 1020
       TEMPORAL_DB_PASSWORD: ${TEMPORAL_DB_PASSWORD:?Generate TEMPORAL_DB_PASSWORD}
     depends_on:
       db-provision:
@@ -448,7 +498,7 @@ services:
     tmpfs: [/tmp]
     environment:
       - DB=postgres12
-      - DB_PORT=5432
+      - DB_PORT=1020
       - POSTGRES_USER=inout_temporal
       - POSTGRES_PWD=${TEMPORAL_DB_PASSWORD:?Generate TEMPORAL_DB_PASSWORD}
       - POSTGRES_SEEDS=postgres-primary
@@ -457,19 +507,22 @@ services:
       - DYNAMIC_CONFIG_FILE_PATH=/etc/temporal/inout-dynamic.yaml
       # gRPC is reachable only by the designated workflow-network clients.
       - BIND_ON_IP=0.0.0.0
+      - FRONTEND_GRPC_PORT=1024
+      - FRONTEND_HTTP_PORT=1025
+      - FRONTEND_MEMBERSHIP_PORT=1026
+      - INTERNAL_FRONTEND_GRPC_PORT=1027
+      - INTERNAL_FRONTEND_MEMBERSHIP_PORT=1028
+      - MATCHING_GRPC_PORT=1029
+      - MATCHING_MEMBERSHIP_PORT=1030
+      - HISTORY_GRPC_PORT=1031
+      - HISTORY_MEMBERSHIP_PORT=1032
+      - WORKER_GRPC_PORT=1033
+      - WORKER_MEMBERSHIP_PORT=1034
     volumes:
       - ./infrastructure/temporal/dynamicconfig.yaml:/etc/temporal/inout-dynamic.yaml:ro
     depends_on:
       temporal-schema-init:
         condition: service_completed_successfully
-    healthcheck:
-      # This is liveness only; the SDK job below verifies gRPC and namespace readiness.
-      test: ["CMD-SHELL", "nc -z -w 2 127.0.0.1 7233"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-      start_interval: 1s
     restart: unless-stopped
 
   temporal-namespace-init:
@@ -480,13 +533,15 @@ services:
     read_only: true
     tmpfs: [/tmp]
     environment:
-      TEMPORAL_HOST: temporal:7233
+      TEMPORAL_HOST: temporal:1024
     volumes:
       - ./infrastructure/temporal/bootstrap_namespace.py:/maintenance/bootstrap_namespace.py:ro
     command: [python, /maintenance/bootstrap_namespace.py]
     depends_on:
       temporal:
-        condition: service_healthy
+        # The pinned server image is minimal and does not provide netcat.
+        # The bootstrap job below performs the actual gRPC health check.
+        condition: service_started
 
   temporal-ui:
     networks: [workflow]
@@ -495,9 +550,10 @@ services:
     cap_drop: [ALL]
     profiles: [observability]
     ports:
-      - "127.0.0.1:${TEMPORAL_UI_PORT:-8233}:8080"
+      - "127.0.0.1:${TEMPORAL_UI_HOST_PORT:-1007}:1035"
     environment:
-      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_ADDRESS=temporal:1024
+      - TEMPORAL_UI_PORT=1035
       - TEMPORAL_CORS_ORIGINS=${AUTH_URL:-http://app.localhost:${APP_PORT:-1008}}
     # Local developer access only. Do not bind beyond loopback or use on a
     # shared host without an authenticated maintenance proxy.
@@ -518,13 +574,13 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
       - --storage.tsdb.retention.time=15d
-      - --web.listen-address=0.0.0.0:9090
+      - --web.listen-address=0.0.0.0:1036
     volumes:
       - ./infrastructure/observability/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./infrastructure/observability/alerts.yml:/etc/prometheus/alerts.yml:ro
       - prometheus-data:/prometheus
     ports:
-      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+      - "127.0.0.1:${PROMETHEUS_PORT:-1010}:1036"
     depends_on:
       kong:
         condition: service_healthy

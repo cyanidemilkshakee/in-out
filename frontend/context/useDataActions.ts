@@ -198,6 +198,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
         host: result.visitor.host ?? input.host,
         company: result.visitor.company ?? input.company,
         allowedZones: input.allowedZones ?? result.request.requestedZones ?? result.visitor.allowedZones ?? [],
+        allowedCheckpoints: result.request.requestedCheckpoints ?? [input.checkpointId],
         validFrom: result.visitor.validFrom ?? input.validFrom,
         validTo: result.visitor.validTo ?? input.validTo,
         createdAt: result.visitor.createdAt ?? result.request.createdAt,

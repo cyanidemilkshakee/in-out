@@ -21,6 +21,7 @@ import { AlertsHistoryTable } from "../../../frontend/components/admin/alerts/Al
 import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
 import { isMovementEventId } from "../../../lib/movementReferences";
 import { movementAnalyticsFilters } from "../../../lib/analyticsQueries";
+import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
 import {
   compactRangeBounds,
   parseDateInput,

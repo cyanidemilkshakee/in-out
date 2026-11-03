@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from routers import permissions, terminal
 from schemas import BrowserScanPayload, PermissionDecision
+from models import PermissionRequestModel
 import temporal_worker
 from workflows.activities import _enqueue_alert_batches
 from event_outbox import MAX_EVENT_BYTES
@@ -33,8 +34,7 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("routers.terminal.require_checkpoint", new=AsyncMock(return_value="cp-main")), \
              patch("routers.terminal.record_scan", new=AsyncMock(return_value=result)), \
-             patch("routers.terminal.enqueue_presence", new=AsyncMock(side_effect=enqueue)) as queue, \
-             patch("routers.terminal.publish_presence_update", new=AsyncMock(side_effect=AssertionError("No HTTP Redis I/O"))):
+             patch("routers.terminal.enqueue_presence", new=AsyncMock(side_effect=enqueue)) as queue:
             payload = BrowserScanPayload(barcode="p1", checkpointId="cp-main")
             returned = await terminal.scan(payload, uuid.uuid4(), db, {"sub": "operator"})
             self.assertIs(returned, result)
@@ -56,7 +56,10 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_decision_queues_signal_and_event_then_reports_queued_truthfully(self):
         order = []
-        db = Mock(commit=AsyncMock(side_effect=lambda: order.append("commit")))
+        request = PermissionRequestModel(id="request", subject_id="person", data={
+            "id": "request", "type": "manual_override", "status": "pending", "checkpointId": "cp-main"})
+        db = Mock(scalar=AsyncMock(return_value=request),
+            commit=AsyncMock(side_effect=lambda: order.append("commit")))
         result = {"request": {"id": "request", "type": "manual_override", "status": "denied",
             "decidedBy": "system", "decisionReason": "Timed out"}}
 
@@ -72,9 +75,9 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("permission_decisions.apply_permission_decision", new=AsyncMock(return_value=result)), \
              patch("routers.permissions._include_entry_restrictions", new=AsyncMock()), \
+             patch("routers.permissions.require_checkpoint_scope", new=AsyncMock()), \
              patch("routers.permissions.enqueue_workflow_signal", new=AsyncMock(side_effect=signal)), \
-             patch("routers.permissions.enqueue_decision", new=AsyncMock(side_effect=event)), \
-             patch("routers.permissions.get_temporal_client", new=AsyncMock(side_effect=AssertionError("No HTTP Temporal I/O"))):
+             patch("routers.permissions.enqueue_decision", new=AsyncMock(side_effect=event)):
             returned = await permissions.decide_permission_request("request",
                 PermissionDecision(decision="approved"), db, {"sub": "admin"})
         self.assertEqual(order, ["signal", "event", "commit"])

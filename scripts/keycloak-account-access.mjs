@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { readFileSync } from "node:fs";
 
 const selfServiceRoles = ["manage-account", "view-profile"];
-const applicationRoles = ["admin", "operator"];
+const applicationRoles = ["zone-admin", "operator"];
 const delegatedAdminRoles = ["manage-users", "query-users", "view-users", "view-realm"];
 
 export function localKeycloakRequest(url, init = {}) {
@@ -104,7 +104,7 @@ export function missingFrontendRoleClaims(token, userRoleNames) {
       if (!token.resource_access?.account?.roles?.includes(name)) missing.push(`account:${name}`);
     }
   }
-  if (roles.includes("admin")) {
+  if (roles.includes("zone-admin")) {
     for (const name of delegatedAdminRoles) {
       if (!token.resource_access?.["realm-management"]?.roles?.includes(name)) missing.push(`realm-management:${name}`);
     }
@@ -142,7 +142,7 @@ export async function connectLocalKeycloak() {
     if (!response.ok) throw new Error(`Keycloak ${method} ${path.split("?")[0]} failed (HTTP ${response.status})`);
     return response;
   };
-  return { base, api };
+  return { base, adminBase, api };
 }
 
 async function main() {
@@ -164,7 +164,7 @@ async function main() {
   // Prepare all additions before any mutation. Preserve role composites and
   // user assignments; only missing built-in account children are added.
   const plans = [];
-  for (const name of ["admin", "operator"]) {
+  for (const name of ["zone-admin", "operator"]) {
     const existing = await get(`/roles/${name}/composites`);
     plans.push({ name, missing: missingAccountRoles(existing, accountRoles, account.id) });
   }
@@ -201,7 +201,7 @@ async function main() {
     const users = await get(`/users?first=${first}&max=100`);
     for (const user of users) {
       const roles = await get(`/users/${user.id}/role-mappings/realm/composite`);
-      if (!roles.some((role) => ["admin", "operator"].includes(role.name))) continue;
+      if (!roles.some((role) => ["zone-admin", "operator"].includes(role.name))) continue;
       const query = new URLSearchParams({ userId: user.id, scope: "openid" });
       const token = await get(`/clients/${consoleClient.id}/evaluate-scopes/generate-example-access-token?${query}`);
       checked++;

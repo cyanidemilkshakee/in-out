@@ -2,9 +2,8 @@
 import asyncio
 import unittest
 import uuid
-from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import test_database as fixture
 from auth import verify_admin_request, verify_admin_or_operator_request, verify_terminal_access_request
@@ -26,29 +25,29 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "verified-admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "verified-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
             "sub": "operator", "realm_access": {"roles": ["operator"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
 
     async def request(self, **fields):
         self.authorize()
-        temporal = SimpleNamespace(start_workflow=AsyncMock(), get_workflow_handle=lambda _: SimpleNamespace(signal=AsyncMock()))
-        with patch("routers.permissions.get_temporal_client", new=AsyncMock(return_value=temporal)), \
-             patch("routers.permissions.publish_decision", new=AsyncMock()):
-            response = await self.client.post("/v1/permission-requests", json={
-                "subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
-                "reason": "Verified request", "requested_zones": ["public", "secure"], **fields})
+        # These cases exercise administrator decisions over a complete zone
+        # selection; the generic permission endpoint also serves operators,
+        # whose zone set is intentionally limited to their assigned checkpoint.
+        self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
+            "sub": "verified-admin", "realm_access": {"roles": ["zone-admin"]}}
+        response = await self.client.post("/v1/permission-requests", json={
+            "subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
+            "reason": "Verified request", "requested_zones": ["a", "b"], **fields})
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
     async def decide(self, request_id, decision="approved"):
         self.authorize()
-        temporal = SimpleNamespace(get_workflow_handle=lambda _: SimpleNamespace(signal=AsyncMock()))
-        with patch("routers.permissions.get_temporal_client", new=AsyncMock(return_value=temporal)), \
-             patch("routers.permissions.publish_decision", new=AsyncMock()):
-            return await self.client.post(f"/v1/permission-requests/{request_id}/decide", json={
-                "decision": decision, "reason": "Verified decision"})
+        return await self.client.post(f"/v1/permission-requests/{request_id}/decide", json={
+            "decision": decision, "reason": "Verified decision"})
 
     async def add_pending_visitor(self):
         now = datetime.now(timezone.utc)
@@ -60,7 +59,7 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
             db.add(permission)
             db.add(PermissionRequestModel(id="visitor-request", subject_id="v1", created_at=now, data={
                 "id": "visitor-request", "subjectId": "v1", "type": "visitor", "status": "pending",
-                "permissionVersion": permission_version(permission), "requestedZones": ["public"],
+                "permissionVersion": permission_version(permission), "requestedZones": ["a"],
                 "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=1)).isoformat()}))
             await db.commit()
 
@@ -70,7 +69,7 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
             db.add(PermissionRequestModel(id="manual-request", subject_id=None, created_at=datetime.now(timezone.utc), data={
                 "id": "manual-request", "type": "manual_override", "status": "pending", "barcode": "unknown-forged"}))
             await db.commit()
-        with patch("workflows.activities.async_session", self.sessions), patch("permission_decisions.publish_decision", new=AsyncMock()):
+        with patch("workflows.activities.async_session", self.sessions):
             results = [await approve_override("manual-request", "forged-admin", "Forged signal"),
                 await deny_override("manual-request", "Forged signal"),
                 await approve_visitor("visitor-request", "Forged signal"),
@@ -89,7 +88,7 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
         await self.add_pending_visitor()
         approved = await self.decide("visitor-request")
         self.assertEqual(approved.status_code, 200, approved.text)
-        with patch("workflows.activities.async_session", self.sessions), patch("permission_decisions.publish_decision", new=AsyncMock()):
+        with patch("workflows.activities.async_session", self.sessions):
             observed = await approve_visitor("visitor-request", "Forged attribution")
             denied = await deny_visitor("visitor-request", "Forged opposite signal")
         self.assertEqual(observed, approved.json()["request"])
@@ -101,7 +100,7 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_timeout_uses_database_deadline_and_preserves_final_decision(self):
         await self.add_pending_visitor()
-        with patch("workflows.activities.async_session", self.sessions), patch("permission_decisions.publish_decision", new=AsyncMock()):
+        with patch("workflows.activities.async_session", self.sessions):
             self.assertEqual((await auto_deny_visitor("visitor-request"))["status"], "pending")
             async with self.sessions() as db:
                 req = await db.get(PermissionRequestModel, "visitor-request")
@@ -196,11 +195,12 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
         current = await self.request()
         approved = await self.decide(current["id"])
         self.assertEqual(approved.status_code, 200, approved.text)
-        self.assertEqual(approved.json()["permission"]["zones"], ["public", "secure"])
+        self.assertEqual(approved.json()["permission"]["zones"], ["a", "b"])
 
     async def test_stale_custody_approval_conflicts_without_overwriting_newer_transfer(self):
         async with self.sessions() as db:
-            db.add_all([Subject(id=subject_id, barcode=subject_id, kind="employee", person=Person(data={"name": name}))
+            db.add_all([Subject(id=subject_id, barcode=subject_id, kind="employee",
+                person=Person(data={"name": name, "allowedZones": ["a", "b"]}))
                 for subject_id, name in (("p2", "Bob"), ("p3", "Carol"))])
             asset = await db.get(HardwareAsset, "h1")
             asset.data = {**asset.data, "assignedEmployeeId": "p1"}

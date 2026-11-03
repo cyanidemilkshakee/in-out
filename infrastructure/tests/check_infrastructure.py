@@ -43,6 +43,9 @@ class InfrastructureAuthorizationTests(unittest.IsolatedAsyncioTestCase):
         app = await self.connection("inout_app")
         identity = await self.connection("inout_keycloak")
         try:
+            await migration.execute("CREATE TEMP TABLE fixture_migration_temp(id integer)")
+            with self.assertRaises(asyncpg.InsufficientPrivilegeError):
+                await app.execute("CREATE TEMP TABLE fixture_app_temp(id integer)")
             await migration.execute("CREATE TABLE public.fixture_acl(id bigserial PRIMARY KEY, value text NOT NULL)")
             await identity.execute("CREATE TABLE keycloak.fixture_acl(id integer PRIMARY KEY)")
             row = await app.fetchrow("INSERT INTO public.fixture_acl(value) VALUES('synthetic') RETURNING id,value")
@@ -172,7 +175,7 @@ class InfrastructureAuthorizationTests(unittest.IsolatedAsyncioTestCase):
             await admin.close()
 
     def redis(self, username=None, password_key=None, **options):
-        return Redis(host="redis", username=username,
+        return Redis(host="redis", port=1021, username=username,
             password=os.environ[password_key] if password_key else None, decode_responses=True, **options)
 
     async def test_redis_scoped_users_authenticate_negotiate_and_reconnect(self):
@@ -245,6 +248,38 @@ class InfrastructureAuthorizationTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await anonymous.aclose()
             await quota.aclose()
+
+    async def test_redis_revocation_reads_and_writes_remain_scoped(self):
+        quota = self.redis("inout-quota", "REDIS_QUOTA_PASSWORD")
+        principal_key = "inout:auth:revocation:principal:fixture"
+        token_key = "inout:auth:revocation:token:fixture"
+        try:
+            # Authentication reads both markers together on every verified
+            # request; logout/role changes write expiring markers through SET.
+            self.assertTrue(await quota.set(principal_key, "100", ex=30))
+            self.assertTrue(await quota.set(token_key, "1", ex=30))
+            self.assertEqual(await quota.mget(principal_key, token_key), ["100", "1"])
+            self.assertGreater(await quota.ttl(principal_key), 0)
+            self.assertGreater(await quota.ttl(token_key), 0)
+            for command in (("MGET", principal_key, "inout:auth:private:fixture"),
+                            ("MGET", principal_key, "foreign:key"),
+                            ("SET", "inout:auth:private:fixture", "1", "EX", "30")):
+                with self.subTest(command=command[0], key=command[-1]):
+                    with self.assertRaises(NoPermissionError):
+                        await quota.execute_command(*command)
+        finally:
+            await quota.aclose()
+        for username, password_key in (("inout-gateway", "REDIS_GATEWAY_PASSWORD"),
+                                       ("inout-events", "REDIS_EVENTS_PASSWORD")):
+            outsider = self.redis(username, password_key)
+            try:
+                for command in (("GET", principal_key), ("MGET", principal_key, token_key),
+                                ("SET", token_key, "1", "EX", "30")):
+                    with self.subTest(username=username, command=command[0]):
+                        with self.assertRaises(NoPermissionError):
+                            await outsider.execute_command(*command)
+            finally:
+                await outsider.aclose()
 
     async def test_redis_gateway_user_owns_only_native_rate_limit_counters(self):
         gateway = self.redis("inout-gateway", "REDIS_GATEWAY_PASSWORD")

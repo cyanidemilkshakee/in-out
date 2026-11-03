@@ -24,12 +24,12 @@ end
 
 local function fetch_identity(httpc, conf, authorization, secret)
   httpc:set_timeouts(conf.connect_timeout_ms, conf.timeout_ms, conf.timeout_ms)
-  local ok = httpc:connect({ scheme = "http", host = "python-api", port = 1102 })
+  local ok = httpc:connect({ scheme = "http", host = "python-api", port = 1019 })
   if not ok then return nil, UNAVAILABLE end
   local response = httpc:request({
     method = "POST", path = "/internal/gateway/identity", body = "",
     headers = {
-      ["Host"] = "python-api:1102",
+      ["Host"] = "python-api:1019",
       ["Authorization"] = authorization,
       ["X-Inout-Gateway-Secret"] = secret,
       ["Content-Length"] = "0",
@@ -87,7 +87,7 @@ local public_get = {
 
 function Handler:access(conf)
   local port = ngx.var.server_port
-  if port ~= "8002" and port ~= "8443" then return end
+  if port ~= "1013" and port ~= "1016" then return end
 
   -- Strip identity hints used by other authentication plugins as well as our
   -- own. Trusted terminal headers were selected by the higher-priority plugin.
@@ -96,7 +96,7 @@ function Handler:access(conf)
                           "X-Inout-Rate-Identity" }) do
     kong.service.request.clear_header(name)
   end
-  if port == "8443" then
+  if port == "1016" then
     local dn = ngx.var.ssl_client_s_dn
     if ngx.var.ssl_client_verify ~= "SUCCESS" or not dn or dn == "" then
       return kong.response.exit(401, { message = "A verified terminal client certificate is required" })

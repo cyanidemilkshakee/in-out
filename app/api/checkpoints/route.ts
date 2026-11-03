@@ -3,7 +3,7 @@ import { apiSession, withApiSession } from "../authSession";
 import { callPythonApi, PythonApiError } from "../pythonApi";
 import { readJsonBody, RequestBodyError } from "../../../lib/requestJson";
 import { requireObject } from "../data/bff";
-import { hasAdminAccess } from "../../../lib/applicationRoles";
+import { hasAdminAccess, hasMasterAdminAccess } from "../../../lib/applicationRoles";
 import { isActiveUserManagementStepUp, USER_MANAGEMENT_STEP_UP_LOCK_COOKIE } from "../../../lib/userManagementStepUp";
 import { userManagementWindowUnlocked } from "../../../lib/serverUserManagement";
 
@@ -28,8 +28,8 @@ async function checkpointsRequest(request: NextRequest) {
       });
     }
 
-    if (!isActiveUserManagementStepUp(session) || request.cookies.has(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE) ||
-        !await userManagementWindowUnlocked(session)) {
+    if (!hasMasterAdminAccess(session.roles) && (!isActiveUserManagementStepUp(session) || request.cookies.has(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE) ||
+        !await userManagementWindowUnlocked(session))) {
       return NextResponse.json({ error: "Fresh re-authentication is required to manage checkpoints.", code: "STEP_UP_REQUIRED" }, { status: 403 });
     }
 

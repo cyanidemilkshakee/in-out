@@ -22,7 +22,7 @@ from critical_entry_restrictions import (
     entry_restrictions_for_subjects,
     entry_restrictions_for_locked_subjects,
 )
-from subject_metadata import current_subject_metadata
+from subject_metadata import current_subject_metadata, terminal_subject_metadata
 from behavior_limits import consume_unknown_barcode_quota
 from manual_review_policy import manual_access_snapshot
 
@@ -153,7 +153,6 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
     normalized.pop("queue_captured_at", None)
     normalized["barcode"] = payload.barcode.strip().lower()
     normalized["selected_hardware_ids"] = sorted(set(payload.selected_hardware_ids))
-    checkpoint_id = await require_registered_checkpoint(db, payload.checkpoint_id)
     fingerprints = compatible_request_fingerprints(normalized, ["checkpoint_id"])
     fingerprint = fingerprints[0]
     # Serialize retries even when a caller reuses a key for a different subject.
@@ -171,10 +170,10 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
         replay_subject = await db.get(Subject, cached.subject_id) if cached.subject_id else None
         replay_kind = replay_subject.kind if replay_subject else (replay_decision.get("event") or {}).get("subjectType")
         if isinstance(replay_decision.get("subject"), dict):
-            replay_decision["subject"] = current_subject_metadata(replay_kind, replay_decision["subject"])
+            replay_decision["subject"] = terminal_subject_metadata(replay_kind, replay_decision["subject"])
         if "updatedPeople" in response:
             response["updatedPeople"] = [
-                current_subject_metadata(replay_kind if person.get("id") == cached.subject_id else person.get("type"), person)
+                terminal_subject_metadata(replay_kind if person.get("id") == cached.subject_id else person.get("type"), person)
                 for person in response["updatedPeople"]
             ]
         event = (response.get("decision") or {}).get("event") or {}
@@ -200,6 +199,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
     # Check only after receipt lookup: an existing receipt is authoritative and
     # can safely replay without another movement. A miss must respect today's
     # supported retention horizon before creating any business state.
+    checkpoint_id = await require_registered_checkpoint(db, payload.checkpoint_id)
     validate_queued_scan_age(payload)
     subject = (await db.execute(select(Subject).where(
         func.lower(Subject.barcode) == payload.barcode.strip().lower()
@@ -316,6 +316,8 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
                 data["status"] = status_map.get(permission_state, data.get("status", "inactive"))
         if isinstance(permission.get("zones"), list):
             data["allowedZones"] = permission["zones"]
+        if isinstance(permission.get("checkpoints"), list):
+            data["allowedCheckpoints"] = permission["checkpoints"]
         if permission.get("validFrom"):
             data["validFrom"] = permission["validFrom"]
         if permission.get("validTo"):
@@ -451,12 +453,12 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
             if event["direction"] == "entry":
                 if not was_inside:
                     states[sub.id].entry_started_at = now
-                    states[sub.id].visitor_overstay_alerted_entry_at = None
+                    states[sub.id].continuous_presence_alerted_entry_at = None
                 elif states[sub.id].entry_started_at is None:
                     states[sub.id].entry_started_at = now
             else:
                 states[sub.id].entry_started_at = None
-                states[sub.id].visitor_overstay_alerted_entry_at = None
+                states[sub.id].continuous_presence_alerted_entry_at = None
             states[sub.id].state = "inside" if event["direction"] == "entry" else "outside"
             states[sub.id].entry_building_id = building_id if event["direction"] == "entry" else None
             states[sub.id].last_scan_timestamp = now
@@ -517,6 +519,14 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
         "subject_id": subject.id, "decision": decision, "updatedPeople": updated["people"],
         "updatedHardwareAssets": updated["hardware"],
         "manualApprovalRequest": manual_approval_request.data if manual_approval_request else None}
+    if isinstance(decision.get("subject"), dict):
+        decision["subject"] = terminal_subject_metadata(subject.kind, decision["subject"])
+    result["updatedPeople"] = [terminal_subject_metadata("employee" if item.get("type") == "employee"
+        else "visitor", item) for item in result["updatedPeople"]]
+    result["updatedHardwareAssets"] = [terminal_subject_metadata("hardware", item)
+        for item in result["updatedHardwareAssets"]]
+    decision["carriedHardware"] = [terminal_subject_metadata("hardware", item)
+        for item in decision.get("carriedHardware", [])]
     result["replayed"] = False
     result["authorizeMovement"] = result["allowed"]
     decision.update(replayed=False, authorizeMovement=result["allowed"])

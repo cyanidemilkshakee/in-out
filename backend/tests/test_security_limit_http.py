@@ -1,6 +1,4 @@
 """Verified identities keep data/behavior budgets across tokens and replicas."""
-import asyncio
-import hashlib
 import os
 import sys
 import time
@@ -37,8 +35,9 @@ class SecurityLimitHTTPTests(unittest.IsolatedAsyncioTestCase):
         def claims(token, **kwargs):
             if token not in self.actors:
                 raise HTTPException(401, "Invalid token")
-            return {"sub": self.actors[token], "exp": time.time() + 300,
-                    "realm_access": {"roles": ["admin"]}}
+            return {"sub": self.actors[token], "iat": int(time.time()), "jti": "security-limit-" + token,
+                    "exp": time.time() + 300,
+                    "realm_access": {"roles": ["zone-admin"]}}
         self.events = AsyncMock()
         for patcher in [patch("auth.verify_keycloak_token", side_effect=claims),
                         patch("behavior_limits.get_redis_pool", return_value=self.redis),

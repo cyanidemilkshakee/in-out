@@ -1,6 +1,5 @@
 """Exercise visitor registration and asset custody with real session behavior."""
 import unittest
-from unittest.mock import AsyncMock, patch
 
 import test_database as fixture
 from auth import verify_admin_or_operator_request
@@ -18,19 +17,17 @@ class RegistryCreationWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
             "sub": "operator", "realm_access": {"roles": ["operator"]},
         }
-        with patch("routers.registry.publish_decision", new=AsyncMock()), \
-             patch("routers.registry.get_temporal_client", new=AsyncMock(side_effect=RuntimeError("offline"))):
-            response = await self.client.post("/v1/registry/subjects", json={
-                "kind": "visitor", "barcode": "registration-guest", "data": {
-                    "name": "Guest", "host": "Alice", "hours": 2, "checkpointId": "cp-main",
-                },
-            })
+        response = await self.client.post("/v1/registry/subjects", json={
+            "kind": "visitor", "barcode": "registration-guest", "data": {
+                "name": "Guest", "host": "Alice", "hours": 2, "checkpointId": "cp-main",
+            },
+        })
         self.assertEqual(response.status_code, 201, response.text)
         data = response.json()
         self.assertEqual(data["data"]["status"], "pending_approval")
         self.assertFalse(data["data"]["inside"])
         self.assertEqual(data["request"]["status"], "pending")
-        self.assertEqual(data["request"]["requestedZones"], ["public"])
+        self.assertEqual(data["request"]["requestedZones"], ["a"])
         async with self.sessions() as db:
             subject = await db.get(Subject, data["id"])
             permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == subject.id))
@@ -40,15 +37,14 @@ class RegistryCreationWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_created_hardware_uses_registered_owner_as_initial_custodian(self):
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
-            "sub": "admin", "realm_access": {"roles": ["admin"]},
+            "sub": "admin", "realm_access": {"roles": ["zone-admin"]},
         }
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
-            response = await self.client.post("/v1/registry/subjects", json={
-                "kind": "hardware", "barcode": "registration-laptop", "data": {
-                    "name": "Laptop", "ownerId": "p1", "owner": "Forged name", "category": "Laptop",
-                    "assignedEmployeeId": "someone-else", "allowedZone": "public", "status": "active",
-                },
-            })
+        response = await self.client.post("/v1/registry/subjects", json={
+            "kind": "hardware", "barcode": "registration-laptop", "data": {
+                "name": "Laptop", "ownerId": "p1", "owner": "Forged name", "category": "Laptop",
+                "assignedEmployeeId": "someone-else", "allowedZone": "a", "status": "active",
+            },
+        })
         self.assertEqual(response.status_code, 201, response.text)
         async with self.sessions() as db:
             subject = await db.scalar(select(Subject).options(selectinload(Subject.hardware))

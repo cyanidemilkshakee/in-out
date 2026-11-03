@@ -23,13 +23,24 @@ services:
     image: temporalio/server:1.32.1@sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049
     environment:
       DB: postgres12
-      DB_PORT: '5432'
+      DB_PORT: '1020'
       POSTGRES_USER: inout_temporal
       POSTGRES_PWD: isolated-workflow-credential-00000000000000
       POSTGRES_SEEDS: postgres-primary
       DBNAME: temporal
       VISIBILITY_DBNAME: temporal_visibility
       BIND_ON_IP: 0.0.0.0
+      FRONTEND_GRPC_PORT: '1024'
+      FRONTEND_HTTP_PORT: '1025'
+      FRONTEND_MEMBERSHIP_PORT: '1026'
+      INTERNAL_FRONTEND_GRPC_PORT: '1027'
+      INTERNAL_FRONTEND_MEMBERSHIP_PORT: '1028'
+      MATCHING_GRPC_PORT: '1029'
+      MATCHING_MEMBERSHIP_PORT: '1030'
+      HISTORY_GRPC_PORT: '1031'
+      HISTORY_MEMBERSHIP_PORT: '1032'
+      WORKER_GRPC_PORT: '1033'
+      WORKER_MEMBERSHIP_PORT: '1034'
       DYNAMIC_CONFIG_FILE_PATH: /etc/temporal/inout-dynamic.yaml
     volumes: [./temporal/dynamicconfig.yaml:/etc/temporal/inout-dynamic.yaml:ro]
     security_opt: [no-new-privileges:true]
@@ -45,7 +56,7 @@ services:
     networks: [workflow]
     image: inout-security-infra-runtime
     environment:
-      TEMPORAL_HOST: temporal:7233
+      TEMPORAL_HOST: temporal:1024
     volumes: [./temporal:/maintenance/temporal:ro]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
@@ -61,7 +72,8 @@ services:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     environment:
-      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_ADDRESS: temporal:1024
+      TEMPORAL_UI_PORT: '1035'
       TEMPORAL_CORS_ORIGINS: http://fixture.invalid
     depends_on:
       temporal: {condition: service_started}

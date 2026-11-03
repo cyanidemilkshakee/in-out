@@ -57,7 +57,7 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
         return alert_id
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "operator"}
 
     async def scan(self, body=None, *, key=None):
@@ -216,7 +216,7 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
             person = await db.get(Person, "p1")
             person.data = {**person.data, "entryRestriction": {"active": False}}
             db.add(AccessPermission(id="normal-active-permission", subject_id="p1", data={
-                "id": "normal-active-permission", "subjectId": "p1", "state": "active", "zones": ["public"]}))
+                "id": "normal-active-permission", "subjectId": "p1", "state": "active", "zones": ["a"]}))
             await db.commit()
         response = await self.scan({"barcode": "p1", "checkpointId": "cp-main", "online": False,
             "capturedOfflineAt": captured.isoformat()})
@@ -224,7 +224,7 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
         event = response.json()["decision"]["event"]
         self.assertEqual(datetime.fromisoformat(event["capturedOfflineAt"]), captured)
         self.assertGreater(datetime.fromisoformat(event["createdAt"].replace("Z", "+00:00")), captured)
-        self.assertTrue(response.json()["updatedPeople"][0]["entryRestriction"]["active"])
+        self.assertTrue(response.json()["decision"]["entryRestrictions"][0]["active"])
         async with self.sessions() as db:
             self.assertEqual((await db.get(PresenceState, "p1")).state, "outside")
             self.assertEqual((await db.get(AccessPermission, "normal-active-permission")).data["state"], "active")

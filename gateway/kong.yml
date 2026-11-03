@@ -6,25 +6,24 @@ _transform: true
 services:
   - name: inout-web
     id: 8c07b156-e8f2-4a30-a967-4c09c8df5945
-    url: http://app:3000
+    url: http://app:1018
     retries: 0
     read_timeout: 60000
     routes:
       - name: web-events
-        expression: http.headers.inoutlistener == "8000" && http.path == "/api/presence"
+        expression: http.headers.inoutlistener == "1012" && http.path == "/api/presence"
         priority: 100
         strip_path: false
         preserve_host: true
         response_buffering: false
       - name: web
-        expression: http.headers.inoutlistener == "8000"
+        expression: http.headers.inoutlistener == "1012"
         priority: 10
         strip_path: false
         preserve_host: true
     plugins:
-      # Count anonymous pages, assets and login callbacks before body work,
-      # using a separate shared socket-peer budget for the browser app.
-      - name: inout-ingress-limit
+      # Use a separate shared socket-peer budget for browser app traffic.
+      - name: rate-limiting
         config:
           minute: 1800
           limit_by: ip
@@ -33,30 +32,32 @@ services:
           fault_tolerant: false
           redis: &gateway-redis
             host: redis
-            port: 6379
+            port: 1021
             database: 0
             timeout: 2000
             username: inout-gateway
             password: "{vault://env/inout-gateway-redis-password}"
 
-  # Sign-in actions and callback POSTs have one independent peer allowance.
+  # Sign-in, password updates and callback POSTs share one peer allowance.
   # GET CSRF/provider requests, OAuth callbacks and ordinary pages remain above.
   - name: inout-login-actions
     id: ec743912-240d-464d-9b1e-491e44d2058a
-    url: http://app:3000
+    url: http://app:1018
     retries: 0
     read_timeout: 60000
     routes:
       - name: login-actions
         expression: >-
-          http.headers.inoutlistener == "8000" && http.method == "POST" &&
+          http.headers.inoutlistener == "1012" && http.method == "POST" &&
           (http.path ~ r#"^/api/auth/(callback|signin)(/.*)?$"# ||
+           http.path ~ r#"^/api/auth/password/update/?$"# ||
+           http.path ~ r#"^/api/auth/profile/complete/?$"# ||
            http.path ~ r#"^/login/?$"#)
         priority: 250
         strip_path: false
         preserve_host: true
     plugins:
-      - name: inout-ingress-limit
+      - name: rate-limiting
         config:
           second: 3
           minute: 10
@@ -68,24 +69,42 @@ services:
 
   - name: inout-api
     id: 49fa490b-bd8a-48d2-9655-5b2bf09cbe20
-    url: http://python-api:1102
+    url: http://python-api:1019
     retries: 0
     read_timeout: 60000
     routes:
       - name: api-events
-        expression: http.headers.inoutlistener == "8002" && http.path == "/v1/presence/stream"
+        expression: http.headers.inoutlistener == "1013" && http.path == "/v1/presence/stream"
         priority: 110
         strip_path: false
+        preserve_host: true
         response_buffering: false
+      # Public health/docs and CORS preflight requests don't have a verified
+      # account credential, so give this route its own IP-based stock limit.
+      - name: api-public
+        id: 7b53e12a-9c17-42b9-b935-267e261bab7f
+        expression: >-
+          http.headers.inoutlistener == "1013" &&
+          (http.method == "OPTIONS" ||
+           ((http.method == "GET" || http.method == "HEAD") &&
+            (http.path == "/" || http.path == "/health/live" ||
+             http.path == "/health/ready" || http.path == "/docs" ||
+             http.path == "/docs/oauth2-redirect" || http.path == "/redoc" ||
+             http.path == "/openapi.json")))
+        priority: 150
+        strip_path: false
+        preserve_host: true
       - name: api
-        expression: http.headers.inoutlistener == "8002"
+        expression: http.headers.inoutlistener == "1013"
         priority: 20
         strip_path: false
+        preserve_host: true
       - name: terminal-mtls
-        expression: http.headers.inoutlistener == "8443" && (http.path == "/v1/scans" || http.path == "/v1/scans/")
+        expression: http.headers.inoutlistener == "1016" && (http.path == "/v1/scans" || http.path == "/v1/scans/")
         protocols: [https]
         priority: 120
         strip_path: false
+        preserve_host: true
     plugins:
       - &api-body-limit
         name: request-size-limiting
@@ -106,13 +125,13 @@ services:
   # endpoint. Selecting another permission/review route cannot reset the budget.
   - name: inout-permission-actions
     id: c3eabdbc-72fa-457d-aedb-351a75c44f0a
-    url: http://python-api:1102
+    url: http://python-api:1019
     retries: 0
     read_timeout: 60000
     routes:
       - name: permission-actions
         expression: >-
-          http.headers.inoutlistener == "8002" &&
+          http.headers.inoutlistener == "1013" &&
           (http.method == "POST" || http.method == "PUT" || http.method == "PATCH" || http.method == "DELETE") &&
           (http.path ~ r#"^/v1/permissions/grant/?$"# ||
            http.path ~ r#"^/v1/permission-requests/?$"# ||
@@ -123,6 +142,7 @@ services:
            http.path ~ r#"^/v1/terminal/manual-reviews/?$"#)
         priority: 200
         strip_path: false
+        preserve_host: true
     plugins:
       - *api-body-limit
       - name: rate-limiting
@@ -137,18 +157,19 @@ services:
 
   - name: inout-user-actions
     id: 452acb5b-8f4a-4bd9-a9d2-efb05daa72a4
-    url: http://python-api:1102
+    url: http://python-api:1019
     retries: 0
     read_timeout: 60000
     routes:
       - name: user-actions
         expression: >-
-          http.headers.inoutlistener == "8002" &&
+          http.headers.inoutlistener == "1013" &&
           (http.method == "POST" || http.method == "PUT" || http.method == "PATCH" || http.method == "DELETE") &&
           (http.path ~ r#"^/v1/keycloak/users(/.*)?$"# ||
            http.path ~ r#"^/v1/checkpoints/?$"#)
         priority: 200
         strip_path: false
+        preserve_host: true
     plugins:
       - *api-body-limit
       - name: rate-limiting
@@ -163,13 +184,13 @@ services:
 
   - name: inout-alert-actions
     id: 3db460ad-6e07-4b7b-9715-af0ab387f494
-    url: http://python-api:1102
+    url: http://python-api:1019
     retries: 0
     read_timeout: 60000
     routes:
       - name: alert-actions
         expression: >-
-          http.headers.inoutlistener == "8002" &&
+          http.headers.inoutlistener == "1013" &&
           (http.method == "POST" || http.method == "PUT" || http.method == "PATCH" || http.method == "DELETE") &&
           (http.path ~ r#"^/v1/alerts/evaluate/?$"# ||
            http.path ~ r#"^/v1/alert-warnings/[^/]+/reset/?$"# ||
@@ -177,6 +198,7 @@ services:
            http.path ~ r#"^/v1/alert-rule-assignments/[^/]+/?$"#)
         priority: 200
         strip_path: false
+        preserve_host: true
     plugins:
       - *api-body-limit
       - name: rate-limiting
@@ -191,49 +213,38 @@ services:
 
   - name: inout-identity
     id: 73f42aab-f727-4a18-9440-8c420bac460c
-    url: http://keycloak:1105
+    url: http://keycloak:1022
     retries: 0
     routes:
       - name: identity
-        expression: http.headers.inoutlistener == "8005"
+        id: 85140fbf-0405-4ce3-86bd-a4a3a9f6da74
+        expression: http.headers.inoutlistener == "1014"
         priority: 30
         strip_path: false
         preserve_host: true
       # This socket is absent unless the operator enables the maintenance
       # overlay. The plugin uses the actual socket, never a supplied header.
       - name: identity-maintenance
-        expression: http.headers.inoutlistener == "8006"
+        expression: http.headers.inoutlistener == "1015"
         priority: 40
         strip_path: false
         preserve_host: true
-    plugins:
-      # Independent public login/OIDC/asset budget; the wrapper excludes the
-      # explicitly enabled maintenance socket sharing this service.
-      - name: inout-ingress-limit
-        config:
-          minute: 600
-          limit_by: ip
-          policy: redis
-          sync_rate: -1
-          fault_tolerant: false
-          redis: *gateway-redis
-
   # Actual password, OTP, recovery and other stock Keycloak form submissions.
   # Realm/action/query changes share one socket-peer budget across gateways.
   - name: inout-identity-login-actions
     id: 15a4c2f8-2a8f-4ae9-a244-3fe92d8bb670
-    url: http://keycloak:1105
+    url: http://keycloak:1022
     retries: 0
     routes:
       - name: identity-login-actions
         expression: >-
-          http.headers.inoutlistener == "8005" && http.method == "POST" &&
+          http.headers.inoutlistener == "1014" && http.method == "POST" &&
           http.path ~ r#"^/realms/[^/]+/login-actions(/.*)?$"#
         priority: 250
         strip_path: false
         preserve_host: true
     plugins:
-      - name: inout-ingress-limit
+      - name: rate-limiting
         config:
           second: 5
           minute: 60
@@ -244,9 +255,35 @@ services:
           redis: *gateway-redis
 
 plugins:
-  # API admission precedes body buffering and identity verification. Web,
-  # sign-in and public identity overrides select independent IP budgets.
-  - name: inout-ingress-limit
+  # Direct route-scoped built-in limiters keep public identity traffic separate
+  # from the maintenance socket on the same Keycloak service.
+  - name: rate-limiting
+    id: 618b4cb7-a841-4b83-9d88-a0f50d0c72b0
+    route:
+      id: 85140fbf-0405-4ce3-86bd-a4a3a9f6da74
+      protocols: [http]
+      expression: 'http.headers.inoutlistener == "1014"'
+    config:
+      minute: 600
+      limit_by: ip
+      policy: redis
+      sync_rate: -1
+      fault_tolerant: false
+      redis: *gateway-redis
+  # Public API/docs and CORS preflight have no verified credential to limit by.
+  - name: rate-limiting
+    id: 730bf6a6-0d8d-49b4-a4a1-ed317a8f37a6
+    route:
+      id: 7b53e12a-9c17-42b9-b935-267e261bab7f
+      protocols: [http]
+      expression: >-
+        http.headers.inoutlistener == "1013" &&
+        (http.method == "OPTIONS" ||
+         ((http.method == "GET" || http.method == "HEAD") &&
+          (http.path == "/" || http.path == "/health/live" ||
+           http.path == "/health/ready" || http.path == "/docs" ||
+           http.path == "/docs/oauth2-redirect" || http.path == "/redoc" ||
+           http.path == "/openapi.json")))
     config:
       minute: 6000
       limit_by: ip
@@ -257,7 +294,7 @@ plugins:
   - name: inout-terminal-identity
   - name: inout-rate-identity
     config:
-      identity_url: http://python-api:1102/internal/gateway/identity
+      identity_url: http://python-api:1019/internal/gateway/identity
       cache_ttl: 30
   - name: correlation-id
     config:

@@ -8,9 +8,9 @@ function response(payload) {
 }
 
 test("master-admin provisioning is idempotent and never grants a user or changes client grants", async () => {
-  const roles = [{ id: "admin-id", name: "admin" }];
+  const roles = [{ id: "zone-admin-id", name: "zone-admin" }];
   const composites = new Map();
-  const mappings = [{ id: "admin-id", name: "admin" }, { id: "operator-id", name: "operator" }];
+  const mappings = [{ id: "zone-admin-id", name: "zone-admin" }, { id: "operator-id", name: "operator" }];
   const writes = [];
   const api = async (path, { method = "GET", body } = {}) => {
     if (method !== "GET") writes.push({ path, method, body });
@@ -34,13 +34,13 @@ test("master-admin provisioning is idempotent and never grants a user or changes
   };
 
   assert.deepEqual(await configureMasterAdmin(api, { apply: true }), {
-    ready: true, roleExists: true, adminComposite: true, frontendScope: true,
+    ready: true, roleExists: true, zoneAdminComposite: true, frontendScope: true,
   });
   assert.equal(writes.length, 3);
   assert.ok(writes.every(({ path }) => !path.startsWith("/users")));
   assert.ok(writes.every(({ path }) => !path.includes("directAccessGrantsEnabled")));
   assert.deepEqual(await configureMasterAdmin(api), {
-    ready: true, roleExists: true, adminComposite: true, frontendScope: true,
+    ready: true, roleExists: true, zoneAdminComposite: true, frontendScope: true,
   });
   assert.equal(writes.length, 3);
 });
@@ -48,11 +48,13 @@ test("master-admin provisioning is idempotent and never grants a user or changes
 test("realm template exposes master-admin only to frontend and preserves access-grant settings", () => {
   const realm = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
   const master = realm.roles.realm.find((role) => role.name === "master-admin");
-  assert.deepEqual(master.composites.realm, ["admin"]);
+  assert.deepEqual(master.composites.realm, ["zone-admin"]);
   assert.deepEqual(realm.scopeMappings.find(({ client }) => client === "inout-frontend").roles,
-    ["admin", "operator", "master-admin"]);
+    ["zone-admin", "operator", "master-admin"]);
   assert.deepEqual(realm.scopeMappings.find(({ client }) => client === "inout-postman").roles,
-    ["admin", "operator"]);
-  assert.equal(realm.clients.find(({ clientId }) => clientId === "inout-frontend").directAccessGrantsEnabled, true);
+    ["zone-admin", "operator"]);
+  const frontend = realm.clients.find(({ clientId }) => clientId === "inout-frontend");
+  assert.equal(frontend.directAccessGrantsEnabled, false);
+  assert.equal(frontend.attributes["inout.app-interactions.enabled"], "true");
   assert.equal(realm.clients.find(({ clientId }) => clientId === "inout-postman").directAccessGrantsEnabled, false);
 });

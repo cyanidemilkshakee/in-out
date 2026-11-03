@@ -3,7 +3,7 @@ import asyncio
 import unittest
 import uuid
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import AsyncMock, Mock
 
 import test_database as fixture
 from auth import verify_admin_or_operator_request, verify_admin_request
@@ -21,7 +21,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
     def authorize(self):
-        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin"}
+        self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
             "sub": "operator", "realm_access": {"roles": ["operator"]}}
 
@@ -30,11 +30,13 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(Subject(id="v1", kind="visitor", barcode="visitor", person=Person(data={
                 "name": "Guest", "status": "pre_approved" if active else "pending_approval",
-                "inside": False, "allowedZones": ["public"] if active else [],
+                # Pending visitors remain visible to the request's assigned-zone
+                # admin so they can review and approve the registration.
+                "inside": False, "allowedZones": ["a"],
                 "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=4)).isoformat()})))
             await db.flush()
             permission = AccessPermission(id="visitor-permission", subject_id="v1", data={
-                "state": "active" if active else "pending_approval", "zones": ["public"] if active else [],
+                "state": "active" if active else "pending_approval", "zones": ["a"] if active else [],
                 "validFrom": now.isoformat(), "validTo": (now + timedelta(hours=4)).isoformat(),
                 "updatedAt": now.isoformat(), "updatedBy": "admin"})
             db.add(permission)
@@ -43,12 +45,13 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
 
     async def request(self, **fields):
         self.authorize()
+        if fields.get("request_type") == "zone_access":
+            self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
+                "sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         temporal = Mock(start_workflow=AsyncMock())
-        with patch("routers.permissions.get_temporal_client", new=AsyncMock(return_value=temporal)), \
-             patch("routers.permissions.publish_decision", new=AsyncMock()):
-            return await self.client.post("/v1/permission-requests", json={
-                "subject_id": "v1", "checkpoint_id": "cp-main", "request_type": "visitor",
-                "reason": "Visit", **fields})
+        return await self.client.post("/v1/permission-requests", json={
+            "subject_id": "v1", "checkpoint_id": "cp-main", "request_type": "visitor",
+            "reason": "Visit", **fields})
 
     async def test_manual_denial_preserves_existing_visit_and_carried_hardware(self):
         now = datetime.now(timezone.utc)
@@ -60,7 +63,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
                 metadata.data = {**metadata.data, "inside": True,
                     **({"status": "maintenance"} if subject_id == "h1" else {})}
                 snapshots[subject_id] = dict(metadata.data)
-                db.add(PresenceState(subject_id=subject_id, state="inside", entry_building_id="main-building",
+                db.add(PresenceState(subject_id=subject_id, state="inside", entry_building_id="a",
                     last_scan_timestamp=now - timedelta(minutes=2), entry_started_at=started_at,
                     entry_override={"requestId": "existing-entry", "hardwareIds": ["h1"]}))
             await db.commit()
@@ -91,7 +94,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
                 state = await db.get(PresenceState, subject_id)
                 self.assertEqual((state.state, state.entry_building_id, state.entry_started_at,
                                   state.last_scan_timestamp, state.entry_override),
-                                 ("inside", "main-building", started_at, now - timedelta(minutes=2),
+                                 ("inside", "a", started_at, now - timedelta(minutes=2),
                                   {"requestId": "existing-entry", "hardwareIds": ["h1"]}))
 
     async def test_legacy_manual_denial_without_scan_retains_one_historical_movement(self):
@@ -100,7 +103,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(PermissionRequestModel(id=request_id, created_at=now, data={
                 "id": request_id, "type": "manual_override", "status": "pending",
-                "barcode": "legacy-unknown", "checkpointId": "main-gate", "direction": "entry"}))
+                "barcode": "legacy-unknown", "checkpointId": "cp-main", "direction": "entry"}))
             await db.commit()
             result = await apply_permission_decision(db, request_id, "denied", "admin", "Unverified identity")
             await db.commit()
@@ -145,11 +148,11 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         request_id = created.json()["id"]
         async with self.sessions() as db:
             permission = await db.get(AccessPermission, "visitor-permission")
-            newer = {**permission.data, "state": "active", "zones": ["secure"],
+            newer = {**permission.data, "state": "active", "zones": ["b"],
                 "updatedAt": datetime.now(timezone.utc).isoformat(), "updatedBy": "new-admin"}
             permission.data = newer
             person = await db.get(Person, "v1")
-            metadata = {**person.data, "status": "pre_approved", "allowedZones": ["secure"]}
+            metadata = {**person.data, "status": "pre_approved", "allowedZones": ["b"]}
             person.data = metadata
             await db.commit()
         for decision in ("approved", "denied"):
@@ -169,7 +172,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_newer_zone_approval_survives_older_visitor_timeout(self):
         await self.add_visitor()
         visitor = await self.request()
-        zone = await self.request(request_type="zone_access", requested_zones=["secure"])
+        zone = await self.request(request_type="zone_access", requested_zones=["b"])
         self.assertEqual(visitor.status_code, 200, visitor.text)
         self.assertEqual(zone.status_code, 200, zone.text)
         async with self.sessions() as db:
@@ -184,7 +187,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(approved["request"]["status"], "approved")
             self.assertEqual(timed_out["request"]["status"], "denied")
             self.assertEqual((await db.get(AccessPermission, "visitor-permission")).data, granted)
-            self.assertEqual((await db.get(Person, "v1")).data["allowedZones"], ["secure"])
+            self.assertEqual((await db.get(Person, "v1")).data["allowedZones"], ["b"])
 
     async def test_legacy_visitor_timeout_cannot_revoke_existing_grant(self):
         original = await self.add_visitor(active=True)
@@ -192,7 +195,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(PermissionRequestModel(id="legacy", subject_id="v1", created_at=now - timedelta(minutes=31), data={
                 "id": "legacy", "subjectId": "v1", "type": "visitor", "status": "pending",
-                "requestedZones": ["public"], "validFrom": now.isoformat(),
+                "requestedZones": ["a"], "validFrom": now.isoformat(),
                 "validTo": (now + timedelta(hours=1)).isoformat()}))
             await db.commit()
             result = await apply_permission_decision(db, "legacy", "denied", "system", "Timed out", from_activity=True, expire_only=True)
@@ -206,7 +209,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(PermissionRequestModel(id="legacy", subject_id="v1", created_at=now - timedelta(minutes=1), data={
                 "id": "legacy", "subjectId": "v1", "type": "visitor", "status": "pending",
-                "requestedZones": ["public"], "validFrom": now.isoformat(),
+                "requestedZones": ["a"], "validFrom": now.isoformat(),
                 "validTo": (now + timedelta(hours=1)).isoformat()}))
             await db.commit()
             result = await apply_permission_decision(db, "legacy", "approved", "admin", "Checked")
@@ -232,8 +235,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         await self.add_visitor()
         created = await self.request()
         self.assertEqual(created.status_code, 200, created.text)
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
-            updated = await self.client.put("/v1/registry/subjects/v1", json={"data": {"name": "Corrected guest"}})
+        updated = await self.client.put("/v1/registry/subjects/v1", json={"data": {"name": "Corrected guest"}})
         self.assertEqual(updated.status_code, 200, updated.text)
         async with self.sessions() as db:
             result = await apply_permission_decision(db, created.json()["id"], "approved", "admin", "Checked")
@@ -267,12 +269,12 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         await self.set_hardware_owner()
         async with self.sessions() as db:
-            db.add(Subject(id="p2", kind="employee", barcode="p2", person=Person(data={"name": "Bob", "status": "active"})))
+            db.add(Subject(id="p2", kind="employee", barcode="p2",
+                person=Person(data={"name": "Bob", "status": "active", "allowedZones": ["a", "b"]})))
             await db.commit()
-        with patch("routers.registry.publish_data_changed", new=AsyncMock()):
-            updated = await self.client.put("/v1/registry/subjects/h1", json={"data": {
-                "ownerId": " p2 ", "owner": "Forged owner", "assignedEmployeeId": " p1 ",
-                "assignedEmployeeName": "Forged custodian"}})
+        updated = await self.client.put("/v1/registry/subjects/h1", json={"data": {
+            "ownerId": " p2 ", "owner": "Forged owner", "assignedEmployeeId": " p1 ",
+            "assignedEmployeeName": "Forged custodian"}})
         self.assertEqual(updated.status_code, 200, updated.text)
         data = updated.json()["data"]
         self.assertEqual((data["ownerId"], data["owner"]), ("p2", "Bob"))
@@ -286,22 +288,20 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         async with self.sessions() as db:
             db.add(AccessPermission(id="employee-permission", subject_id="p1", data={
-                "state": "active", "zones": ["public"], "subjectName": "Alice"}))
+                "state": "active", "zones": ["a"], "subjectName": "Alice"}))
             await db.commit()
         for subject_id, barcode, patch_data in (("p1", "H1", {"name": "Changed employee"}),
                                                 ("h1", "P1", {"ownerId": "p1", "name": "Changed asset"})):
             with self.subTest(subject_id=subject_id):
-                with patch("routers.registry.publish_data_changed", new=AsyncMock()) as publish:
-                    response = await self.client.put(f"/v1/registry/subjects/{subject_id}", json={
-                        "barcode": barcode, "data": patch_data})
+                response = await self.client.put(f"/v1/registry/subjects/{subject_id}", json={
+                    "barcode": barcode, "data": patch_data})
                 self.assertEqual(response.status_code, 409, response.text)
-                publish.assert_not_awaited()
                 async with self.sessions() as db:
                     self.assertEqual((await db.get(Subject, subject_id)).barcode, subject_id)
                     metadata = await db.get(Person if subject_id == "p1" else HardwareAsset, subject_id)
                     self.assertEqual(metadata.data["name"], "Alice" if subject_id == "p1" else "Laptop")
                     self.assertEqual((await db.get(AccessPermission, "employee-permission")).data,
-                        {"state": "active", "zones": ["public"], "subjectName": "Alice"})
+                        {"state": "active", "zones": ["a"], "subjectName": "Alice"})
 
     async def test_scan_rejects_barcode_replaced_while_waiting_for_subject_lock(self):
         async with self.sessions() as updater, self.sessions() as scanner:

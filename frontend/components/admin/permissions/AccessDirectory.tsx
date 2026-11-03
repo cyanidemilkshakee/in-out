@@ -1,8 +1,9 @@
 "use client";
 
 import { ChevronRight, Package, Search, ShieldAlert, SlidersHorizontal, UserRound, UsersRound, X } from "lucide-react";
-import type { AccessPermission, HardwareAsset } from "../../../../lib/types";
-import { formatFacilityZones } from "../../../../lib/facilityZones";
+import type { AccessPermission, Checkpoint, HardwareAsset } from "../../../../lib/types";
+import type { OrganizationZone } from "../../../../lib/types";
+import { facilityZoneLabel, formatFacilityZones } from "../../../../lib/facilityZones";
 import { formatRequestDate, permissionDisplayState } from "./requestPresentation";
 import styles from "./Requests.module.css";
 
@@ -12,9 +13,11 @@ function entryAction(permission: AccessPermission) {
   return permission.state === "pending_approval" ? "Review permission" : "Manage";
 }
 
-export function AccessDirectory({ rows, hardwareAssets, tab, onTabChange, search, onSearchChange, stateFilter, onStateFilterChange, highlightedSubjectId, busy, isLoading, error, total, onReviewRequest, onManageAccess, onReassign }: {
+export function AccessDirectory({ rows, hardwareAssets, checkpoints = [], zoneLabels = [], tab, onTabChange, search, onSearchChange, stateFilter, onStateFilterChange, highlightedSubjectId, busy, isLoading, error, total, onReviewRequest, onManageAccess, onReassign }: {
   rows: AccessPermission[];
   hardwareAssets: HardwareAsset[];
+  checkpoints?: Checkpoint[];
+  zoneLabels?: readonly Pick<OrganizationZone, "id" | "name">[];
   tab: DirectoryTab;
   onTabChange: (tab: DirectoryTab) => void;
   search: string;
@@ -33,7 +36,7 @@ export function AccessDirectory({ rows, hardwareAssets, tab, onTabChange, search
   return (
     <section className={styles.directoryPanel} aria-labelledby="directory-title">
       <div className={styles.directoryHeading}>
-        <div className={styles.sectionTitle}><span className={styles.sectionIcon} aria-hidden="true"><UsersRound size={20} strokeWidth={1.7} /></span><div><h2 id="directory-title">Access directory</h2><p>People and assets. Their zones and access windows.</p></div></div>
+        <div className={styles.sectionTitle}><span className={styles.sectionIcon} aria-hidden="true"><UsersRound size={20} strokeWidth={1.7} /></span><div><h2 id="directory-title">Access directory</h2><p>People and assets. Their access scopes and time windows.</p></div></div>
         <span className={styles.directoryCount} aria-label={`${rows.length} matching permissions`}>{rows.length}</span>
       </div>
       <div className={styles.directoryToolbar}>
@@ -50,7 +53,13 @@ export function AccessDirectory({ rows, hardwareAssets, tab, onTabChange, search
       </div>
       <div className={`${styles.directoryList} scrollable-content`}>
         {isLoading && !total ? <p className={styles.directoryEmpty} role="status">Loading access permissions…</p> : error && !total ? <p className={styles.directoryEmpty}>Access permissions are unavailable. Use Retry above.</p> : !rows.length ? <div className={styles.directoryEmpty}><span className={styles.emptyIcon} aria-hidden="true"><Search size={24} strokeWidth={1.5} /></span><strong>{total ? "No matching permissions" : "Your directory starts here"}</strong><span>{total ? "Try another name, barcode, or access state." : "Registered subjects and granted permissions will appear here."}</span>{(search || stateFilter !== "all") && <button type="button" className={styles.contextLink} onClick={() => { onSearchChange(""); onStateFilterChange("all"); }}>Clear filters</button>}</div> : rows.map((permission) => {
-          const zones = formatFacilityZones(permission.zones) || "No zones assigned";
+          const checkpointScope = permission.subjectType === "visitor" && permission.checkpoints?.length
+            ? permission.checkpoints.map((id) => {
+              const item = checkpoints.find((candidate) => candidate.id === id);
+              return item ? `${facilityZoneLabel(item.zoneId ?? item.zone, zoneLabels)} · ${item.name}` : id;
+            }).join(", ")
+            : "";
+          const scope = checkpointScope ? `Checkpoints · ${checkpointScope}` : formatFacilityZones(permission.zones, zoneLabels) || "No zones assigned";
           const asset = hardwareAssets.find((item) => item.id === permission.subjectId);
           const action = entryAction(permission);
           const restriction = permission.entryRestriction?.active ? permission.entryRestriction : undefined;
@@ -63,7 +72,7 @@ export function AccessDirectory({ rows, hardwareAssets, tab, onTabChange, search
                   <div className={styles.directoryIdentityDetails}>
                     <div className={styles.directoryNameLine}><h3>{permission.subjectName}</h3><span className={styles.accessState} data-state={displayState}><span aria-hidden="true" />{displayState === "pending_approval" ? "Pending" : displayState.charAt(0).toUpperCase() + displayState.slice(1)}</span></div>
                     {(permission.barcode || asset?.barcode) && <span className={styles.subjectBarcode}>Barcode: {permission.barcode || asset?.barcode}</span>}
-                    <span className={styles.subjectType}>{permission.subjectType === "employee" ? "Employee" : permission.subjectType === "visitor" ? "Visitor" : "Hardware"} · {zones}</span>
+                    <span className={styles.subjectType}>{permission.subjectType === "employee" ? "Employee" : permission.subjectType === "visitor" ? "Visitor" : "Hardware"} · {scope}</span>
                   </div>
                 </div>
                 {action === "Review permission"

@@ -41,8 +41,8 @@ test("auth mutations reject missing, opaque, cross-origin, and duplicate Origin 
 });
 
 test("configured auth origin is exclusive even behind forged or internal proxy URLs", () => {
-  const internalUrl = "http://internal-app:3000/api/auth/step-up";
-  for (const supplied of [undefined, "null", "http://internal-app:3000", "https://untrusted.invalid", `${origin}/`, `${origin}, ${origin}`]) {
+  const internalUrl = "http://internal-app:1018/api/auth/step-up";
+  for (const supplied of [undefined, "null", "http://internal-app:1018", "https://untrusted.invalid", `${origin}/`, `${origin}, ${origin}`]) {
     const headers = new Headers({ "X-Forwarded-Host": "untrusted.invalid", "X-Forwarded-Proto": "https" });
     if (supplied !== undefined) headers.set("Origin", supplied);
     assert.equal(isSameOriginAuthRequest(new Request(internalUrl, { headers }), origin), false);
@@ -151,7 +151,7 @@ test("only the configured OAuth authorization endpoint may leave the app", () =>
 test("public auth sessions omit provider tokens, response bodies and private window identifiers", () => {
   const result = publicAuthSession({
     user: { name: "Test", email: "test@example.invalid", image: null, access_token: "synthetic-secret", password: "synthetic-secret" },
-    subject: "synthetic-subject", expires: "2030-01-01", provider: "keycloak", roles: ["admin", 1],
+    subject: "synthetic-subject", expires: "2030-01-01", provider: "keycloak", roles: ["zone-admin", 1],
     authTime: 2000, stepUpExpiresAt: 2300, stepUpDurationMinutes: 5, stepUpExtensionSeconds: 0,
     access_token: "synthetic-secret", refresh_token: "synthetic-secret", id_token: "synthetic-secret",
     stepUpWindowId: "synthetic-private-id", step_up_intent_id: "synthetic-private-id", response: { password: "synthetic-secret" },
@@ -159,7 +159,7 @@ test("public auth sessions omit provider tokens, response bodies and private win
   });
   assert.deepEqual(result, {
     user: { name: "Test", email: "test@example.invalid", image: null }, subject: "synthetic-subject", expires: "2030-01-01",
-    provider: "keycloak", roles: ["admin"], authTime: 2000, stepUpExpiresAt: 2300, stepUpDurationMinutes: 5, stepUpExtensionSeconds: 0,
+    provider: "keycloak", roles: ["zone-admin"], authTime: 2000, stepUpExpiresAt: 2300, stepUpDurationMinutes: 5, stepUpExtensionSeconds: 0,
   });
   assert.equal(JSON.stringify(result).includes("synthetic-secret"), false);
   assert.equal(publicAuthSession(null), null);
@@ -193,10 +193,10 @@ const callbackIntent: StepUpIntent = {
   issuedAt: callbackNow - 1000, durationMinutes: 5, subject: callbackSubject,
   intentId: "b6054cab-bd97-4b4e-845b-a86dcf7a3910",
 };
-const callbackBearer = (subject = callbackSubject, roles = ["admin"]) =>
+const callbackBearer = (subject = callbackSubject, roles = ["zone-admin"]) =>
   `header.${Buffer.from(JSON.stringify({ sub: subject, realm_access: { roles } })).toString("base64url")}.signature`;
 const callbackToken: Record<string, unknown> = {
-  sub: callbackSubject, access_token: callbackBearer(), roles: ["admin"], expires_at: 2600,
+  sub: callbackSubject, access_token: callbackBearer(), roles: ["zone-admin"], expires_at: 2600,
   auth_time: 2000, step_up_expires_at: 2300, step_up_duration_minutes: 5, step_up_extension_seconds: 0,
   step_up_window_id: "b6054cab-bd97-4b4e-845b-a86dcf7a3911", step_up_intent_id: callbackIntent.intentId,
 };

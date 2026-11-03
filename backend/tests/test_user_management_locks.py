@@ -43,7 +43,7 @@ class UserManagementLockTests(unittest.IsolatedAsyncioTestCase):
             await lock_window(db, {"sub": "admin-a"}, window)  # Idempotent retry.
 
     async def test_http_lock_prevents_management_even_with_replayed_signed_proof_and_refreshed_bearer(self):
-        claims = {"sub": "admin-a", "realm_access": {"roles": ["admin"]}}
+        claims = {"sub": "admin-a", "realm_access": {"roles": ["zone-admin"]}}
         self.app.include_router(user_management_auth.router)
         self.app.include_router(keycloak_admin.router)
         async def guard_session():
@@ -106,7 +106,7 @@ class UserManagementLockTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(rejected.exception.status_code, 401)
 
     async def test_lock_waits_through_create_users_early_assignment_commit(self):
-        claims = {"sub": "admin-a", "realm_access": {"roles": ["admin"]}}
+        claims = {"sub": "admin-a", "realm_access": {"roles": ["zone-admin", "master-admin"]}}
         self.app.include_router(user_management_auth.router)
         self.app.include_router(keycloak_admin.router)
         self.app.dependency_overrides[verify_admin_request] = lambda: claims
@@ -127,8 +127,7 @@ class UserManagementLockTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), \
              patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value=claims)), \
              patch("routers.keycloak_admin._request", side_effect=provider), \
-             patch("routers.keycloak_admin._replace_roles", side_effect=roles), \
-             patch("routers.keycloak_admin.publish_checkpoint_assignment", new=AsyncMock()):
+             patch("routers.keycloak_admin._replace_roles", side_effect=roles):
             creating = asyncio.create_task(self.client.post("/v1/keycloak/users", headers=headers, json={
                 "username": "new-operator", "password": "test-only-password", "roles": ["operator"], "checkpointId": "cp-main"}))
             locking = None

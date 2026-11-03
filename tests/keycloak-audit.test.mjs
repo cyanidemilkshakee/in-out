@@ -29,7 +29,9 @@ test("new realm template enables bounded audit events without changing client gr
   assert.equal(template.adminEventsEnabled, true);
   assert.equal(template.adminEventsDetailsEnabled, false);
   assert.ok(REQUIRED_USER_EVENT_TYPES.every((event) => template.enabledEventTypes.includes(event)));
-  assert.equal(template.clients.find((client) => client.clientId === "inout-frontend").directAccessGrantsEnabled, true);
+  const frontend = template.clients.find((client) => client.clientId === "inout-frontend");
+  assert.equal(frontend.directAccessGrantsEnabled, false);
+  assert.equal(frontend.attributes["inout.app-interactions.enabled"], "true");
 });
 
 test("audit settings preserve longer retention and existing selected event types", () => {

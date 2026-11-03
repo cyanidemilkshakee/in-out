@@ -71,10 +71,6 @@ def validate_zones(zones, *, known_zone_ids=None):
         )
     except ValueError as error:
         raise HTTPException(422, str(error)) from error
-    allowed = set(FACILITY_ZONES if known_zone_ids is None else known_zone_ids)
-    if any(zone not in allowed for zone in normalized):
-        raise HTTPException(422, "Choose Main Entrance or Server Room")
-    return normalized
 
 
 async def validate_registered_zones(db, zones):

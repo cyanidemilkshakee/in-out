@@ -3,6 +3,7 @@ import json
 import sys
 import time
 import unittest
+import uuid
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -52,7 +53,8 @@ class GatewayRateIdentityTests(unittest.IsolatedAsyncioTestCase):
 
     def token(self, **changes):
         claims = {"iss": self.issuer, "aud": "inout-frontend", "sub": "alice",
-                  "typ": "Bearer", "exp": int(time.time()) + 300, **changes}
+                  "typ": "Bearer", "iat": int(time.time()), "jti": "gateway-test-" + str(uuid.uuid4()),
+                  "exp": int(time.time()) + 300, **changes}
         return jwt.encode(claims, self.signer, algorithm="RS256", headers={"kid": "gateway-test"})
 
     async def callback(self, token=None, secret=None, headers=None):

@@ -72,6 +72,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
         status: visitorRequest.status === "approved" ? "approved" as const
           : visitorRequest.status === "denied" ? "denied" as const : visitor.status,
         allowedZones: visitorRequest.requestedZones,
+        ...(visitorRequest.requestedCheckpoints ? { allowedCheckpoints: visitorRequest.requestedCheckpoints } : {}),
         validFrom: visitorRequest.validFrom,
         validTo: visitorRequest.validTo,
       };
@@ -83,6 +84,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
             : visitorPermission.state === "expired" ? "expired"
               : visitorPermission.state === "revoked" ? "inactive" : visitor.status;
       return { ...visitor, status, allowedZones: visitorPermission.zones,
+        ...(visitorPermission.checkpoints ? { allowedCheckpoints: visitorPermission.checkpoints } : {}),
         validFrom: visitorPermission.validFrom, validTo: visitorPermission.validTo };
     }
     return visitor;
@@ -136,7 +138,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
     }
   }
   return {
-    ...current, people, hardwareAssets, permissionRequests, alerts, permissions,
+    ...current, people, hardwareAssets, permissionRequests, alerts, permissions, terminalVisitors,
     ...(update.revision !== undefined ? { eventRevision: update.revision } : {}),
     movements: movement ? mergeById(current.movements, [movement]).slice(0, 100) : current.movements,
     scanAnalytics: { ...analytics, activeInside: Math.max(0, current.scanAnalytics.activeInside + occupancyDelta) },

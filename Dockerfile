@@ -63,9 +63,9 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 
 USER nextjs
 
-EXPOSE 3000
+EXPOSE 1018
 
-ENV PORT=3000
+ENV PORT=1018
 # set hostname to localhost
 ENV HOSTNAME="0.0.0.0"
 
@@ -74,4 +74,4 @@ ENV HOSTNAME="0.0.0.0"
 # Session chunks plus OAuth state/PKCE/nonce cookies can exceed Node's default
 # 16 KiB total during reauthentication. Kong bounds each large header at 32 KiB;
 # leave room for that Cookie header and the remaining forwarded request headers.
-CMD ["sh", "-c", "echo \"Starting app on http://localhost:${PUBLIC_PORT:-3000}\" && exec node --max-http-header-size=65536 server.js"]
+CMD ["sh", "-c", "echo \"Starting app on http://localhost:${PUBLIC_PORT:-1018}\" && exec node --max-http-header-size=65536 server.js"]

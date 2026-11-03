@@ -4,7 +4,7 @@ import Credentials from "next-auth/providers/credentials"
 import { cookies } from "next/headers"
 import { authTimeFromToken, invalidSession, keycloakSession, rolesFromAccessToken, subjectFromAccessToken, type RoleToken } from "./lib/keycloakSession"
 import { refreshKeycloakTokenSingleFlight } from "./lib/keycloakRefresh"
-import { completedStepUpWindow, USER_MANAGEMENT_STEP_UP_COOKIE, verifyStepUpIntent } from "./lib/userManagementStepUp"
+import { completedStepUpWindow, USER_MANAGEMENT_STEP_UP_COOKIE, USER_MANAGEMENT_STEP_UP_LOCK_COOKIE, verifyStepUpIntent } from "./lib/userManagementStepUp"
 import { safeAuthRedirect } from "./lib/authRequestBoundary"
 import { boundedIdentityResponse, verifyKeycloakToken, verifyKeycloakTokenPair } from "./lib/keycloakTokenValidation"
 import { authenticateKeycloakCredentials, KeycloakCredentialsError, type VerifiedCredentials } from "./lib/keycloakCredentials"
@@ -31,7 +31,7 @@ async function clearAdminOfflineStatus(accessToken: unknown): Promise<void> {
 }
 
 class AppCredentialsSignin extends CredentialsSignin {
-  constructor(code: string) { super(); this.code = code }
+  constructor(code: string, readonly signinStage?: string, readonly providerStatus?: number) { super(); this.code = code }
 }
 
 async function completedUserManagementStepUp(authTime: number | undefined, subject: string, roles: string[]) {
@@ -43,32 +43,26 @@ async function completedUserManagementStepUp(authTime: number | undefined, subje
   return window ? { ...window, intentId: intent!.intentId } : undefined;
 }
 
+async function enforceStepUpIdentity(subject: string, roles: string[]) {
+  const cookieStore = await cookies();
+  const intentCookie = cookieStore.get(USER_MANAGEMENT_STEP_UP_COOKIE)?.value;
+  if (!intentCookie) {
+    if (cookieStore.has(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE)) throw new AppCredentialsSignin("step_up_expired");
+    return;
+  }
+  const secret = process.env.AUTH_SECRET;
+  const intent = secret ? await verifyStepUpIntent(intentCookie, secret) : null;
+  if (!intent) throw new AppCredentialsSignin("step_up_expired");
+  if (intent.subject !== subject || !hasAdminAccess(roles)) {
+    throw new AppCredentialsSignin("step_up_account_mismatch");
+  }
+}
+
 // Both instances share the same provider/cookie configuration. Only the
 // internal instance exposes the bearer token; HTTP handlers always filter it.
 function keycloakConfig(serverOnly: boolean): NextAuthConfig {
-  return {
-    logger: {
-      error() {
-        // Provider/library errors can embed token responses in nested causes.
-        console.error("[auth] Authentication could not be completed.")
-      },
-    },
-    session: { strategy: "jwt" },
-    providers: keycloakConfigured ? [Credentials({
-      name: "InOut",
-      credentials: { username: {}, password: { type: "password" }, otp: {} },
-      async authorize(credentials) {
-        try {
-          const identity = await authenticateKeycloakCredentials(credentials, {
-            issuer: keycloakPublicIssuer!, clientId: process.env.KEYCLOAK_CLIENT_ID!,
-            clientSecret: process.env.KEYCLOAK_CLIENT_SECRET!, jwksIssuer: process.env.KEYCLOAK_JWKS_BASE,
-          })
-          return { id: identity.id, name: identity.name, email: identity.email, verifiedIdentity: identity }
-        } catch (error) {
-          throw new AppCredentialsSignin(error instanceof KeycloakCredentialsError ? error.code : "service_unavailable")
-        }
-      },
-    }), Keycloak({
+  const keycloakProvider = (passwordAction?: "setup" | "change") => {
+    const provider = Keycloak({
       clientId: process.env.KEYCLOAK_CLIENT_ID!,
       clientSecret: process.env.KEYCLOAK_CLIENT_SECRET!,
       issuer: keycloakPublicIssuer!,
@@ -83,8 +77,73 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
           signal: init?.signal ? AbortSignal.any([init.signal, AbortSignal.timeout(10_000)]) : AbortSignal.timeout(10_000),
         }).then((response) => boundedIdentityResponse(response))
       },
-      authorization: { url: `${keycloakPublicIssuer}/protocol/openid-connect/auth`, params: { scope: "openid profile email" } },
-    })] : [],
+      authorization: {
+        url: `${keycloakPublicIssuer}/protocol/openid-connect/auth`,
+        params: {
+          scope: "openid profile email",
+          ...(passwordAction ? { kc_action: "UPDATE_PASSWORD", prompt: "login", max_age: "0" } : {}),
+        },
+      },
+    })
+    return passwordAction ? {
+      ...provider,
+      id: `keycloak-password-${passwordAction}`,
+      name: `InOut password ${passwordAction}`,
+    } : provider
+  }
+
+  return {
+    logger: {
+      error(error: unknown) {
+        // Provider/library messages and nested causes can contain token
+        // responses. Log only error classes and source locations for diagnosis.
+        const types: string[] = []
+        const seen = new Set<unknown>()
+        let current: unknown = error
+        while (current && typeof current === "object" && !seen.has(current) && types.length < 5) {
+          seen.add(current)
+          const value = current as { name?: unknown; type?: unknown; cause?: unknown }
+          const name = typeof value.type === "string" ? value.type
+            : typeof value.name === "string" ? value.name : "Error"
+          types.push(name)
+          current = value.cause
+        }
+        const signinCode = error && typeof error === "object" &&
+          (error as { type?: unknown }).type === "CredentialsSignin" &&
+          ["credentials", "account_setup_required", "profile_setup_required", "service_unavailable"].includes((error as { code?: string }).code ?? "")
+          ? (error as { code: string }).code : undefined
+        const diagnostic = error && typeof error === "object" ? error as { signinStage?: unknown; providerStatus?: unknown } : undefined
+        const signinStage = ["verify_request", "verify_http", "verify_payload", "token_request", "token_http",
+          "token_payload", "token_validation", "internal"].includes(String(diagnostic?.signinStage))
+          ? diagnostic?.signinStage as string : undefined
+        const providerStatus = typeof diagnostic?.providerStatus === "number" && Number.isInteger(diagnostic.providerStatus) &&
+          diagnostic.providerStatus >= 100 && diagnostic.providerStatus <= 599 ? diagnostic.providerStatus : undefined
+        const stack = error instanceof Error && typeof error.stack === "string"
+          ? error.stack.split("\n").slice(1, 5).map((line) => line.trim())
+          : []
+        console.error("[auth] Authentication could not be completed.", { types, ...(signinCode ? { signinCode } : {}),
+          ...(signinStage ? { signinStage } : {}), ...(providerStatus ? { providerStatus } : {}), stack })
+      },
+    },
+    session: { strategy: "jwt" },
+    providers: keycloakConfigured ? [Credentials({
+      name: "InOut",
+      credentials: { username: {}, password: { type: "password" }, otp: {} },
+      async authorize(credentials) {
+        try {
+          const identity = await authenticateKeycloakCredentials(credentials, {
+            issuer: keycloakPublicIssuer!, clientId: process.env.KEYCLOAK_CLIENT_ID!,
+            clientSecret: process.env.KEYCLOAK_CLIENT_SECRET!, jwksIssuer: process.env.KEYCLOAK_JWKS_BASE,
+          })
+          await enforceStepUpIdentity(identity.id, identity.roles)
+          return { id: identity.id, name: identity.name, email: identity.email, verifiedIdentity: identity }
+        } catch (error) {
+          if (error instanceof AppCredentialsSignin) throw error
+          const failure = error instanceof KeycloakCredentialsError ? error : undefined
+          throw new AppCredentialsSignin(failure?.code ?? "service_unavailable", failure?.stage, failure?.providerStatus)
+        }
+      },
+    }), keycloakProvider(), keycloakProvider("setup"), keycloakProvider("change")] : [],
     pages: { signIn: "/login" },
     callbacks: {
       async redirect({ url, baseUrl }) {
@@ -107,7 +166,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
               step_up_intent_id: stepUp?.intentId, error: undefined,
             } satisfies RoleToken
           }
-          if (account.provider !== "keycloak") return null
+          if (!new Set(["keycloak", "keycloak-password-setup", "keycloak-password-change"]).has(account.provider)) return null
           const accessToken = account.access_token
           const idToken = account.id_token
           if (typeof accessToken !== "string") return null
@@ -125,7 +184,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
             return null
           }
           const roles = rolesFromAccessToken(accessToken)
-          await clearAdminOfflineStatus(accessToken)
+          if (account.provider !== "keycloak-password-change") await clearAdminOfflineStatus(accessToken)
           const stepUp = await completedUserManagementStepUp(authTimeFromToken(idToken), subject, roles)
           const roleToken: RoleToken = {
           ...token,
@@ -133,7 +192,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
           access_token: accessToken,
           refresh_token: account.refresh_token,
           expires_at: Math.min(account.expires_at ?? Number(verifiedAccess.exp), Number(verifiedAccess.exp)),
-          provider: account.provider,
+          provider: "keycloak",
           roles,
           auth_time: authTimeFromToken(idToken),
           step_up_expires_at: stepUp?.expiresAt,

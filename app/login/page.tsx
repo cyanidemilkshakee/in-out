@@ -18,6 +18,13 @@ export default async function LoginPage(props: {
 
   const errorMessages: Record<string, string> = {
     Configuration: "Sign-in is temporarily unavailable. Please try again later.",
+    auth_failed: "Sign-in did not complete. Start again from the InOut sign-in page.",
+    signin_use_login: "Start sign-in from this page using your InOut credentials.",
+    password_setup_use_login: "Start temporary password setup from this page. Enter the temporary password, then choose Change temporary password.",
+    password_setup_signout_required: "An account is already signed in here. Sign out first to protect that session. Then enter the temporary account's credentials and choose Change temporary password.",
+    password_setup_cancelled: "Password setup was canceled in Keycloak. No app session was created. Sign in again and complete the password change.",
+    password_setup_unconfirmed: "Keycloak did not confirm the password change, so no app session was created. Sign in again and complete password setup.",
+    password_change_signin_required: "Sign in to the account whose password you want to change, then open Account and security.",
     default: "Sign-in failed. Please try again.",
   }
   const initialError = searchParams?.error
@@ -50,6 +57,7 @@ export default async function LoginPage(props: {
             redirectTo={redirectTo}
             stepUpLogin={stepUpLogin}
             initialError={initialError}
+            passwordSetupSignoutRequired={searchParams?.error === "password_setup_signout_required"}
             initialDurationMinutes={stepUpLogin && isStepUpDurationMinutes(selectedDuration) ? selectedDuration : undefined}
           />
         ) : (
@@ -57,6 +65,16 @@ export default async function LoginPage(props: {
             Sign-in is unavailable. Contact your administrator.
           </div>
         )}
+        {process.env.KEYCLOAK_ADMIN_CONSOLE_URL ? (
+          <a
+            className={styles.adminConsoleLink}
+            href={process.env.KEYCLOAK_ADMIN_CONSOLE_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Keycloak administration
+          </a>
+        ) : null}
       </section>
     </main>
   )

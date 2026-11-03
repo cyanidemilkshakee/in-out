@@ -1,14 +1,14 @@
-// Align the existing realm's password policy with app-side validation.
+// Clear password-strength rules from an existing realm.
 // The partial realm update preserves users, clients, and all other settings.
 import { pathToFileURL } from "node:url";
 import { connectLocalKeycloak } from "./keycloak-account-access.mjs";
 
-export const APP_PASSWORD_POLICY = "length(8) and maxLength(128) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail";
+export const APP_PASSWORD_POLICY = "";
 
 export async function configurePasswordPolicy(api, { apply = false, log = console.log } = {}) {
   const realm = await (await api("")).json();
-  if (realm.passwordPolicy === APP_PASSWORD_POLICY) {
-    log("Password policy: configured");
+  if (typeof realm.passwordPolicy !== "string" || !realm.passwordPolicy.trim()) {
+    log("Password policy: no requirements");
     return true;
   }
   if (!apply) {
@@ -17,10 +17,10 @@ export async function configurePasswordPolicy(api, { apply = false, log = consol
   }
   await api("", { method: "PUT", body: { passwordPolicy: APP_PASSWORD_POLICY } });
   const updated = await (await api("")).json();
-  if (updated.passwordPolicy !== APP_PASSWORD_POLICY) {
-    throw new Error("Keycloak did not save the password policy");
+  if (typeof updated.passwordPolicy === "string" && updated.passwordPolicy.trim()) {
+    throw new Error("Keycloak did not clear the password policy");
   }
-  log("Password policy: applied");
+  log("Password policy: cleared");
   return true;
 }
 

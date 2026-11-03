@@ -148,6 +148,9 @@ def _is_hardware(subject: Any) -> bool:
 
 
 def _zone_allowed(subject: Any, checkpoint: Checkpoint) -> bool:
+    allowed_checkpoints = subject.get("allowedCheckpoints")
+    if isinstance(allowed_checkpoints, list) and allowed_checkpoints:
+        return checkpoint.get("id") in allowed_checkpoints
     allowed: list[str] = subject.get("allowedZones", [])
     if "All Zones" in allowed:
         return True

@@ -23,9 +23,9 @@ class CheckpointCreationTests(unittest.IsolatedAsyncioTestCase):
     async def test_custom_checkpoint_uses_next_zone_number_and_audits_zone(self):
         zone = OrganizationZone(id="a", name="A", active=True)
         db = Mock(get=AsyncMock(return_value=None), execute=AsyncMock(),
-            scalar=AsyncMock(side_effect=[2, None]), add=Mock(), flush=AsyncMock(),
+            scalar=AsyncMock(side_effect=[0, 2, None]), add=Mock(), flush=AsyncMock(),
             commit=AsyncMock(), rollback=AsyncMock())
-        actor = {"sub": "admin-a", "realm_access": {"roles": ["admin"]}}
+        actor = {"sub": "admin-a", "realm_access": {"roles": ["zone-admin"]}}
         with patch("routers.checkpoints.require_zone_scope", new=AsyncMock(return_value=zone)), \
              patch("routers.checkpoints.enqueue_changed", new=AsyncMock(return_value=12)) as enqueue:
             result = await checkpoints.create_checkpoint(
@@ -52,7 +52,7 @@ class CheckpointCreationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as duplicate:
                 await checkpoints.create_checkpoint(
                     checkpoints.CheckpointCreate(zoneId="a", preset="back_gate"), duplicate_db,
-                    {"sub": "admin-a", "realm_access": {"roles": ["admin"]}})
+                    {"sub": "admin-a", "realm_access": {"roles": ["zone-admin"]}})
         self.assertEqual(duplicate.exception.status_code, 409)
         duplicate_db.add.assert_not_called()
         duplicate_db.rollback.assert_awaited_once()
@@ -63,7 +63,7 @@ class CheckpointCreationTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as full:
                 await checkpoints.create_checkpoint(
                     checkpoints.CheckpointCreate(zoneId="a", name="Another Gate"), full_db,
-                    {"sub": "admin-a", "realm_access": {"roles": ["admin"]}})
+                    {"sub": "admin-a", "realm_access": {"roles": ["zone-admin"]}})
         self.assertEqual(full.exception.status_code, 409)
         full_db.add.assert_not_called()
         full_db.rollback.assert_awaited_once()
@@ -100,7 +100,7 @@ class CheckpointCreationTests(unittest.IsolatedAsyncioTestCase):
             verify.assert_awaited_once()
             step_up.assert_not_called()
 
-        master_admin = {"sub": "master", "realm_access": {"roles": ["master-admin", "admin"]}}
+        master_admin = {"sub": "master", "realm_access": {"roles": ["master-admin", "zone-admin"]}}
         window = {"windowId": "synthetic-window", "expiresAt": 1_900_000_000}
         with patch("routers.checkpoints.verify_admin_request", new=AsyncMock(return_value=master_admin)), \
              patch("routers.checkpoints.verified_user_management_window", return_value=window) as step_up, \

@@ -7,7 +7,7 @@ import { createLogoutIntent, LOGOUT_INTENT_COOKIE } from "../../lib/logoutIntent
 import { lockUserManagementWindow } from "../../lib/serverUserManagement";
 import { AuthRequestError, isSameOriginAuthRequest, prepareAuthRequest } from "../../lib/authRequestBoundary";
 import { revokeKeycloakRefreshToken } from "../../lib/keycloakCredentials";
-import { hasAdminAccess } from "../../lib/applicationRoles";
+import { hasAdminAccess, hasMasterAdminAccess } from "../../lib/applicationRoles";
 
 function publicAppUrl(request: NextRequest) {
   const appUrl = new URL(process.env.AUTH_URL || process.env.NEXTAUTH_URL || request.url);
@@ -39,7 +39,8 @@ export async function POST(request: NextRequest) {
   if (!process.env.AUTH_SECRET) return new NextResponse("Authentication is not configured.", { status: 503 });
   const session = await auth() as AppSession | null;
   const isAdmin = Boolean(session?.access_token && hasAdminAccess(session.roles));
-  if (isAdmin && session) {
+  const tracksAdminAvailability = isAdmin && !hasMasterAdminAccess(session?.roles);
+  if (tracksAdminAvailability && session) {
     try { await lockUserManagementWindow(session); }
     catch {
       // Logout must clear this browser even while the API is unavailable.
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
       console.warn("[auth] User-management lock unavailable during logout.");
     }
   }
-  if (isAdmin && session?.access_token) {
+  if (tracksAdminAvailability && session?.access_token) {
     const offlineUntil = new Date(Date.now() + minutes * 60_000).toISOString();
     const apiUrl = process.env.PYTHON_API_URL?.replace(/\/$/, "");
     if (apiUrl) {

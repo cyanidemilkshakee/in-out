@@ -44,15 +44,23 @@ export function normalizeFacilityZones(value: unknown): string[] {
   });
 }
 
-export function facilityZoneLabel(value: string): string {
+export function facilityZoneLabel(
+  value: string,
+  zoneLabels: readonly { id: string; name: string }[] = [],
+): string {
   const id = zoneId(value);
-  return FACILITY_ZONES.find((zone) => zone.id === id)?.name ?? (id ? `Zone ${id.toUpperCase()}` : value);
+  if (!id) return value;
+  return zoneLabels.find((zone) => zone.id === id)?.name
+    ?? FACILITY_ZONES.find((zone) => zone.id === id)?.name
+    ?? `Zone ${id.toUpperCase()}`;
 }
 
-export function formatFacilityZones(value: readonly string[]): string {
+export function formatFacilityZones(
+  value: readonly string[],
+  zoneLabels: readonly { id: string; name: string }[] = [],
+): string {
   const zones = normalizeFacilityZones(value);
-  if (zones.length === FACILITY_ZONES.length) return "All zones";
-  return zones.map(facilityZoneLabel).join(" · ");
+  return zones.map((zone) => facilityZoneLabel(zone, zoneLabels)).join(" · ");
 }
 
 export function canonicalCheckpointId(value: string): string {
@@ -75,6 +83,7 @@ export function normalizeFacilityCheckpoints(value: unknown): Checkpoint[] {
       name: record.name.trim(),
       zone,
       zoneId: zone,
+      ...(typeof record.zoneName === "string" ? { zoneName: record.zoneName } : {}),
       number: typeof record.number === "number" ? record.number : undefined,
       gateType: record.gateType ?? "custom",
       gateLabel: record.gateLabel ?? "",

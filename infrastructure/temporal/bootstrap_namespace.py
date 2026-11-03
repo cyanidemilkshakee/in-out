@@ -15,7 +15,7 @@ async def bootstrap():
     deadline = time.monotonic() + 90
     while True:
         try:
-            client = await Client.connect(os.environ.get("TEMPORAL_HOST", "temporal:7233"))
+            client = await Client.connect(os.environ.get("TEMPORAL_HOST", "temporal:1024"))
             if not await client.service_client.check_health():
                 raise RuntimeError("Temporal is not serving")
             try:

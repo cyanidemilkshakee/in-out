@@ -1,38 +1,60 @@
-.panel {
-  container-type: inline-size;
+:global(.employee-profile-dialog) .panel {
+  container: employee-profile-alerts / inline-size;
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 20px;
   border-left: 1px solid var(--profile-border);
-  background: color-mix(in srgb, var(--admin-panel) 50%, var(--admin-bg));
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  color: var(--ui-text-primary);
+  font-size: 15px;
+  line-height: 1.5;
   scrollbar-width: thin;
   scrollbar-color: var(--admin-border) transparent;
 }
 
-.panel .activity {
+:global(.employee-profile-dialog) .panel .activity {
   width: 100%;
   border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   overflow: visible;
 }
 
-.panel .activity > :global(.permission-section-heading) {
+:global(.employee-profile-dialog) .panel .activity > :global(.permission-section-heading) {
+  flex-wrap: wrap;
+  gap: 8px 12px;
   padding: 0 0 16px;
 }
 
-.panel .activity :global(.alert-activity-list) {
+:global(.employee-profile-dialog) .panel .activity > :global(.permission-section-heading) h2 {
+  font-size: 20px;
+  font-weight: 650;
+  line-height: 1.35;
+  letter-spacing: -.015em;
+}
+
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-list) {
   max-height: none;
   overflow: visible;
 }
 
-.panel .activity :global(.alert-activity-list article) {
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-list article) {
   grid-template-columns: 10px minmax(0, 1fr) auto;
   gap: 12px;
   padding: 18px 0;
+  border: 0;
+  border-bottom: 1px solid var(--profile-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
-.panel .activity :global(.alert-activity-list time) {
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-list time) {
   grid-column: 2;
   grid-row: 1;
   display: flex;
@@ -41,41 +63,92 @@
   align-items: baseline;
 }
 
-.panel .activity :global(.alert-activity-dot) {
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-dot) {
   grid-column: 1;
   grid-row: 1 / span 3;
 }
 
-.panel .activity :global(.alert-activity-copy) {
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-copy) {
   grid-column: 2 / -1;
   grid-row: 2;
   gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.panel .activity :global(.alert-activity-marker) {
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-marker) {
   grid-column: 3;
   grid-row: 1;
   align-self: start;
+  max-width: 100%;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: normal;
 }
 
-.panel .activity :global(.alert-review-controls) {
+:global(.employee-profile-dialog) .panel .activity :global(.alert-review-controls) {
   grid-column: 2 / -1;
   grid-row: 3;
   gap: 12px;
+  min-width: 0;
 }
 
-.panel .activity :global(.alert-review-controls input) {
+:global(.employee-profile-dialog) .panel .activity :global(.alert-review-controls input) {
   box-sizing: border-box;
   min-height: 44px;
   padding: 10px 12px;
+  font-size: 16px;
 }
 
-.controls {
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-actions) { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px; }
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-actions button) { flex: 1 1 0; min-width: 0; min-height: 44px; padding: 9px 12px; }
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-empty) { padding: 16px 0 20px; }
+
+:global(.employee-profile-dialog) .controls {
   display: grid;
+  min-width: 0;
   padding-top: 12px;
 }
 
-.error {
+:global(.employee-profile-dialog) .controls > section {
+  min-width: 0;
+  padding-block: 20px;
+  border: 0;
+  border-top: 1px solid var(--profile-border);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+:global(.employee-profile-dialog) .controls > section:last-child { padding-bottom: 0; }
+:global(.employee-profile-dialog) .controls > section :is(div, ul, li, label) { min-width: 0; max-width: 100%; }
+:global(.employee-profile-dialog) .controls > section[aria-label="Rule assignments"] > div:has(> h3) { flex-wrap: wrap; gap: 10px 12px; }
+:global(.employee-profile-dialog) .controls :is(h3, h4, p, strong, span) { overflow-wrap: anywhere; }
+:global(.employee-profile-dialog) .controls label[data-checked] {
+  min-height: 44px;
+  padding: 12px 0;
+  border: 0;
+  border-bottom: 1px solid var(--profile-border);
+  border-radius: 0;
+  background: transparent;
+}
+:global(.employee-profile-dialog) .controls label[data-checked]:hover:not([data-disabled="true"]) {
+  border-color: var(--ui-border-hover);
+  background: transparent;
+}
+:global(.employee-profile-dialog) .controls label:has(> input[type="date"]) { flex: 1 1 160px; min-width: 0; }
+:global(.employee-profile-dialog) .controls :is(input[type="text"], input[type="date"]) { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; min-height: 44px; font-size: 16px; }
+:global(.employee-profile-dialog) .controls button { max-width: 100%; min-height: 44px; white-space: normal; overflow-wrap: anywhere; box-shadow: none; }
+:global(.employee-profile-dialog) .controls :global(ul[aria-label="Irregularity skip dates"]) > li {
+  padding-left: 0;
+  border: 0;
+  border-bottom: 1px solid var(--profile-border);
+  border-radius: 0;
+  background: transparent;
+}
+:global(.employee-profile-dialog) .controls :global(ul[aria-label="Irregularity skip dates"]) button { width: 44px; height: 44px; padding: 0; }
+
+:global(.employee-profile-dialog) .error {
   display: grid;
   justify-items: start;
   gap: 10px;
@@ -85,9 +158,9 @@
   overflow-wrap: anywhere;
 }
 
-.error p { margin: 0; }
-.error button {
-  min-height: 40px;
+:global(.employee-profile-dialog) .error p { margin: 0; }
+:global(.employee-profile-dialog) .error button {
+  min-height: 44px;
   padding: 8px 12px;
   border: 1px solid var(--admin-border);
   border-radius: var(--radius);
@@ -97,29 +170,33 @@
   cursor: pointer;
 }
 
-.panel :is(input, select, button, a):focus-visible {
+:global(.employee-profile-dialog) .panel :is(input, select, button, a):focus-visible {
   outline: 2px solid var(--ui-text-info);
   outline-offset: 3px;
 }
 
-.panel input[aria-invalid="true"]:focus-visible {
+:global(.employee-profile-dialog) .panel input[aria-invalid="true"]:focus-visible {
   outline-color: var(--ui-text-danger);
 }
 
-@media (max-width: 1050px) {
-  .panel {
+@media (max-width: 760px) {
+  :global(.employee-profile-dialog) .panel {
     overflow: visible;
     border-left: 0;
-    border-top: 1px solid var(--profile-border);
+    border-top: 0;
   }
 }
 
-@media (max-width: 600px) {
-  .panel { padding: 18px 14px; }
+@media (min-width: 761px) and (max-width: 1100px) {
+  :global(.employee-profile-dialog) .panel { padding-inline: 12px; }
 }
 
-@container (max-width: 350px) {
-  .panel .activity :global(.alert-activity-list article) { grid-template-columns: 10px minmax(0, 1fr); }
-  .panel .activity :global(.alert-activity-marker) { grid-column: 2; grid-row: 3; justify-content: flex-start; }
-  .panel .activity :global(.alert-review-controls) { grid-row: 4; }
+@media (max-width: 600px) {
+  :global(.employee-profile-dialog) .panel { padding: 18px 14px; }
+}
+
+@container employee-profile-alerts (max-width: 350px) {
+  :global(.employee-profile-dialog) .panel .activity :global(.alert-activity-list article) { grid-template-columns: 10px minmax(0, 1fr); }
+  :global(.employee-profile-dialog) .panel .activity :global(.alert-activity-marker) { grid-column: 2; grid-row: 3; justify-content: flex-start; }
+  :global(.employee-profile-dialog) .panel .activity :global(.alert-review-controls) { grid-row: 4; }
 }

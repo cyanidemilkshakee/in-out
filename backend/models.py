@@ -1,7 +1,6 @@
 from sqlalchemy import Column, String, ForeignKey, DateTime, Integer, BigInteger, Boolean, CheckConstraint, Index, UniqueConstraint, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
-from sqlalchemy.ext.hybrid import hybrid_property
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, synonym
 import uuid
 
 from database import Base
@@ -87,18 +86,6 @@ class Checkpoint(Base):
         Index("uq_checkpoint_required_per_zone", "zone_id", unique=True, postgresql_where=text("required")),
     )
 
-    @hybrid_property
-    def zone_id(self):
-        return (self.data or {}).get("zone")
-
-    @zone_id.expression
-    def zone_id(cls):
-        return case(
-            (cls.id == "cp-main", literal("public")),
-            (cls.id == "server-room", literal("secure")),
-            else_=cls.data["zone"].astext,
-        )
-
 class TerminalCheckpointAssignment(Base):
     __tablename__ = "terminal_checkpoint_assignments"
 
@@ -119,7 +106,12 @@ class PresenceState(Base):
     last_scan_timestamp = Column(DateTime(timezone=True), nullable=True)
     # Continuous visit time survives repeated approved scans while still inside.
     entry_started_at = Column(DateTime(timezone=True), nullable=True)
-    visitor_overstay_alerted_entry_at = Column(DateTime(timezone=True), nullable=True)
+    # Legacy SQL column name retained; this now deduplicates employee and
+    # visitor continuous-presence alerts for each entry episode.
+    continuous_presence_alerted_entry_at = Column(
+        "visitor_overstay_alerted_entry_at", DateTime(timezone=True), nullable=True
+    )
+    visitor_overstay_alerted_entry_at = synonym("continuous_presence_alerted_entry_at")
     # One admitted visit, consumed by the matching exit. Never grants re-entry.
     entry_override = Column(JSONB, nullable=True)
     updated_at = Column(

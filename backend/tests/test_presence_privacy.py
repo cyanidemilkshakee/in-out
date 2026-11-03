@@ -27,15 +27,20 @@ class PresencePrivacyTests(unittest.IsolatedAsyncioTestCase):
         self.app = FastAPI()
         self.app.include_router(presence.router)
         now = datetime.now(timezone.utc)
-        self.db = SimpleNamespace(execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [(
-            SimpleNamespace(subject_id="private-subject", state="inside", last_scan_timestamp=now, updated_at=now),
-            SimpleNamespace(kind="employee", barcode="PRIVATE-BARCODE"),
-        )])))
+        self.db = SimpleNamespace(
+            execute=AsyncMock(return_value=SimpleNamespace(all=lambda: [(
+                SimpleNamespace(subject_id="private-subject", state="inside",
+                    last_scan_timestamp=now, updated_at=now),
+                SimpleNamespace(kind="employee", barcode="PRIVATE-BARCODE"),
+            )])),
+            scalars=AsyncMock(return_value=SimpleNamespace(all=lambda: ["a"])),
+        )
         self.app.dependency_overrides[get_read_db] = lambda: self.db
 
     @staticmethod
     def claims(token):
-        return {"sub": token, "exp": time.time() + 300, "realm_access": {"roles": [token]}}
+        return {"sub": token, "iat": int(time.time()), "jti": "presence-" + token,
+                "exp": time.time() + 300, "realm_access": {"roles": [token]}}
 
     async def fetch(self, path, role):
         async with httpx.AsyncClient(transport=httpx.ASGITransport(self.app), base_url="http://isolated") as client:
@@ -76,7 +81,9 @@ class PresencePrivacyTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(events, [{"type": "data_changed"}, {"type": "data_changed"}, {"type": "terminal_assignment"}, {"type": "data_changed"}])
         self.assertEqual(assignment.await_count, len(messages) + 1)
         administrator, lookup = await self.stream("admin", messages, [])
-        self.assertEqual(administrator, messages)
+        # Admin streams are zone-scoped; the refresh hint keeps other-zone
+        # subjects, identities and review details out of the SSE payload.
+        self.assertEqual(administrator, [{"type": "data_changed"} for _ in messages])
         lookup.assert_not_awaited()
 
     async def test_unassigned_operator_gets_no_private_updates(self):

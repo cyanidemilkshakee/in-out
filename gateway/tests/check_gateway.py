@@ -27,17 +27,17 @@ class GatewayTests(unittest.TestCase):
             time.sleep(remaining + 0.1)
 
     def set_identity_state(self, client, account=None, **state):
-        response = client.post('http://python-api:1102/__fixture/identity-state',
+        response = client.post('http://python-api:1019/__fixture/identity-state',
             headers={'X-Inout-Gateway-Secret': 'fixture-identity-secret-not-for-production-12345'},
             json={'account': account or self.actor, **state})
         self.assertEqual(response.status_code, 204, self.summary(response))
 
     def test_slow_upload_has_total_deadline_for_fixed_and_chunked_bodies(self):
         with httpx.Client(timeout=5) as client:
-            before = client.get('http://kong:8002/__fixture/body-count', headers=self.auth()).json()['contacts']
+            before = client.get('http://kong:1013/__fixture/body-count', headers=self.auth()).json()['contacts']
         for chunked, crowded in ((False, False), (True, False), (False, True), (True, True)):
             with self.subTest(chunked=chunked, crowded=crowded):
-                connection = http.client.HTTPConnection('kong', 8002, timeout=5)
+                connection = http.client.HTTPConnection('kong', 1013, timeout=5)
                 try:
                     connection.putrequest('POST', '/v1/deadline-probe')
                     connection.putheader('Content-Type', 'application/json')
@@ -66,18 +66,18 @@ class GatewayTests(unittest.TestCase):
                 finally:
                     connection.close()
         with httpx.Client(timeout=5) as client:
-            self.assertEqual(client.get('http://kong:8002/__fixture/body-count', headers=self.auth()).json()['contacts'], before)
+            self.assertEqual(client.get('http://kong:1013/__fixture/body-count', headers=self.auth()).json()['contacts'], before)
 
     def test_listener_routing_headers_and_authentication(self):
         with httpx.Client(timeout=10) as client:
-            for port, upstream in ((8000, 3000), (8002, 1102), (8005, 1105), (8006, 1105)):
-                path = '/realms/inout/example' if port == 8005 else '/example'
+            for port, upstream in ((1012, 1018), (1013, 1019), (1014, 1022), (1015, 1022)):
+                path = '/realms/inout/example' if port == 1014 else '/example'
                 response = client.get(f'http://kong:{port}{path}?eventId=EVT-000123', headers={
                     'Host': 'localhost:1008', 'Authorization': 'Bearer fixture-valid',
                     'Idempotency-Key': 'test-retry-key', 'X-Client-Verify': 'SUCCESS',
                     'X-Client-DN': 'CN=spoof', 'X-Proxy-Secret': 'spoof',
                     'X-Inout-Terminal-DN': 'CN=spoof', 'X-Inout-Gateway-Secret': 'spoof',
-                    'InoutListener': '8443',
+                    'InoutListener': '1016',
                     'X-Forwarded-Host': 'attacker.invalid', 'X-Forwarded-Proto': 'https'})
                 self.assertEqual(response.status_code, 200, self.summary(response))
                 self.assertEqual(response.json()['port'], upstream)
@@ -91,16 +91,16 @@ class GatewayTests(unittest.TestCase):
                 for name in ('x-client-verify', 'x-client-dn', 'x-proxy-secret', 'x-inout-terminal-dn', 'x-inout-gateway-secret'):
                     self.assertFalse(name in headers, f'Untrusted header {name} was forwarded')
                 self.assertIn('x-request-id', response.headers)
-            self.assertEqual(client.get('http://kong:8002/v1/protected').status_code, 401)
-            self.assertEqual(client.get('http://kong:8002/v1/protected', headers={'Authorization':'Bearer fixture-valid'}).status_code, 200)
+            self.assertEqual(client.get('http://kong:1013/v1/protected').status_code, 401)
+            self.assertEqual(client.get('http://kong:1013/v1/protected', headers={'Authorization':'Bearer fixture-valid'}).status_code, 200)
             with self.assertRaises(httpx.ConnectError):
                 client.get('http://kong:8001/')
 
     def test_gateway_metrics_are_available_only_on_private_status_listener(self):
         with httpx.Client(timeout=10) as client:
-            proxied = client.get('http://kong:8000/metrics-fixture')
+            proxied = client.get('http://kong:1012/metrics-fixture')
             self.assertEqual(proxied.status_code, 200, self.summary(proxied))
-            metrics = client.get('http://kong:8100/metrics')
+            metrics = client.get('http://kong:1017/metrics')
             self.assertEqual(metrics.status_code, 200, self.summary(metrics))
             body = metrics.text
             self.assertIn('kong_http_requests_total', body)
@@ -108,6 +108,51 @@ class GatewayTests(unittest.TestCase):
             self.assertIn('kong_upstream_latency_ms', body)
             with self.assertRaises(httpx.ConnectError):
                 client.get('http://kong:8001/metrics')
+
+    def test_api_redirects_preserve_public_host_port_method_and_query(self):
+        # All API services must retain the browser-facing authority. Otherwise
+        # FastAPI's absolute slash redirects send clients to python-api:1019.
+        cases = (
+            ('GET', '/v1/__fixture/redirect/', '8'),
+            ('GET', '/v1/presence/stream', '8'),
+            ('POST', '/v1/permission-requests/', '60'),
+            ('POST', '/v1/terminal/manual-reviews/', '60'),
+            ('POST', '/v1/keycloak/users/', '20'),
+            ('POST', '/v1/alerts/evaluate/', '20'),
+        )
+        query = '__fixture_redirect=1&reason=fixture%2Bnote&eventId=fixture-event'
+        body = b'{"reason":"synthetic redirect regression"}'
+        with httpx.Client(timeout=10, follow_redirects=False) as client:
+            for method, path, quota in cases:
+                with self.subTest(method=method, path=path):
+                    response = client.request(method, f'http://kong:1013{path}?{query}',
+                        headers=self.auth(uuid.uuid4().hex, **{
+                            'Host': 'api.fixture:1002', 'Content-Type': 'application/json',
+                            'X-Forwarded-Host': 'attacker.invalid:9999',
+                            'X-Forwarded-Proto': 'https', 'X-Forwarded-Port': '9999',
+                        }), content=body if method == 'POST' else None)
+                    self.assertEqual(response.status_code, 307, self.summary(response))
+                    canonical = path[:-1] if path.endswith('/') else path + '/canonical'
+                    self.assertEqual(response.headers.get('Location'), f'http://api.fixture:1002{canonical}?{query}')
+                    self.assertEqual(response.headers.get('X-RateLimit-Limit-Minute'), quota)
+                    self.assertEqual(response.json(), {'method': method,
+                        'body': body.decode() if method == 'POST' else ''})
+                    self.assertEqual(response.history, [])
+
+    def test_mtls_scan_redirect_preserves_public_tls_authority(self):
+        context = ssl.create_default_context(cafile='/certificates/ca.crt')
+        context.load_cert_chain('/certificates/client.crt', '/certificates/client.key')
+        query = '__fixture_redirect=1&eventId=fixture-terminal-event'
+        body = b'{"barcode":"synthetic-barcode"}'
+        with httpx.Client(verify=context, timeout=10, follow_redirects=False) as client:
+            response = client.post(f'https://kong:1016/v1/scans/?{query}', content=body,
+                headers={'Host': 'terminal.fixture:1011', 'Content-Type': 'application/json',
+                         'X-Forwarded-Host': 'attacker.invalid:9999',
+                         'X-Forwarded-Proto': 'http', 'X-Forwarded-Port': '9999'})
+        self.assertEqual(response.status_code, 307, self.summary(response))
+        self.assertEqual(response.headers.get('Location'), f'https://terminal.fixture:1011/v1/scans?{query}')
+        self.assertEqual(response.json(), {'method': 'POST', 'body': body.decode()})
+        self.assertEqual(response.history, [])
 
     def test_provider_admin_api_is_only_reachable_through_maintenance_or_internal_routes(self):
         # Send raw paths so the client does not remove dot segments before
@@ -124,15 +169,18 @@ class GatewayTests(unittest.TestCase):
             '/realms\\..\\admin/realms/inout/users', '/realms/%5c..%5cadmin/realms/inout/users',
             '/realms/inout/scim', '/realms/inout/scim/v2/Users', '/realms/inout/%73cim/v2/Users',
             '/realms/inout/SCIM/v2/Users',
+            '/realms/inout/inout-auth', '/realms/inout/inout-auth/status',
+            '/realms/inout/inout-auth/verify', '/realms/inout/%69nout-auth/token',
+            '/realms/inout/INOUT-AUTH/prepare',
             '/health/ready', '/metrics',
         )
         for path in denied_paths:
             with self.subTest(path=path):
-                connection = http.client.HTTPConnection('kong', 8005, timeout=10)
+                connection = http.client.HTTPConnection('kong', 1014, timeout=10)
                 try:
                     connection.request('GET', path, headers={
-                        'Authorization': 'Bearer fixture-valid', 'InoutListener': '8006',
-                        'Host': 'auth.localhost:1009', 'X-Forwarded-Port': '8006'})
+                        'Authorization': 'Bearer fixture-valid', 'InoutListener': '1015',
+                        'Host': 'auth.localhost:1009', 'X-Forwarded-Port': '1015'})
                     response = connection.getresponse()
                     body = response.read()
                     self.assertEqual(response.status, 404, f'response bytes={len(body)}')
@@ -144,18 +192,42 @@ class GatewayTests(unittest.TestCase):
                          '/realms/inout/protocol/openid-connect/auth?redirect_uri=http://localhost/admin',
                          '/realms/inout/protocol/openid-connect/token', '/realms/inout/account/',
                          '/resources/version/login/keycloak/style.css', '/.well-known/openid-configuration'):
-                response = client.get(f'http://kong:8005{path}')
+                response = client.get(f'http://kong:1014{path}')
                 self.assertEqual(response.status_code, 200, self.summary(response))
-                self.assertEqual(response.json()['port'], 1105)
-            for base in ('http://kong:8006', 'http://keycloak:1105'):
+                self.assertEqual(response.json()['port'], 1022)
+            for base in ('http://kong:1015', 'http://keycloak:1022'):
                 response = client.get(f'{base}/admin/realms/inout/users',
                     headers={'Authorization': 'Bearer fixture-valid'})
                 self.assertEqual(response.status_code, 200, self.summary(response))
-                self.assertEqual(response.json()['port'], 1105)
+                self.assertEqual(response.json()['port'], 1022)
                 self.assertEqual(client.get(f'{base}/realms/inout/scim/v2/Users').status_code, 200)
             # The application's own admin pages and API stay accessible.
-            self.assertEqual(client.get('http://kong:8000/admin/users').status_code, 200)
-            self.assertEqual(client.get('http://kong:8002/v1/admin/profile', headers=self.auth()).status_code, 200)
+            self.assertEqual(client.get('http://kong:1012/admin/users').status_code, 200)
+            self.assertEqual(client.get('http://kong:1013/v1/admin/profile', headers=self.auth()).status_code, 200)
+
+    def test_identity_admin_entry_uses_only_actual_maintenance_socket(self):
+        with httpx.Client(timeout=10, follow_redirects=False) as client:
+            for method in ('GET', 'HEAD'):
+                for path in ('/', '/admin', '/admin/'):
+                    for host in ('auth.fixture:1009', 'auth.fixture:1005', 'unrelated.fixture:9876'):
+                        with self.subTest(method=method, path=path, host=host):
+                            response = client.request(method, f'http://kong:1015{path}', headers={
+                                'Host': host, 'InoutListener': '1014',
+                                'X-Forwarded-Host': 'attacker.invalid:9999',
+                                'X-Forwarded-Proto': 'https', 'X-Forwarded-Port': '9999',
+                            })
+                            self.assertEqual(response.status_code, 302, self.summary(response))
+                            self.assertEqual(response.headers.get('Location'), '/admin/master/console/')
+                            self.assertEqual(response.headers.get('Cache-Control'), 'no-store')
+                            self.assertEqual(response.history, [])
+                    # A Host header, forwarded port or listener header cannot
+                    # turn the public identity socket into maintenance access.
+                    public = client.request(method, f'http://kong:1014{path}', headers={
+                        'Host': 'auth.fixture:1009', 'InoutListener': '1015',
+                        'X-Forwarded-Port': '1015', 'X-Forwarded-Host': 'auth.fixture:1009',
+                    })
+                    self.assertEqual(public.status_code, 404, self.summary(public))
+                    self.assertIsNone(public.headers.get('Location'))
 
     def test_chunked_auth_session_request_and_response_headers(self):
         # A session carrying identity-provider tokens can cross Node's default
@@ -165,7 +237,7 @@ class GatewayTests(unittest.TestCase):
         self.assertGreater(len(cookie.encode()), 16384)
         self.assertLess(len(cookie.encode()), 32768)
         with httpx.Client(timeout=10) as client:
-            response = client.get('http://kong:8000/api/auth/fixture-session',
+            response = client.get('http://kong:1012/api/auth/fixture-session',
                 headers={'Cookie': cookie})
         self.assertEqual(response.status_code, 200, self.summary(response))
         self.assertEqual(response.json()['headers']['cookie'], cookie)
@@ -192,15 +264,15 @@ class GatewayTests(unittest.TestCase):
             '/realms/inout/login-actions/%01authenticate',
         )
         with httpx.Client(timeout=10) as client:
-            before = client.get('http://keycloak:1105/__fixture/body-count').json()['contacts']
+            before = client.get('http://keycloak:1022/__fixture/body-count').json()['contacts']
         for path in paths:
             with self.subTest(path=path):
-                connection = http.client.HTTPConnection('kong', 8005, timeout=10)
+                connection = http.client.HTTPConnection('kong', 1014, timeout=10)
                 try:
                     connection.request('POST', path + '?session_code=fixture&execution=fixture',
                         body=b'username=synthetic&password=synthetic', headers={
                             'Content-Type': 'application/x-www-form-urlencoded',
-                            'Host': 'auth.localhost:8006', 'InoutListener': '8006',
+                            'Host': 'auth.localhost:1015', 'InoutListener': '1015',
                             'X-Forwarded-For': '203.0.113.99'})
                     response = connection.getresponse()
                     body = response.read()
@@ -209,26 +281,26 @@ class GatewayTests(unittest.TestCase):
                 finally:
                     connection.close()
         with httpx.Client(timeout=10) as client:
-            self.assertEqual(client.get('http://keycloak:1105/__fixture/body-count').json()['contacts'], before)
+            self.assertEqual(client.get('http://keycloak:1022/__fixture/body-count').json()['contacts'], before)
 
     def test_public_identity_login_posts_share_strict_budget_and_preserve_oidc_reads(self):
         self.avoid_minute_boundary(margin=25)
-        spoofed = {'Host': 'auth.localhost:8006', 'InoutListener': '8006',
-            'X-Forwarded-Port': '8006', 'X-Forwarded-For': '203.0.113.77',
+        spoofed = {'Host': 'auth.localhost:1015', 'InoutListener': '1015',
+            'X-Forwarded-Port': '1015', 'X-Forwarded-For': '203.0.113.77',
             'X-Real-IP': '198.51.100.88', 'X-Consumer-ID': 'forged-login-account'}
-        before = httpx.get('http://keycloak:1105/__fixture/body-count').json()['contacts']
+        before = httpx.get('http://keycloak:1022/__fixture/body-count').json()['contacts']
 
         async def burst():
             async with httpx.AsyncClient(timeout=10) as client:
                 # Warm both peers before the fixed second-window assertion.
                 for peer in ('kong', 'kong-peer'):
-                    self.assertEqual((await client.get(f'http://{peer}:8005/realms/inout/protocol/openid-connect/auth',
+                    self.assertEqual((await client.get(f'http://{peer}:1014/realms/inout/protocol/openid-connect/auth',
                         headers=spoofed)).status_code, 200)
                 while time.time() % 1 > 0.10:
                     await asyncio.sleep(0.02)
                 async def request(index):
                     peer = 'kong' if index % 2 else 'kong-peer'
-                    return await client.post(f'http://{peer}:8005/realms/inout/login-actions/authenticate?session_code=fixture{index}',
+                    return await client.post(f'http://{peer}:1014/realms/inout/login-actions/authenticate?session_code=fixture{index}',
                         headers={**spoofed, 'X-Forwarded-For': f'203.0.113.{index + 1}'},
                         data={'username': 'synthetic', 'password': 'synthetic'})
                 return await asyncio.gather(*(request(index) for index in range(6)))
@@ -248,14 +320,14 @@ class GatewayTests(unittest.TestCase):
             for index in range(54):
                 peer = 'kong' if index % 2 else 'kong-peer'
                 path = paths[index % len(paths)] + f'?session_code=fixture{index}&execution=fixture-execution&client_id=inout-frontend&tab_id=fixture%2Btab'
-                response = client.post(f'http://{peer}:8005' + path,
+                response = client.post(f'http://{peer}:1014' + path,
                     headers={**spoofed, 'X-Forwarded-For': f'198.51.100.{index + 1}'},
                     data={'username': 'synthetic', 'password': 'synthetic'})
                 self.assertEqual(response.status_code, 200, self.summary(response))
                 self.assertEqual(response.headers.get('X-RateLimit-Limit-Minute'), '60')
                 self.assertEqual(response.json()['path'], path)
                 time.sleep(0.24)
-            blocked = client.post('http://kong-peer:8005/realms/inout/login-actions/authenticate?session_code=new-fixture',
+            blocked = client.post('http://kong-peer:1014/realms/inout/login-actions/authenticate?session_code=new-fixture',
                 headers=spoofed, data={'username': 'synthetic', 'password': 'synthetic'})
             self.assertEqual(blocked.status_code, 429, self.summary(blocked))
             self.assertTrue(blocked.headers['Retry-After'].isdigit())
@@ -263,15 +335,15 @@ class GatewayTests(unittest.TestCase):
             for path in ('/realms/inout/login-actions/authenticate?session_code=issued-fixture',
                 '/realms/inout/protocol/openid-connect/auth', '/realms/inout/.well-known/openid-configuration',
                 '/resources/version/login/keycloak/style.css'):
-                response = client.get('http://kong:8005' + path, headers=spoofed)
+                response = client.get('http://kong:1014' + path, headers=spoofed)
                 self.assertEqual(response.status_code, 200, self.summary(response))
                 self.assertEqual(response.headers.get('X-RateLimit-Limit-Minute'), '64')
-            exchange = client.post('http://kong:8005/realms/inout/protocol/openid-connect/token',
+            exchange = client.post('http://kong:1014/realms/inout/protocol/openid-connect/token',
                 headers=spoofed, data={'grant_type': 'authorization_code', 'code': 'synthetic'})
             self.assertEqual(exchange.status_code, 200, self.summary(exchange))
             self.assertEqual(exchange.headers.get('X-RateLimit-Limit-Minute'), '64')
-            self.assertEqual(client.get('http://keycloak:1105/__fixture/body-count').json()['contacts'], before + 60)
-        connection = http.client.HTTPConnection('kong', 8005, timeout=5)
+            self.assertEqual(client.get('http://keycloak:1022/__fixture/body-count').json()['contacts'], before + 60)
+        connection = http.client.HTTPConnection('kong', 1014, timeout=5)
         try:
             connection.putrequest('POST', '/realms/inout/login-actions/authenticate?session_code=fixture')
             connection.putheader('Content-Length', '100')
@@ -287,17 +359,17 @@ class GatewayTests(unittest.TestCase):
         # Each field must fit within one 32 KiB large-header buffer. Raising
         # the auth allowance must not remove that gateway boundary.
         with httpx.Client(timeout=10) as client:
-            response = client.get('http://kong:8000/api/auth/fixture-session',
+            response = client.get('http://kong:1012/api/auth/fixture-session',
                 headers={'Cookie': 'authjs.session-token=' + 'x' * 32768})
         self.assertIn(response.status_code, (400, 431), self.summary(response))
 
     def test_http_cannot_spoof_terminal_identity(self):
-        for port in (8000, 8002, 8005):
+        for port in (1012, 1013, 1014):
             response = httpx.post(f'http://kong:{port}/v1/scans', headers={
                 'X-Client-Verify':'SUCCESS', 'X-Client-DN':'CN=terminal-test',
                 'X-Inout-Terminal-DN':'CN=terminal-test',
                 'X-Inout-Gateway-Secret':'gateway-test-secret-not-for-production-12345'})
-            self.assertEqual(response.status_code, 404 if port == 8005 else 401)
+            self.assertEqual(response.status_code, 404 if port == 1014 else 401)
 
     def test_api_raw_path_aliases_cannot_bypass_operation_group_routes(self):
         paths = (
@@ -310,7 +382,7 @@ class GatewayTests(unittest.TestCase):
         for path in paths:
             with self.subTest(path=path):
                 # Raw HTTP preserves aliases that higher-level clients remove.
-                connection = http.client.HTTPConnection('kong', 8002, timeout=10)
+                connection = http.client.HTTPConnection('kong', 1013, timeout=10)
                 try:
                     connection.request('POST', path, headers=self.auth())
                     response = connection.getresponse()
@@ -320,13 +392,13 @@ class GatewayTests(unittest.TestCase):
                 finally:
                     connection.close()
         with httpx.Client(timeout=10) as client:
-            response = client.get('http://kong:8002/v1/permission-requests?reason=%2F%3B%5C%20test',
+            response = client.get('http://kong:1013/v1/permission-requests?reason=%2F%3B%5C%20test',
                 headers=self.auth())
             self.assertEqual(response.status_code, 200, self.summary(response))
             self.assertEqual(response.json()['path'], '/v1/permission-requests?reason=%2F%3B%5C%20test')
         context = ssl.create_default_context(cafile='/certificates/ca.crt')
         context.load_cert_chain('/certificates/client.crt', '/certificates/client.key')
-        connection = http.client.HTTPSConnection('kong', 8443, timeout=10, context=context)
+        connection = http.client.HTTPSConnection('kong', 1016, timeout=10, context=context)
         try:
             connection.request('POST', '/v1/%73cans')
             response = connection.getresponse()
@@ -342,22 +414,22 @@ class GatewayTests(unittest.TestCase):
             if certificate:
                 context.load_cert_chain(f'/certificates/{certificate}.crt', f'/certificates/{certificate}.key')
             with httpx.Client(verify=context, timeout=10) as client:
-                response = client.post('https://kong:8443/v1/scans', headers={'X-Inout-Terminal-DN':'CN=spoof'})
+                response = client.post('https://kong:1016/v1/scans', headers={'X-Inout-Terminal-DN':'CN=spoof'})
                 if certificate == 'client':
                     self.assertEqual(response.status_code, 200, self.summary(response))
                     self.assertEqual(response.json()['headers']['x-inout-terminal-dn'], 'CN=terminal-test')
                     self.assertTrue(response.json()['headers']['x-inout-gateway-secret'] == 'gateway-test-secret-not-for-production-12345', 'Trusted terminal gateway secret changed')
-                    self.assertEqual(client.get('https://kong:8443/admin').status_code, 404)
+                    self.assertEqual(client.get('https://kong:1016/admin').status_code, 404)
                 else:
                     self.assertGreaterEqual(response.status_code, 400)
 
     def test_api_body_limit_including_chunked_requests(self):
         for body in (b'x' * 262145, iter([b'x' * 131073, b'x' * 131073])):
-            response = httpx.post('http://kong:8002/v1/example', content=body, headers=self.auth())
+            response = httpx.post('http://kong:1013/v1/example', content=body, headers=self.auth())
             self.assertEqual(response.status_code, 413, self.summary(response))
 
     def test_events_are_not_buffered(self):
-        for port, path in ((8000, '/api/presence'), (8002, '/v1/presence/stream')):
+        for port, path in ((1012, '/api/presence'), (1013, '/v1/presence/stream')):
             with httpx.stream('GET', f'http://kong:{port}{path}', timeout=10, headers=self.auth()) as response:
                 # Measure delivery after headers; cold Docker DNS is unrelated to buffering.
                 started = time.monotonic()
@@ -377,7 +449,7 @@ class GatewayTests(unittest.TestCase):
             async with httpx.AsyncClient(timeout=20) as client:
                 async def request(account):
                     async with semaphore:
-                        return (await client.get('http://kong:8002/limit', headers=self.auth(account))).status_code
+                        return (await client.get('http://kong:1013/limit', headers=self.auth(account))).status_code
                 accounts = [uuid.uuid4().hex for _ in range(16)]
                 return await asyncio.gather(*(request(account) for account in accounts for _ in range(2)))
         self.assertEqual(set(asyncio.run(burst())), {200})
@@ -388,10 +460,10 @@ class GatewayTests(unittest.TestCase):
             for index in range(8):
                 method = 'GET' if index % 2 == 0 else 'POST'
                 path = '/limit' if method == 'GET' else '/v1/terminal/scans'
-                response = client.request(method, f'http://kong:8002{path}',
+                response = client.request(method, f'http://kong:1013{path}',
                     headers=self.auth(token=index % 2 + 1))
                 self.assertEqual(response.status_code, 200, self.summary(response))
-            blocked = client.get('http://kong:8002/limit', headers=self.auth(token=3))
+            blocked = client.get('http://kong:1013/limit', headers=self.auth(token=3))
         self.assertEqual(blocked.status_code, 429, self.summary(blocked))
         self.assertGreaterEqual(int(blocked.headers['Retry-After']), 1)
         self.assertLessEqual(int(blocked.headers['Retry-After']), 60)
@@ -402,15 +474,15 @@ class GatewayTests(unittest.TestCase):
         other = uuid.uuid4().hex
         with httpx.Client(timeout=10) as client:
             for _ in range(8):
-                self.assertEqual(client.get('http://kong:8002/limit', headers=self.auth()).status_code, 200)
+                self.assertEqual(client.get('http://kong:1013/limit', headers=self.auth()).status_code, 200)
             spoofed = self.auth(token=4, **{
                 'X-Inout-Limit-Identity': other, 'X-Consumer-ID': other,
                 'X-Consumer-Username': other, 'X-Credential-Identifier': other,
                 'X-Inout-Gateway-Secret': 'fixture-identity-secret-not-for-production-12345',
                 'X-Inout-Terminal-DN': 'CN=another-terminal', 'X-Forwarded-For': '203.0.113.77',
             })
-            blocked = client.get('http://kong:8002/limit', headers=spoofed)
-            independent = client.get('http://kong:8002/limit', headers=self.auth(other))
+            blocked = client.get('http://kong:1013/limit', headers=spoofed)
+            independent = client.get('http://kong:1013/limit', headers=self.auth(other))
         self.assertEqual(blocked.status_code, 429, self.summary(blocked))
         self.assertEqual(independent.status_code, 200, self.summary(independent))
 
@@ -420,7 +492,7 @@ class GatewayTests(unittest.TestCase):
             async with httpx.AsyncClient(timeout=20) as client:
                 async def request(index):
                     peer = 'kong' if index % 2 else 'kong-peer'
-                    return (await client.get(f'http://{peer}:8002/limit',
+                    return (await client.get(f'http://{peer}:1013/limit',
                         headers=self.auth(token=index % 3 + 1))).status_code
                 return await asyncio.gather(*(request(index) for index in range(24)))
         statuses = asyncio.run(burst())
@@ -428,7 +500,7 @@ class GatewayTests(unittest.TestCase):
         self.assertEqual(statuses.count(429), 16, statuses)
 
     def test_forged_bearer_and_identity_headers_cannot_create_a_verified_credential(self):
-        response = httpx.get('http://kong:8002/limit', headers={
+        response = httpx.get('http://kong:1013/limit', headers={
             'Authorization': 'Bearer forged-subject', 'X-Consumer-ID': self.actor,
             'X-Inout-Limit-Identity': self.actor,
             'X-Inout-Gateway-Secret': 'fixture-identity-secret-not-for-production-12345'})
@@ -438,25 +510,25 @@ class GatewayTests(unittest.TestCase):
     def test_cached_identity_is_not_resurrected_when_verifier_becomes_unavailable(self):
         with httpx.Client(timeout=10) as client:
             self.set_identity_state(client, status=200, expires_at=time.time() + 300)
-            warm = client.get('http://kong:8002/limit', headers=self.auth())
+            warm = client.get('http://kong:1013/limit', headers=self.auth())
             self.assertEqual(warm.status_code, 200, self.summary(warm))
             self.set_identity_state(client, status=503, expires_at=time.time() + 300)
             # The valid positive cache remains usable within its two-second
             # fixture TTL, but an outage may never extend that deadline.
-            cached = client.get('http://kong:8002/limit', headers=self.auth())
+            cached = client.get('http://kong:1013/limit', headers=self.auth())
             self.assertEqual(cached.status_code, 200, self.summary(cached))
             time.sleep(2.2)
-            unavailable = client.get('http://kong:8002/limit', headers=self.auth())
+            unavailable = client.get('http://kong:1013/limit', headers=self.auth())
         self.assertEqual(unavailable.status_code, 503, self.summary(unavailable))
         self.assertFalse('"port":' in unavailable.text, 'Stale identity must not reach the API fixture')
 
     def test_expired_token_cannot_reuse_cached_identity(self):
         with httpx.Client(timeout=10) as client:
             self.set_identity_state(client, status=200, expires_at=time.time() + 1.2)
-            warm = client.get('http://kong:8002/limit', headers=self.auth())
+            warm = client.get('http://kong:1013/limit', headers=self.auth())
             self.assertEqual(warm.status_code, 200, self.summary(warm))
             time.sleep(1.4)
-            expired = client.get('http://kong:8002/limit', headers=self.auth())
+            expired = client.get('http://kong:1013/limit', headers=self.auth())
         self.assertEqual(expired.status_code, 401, self.summary(expired))
         self.assertEqual(expired.headers.get('WWW-Authenticate'), 'Bearer')
         self.assertFalse('"port":' in expired.text, 'Expired identity must not reach the API fixture')
@@ -486,7 +558,7 @@ class GatewayTests(unittest.TestCase):
                         method, path = actions[index % len(actions)]
                         peer = 'kong' if index % 2 else 'kong-peer'
                         response = client.request(method,
-                            f'http://{peer}:8002' + path.format(record=uuid.uuid4().hex),
+                            f'http://{peer}:1013' + path.format(record=uuid.uuid4().hex),
                             headers=self.auth(actor, token=index % 2 + 1))
                         self.assertEqual(response.status_code, 200, self.summary(response))
                         self.assertEqual(response.headers.get('X-RateLimit-Limit-Minute'), str(minute))
@@ -496,16 +568,16 @@ class GatewayTests(unittest.TestCase):
                         time.sleep(1.25 / second)
                     method, path = actions[-1]
                     blocked = client.request(method,
-                        'http://kong:8002' + path.format(record=uuid.uuid4().hex),
+                        'http://kong:1013' + path.format(record=uuid.uuid4().hex),
                         headers=self.auth(actor, token=3))
                     self.assertEqual(blocked.status_code, 429, self.summary(blocked))
                     self.assertGreaterEqual(int(blocked.headers['Retry-After']), 1)
                     self.assertFalse('"port":' in blocked.text, 'Rejected group action reached upstream')
                     independent = client.request(method,
-                        'http://kong-peer:8002' + path.format(record=uuid.uuid4().hex),
+                        'http://kong-peer:1013' + path.format(record=uuid.uuid4().hex),
                         headers=self.auth(uuid.uuid4().hex))
                     self.assertEqual(independent.status_code, 200, self.summary(independent))
-                    read = client.get('http://kong:8002' + read_path, headers=self.auth(actor))
+                    read = client.get('http://kong:1013' + read_path, headers=self.auth(actor))
                     self.assertEqual(read.status_code, 200, self.summary(read))
                     self.assertEqual(read.headers.get('X-RateLimit-Limit-Minute'), '8')
 
@@ -517,17 +589,23 @@ class GatewayTests(unittest.TestCase):
             '/api/auth/./signin/keycloak', '/api/auth/x/../signin/keycloak',
             '/api/auth/signin;ignored/keycloak', '/api/auth/signin%3bignored/keycloak',
             '/api/auth\\signin\\keycloak', '/api/auth/signin/%01keycloak',
+            '/api/auth/password/%75pdate', '/api/auth/pass%77ord/update',
+            '/api%2fauth/password/update', '/api%252fauth/password/update',
+            '/api/auth//password/update', '//api/auth/password/update',
+            '/api/auth/password/./update', '/api/auth/password/x/../update',
+            '/api/auth/password/update;ignored', '/api/auth/password/update%3bignored',
+            '/api/auth/password\\update', '/api/auth/password/update//',
             '/%6cogin', '/x/../login', '/login;ignored', '/login//',
         )
         with httpx.Client(timeout=10) as client:
-            before = client.get('http://app:3000/__fixture/body-count').json()['contacts']
+            before = client.get('http://app:1018/__fixture/body-count').json()['contacts']
         for path in paths:
             with self.subTest(path=path):
-                connection = http.client.HTTPConnection('kong', 8000, timeout=10)
+                connection = http.client.HTTPConnection('kong', 1012, timeout=10)
                 try:
                     connection.request('POST', path, body=b'csrfToken=fixture', headers={
                         'Content-Type': 'application/x-www-form-urlencoded',
-                        'Host': 'localhost:8002', 'InoutListener': '8002',
+                        'Host': 'localhost:1013', 'InoutListener': '1013',
                         'X-Forwarded-For': '203.0.113.99'})
                     response = connection.getresponse()
                     body = response.read()
@@ -536,18 +614,18 @@ class GatewayTests(unittest.TestCase):
                 finally:
                     connection.close()
         with httpx.Client(timeout=10) as client:
-            self.assertEqual(client.get('http://app:3000/__fixture/body-count').json()['contacts'], before)
+            self.assertEqual(client.get('http://app:1018/__fixture/body-count').json()['contacts'], before)
 
     def test_web_login_post_budget_is_shared_and_keeps_get_auth_flows_available(self):
         self.avoid_minute_boundary(margin=15)
-        spoofed = {'Host': 'localhost:8002', 'InoutListener': '8006',
-            'X-Forwarded-Port': '8006', 'X-Forwarded-For': '203.0.113.77',
+        spoofed = {'Host': 'localhost:1013', 'InoutListener': '1015',
+            'X-Forwarded-Port': '1015', 'X-Forwarded-For': '203.0.113.77',
             'X-Real-IP': '198.51.100.88', 'Forwarded': 'for=192.0.2.99',
             'X-Consumer-ID': 'forged-login-account'}
         with httpx.Client(timeout=10) as client:
-            before = client.get('http://app:3000/__fixture/body-count').json()['contacts']
+            before = client.get('http://app:1018/__fixture/body-count').json()['contacts']
             for path in ('/api/auth/csrf', '/api/auth/providers'):
-                response = client.get('http://kong:8000' + path, headers=spoofed)
+                response = client.get('http://kong:1012' + path, headers=spoofed)
                 self.assertEqual(response.status_code, 200, self.summary(response))
                 self.assertEqual(response.headers.get('X-RateLimit-Limit-Minute'), '48')
 
@@ -557,9 +635,11 @@ class GatewayTests(unittest.TestCase):
             time.sleep(0.02)
         async def burst():
             async with httpx.AsyncClient(timeout=10) as client:
+                paths = ('/api/auth/signin/keycloak', '/api/auth/password/update',
+                         '/api/auth/callback/credentials', '/api/auth/password/update/')
                 async def request(index):
                     peer = 'kong' if index % 2 else 'kong-peer'
-                    return await client.post(f'http://{peer}:8000/api/auth/signin/keycloak?attempt={index}',
+                    return await client.post(f'http://{peer}:1012{paths[index]}?attempt={index}',
                         headers={**spoofed, 'X-Forwarded-For': f'203.0.113.{index + 1}'},
                         data={'csrfToken': 'fixture', 'callbackUrl': '/admin'})
                 return await asyncio.gather(*(request(index) for index in range(4)))
@@ -572,52 +652,63 @@ class GatewayTests(unittest.TestCase):
 
         # Native Redis accounting counts the burst-rejected attempt in the
         # minute window too. Six attempts remain after the initial four.
-        # Sign-in, callback POSTs and server actions share them across peers.
+        # Sign-in, password updates, callbacks and server actions share them
+        # across peers, including the password endpoint's trailing-slash form.
         time.sleep(1.05)
-        paths = ('/api/auth/signin/keycloak', '/api/auth/callback/keycloak',
-                 '/login', '/api/auth/signin', '/api/auth/signin/keycloak/')
+        paths = ('/api/auth/password/update', '/api/auth/callback/credentials',
+                 '/api/auth/password/update/', '/login', '/api/auth/signin',
+                 '/api/auth/signin/keycloak/')
         with httpx.Client(timeout=10) as client:
             for index in range(6):
                 peer = 'kong' if index % 2 else 'kong-peer'
-                response = client.post(f'http://{peer}:8000{paths[index % len(paths)]}?callbackUrl=%2Fadmin',
+                response = client.post(f'http://{peer}:1012{paths[index % len(paths)]}?callbackUrl=%2Fadmin',
                     headers={**spoofed, 'X-Forwarded-For': f'198.51.100.{index + 1}'},
                     data={'csrfToken': 'fixture', 'callbackUrl': '/admin'})
                 self.assertEqual(response.status_code, 200, self.summary(response))
                 self.assertEqual(response.headers.get('X-RateLimit-Limit-Minute'), '10')
                 time.sleep(0.4)
-            blocked = client.post('http://kong-peer:8000/api/auth/signin/keycloak?attempt=new',
+            blocked = client.post('http://kong-peer:1012/api/auth/password/update?attempt=new',
                 headers=spoofed, data={'csrfToken': 'fixture', 'callbackUrl': '/admin'})
             self.assertEqual(blocked.status_code, 429, self.summary(blocked))
             self.assertTrue(blocked.headers['Retry-After'].isdigit())
             self.assertFalse('"port":' in blocked.text, 'Throttled login reached upstream')
             for path in ('/api/auth/csrf', '/api/auth/providers', '/api/auth/callback/keycloak?code=fixture&state=fixture',
                          '/login', '/_next/static/fixture.js'):
-                response = client.get('http://kong:8000' + path, headers=spoofed)
+                response = client.get('http://kong:1012' + path, headers=spoofed)
                 self.assertEqual(response.status_code, 200, self.summary(response))
                 self.assertEqual(response.headers.get('X-RateLimit-Limit-Minute'), '48')
-            self.assertEqual(client.get('http://app:3000/__fixture/body-count').json()['contacts'], before + 9)
+            self.assertEqual(client.get('http://app:1018/__fixture/body-count').json()['contacts'], before + 9)
 
-        connection = http.client.HTTPConnection('kong', 8000, timeout=5)
+        connection = http.client.HTTPConnection('kong', 1012, timeout=5)
         try:
-            connection.putrequest('POST', '/api/auth/signin/keycloak')
+            connection.putrequest('POST', '/api/auth/password/update')
             connection.putheader('Content-Length', '100')
             connection.endheaders()
-            # Send no body: the strict quota runs before buffering/auth work.
-            response = connection.getresponse()
-            self.assertEqual(response.status, 429)
-            self.assertIsNotNone(response.getheader('Retry-After'))
-            response.read()
+            # The global upload deadline precedes the stock access-phase
+            # limiter. A missing body must time out/close promptly and never
+            # reach authentication; complete requests above prove the quota.
+            began = time.monotonic()
+            try:
+                response = connection.getresponse()
+                self.assertIn(response.status, (408, 429))
+                response.read()
+            except http.client.RemoteDisconnected:
+                pass
+            self.assertLess(time.monotonic() - began, 3)
         finally:
             connection.close()
+
+        with httpx.Client(timeout=10) as client:
+            self.assertEqual(client.get('http://app:1018/__fixture/body-count').json()['contacts'], before + 9)
 
     def test_z_anonymous_browser_and_oidc_ingress_is_shared_bounded_and_separate(self):
         # Anonymous quotas are intentionally exhausted last: all earlier
         # regression probes share this container's real socket-peer address.
         self.avoid_minute_boundary(margin=15)
         spoofed = {
-            'Host': 'localhost:8006', 'InoutListener': '8006',
-            'X-Forwarded-Port': '8006', 'X-Forwarded-For': '203.0.113.77',
-            'X-Real-IP': '198.51.100.88', 'Forwarded': 'for=192.0.2.99;host=localhost:8006',
+            'Host': 'localhost:1015', 'InoutListener': '1015',
+            'X-Forwarded-Port': '1015', 'X-Forwarded-For': '203.0.113.77',
+            'X-Real-IP': '198.51.100.88', 'Forwarded': 'for=192.0.2.99;host=localhost:1015',
         }
 
         async def exhaust(port, remaining, paths, limit):
@@ -627,7 +718,7 @@ class GatewayTests(unittest.TestCase):
                     # A new forged identity or target listener on each call
                     # must not choose another bucket on either gateway.
                     headers = {**spoofed, 'X-Forwarded-For': f'203.0.113.{index % 250 + 1}',
-                               'Host': f'localhost:{8002 if index % 2 else 8005}'}
+                               'Host': f'localhost:{1013 if index % 2 else 1014}'}
                     return await client.get(f'http://{peer}:{port}{paths[index % len(paths)]}', headers=headers)
                 responses = await asyncio.gather(*(request(index) for index in range(remaining + 4)))
             statuses = [response.status_code for response in responses]
@@ -642,42 +733,42 @@ class GatewayTests(unittest.TestCase):
 
         with httpx.Client(timeout=10) as client:
             before = {
-                8000: client.get('http://app:3000/__fixture/body-count').json()['contacts'],
-                8005: client.get('http://keycloak:1105/__fixture/body-count').json()['contacts'],
+                1012: client.get('http://app:1018/__fixture/body-count').json()['contacts'],
+                1014: client.get('http://keycloak:1022/__fixture/body-count').json()['contacts'],
             }
-            browser = client.get('http://kong:8000/_next/static/fixture.js', headers=spoofed)
-            identity = client.get('http://kong-peer:8005/realms/inout/.well-known/openid-configuration', headers=spoofed)
-            api = client.get('http://kong:8002/limit', headers=self.auth(**spoofed))
-            for response, port, limit in ((browser, 3000, 48), (identity, 1105, 64), (api, 1102, 8)):
+            browser = client.get('http://kong:1012/_next/static/fixture.js', headers=spoofed)
+            identity = client.get('http://kong-peer:1014/realms/inout/.well-known/openid-configuration', headers=spoofed)
+            api = client.get('http://kong:1013/limit', headers=self.auth(**spoofed))
+            for response, port, limit in ((browser, 1018, 48), (identity, 1022, 64), (api, 1019, 8)):
                 self.assertEqual(response.status_code, 200, self.summary(response))
                 self.assertEqual(response.json()['port'], port)
                 self.assertEqual(response.headers.get('X-RateLimit-Limit-Minute'), str(limit))
 
-            asyncio.run(exhaust(8000, int(browser.headers['X-RateLimit-Remaining-Minute']),
+            asyncio.run(exhaust(1012, int(browser.headers['X-RateLimit-Remaining-Minute']),
                 ('/', '/_next/static/fixture.js', '/api/auth/signin'), 48))
-            independent_identity = client.get('http://kong:8005/resources/version/login/keycloak/style.css', headers=spoofed)
+            independent_identity = client.get('http://kong:1014/resources/version/login/keycloak/style.css', headers=spoofed)
             self.assertEqual(independent_identity.status_code, 200, self.summary(independent_identity))
             self.assertEqual(int(independent_identity.headers['X-RateLimit-Remaining-Minute']),
                              int(identity.headers['X-RateLimit-Remaining-Minute']) - 1)
-            self.assertEqual(client.get('http://kong-peer:8002/limit', headers=self.auth(**spoofed)).status_code, 200)
+            self.assertEqual(client.get('http://kong-peer:1013/limit', headers=self.auth(**spoofed)).status_code, 200)
 
-            asyncio.run(exhaust(8005, int(independent_identity.headers['X-RateLimit-Remaining-Minute']),
+            asyncio.run(exhaust(1014, int(independent_identity.headers['X-RateLimit-Remaining-Minute']),
                 ('/realms/inout/.well-known/openid-configuration',
                  '/realms/inout/protocol/openid-connect/auth',
                  '/resources/version/login/keycloak/style.css'), 64))
-            maintenance = client.get('http://kong:8006/admin/realms/inout/users', headers=spoofed)
+            maintenance = client.get('http://kong:1015/admin/realms/inout/users', headers=spoofed)
             self.assertEqual(maintenance.status_code, 200, self.summary(maintenance))
             self.assertIsNone(maintenance.headers.get('X-RateLimit-Limit-Minute'))
-            api = client.get('http://kong:8002/limit', headers=self.auth(**spoofed))
+            api = client.get('http://kong:1013/limit', headers=self.auth(**spoofed))
             self.assertEqual(api.status_code, 200, self.summary(api))
             self.assertEqual(api.headers.get('X-RateLimit-Limit-Minute'), '8')
             for _ in range(int(api.headers['X-RateLimit-Remaining-Minute'])):
-                self.assertEqual(client.get('http://kong:8002/limit', headers=self.auth(**spoofed)).status_code, 200)
-            blocked_api = client.get('http://kong-peer:8002/limit', headers=self.auth(**spoofed))
+                self.assertEqual(client.get('http://kong:1013/limit', headers=self.auth(**spoofed)).status_code, 200)
+            blocked_api = client.get('http://kong-peer:1013/limit', headers=self.auth(**spoofed))
             self.assertEqual(blocked_api.status_code, 429, self.summary(blocked_api))
-            self.assertEqual(client.get('http://kong:8002/limit', headers=self.auth(uuid.uuid4().hex, **spoofed)).status_code, 200)
+            self.assertEqual(client.get('http://kong:1013/limit', headers=self.auth(uuid.uuid4().hex, **spoofed)).status_code, 200)
 
-            for port, path in ((8000, '/v1/deadline-probe'), (8005, '/realms/inout/deadline-probe')):
+            for port, path in ((1012, '/v1/deadline-probe'), (1014, '/realms/inout/deadline-probe')):
                 with self.subTest(port=port):
                     connection = http.client.HTTPConnection('kong', port, timeout=5)
                     try:
@@ -694,8 +785,8 @@ class GatewayTests(unittest.TestCase):
                         self.assertIsNotNone(response.getheader('Retry-After'))
                     finally:
                         connection.close()
-            self.assertEqual(client.get('http://app:3000/__fixture/body-count').json()['contacts'], before[8000])
-            self.assertEqual(client.get('http://keycloak:1105/__fixture/body-count').json()['contacts'], before[8005])
+            self.assertEqual(client.get('http://app:1018/__fixture/body-count').json()['contacts'], before[1012])
+            self.assertEqual(client.get('http://keycloak:1022/__fixture/body-count').json()['contacts'], before[1014])
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

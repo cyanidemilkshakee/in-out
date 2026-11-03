@@ -796,7 +796,7 @@ test("branch zone IDs normalize across snapshots and live updates", () => {
   assert.deepEqual(normalizeFacilityZones(["All Zones"]), ["a", "b"]);
   assert.deepEqual(normalizeFacilityZones(["IT Lab", 42, null]), []);
   assert.deepEqual(normalizeFacilityZones(["c", "north-branch"]), ["c", "north-branch"]);
-  assert.equal(formatFacilityZones(["a", "b"]), "Zone A / Zone B");
+  assert.equal(formatFacilityZones(["a", "b"]), "Zone A · Zone B");
   const snapshot = normalizeTerminalSnapshot({ subjects: [{ id: "p1", type: "employee", allowedZones: ["All Zones"] }] });
   assert.deepEqual(snapshot.people[0].allowedZones, ["a", "b"]);
   const initial: DataState = { ...emptyData, isLoading: false, error: null };

@@ -7,7 +7,7 @@ export type ManagedUser = {
   enabled: boolean;
   emailVerified: boolean;
   createdTimestamp?: number;
-  roles?: Array<"admin" | "operator" | "master-admin">;
+  roles?: Array<"zone-admin" | "operator" | "master-admin">;
   checkpointId?: string | null;
   zoneIds?: string[];
   canManage: boolean;
@@ -59,4 +59,8 @@ export function resetManagedUserPassword(userId: string, password: string, tempo
 
 export function endManagedUserSessions(userId: string) {
   return request<{ ended: boolean }>("POST", { action: "endSessions", userId });
+}
+
+export function deleteManagedUser(userId: string) {
+  return request<{ deleted: boolean }>("POST", { action: "deleteUser", userId });
 }

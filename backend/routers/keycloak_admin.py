@@ -1,9 +1,9 @@
 """Application-scoped Keycloak user administration.
 
-Keycloak remains the identity authority.  This router exposes only the user
-and role operations the InOut dashboard needs and forwards the signed-in
-administrator's bearer token to Keycloak's Admin REST API. It deliberately has
-no delete-user endpoint.
+Keycloak remains the identity authority. This router exposes the user and role
+operations the InOut dashboard needs and forwards the signed-in administrator's
+bearer token to Keycloak's Admin REST API. Account deletion is limited to
+zone-admin and operator identities.
 """
 from __future__ import annotations
 
@@ -22,20 +22,21 @@ from auth import has_master_admin_role, verify_admin_request
 from config import settings
 from database import get_db
 from keycloak_http import get_keycloak_admin_client
-from sqlalchemy import select, text
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from models import Checkpoint, OrganizationZone, TerminalCheckpointAssignment, ZoneAdminAssignment
+from models import Checkpoint, TerminalCheckpointAssignment, ZoneAdminAssignment
 from event_outbox import enqueue_changed
-from terminal_assignments import publish_checkpoint_assignment, enqueue_checkpoint_assignment, set_checkpoint_assignment
+from terminal_assignments import enqueue_checkpoint_assignment, set_checkpoint_assignment
+from token_revocation import revoke_principal_tokens
 from user_management_step_up import verified_user_management_window
 from user_management_locks import get_window_guard_db, require_unlocked_window
-from user_management_policy import MASTER_ADMIN_ROLE, can_manage_user, can_update_user_fields
+from user_management_policy import MASTER_ADMIN_ROLE, ZONE_ADMIN_ROLE, can_manage_user, can_update_user_fields
 from zone_access import admin_zone_ids, require_checkpoint_scope
 
 router = APIRouter(prefix="/v1/keycloak", tags=["keycloak"])
 _bearer = HTTPBearer(auto_error=False)
-APP_ROLES = frozenset({"admin", "operator", MASTER_ADMIN_ROLE})
-ASSIGNABLE_ROLES = frozenset({"admin", "operator"})
+APP_ROLES = frozenset({ZONE_ADMIN_ROLE, "operator", MASTER_ADMIN_ROLE})
+ASSIGNABLE_ROLES = frozenset({ZONE_ADMIN_ROLE, "operator"})
 CheckpointId = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
 logger = logging.getLogger(__name__)
 
@@ -46,13 +47,12 @@ class UserCreateRequest(BaseModel):
     first_name: str = Field("", alias="firstName", max_length=100)
     last_name: str = Field("", alias="lastName", max_length=100)
     email: str = Field("", max_length=320)
-    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=8, max_length=128)
+    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=1, max_length=128)
     temporary_password: bool = Field(True, alias="temporaryPassword")
-    roles: list[Literal["admin", "operator"]] = Field(default_factory=list)
+    roles: list[Literal["zone-admin", "operator"]] = Field(default_factory=list)
     enabled: bool = True
     checkpoint_id: CheckpointId | None = Field(None, alias="checkpointId")
     zone_ids: list[str] = Field(default_factory=list, alias="zoneIds", max_length=100)
-
     @field_validator("email")
     @classmethod
     def valid_email(cls, value: str) -> str:
@@ -63,7 +63,8 @@ class UserCreateRequest(BaseModel):
     @field_validator("password")
     @classmethod
     def valid_password(cls, value: str) -> str:
-        return _validate_password_policy(value)
+        # Preserve the passphrase for Keycloak's configured password policy.
+        return value
 
 
 class UserUpdateRequest(BaseModel):
@@ -73,7 +74,7 @@ class UserUpdateRequest(BaseModel):
     email: str | None = Field(None, max_length=320)
     enabled: bool | None = None
     checkpoint_id: CheckpointId | None = Field(None, alias="checkpointId")
-    roles: list[Literal["admin", "operator"]] | None = None
+    roles: list[Literal["zone-admin", "operator"]] | None = None
     zone_ids: list[str] | None = Field(None, alias="zoneIds", max_length=100)
 
     @field_validator("roles", mode="before")
@@ -100,18 +101,18 @@ class UserUpdateRequest(BaseModel):
 
 class RolesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    roles: list[Literal["admin", "operator"]]
+    roles: list[Literal["zone-admin", "operator"]]
 
 
 class PasswordResetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=1, max_length=128)
     temporary: bool = True
 
     @field_validator("password")
     @classmethod
     def valid_password(cls, value: str) -> str:
-        return _validate_password_policy(value)
+        return value
 
 
 async def _admin_context(
@@ -123,8 +124,9 @@ async def _admin_context(
     if credentials is None:
         raise HTTPException(status_code=401, detail="Bearer token required")
     claims = await verify_admin_request(credentials, request)
-    window = verified_user_management_window(credentials.credentials, claims, step_up, now=time.time())
-    await require_unlocked_window(db, claims, window)
+    if not has_master_admin_role(claims):
+        window = verified_user_management_window(credentials.credentials, claims, step_up, now=time.time())
+        await require_unlocked_window(db, claims, window)
     return credentials.credentials
 
 
@@ -331,11 +333,16 @@ async def get_user(user_id: str, token: str = Depends(_admin_context), db: Async
 @router.post("/users", status_code=201)
 async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_context),
     db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
-    if not has_master_admin_role(actor):
-        raise HTTPException(403, "Only a master-admin can create identity accounts")
+    master_admin = has_master_admin_role(actor)
+    if not master_admin and set(payload.roles) != {"operator"}:
+        raise HTTPException(403, "Zone admins may create operator accounts only")
+    if not master_admin and payload.zone_ids:
+        raise HTTPException(403, "Zone admins cannot assign administrator zones")
+    if not master_admin and not (payload.first_name and payload.last_name and payload.email):
+        raise HTTPException(422, "Provide the operator's first name, last name, and email")
     if "operator" in payload.roles and not payload.checkpoint_id:
         raise HTTPException(422, "Assign a checkpoint when creating an operator account")
-    if "admin" in payload.roles and not payload.zone_ids:
+    if ZONE_ADMIN_ROLE in payload.roles and not payload.zone_ids:
         raise HTTPException(422, "Assign at least one zone when creating an admin account")
     if payload.zone_ids:
         from access_validation import validate_registered_zones
@@ -369,16 +376,20 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
         if payload.checkpoint_id:
             await set_checkpoint_assignment(db, identity, payload.checkpoint_id, actor["sub"])
             await enqueue_checkpoint_assignment(db, identity)
-        if "admin" in payload.roles:
+        if ZONE_ADMIN_ROLE in payload.roles:
             await _replace_zone_assignments(db, user_id, payload.zone_ids, actor["sub"])
+        if payload.checkpoint_id or ZONE_ADMIN_ROLE in payload.roles:
+            # Persist the access assignment before granting the corresponding
+            # Keycloak role. The account is still disabled at this point; if
+            # the provider write fails, the recovery path removes this saved
+            # assignment before returning.
+            await enqueue_changed(db)
+            await db.commit()
+            assignment_saved = True
         roles = await _replace_roles(token, user_id, payload.roles)
         if payload.enabled:
             await _request(token, "PUT", f"users/{quote(user_id, safe='')}", {"enabled": True})
         user = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
-        if payload.checkpoint_id or "admin" in payload.roles:
-            await enqueue_changed(db)
-            await db.commit()
-            assignment_saved = True
     except Exception as error:
         await db.rollback()
         cleanup_failed = False
@@ -393,8 +404,12 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
                 logger.exception("Failed to disable incompletely provisioned Keycloak user %s", user_id)
         if assignment_saved:
             try:
-                await set_checkpoint_assignment(db, identity, None, actor["sub"])
-                await enqueue_checkpoint_assignment(db, identity)
+                if payload.checkpoint_id:
+                    await set_checkpoint_assignment(db, identity, None, actor["sub"])
+                    await enqueue_checkpoint_assignment(db, identity)
+                if ZONE_ADMIN_ROLE in payload.roles:
+                    await _replace_zone_assignments(db, user_id, [], actor["sub"])
+                    await enqueue_changed(db)
                 await db.commit()
             except Exception:
                 cleanup_failed = True
@@ -403,8 +418,8 @@ async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_co
         if cleanup_failed:
             raise HTTPException(503, f"Creation incomplete. Recovery is required for Keycloak account {user_id} ({payload.username}); inspect the account before retrying.") from error
         raise _recovered_failure(error, "Creation was rolled back; the new account was removed. You can retry.") from error
-    return _user_summary(user, roles, payload.checkpoint_id, can_manage_user(True, roles),
-        payload.zone_ids if "admin" in roles else [])
+    return _user_summary(user, roles, payload.checkpoint_id, can_manage_user(master_admin, roles),
+        payload.zone_ids if ZONE_ADMIN_ROLE in roles else [])
 
 
 @router.patch("/users/{user_id}")
@@ -433,7 +448,7 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
             raise HTTPException(404, "User not found")
     if checkpoint:
         await require_checkpoint_scope(db, actor, checkpoint)
-    if "admin" in requested_roles:
+    if ZONE_ADMIN_ROLE in requested_roles:
         target_zones = payload.zone_ids if payload.zone_ids is not None else previous_zones
         if not target_zones:
             raise HTTPException(422, "Assign at least one zone to every admin account")
@@ -504,6 +519,13 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
         if recovery_failed:
             raise HTTPException(503, f"Save incomplete. Recovery is required for Keycloak account {user_id}; reload its current state and inspect it in Keycloak before retrying.") from error
         raise _recovered_failure(error, "Save was rolled back; the previous account settings were restored.") from error
+    if (("enabled" in payload.model_fields_set and payload.enabled is False)
+            or payload.roles is not None):
+        try:
+            await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
+        except HTTPException as error:
+            raise HTTPException(503,
+                "Account changes were saved, but active application tokens could not be revoked. Retry after authentication service recovery.") from error
     return _user_summary(saved, saved_roles, checkpoint,
         can_manage_user(master_admin, saved_roles), target_zones)
 
@@ -525,7 +547,7 @@ async def reset_password(user_id: str, payload: PasswordResetRequest, token: str
     await _request(token, "PUT", f"users/{quote(user_id, safe='')}/reset-password", {
         "type": "password", "value": payload.password, "temporary": payload.temporary,
     })
-    return result
+    return {"updated": True}
 
 
 @router.post("/users/{user_id}/logout")
@@ -536,4 +558,50 @@ async def end_user_sessions(user_id: str, token: str = Depends(_admin_context),
     if not can_manage_user(True, await _user_roles(token, user_id)):
         raise HTTPException(403, "This account can only be managed through the master-admin bootstrap")
     await _request(token, "POST", f"users/{quote(user_id, safe='')}/logout")
-    return result
+    try:
+        await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
+    except HTTPException as error:
+        raise HTTPException(503,
+            "Keycloak sessions ended, but active application tokens could not be revoked. Retry after authentication service recovery.") from error
+    return {"updated": True}
+
+
+@router.delete("/users/{user_id}", status_code=204)
+async def delete_user(user_id: str, token: str = Depends(_admin_context),
+    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> None:
+    if not has_master_admin_role(actor):
+        raise HTTPException(403, "Only a master-admin can delete application accounts")
+    if not user_id or user_id == actor.get("sub"):
+        raise HTTPException(409, "You cannot delete your own account")
+
+    await _lock_user(db, user_id)
+    roles = await _user_roles(token, user_id)
+    if not roles or "master-admin" in roles or not set(roles).issubset(ASSIGNABLE_ROLES):
+        raise HTTPException(403, "Only zone-admin and operator accounts can be deleted")
+
+    identity = "browser:" + user_id
+    assignment = await db.get(TerminalCheckpointAssignment, identity, with_for_update=True)
+    try:
+        await _request(token, "DELETE", f"users/{quote(user_id, safe='')}")
+    except Exception:
+        await db.rollback()
+        raise
+
+    try:
+        if assignment is not None:
+            await db.delete(assignment)
+            await enqueue_checkpoint_assignment(db, identity)
+        await db.execute(delete(ZoneAdminAssignment).where(ZoneAdminAssignment.admin_subject == user_id))
+        await enqueue_changed(db)
+        await db.commit()
+    except Exception as error:
+        await db.rollback()
+        logger.exception("Keycloak account %s was deleted but local assignment cleanup failed", user_id)
+        raise HTTPException(503,
+            "The identity account was deleted, but its application assignments could not be cleared. Contact an administrator.") from error
+
+    try:
+        await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
+    except HTTPException as error:
+        raise HTTPException(503,
+            "The account was deleted, but active application tokens could not be revoked. Retry after authentication service recovery.") from error

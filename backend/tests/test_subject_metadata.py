@@ -15,11 +15,11 @@ from routers.registry import create_subject, get_subject, list_subjects, registr
 from routers.permissions import list_permissions
 from permission_decisions import apply_permission_decision, publish_decision, zone_permission_version
 from terminal_scans import record_scan
-from subject_metadata import validate_subject_metadata_size
+from subject_metadata import terminal_subject_metadata, validate_subject_metadata_size
 from database import database_engine_options
 
 
-ADMIN = {"sub": "admin", "realm_access": {"roles": ["admin"]}}
+ADMIN = {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
 
 
 def rows(values=(), scalar=None):
@@ -32,7 +32,11 @@ def rows(values=(), scalar=None):
 
 
 def session():
-    return Mock(execute=AsyncMock(), scalar=AsyncMock(return_value=None), get=AsyncMock(),
+    class ScalarRows(list):
+        def all(self):
+            return list(self)
+    return Mock(execute=AsyncMock(), scalar=AsyncMock(return_value=None),
+                scalars=AsyncMock(return_value=ScalarRows(["a", "b"])), get=AsyncMock(),
                 flush=AsyncMock(), commit=AsyncMock(), refresh=AsyncMock(), rollback=AsyncMock(), info={})
 
 
@@ -40,7 +44,7 @@ def legacy_employee():
     # Relational kind remains authoritative even when old editable JSON disagrees.
     return Subject(id="employee", kind="employee", barcode="EMP-1", person=Person(data={
         "name": "Alice", "type": "visitor", "department": "Operations", "accessLevel": "Admin",
-        "allowedZones": ["public"], "status": "active", "inside": False,
+        "allowedZones": ["a"], "status": "active", "inside": False,
         "validFrom": "2026-01-01T00:00:00Z", "validTo": "",
         "phone": "+1-555-0100", "ownerId": "private-owner", "taxId": "synthetic-tax-id",
         "privateCustomField": {"secret": "synthetic-private-value"},
@@ -62,57 +66,72 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         for field in ("phone", "ownerId", "taxId", "privateCustomField", "department", "accessLevel"):
             self.assertNotIn(field, data)
 
+    def test_terminal_projection_keeps_identity_for_person_and_hardware_updates(self):
+        for kind in ("employee", "visitor", "hardware"):
+            with self.subTest(kind=kind):
+                projected = terminal_subject_metadata(kind, {
+                    "id": "subject-1", "barcode": "BARCODE-1", "name": "Test subject",
+                    "inside": True, "allowedZones": ["a"], "taxId": "private-value",
+                })
+                self.assertEqual(projected["id"], "subject-1")
+                self.assertEqual(projected["barcode"], "BARCODE-1")
+                self.assertTrue(projected["inside"])
+                self.assert_terminal_allowlist(projected)
+
     async def test_create_discards_stale_fields_without_rejecting_or_changing_zones(self):
         db = session()
         added = []
         db.add.side_effect = added.append
         payload = SubjectCreate(kind="employee", barcode="EMP-NEW", data={
-            "name": "Alice", "allowedZones": ["public"], "department": {"stale": "value"},
+            "name": "Alice", "allowedZones": ["a"], "department": {"stale": "value"},
             "accessLevel": ["Admin"], "type": "visitor",
         })
         with patch("routers.registry.enqueue_changed", new=AsyncMock()):
             result = await create_subject(payload, db, ADMIN)
         self.assert_retired_absent(result.data)
-        self.assertEqual(result.data["allowedZones"], ["public"])
+        self.assertEqual(result.data["allowedZones"], ["a"])
         self.assertEqual(result.data["type"], "employee")
         subject = next(item for item in added if isinstance(item, Subject))
         self.assert_retired_absent(subject.person.data)
         permission = next(item for item in added if isinstance(item, AccessPermission))
-        self.assertEqual(permission.data["zones"], ["public"])
+        self.assertEqual(permission.data["zones"], ["a"])
         db.commit.assert_awaited_once()
 
     async def test_update_discards_stale_fields_and_preserves_real_policy_changes(self):
         subject = legacy_employee()
-        permission = AccessPermission(id="perm", subject_id=subject.id, data={"zones": ["public"], "state": "active"})
+        permission = AccessPermission(id="perm", subject_id=subject.id, data={"zones": ["a"], "state": "active"})
         db = session()
         db.execute.return_value = rows(scalar=subject)
         db.scalar.return_value = permission
         with patch("routers.registry.enqueue_changed", new=AsyncMock()):
-            result = await update_subject(subject.id, SubjectUpdate(data={
-                "department": 123, "accessLevel": "Elevated", "allowedZones": ["secure"], "status": "restricted",
-            }), db, ADMIN)
+            with patch("routers.registry.require_subject_scope", new=AsyncMock(return_value=subject)):
+                result = await update_subject(subject.id, SubjectUpdate(data={
+                    "department": 123, "accessLevel": "Elevated", "allowedZones": ["b"], "status": "restricted",
+                }), db, ADMIN)
         self.assert_retired_absent(subject.person.data)
         self.assert_retired_absent(result.data)
-        self.assertEqual(result.data["allowedZones"], ["secure"])
-        self.assertEqual((permission.data["zones"], permission.data["state"]), (["secure"], "restricted"))
+        self.assertEqual(result.data["allowedZones"], ["b"])
+        self.assertEqual((permission.data["zones"], permission.data["state"]), (["b"], "restricted"))
 
     async def test_barcode_only_update_also_cleans_legacy_current_metadata(self):
         subject = legacy_employee()
         db = session()
         db.execute.return_value = rows(scalar=subject)
         with patch("routers.registry.enqueue_changed", new=AsyncMock()):
-            result = await update_subject(subject.id, SubjectUpdate(barcode="EMP-RENAMED"), db, ADMIN)
+            with patch("routers.registry.require_subject_scope", new=AsyncMock(return_value=subject)):
+                result = await update_subject(subject.id, SubjectUpdate(barcode="EMP-RENAMED"), db, ADMIN)
         self.assert_retired_absent(subject.person.data)
         self.assert_retired_absent(result.data)
         self.assertEqual(result.data["barcode"], "EMP-RENAMED")
-        self.assertEqual(result.data["allowedZones"], ["public"])
+        self.assertEqual(result.data["allowedZones"], ["a"])
 
     async def test_legacy_get_list_bundle_and_permission_subjects_hide_retired_fields_before_migration(self):
         subject = legacy_employee()
         original = copy.deepcopy(subject.person.data)
         db = session()
         db.execute.return_value = rows(scalar=subject)
-        single = await get_subject(subject.id, db, ADMIN)
+        with patch("routers.registry.require_subject_scope", new=AsyncMock(return_value=subject)):
+            single = await get_subject(subject.id, db, ADMIN)
         self.assert_retired_absent(single.data)
         db.execute.side_effect = [rows(scalar=1), rows([subject])]
         listed = await list_subjects(None, 50, 0, db, ADMIN)
@@ -126,7 +145,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         with patch("critical_entry_restrictions.entry_restrictions_for_subjects", new=AsyncMock(return_value={})):
             permissions = await list_permissions(db, ADMIN)
         self.assert_retired_absent(permissions["subjects"][0])
-        self.assertEqual(permissions["people"][0]["zones"], ["public"])
+        self.assertEqual(permissions["people"][0]["zones"], ["a"])
         self.assertEqual(subject.person.data, original, "Read serialization must not mutate database history or current rows")
 
     async def test_fresh_approved_and_denied_scans_hide_fields_and_preserve_access_behavior(self):
@@ -135,21 +154,27 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
                 subject = legacy_employee()
                 if restricted:
                     subject.person.data["status"] = "restricted"
-                checkpoint = Checkpoint(id="cp-main", data={"name": "Main Entrance", "zone": "public"})
+                checkpoint = Checkpoint(id="cp-main", zone_id="a", active=True,
+                    data={"name": "Main Entrance", "zone": "a"})
                 presence = PresenceState(subject_id=subject.id, state="outside", last_scan_timestamp=None)
                 db = session()
                 db.get.side_effect = [None, checkpoint]
                 db.execute.side_effect = [rows(), rows(scalar=subject), rows([subject]), rows(), rows(), rows([presence])]
                 with patch("terminal_scans.entry_restrictions_for_subjects", new=AsyncMock(return_value={})), \
                      patch("terminal_scans.entry_restrictions_for_locked_subjects", new=AsyncMock(return_value={})), \
-                     patch("terminal_scans._approved_manual_review", new=AsyncMock(return_value=None)):
+                     patch("terminal_scans._approved_manual_review", new=AsyncMock(return_value=None)), \
+                     patch("terminal_scans.require_registered_checkpoint", new=AsyncMock(return_value="cp-main")):
                     result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode=subject.barcode, checkpointId="cp-main"), "operator")
                 self.assertEqual(result["allowed"], not restricted)
                 self.assert_retired_absent(result["decision"]["subject"])
                 self.assert_retired_absent(result["updatedPeople"][0])
                 self.assert_terminal_allowlist(result["decision"]["subject"])
                 self.assert_terminal_allowlist(result["updatedPeople"][0])
-                self.assertEqual(result["updatedPeople"][0]["allowedZones"], ["public"])
+                self.assertEqual(result["decision"]["subject"]["id"], subject.id)
+                self.assertEqual(result["decision"]["subject"]["barcode"], subject.barcode)
+                self.assertEqual(result["updatedPeople"][0]["id"], subject.id)
+                self.assertEqual(result["updatedPeople"][0]["barcode"], subject.barcode)
+                self.assertEqual(result["updatedPeople"][0]["allowedZones"], ["a"])
 
     async def test_legacy_scan_replay_hides_employee_fields_without_rewriting_snapshot(self):
         subject = legacy_employee()
@@ -165,6 +190,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         self.assert_retired_absent(result["updatedPeople"][0])
         self.assert_terminal_allowlist(result["decision"]["subject"])
         self.assert_terminal_allowlist(result["updatedPeople"][0])
+        self.assertEqual(result["updatedPeople"][0]["id"], subject.id)
         self.assertEqual(cached.response_body, saved)
         self.assertTrue(db.info["scan_replayed"])
 
@@ -179,9 +205,9 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         db = session()
         db.commit.side_effect = RuntimeError("INSERT parameters include private@example.test")
         payload = SubjectCreate(kind="employee", barcode="EMP-FAIL", data={
-            "name": "Private Name", "allowedZones": ["public"],
+            "name": "Private Name", "allowedZones": ["a"],
         })
-        admin_zones = patch("routers.registry.admin_zone_ids", new=AsyncMock(return_value=["public"]))
+        admin_zones = patch("routers.registry.admin_zone_ids", new=AsyncMock(return_value=["a"]))
         admin_zones.start()
         self.addCleanup(admin_zones.stop)
         registered_zones = patch("routers.registry.validate_registered_zones",
@@ -201,9 +227,9 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
         start, end = (now + timedelta(days=1)).isoformat(), (now + timedelta(days=2)).isoformat()
         request = PermissionRequestModel(id="request", subject_id=subject.id, data={
             "id": "request", "type": "zone_access", "status": "pending", "subjectName": "Alice",
-            "requestedZones": ["secure"], "validFrom": start, "validTo": end,
+            "requestedZones": ["b"], "validFrom": start, "validTo": end,
         })
-        permission = AccessPermission(id="perm", subject_id=subject.id, data={"zones": ["public"]})
+        permission = AccessPermission(id="perm", subject_id=subject.id, data={"zones": ["a"]})
         request.data["permissionVersion"] = zone_permission_version(permission, subject.person.data)
         db = session()
         db.scalar.side_effect = [request, None, subject, permission]
@@ -211,7 +237,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
             result = await apply_permission_decision(db, request.id, "approved", "admin", "Confirmed")
         self.assert_retired_absent(result["person"])
         self.assert_retired_absent(subject.person.data)
-        self.assertEqual(result["person"]["allowedZones"], ["secure"])
+        self.assertEqual(result["person"]["allowedZones"], ["b"])
         self.assertEqual(result["permission"]["validTo"], end)
         event = await publish_decision(result)
         self.assert_retired_absent(event["people"][0])

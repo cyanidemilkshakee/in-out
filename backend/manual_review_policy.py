@@ -6,9 +6,9 @@ from facility_zones import normalize_facility_document
 
 MANUAL_REVIEW_TIMEOUT_MINUTES = 10
 
-_METADATA_ACCESS_FIELDS = ("status", "allowedZones", "allowedZone", "validFrom", "validTo", "validUntil",
+_METADATA_ACCESS_FIELDS = ("status", "allowedZones", "allowedCheckpoints", "allowedZone", "validFrom", "validTo", "validUntil",
                            "ownerId", "assignedEmployeeId")
-_PERMISSION_ACCESS_FIELDS = ("state", "zones", "validFrom", "validTo")
+_PERMISSION_ACCESS_FIELDS = ("state", "zones", "checkpoints", "validFrom", "validTo")
 
 
 def _access_fields(data, fields):

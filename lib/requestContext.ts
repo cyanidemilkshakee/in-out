@@ -24,7 +24,7 @@ export function upstreamRoute(path: string): string {
   const families = new Set([
     "registry", "alerts", "alert-warnings", "alert-rule-assignments", "permissions",
     "permission-requests", "terminal", "movements", "presence", "dashboard", "audit",
-    "checkpoints", "keycloak", "user-management", "admin", "exports",
+    "checkpoints", "zones", "keycloak", "user-management", "admin", "exports",
   ]);
   return families.has(segments[2]) ? `/v1/${segments[2]}` : "/v1/other";
 }

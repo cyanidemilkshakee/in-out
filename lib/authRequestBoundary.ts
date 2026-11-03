@@ -117,7 +117,16 @@ function validateAuthorizationQuery(url: URL, query: Map<string, string>) {
   // Auth.js merges query parameters into its generated OIDC authorization URL.
   // Keep client, redirect, response, scope and security parameters server-owned.
   // Match the same repeated/trailing slash forms that Auth.js accepts.
-  if (url.pathname.split('/').filter(Boolean).join('/') !== 'api/auth/signin/keycloak') return;
+  const path = url.pathname.split('/').filter(Boolean).join('/');
+  if (path === 'api/auth/signin/keycloak-password-setup' || path === 'api/auth/signin/keycloak-password-change') {
+    // The AIA itself is fixed in the server-side provider configuration.
+    // Only a same-origin callback destination may be supplied by the browser.
+    for (const name of query.keys()) {
+      if (name !== 'callbackUrl') throw new AuthRequestError('Authentication parameters are invalid.', 400);
+    }
+    return;
+  }
+  if (path !== 'api/auth/signin/keycloak') return;
   for (const [name, value] of query) {
     if (!((name === 'prompt' && value === 'login') || (name === 'max_age' && value === '0'))) {
       throw new AuthRequestError('Authentication parameters are invalid.', 400);

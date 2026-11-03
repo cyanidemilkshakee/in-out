@@ -7,7 +7,7 @@ import { formatIrregularitySkipDate, irregularitySkipDateRange, isIrregularitySk
 import { assignmentSaveInput, remainingAssignmentDraft, type AssignmentDraft, type AssignmentSection } from "../../../../lib/alertAssignmentDraft";
 import styles from "./EmployeeAlertManagement.module.css";
 
-export function RuleAssignments({ assignments, rules, selectedEmployeeId, onSave, onReload, onViewProfile, isLoading = false, children }: {
+export function RuleAssignments({ assignments, rules, selectedEmployeeId, onSave, onReload, onViewProfile, isLoading = false, profileLayout = false, profileSchedule, children }: {
   assignments: AlertRuleAssignment[];
   rules: AlertRule[];
   selectedEmployeeId?: string;
@@ -90,10 +90,6 @@ export function RuleAssignments({ assignments, rules, selectedEmployeeId, onSave
       {busy ? <LoaderCircle size={17} className={styles.loadingIcon} aria-hidden="true" /> : <Check size={17} aria-hidden="true" />}
       {busy ? "Saving…" : rulesDirty ? "Save rules" : "Rules saved"}
     </button> : null;
-  const rulesHeading = selected ? <div className={styles.sectionHeading}>
-    <h3>Applied rules</h3>
-    {rulesSaveButton}
-  </div> : null;
   const rulesList = selected ? <div className={`${styles.ruleList}${profileLayout ? " employee-profile-rule-list" : ""}`}>{eligibleRules.map((rule) => <label key={rule.id} className={`${styles.rule}${profileLayout ? " employee-profile-rule" : ""}`} data-checked={checkedIds.includes(rule.id)} data-disabled={busy || isLoading}><input type="checkbox" disabled={busy || isLoading} checked={checkedIds.includes(rule.id)} onChange={(event) => {
     const enabled = event.target.checked;
     updateDraft((previous) => ({ ...previous, ruleIds: enabled ? [...new Set([...previous.ruleIds, rule.id])] : previous.ruleIds.filter((id) => id !== rule.id) }));

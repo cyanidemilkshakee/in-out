@@ -109,6 +109,7 @@ class PermissionRequestCreate(APIModel):
     barcode: Optional[str] = Field(None, min_length=1, max_length=64, pattern=BARCODE_PATTERN)
     requester: Optional[str] = None
     requested_zones: list[str] = Field(default_factory=list)
+    requested_checkpoints: list[str] = Field(default_factory=list, max_length=16)
     valid_from: Optional[str] = None
     valid_to: Optional[str] = None
     hardware_id: Optional[str] = None

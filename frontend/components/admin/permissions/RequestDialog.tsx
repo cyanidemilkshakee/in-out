@@ -44,13 +44,20 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
   const { submitPermissionRequest, createVisitor, grantPermission, releaseEntryRestriction } = useDataActions();
   const { zones: organizationZones } = useOrganizationZones();
   const zoneChoices = organizationZones.length ? organizationZones : [...new Set(checkpoints.map((item) => item.zoneId ?? item.zone))]
-    .filter(Boolean).map((id) => ({ id, name: facilityZoneLabel(id), active: true, checkpoints: [] }));
+    .filter(Boolean).map((id) => ({ id, name: facilityZoneLabel(id, organizationZones), active: true, checkpoints: [] }));
   const isGrant = mode === "grant";
   const now = useDateTimeNow();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [type, setType] = useState<FormPermissionType>(() => contextType(context));
   const [subjectId, setSubjectId] = useState(() => context.type === "visitor" && !context.subjectId ? "" : context.subjectId ?? "");
-  const [checkpointId, setCheckpointId] = useState(checkpoints[0]?.id ?? "");
+  const [checkpointId, setCheckpointId] = useState(() => {
+    const current = people.find((person) => person.id === context.subjectId);
+    const currentScope = permissions.find((permission) => permission.subjectId === context.subjectId)?.checkpoints
+      ?? current?.allowedCheckpoints;
+    return checkpoints.find((item) => item.active !== false && currentScope?.includes(item.id))?.id
+      ?? checkpoints.find((item) => item.active !== false)?.id
+      ?? "";
+  });
   const [carrierId, setCarrierId] = useState("");
   const [reason, setReason] = useState("");
   const [visitorDraft, setVisitorDraft] = useState({ name: "", barcode: "", host: "", company: "" });
@@ -85,7 +92,7 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
   const permanentZoneAccess = isGrant && type === "zone_access" && !isVisitorAccess && permanentAccess;
   const validSubject = Boolean(subject && (type !== "hardware_custody" || asset));
   const employee = people.find((person) => person.id === carrierId && person.type === "employee");
-  const checkpoint = checkpoints.find((item) => item.id === checkpointId);
+  const checkpoint = checkpoints.find((item) => item.id === checkpointId && item.active !== false);
   const currentPermission = permissions.find((item) => item.subjectId === subjectId);
   const canRevokeAccess = isGrant && currentPermission
     && currentPermission.state !== "pending_approval"
@@ -93,15 +100,13 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
     && currentPermission.state !== "revoked";
   const entryRestriction = currentPermission?.entryRestriction ?? subject?.entryRestriction;
   const dateLimits = accessDateTimeLimits(validFrom, validTo, now);
-  const needsZones = type === "zone_access" || isVisitorType;
+  const needsZones = !isVisitorAccess && (type === "zone_access" || isVisitorType);
   const needsDateWindow = isVisitorType || type === "zone_access";
-  const needsCheckpointField = !isGrant && !isVisitorType;
+  const needsCheckpointField = isVisitorAccess || (!isGrant && !isVisitorType);
   const selectedZoneIds = normalizeFacilityZones(zones);
   const visitorCheckpoint = checkpoints.find((item) => (item.zoneId ?? item.zone) === selectedZoneIds[0] && (item.required || item.number === 1))
     ?? checkpoints.find((item) => (item.zoneId ?? item.zone) === selectedZoneIds[0]);
-  const permissionCheckpointId = isVisitorType
-    ? visitorCheckpoint?.id ?? ""
-    : checkpointId;
+  const permissionCheckpointId = isVisitorAccess ? checkpointId : isVisitorType ? visitorCheckpoint?.id ?? "" : checkpointId;
   const visitorBarcode = visitorDraft.barcode.trim();
   const visitorBarcodeValid = Boolean(visitorBarcode && visitorBarcode.length <= 64 && /^[A-Za-z0-9._:/-]+$/.test(visitorBarcode));
   const visitorRequest = permissionRequests.find((request) =>
@@ -122,7 +127,9 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
   }, []);
 
   useEffect(() => {
-    if ((!checkpointId || !checkpoints.some((item) => item.id === checkpointId)) && checkpoints.length) setCheckpointId(checkpoints[0].id);
+    if ((!checkpointId || !checkpoints.some((item) => item.id === checkpointId && item.active !== false)) && checkpoints.length) {
+      setCheckpointId(checkpoints.find((item) => item.active !== false)?.id ?? "");
+    }
   }, [checkpointId, checkpoints]);
 
   useEffect(() => {
@@ -227,7 +234,9 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
     if (type === "hardware_custody" && !asset) { setError("Choose registered hardware."); return; }
     const requestedZones = type === "hardware_custody"
       ? []
-      : normalizeFacilityZones(type === "zone_access" || isVisitorType ? zones : [checkpoint?.zone ?? ""]);
+      : isVisitorAccess
+        ? normalizeFacilityZones([checkpoint?.zoneId ?? checkpoint?.zone ?? ""])
+        : normalizeFacilityZones(type === "zone_access" || isVisitorType ? zones : [checkpoint?.zone ?? ""]);
     const pending = permissionRequests.find((request) =>
       request.status === "pending" && request.type === requestType && request.subjectId === subjectId &&
       (requestType !== "hardware_custody" || request.carrierId === carrierId)
@@ -244,6 +253,7 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
         requester: "Administrator",
         purpose: reason.trim(),
         requestedZones,
+        ...(isVisitorAccess ? { requestedCheckpoints: [permissionCheckpointId] } : {}),
         checkpointId: permissionCheckpointId,
         validFrom: needsDateWindow ? facilityDateIso(validFrom) : "",
         validTo: needsDateWindow && !permanentZoneAccess ? facilityDateIso(validTo) : "",
@@ -306,15 +316,16 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
 
   return <dialog ref={dialogRef} className={`${styles.dialog} scrollable-content`} aria-labelledby="new-request-title" onCancel={(event) => { event.preventDefault(); if (!busy) onClose(); }}>
     <form onSubmit={submit} noValidate className={styles.form}>
-      <header className={styles.header}><div><h2 id="new-request-title">{isGrant ? "New permission" : "New request"}</h2><p>{isGrant ? "Grant access or reassign custody directly." : "Choose the approval you need."}</p></div><button type="button" className={styles.close} aria-label={isGrant ? "Close new permission" : "Close new request"} disabled={busy} onClick={onClose}><X size={19} /></button></header>
+      <header className={styles.header}><div><h2 id="new-request-title">{isGrant ? isVisitorAccess ? "Checkpoint access" : "New permission" : "New request"}</h2><p>{isGrant ? isVisitorAccess ? "Choose one checkpoint and set this visitor’s access window." : "Grant access or reassign custody directly." : "Choose the approval you need."}</p></div><button type="button" className={styles.close} aria-label={isGrant ? isVisitorAccess ? "Close checkpoint access" : "Close new permission" : "Close new request"} disabled={busy} onClick={onClose}><X size={19} /></button></header>
 
       <fieldset className={styles.typeSelector} disabled={busy}>
         <legend>{isGrant ? "Permission type" : "Request type"}</legend>
         <div className={styles.typeChoices}>{NEW_REQUEST_TYPES.map((item) => {
           const Icon = item.icon;
+          const label = isVisitorAccess && item.value === "zone_access" ? "Checkpoint access" : item.label;
           return <label key={item.value} className={styles.typeChoice} data-selected={type === item.value}>
             <input type="radio" name="permissionType" value={item.value} checked={type === item.value} onChange={() => changeType(item.value)} />
-            <Icon size={19} strokeWidth={1.7} aria-hidden="true" /><span>{item.label}</span>
+            <Icon size={19} strokeWidth={1.7} aria-hidden="true" /><span>{label}</span>
           </label>;
         })}</div>
       </fieldset>
@@ -326,11 +337,15 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
         <select className="admin-surface" aria-invalid={invalidSubject || undefined} value={subjectId} disabled={busy} required onChange={(event) => {
           const nextSubjectId = event.target.value;
           const selectedSubject = [...selectablePeople, ...hardwareAssets].find((item) => item.id === nextSubjectId);
-          const selectedVisitor = Boolean(selectedSubject && "type" in selectedSubject && selectedSubject.type === "visitor");
+          const selectedVisitor = selectedSubject && "type" in selectedSubject && selectedSubject.type === "visitor" ? selectedSubject : undefined;
           const savedZones = normalizeFacilityZones(permissions.find((item) => item.subjectId === nextSubjectId)?.zones ?? []);
+          const savedCheckpoints = permissions.find((item) => item.subjectId === nextSubjectId)?.checkpoints
+            ?? selectedVisitor?.allowedCheckpoints;
           setSubjectId(nextSubjectId);
           setCarrierId("");
           setZones(savedZones.length ? savedZones : selectedVisitor && zoneChoices.length ? [zoneChoices[0].id] : []);
+          if (selectedVisitor) setCheckpointId(checkpoints.find((item) => item.active !== false && savedCheckpoints?.includes(item.id))?.id
+            ?? checkpoints.find((item) => item.active !== false)?.id ?? "");
           if (selectedVisitor) setPermanentAccess(false);
           setError("");
         }}>
@@ -361,13 +376,13 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
         <label className={styles.field}><span>Company</span><input className="admin-surface" maxLength={120} value={visitorDraft.company} disabled={busy} onChange={(event) => setVisitorDraft((current) => ({ ...current, company: event.target.value }))} /></label>
       </div>}
 
-      {needsCheckpointField && <label className={styles.field}><span>Checkpoint</span><select className="admin-surface" aria-invalid={invalidCheckpoint || undefined} required disabled={busy} value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)}><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((item) => <option key={item.id} value={item.id}>{facilityZoneLabel(item.zoneId ?? item.zone)} · {item.name}{item.gateLabel ? ` · ${item.gateLabel}` : ""}</option>)}</select></label>}
+      {needsCheckpointField && <label className={styles.field}><span>Checkpoint</span><select className="admin-surface" aria-invalid={invalidCheckpoint || undefined} required disabled={busy} value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)}><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((item) => <option key={item.id} value={item.id}>{facilityZoneLabel(item.zoneId ?? item.zone, organizationZones)} · {item.name}{item.gateLabel ? ` · ${item.gateLabel}` : ""}</option>)}</select></label>}
 
       {type === "hardware_custody" && <label className={styles.field}><span>{isGrant ? "New custodian" : "Requested custodian"}</span><select className="admin-surface" aria-invalid={invalidCarrier || undefined} required disabled={busy} value={carrierId} onChange={(event) => setCarrierId(event.target.value)}><option value="">Choose an employee</option>{people.filter((person) => person.type === "employee").map((person) => <option key={person.id} value={person.id} disabled={person.id === currentCustodianId}>{person.name} · {person.barcode}{person.id === currentCustodianId ? " · Current custodian" : ""}</option>)}</select></label>}
 
       {needsZones && <FacilityZoneSelection label={type === "zone_access" ? "Zone access" : "Allowed zones"} value={zones} onChange={(next) => { setZones(next); setError(""); }} zones={zoneChoices} disabled={busy || !zoneChoices.length} invalid={invalidZones} />}
 
-      {isVisitorAccess && visitorRequest && <div className={styles.notice}><strong>Approval already pending</strong><p>{isGrant ? `Grant permission will approve ${visitorRequest.subjectName}'s pending visitor request using the dates and zones selected here.` : `${visitorRequest.subjectName} is already awaiting review.`}</p>{!isGrant && <button type="button" className={styles.reviewAction} onClick={() => onReview(visitorRequest.id)}>Review pending permission <ArrowRight size={16} /></button>}</div>}
+      {isVisitorAccess && visitorRequest && <div className={styles.notice}><strong>Approval already pending</strong><p>{isGrant ? `Grant permission will approve ${visitorRequest.subjectName}'s pending visitor request using the selected checkpoint and access dates.` : `${visitorRequest.subjectName} is already awaiting review.`}</p>{!isGrant && <button type="button" className={styles.reviewAction} onClick={() => onReview(visitorRequest.id)}>Review pending permission <ArrowRight size={16} /></button>}</div>}
 
       {needsDateWindow && <div className={styles.dates}>
         <label className={styles.field}><span>Starts</span><input className="admin-surface" name="validFrom" type="datetime-local" required {...dateLimits.start} step={60} value={validFrom} disabled={busy} aria-invalid={Boolean(attemptedSubmit && invalidDateErrors.start)} aria-describedby={dateErrors.start ? "permission-start-error" : undefined} onChange={(event) => { setStartTouched(true); setValidFrom(event.target.value); setDateErrors((current) => ({ ...current, start: undefined })); }} />{dateErrors.start && <small id="permission-start-error" className={styles.dateError}>{dateErrors.start}</small>}</label>
@@ -388,7 +403,17 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
           ? <p>Choose a person or asset to view its current access.</p>
           : <>
               {type === "hardware_custody" && <p><strong>Current custodian:</strong> {asset?.assignedEmployeeName || "Unassigned"}</p>}
-              <p><strong>Zones:</strong> {formatFacilityZones(currentZones) || "No zones assigned"}</p>
+              {isVisitorAccess
+                ? <p><strong>Checkpoint access:</strong> {(() => {
+                  const subjectCheckpoints = subject && "allowedCheckpoints" in subject ? subject.allowedCheckpoints : undefined;
+                  const allowedCheckpoints: string[] | undefined = currentPermission?.checkpoints ?? subjectCheckpoints;
+                  if (allowedCheckpoints?.length) return allowedCheckpoints.map((id) => {
+                    const item = checkpoints.find((candidate) => candidate.id === id);
+                    return item ? `${facilityZoneLabel(item.zoneId ?? item.zone, organizationZones)} · ${item.name}` : id;
+                  }).join(", ");
+                  return `All checkpoints in ${formatFacilityZones(currentZones, organizationZones) || "no zones assigned"} (existing zone-wide access)`;
+                })()}</p>
+                : <p><strong>Zones:</strong> {formatFacilityZones(currentZones, organizationZones) || "No zones assigned"}</p>}
               {type !== "hardware_custody" && <p className={styles.currentAccessWindow}><span>{currentWindow.start}</span><span>{currentWindow.end}</span></p>}
               {canRevokeAccess && <button type="button" className={styles.revokeAction} disabled={busy || revoking} onClick={() => void revokeCurrentAccess()}><ShieldAlert size={16} aria-hidden="true" />{revoking ? "Revoking…" : "Revoke access"}</button>}
             </>}
@@ -396,7 +421,7 @@ export function RequestDialog({ context, mode = "request", onClose, onSubmitted,
 
       </div>
 
-      <footer className={styles.footer}><button type="button" className={styles.cancelButton} disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className={styles.submitButton} disabled={busy || (type === "hardware_custody" && currentCustodianId === carrierId) || Boolean(!isGrant && visitorRequest)}>{busy ? <><Loader2 size={16} className={styles.spinner} />{isGrant ? "Granting…" : "Submitting…"}</> : <>{isGrant ? "Grant permission" : isNewVisitor ? "Register & request approval" : "Submit request"}<ArrowRight size={16} aria-hidden="true" /></>}</button></footer>
+      <footer className={styles.footer}><button type="button" className={styles.cancelButton} disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className={styles.submitButton} disabled={busy || (type === "hardware_custody" && currentCustodianId === carrierId) || Boolean(!isGrant && visitorRequest)}>{busy ? <><Loader2 size={16} className={styles.spinner} />{isGrant ? "Granting…" : "Submitting…"}</> : <>{isGrant ? isVisitorAccess ? "Grant checkpoint access" : "Grant permission" : isNewVisitor ? "Register & request approval" : "Submit request"}<ArrowRight size={16} aria-hidden="true" /></>}</button></footer>
     </form>
   </dialog>;
 }
