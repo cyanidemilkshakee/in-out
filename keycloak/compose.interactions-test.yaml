@@ -5,7 +5,7 @@ services:
   tests:
     image: inout-native-password-runtime
   keycloak:
-    image: inout-keycloak-interactions:26.8.0
+    image: inout-keycloak-interactions:26.8.1
   kong:
     networks:
       default: {}

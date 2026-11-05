@@ -1,9 +1,10 @@
 "use client"
 
 import { useRef, useState, type FormEvent } from "react"
-import { getCsrfToken } from "next-auth/react"
+import { getCsrfToken, signIn } from "next-auth/react"
 import { StepUpDurationSelect } from "../../frontend/components/admin/StepUpDurationSelect"
 import { DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES, type StepUpDurationMinutes } from "../../lib/userManagementStepUp"
+import { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH } from "../../lib/passwordLimits"
 import styles from "./login.module.css"
 
 type LoginFormProps = {
@@ -98,6 +99,7 @@ export default function LoginForm({ redirectTo, stepUpLogin, initialError, passw
         else if (stepUpLogin && failureCode === "step_up_expired") {
           setError("This re-authentication request has expired. Return to Manage users and try again.")
         }
+        else if (failureCode === "account_action_required") setError("Your account needs an additional security action. Contact your administrator to complete it before signing in.")
         else if (failureCode === "service_unavailable" || errorCode === "Configuration") setError("Sign-in is temporarily unavailable. Please try again later.")
         else setError("Unable to sign in. Check your username, password, and authenticator code if you use one.")
         return
@@ -114,6 +116,22 @@ export default function LoginForm({ redirectTo, stepUpLogin, initialError, passw
         setSubmitting(false)
         pending.current = false
       }
+    }
+  }
+
+  async function beginCompanySignIn() {
+    // Admin re-authentication must prove the same account with a fresh
+    // credential check. Keep the federated route off that flow.
+    if (stepUpLogin || pending.current) return
+    pending.current = true
+    setError(null)
+    setSubmitting(true)
+    try {
+      await signIn("keycloak", { redirectTo })
+    } catch {
+      setError("Company sign-in could not be started. Try again or use your InOut credentials.")
+      setSubmitting(false)
+      pending.current = false
     }
   }
 
@@ -285,11 +303,11 @@ export default function LoginForm({ redirectTo, stepUpLogin, initialError, passw
           </label>
           <label className={styles.field} htmlFor="setup-new-password">
             New password
-            <input id="setup-new-password" name="newPassword" type="password" required minLength={1} maxLength={128} autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} disabled={submitting} />
+            <input id="setup-new-password" name="newPassword" type="password" required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} autoComplete="new-password" placeholder="At least 12 characters" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} disabled={submitting} />
           </label>
           <label className={styles.field} htmlFor="setup-confirm-password">
             Confirm new password
-            <input id="setup-confirm-password" name="confirmPassword" type="password" required minLength={1} maxLength={128} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={submitting} />
+            <input id="setup-confirm-password" name="confirmPassword" type="password" required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} disabled={submitting} />
           </label>
           <details className={styles.authenticator}>
             <summary>Authenticator code</summary>
@@ -316,6 +334,7 @@ export default function LoginForm({ redirectTo, stepUpLogin, initialError, passw
           </button>
         </form>
       ) : (
+      <>
       <form className={styles.form} method="post" action="/api/auth/callback/credentials" onSubmit={submit} aria-busy={submitting}>
         <label className={styles.field} htmlFor="login-username">
           Email or username
@@ -337,6 +356,15 @@ export default function LoginForm({ redirectTo, stepUpLogin, initialError, passw
           {submitting ? "Signing in…" : stepUpLogin ? "Re-authenticate" : "Sign in"}
         </button>
       </form>
+      {!stepUpLogin && !passwordSetupSignoutRequired && (
+        <div className={styles.ssoSection}>
+          <div className={styles.ssoDivider}><span>or</span></div>
+          <button type="button" className={styles.ssoButton} onClick={() => void beginCompanySignIn()} disabled={submitting}>
+            {submitting ? "Connecting…" : "Continue with Zoho"}
+          </button>
+        </div>
+      )}
+      </>
       )}
     </>
   )

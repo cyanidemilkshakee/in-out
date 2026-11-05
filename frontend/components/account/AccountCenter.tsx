@@ -1,5 +1,7 @@
 "use client";
 
+import { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH } from "../../../lib/passwordLimits";
+
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { getCsrfToken } from "next-auth/react";
 import { BadgeCheck, KeyRound, LoaderCircle, ShieldCheck, UserRound } from "lucide-react";
@@ -236,8 +238,8 @@ export function AccountCenter() {
           <label className={styles.field}><span>Email or username</span><input name="username" required maxLength={254} autoComplete="username" autoCapitalize="none" spellCheck={false} value={passwordUpdate.username} onChange={(event) => setPasswordUpdate((value) => ({ ...value, username: event.target.value }))} disabled={busy} /></label>
           <label className={styles.field}><span>Current password</span><input name="currentPassword" type="password" required minLength={1} maxLength={128} autoComplete="current-password" value={passwordUpdate.currentPassword} onChange={(event) => setPasswordUpdate((value) => ({ ...value, currentPassword: event.target.value }))} disabled={busy} /></label>
           <div className={styles.twoColumn}>
-            <label className={styles.field}><span>New password</span><input name="newPassword" type="password" required minLength={1} maxLength={128} autoComplete="new-password" value={passwordUpdate.newPassword} onChange={(event) => setPasswordUpdate((value) => ({ ...value, newPassword: event.target.value }))} disabled={busy} /></label>
-            <label className={styles.field}><span>Confirm new password</span><input name="confirmPassword" type="password" required minLength={1} maxLength={128} autoComplete="new-password" value={passwordUpdate.confirmPassword} onChange={(event) => setPasswordUpdate((value) => ({ ...value, confirmPassword: event.target.value }))} disabled={busy} /></label>
+            <label className={styles.field}><span>New password</span><input name="newPassword" type="password" required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} autoComplete="new-password" placeholder="At least 12 characters" value={passwordUpdate.newPassword} onChange={(event) => setPasswordUpdate((value) => ({ ...value, newPassword: event.target.value }))} disabled={busy} /></label>
+            <label className={styles.field}><span>Confirm new password</span><input name="confirmPassword" type="password" required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} autoComplete="new-password" value={passwordUpdate.confirmPassword} onChange={(event) => setPasswordUpdate((value) => ({ ...value, confirmPassword: event.target.value }))} disabled={busy} /></label>
           </div>
           <label className={styles.field}><span>Authenticator code <small>(if configured)</small></span><input name="otp" inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,8}" maxLength={8} value={passwordUpdate.otp} onChange={(event) => setPasswordUpdate((value) => ({ ...value, otp: event.target.value }))} disabled={busy} /></label>
           <div className={styles.buttonRow}>

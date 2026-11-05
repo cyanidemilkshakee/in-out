@@ -1,7 +1,7 @@
 import { boundedIdentityResponse, verifyKeycloakToken, verifyKeycloakTokenPair, type KeycloakTokenConfig } from "./keycloakTokenValidation"
 import { interactionChallenge, interactionVerifier, keycloakInteractionRequest, validInteractionSubject } from "./keycloakInteractions"
 
-export type CredentialsFailureCode = "credentials" | "account_setup_required" | "profile_setup_required" | "service_unavailable"
+export type CredentialsFailureCode = "credentials" | "account_setup_required" | "profile_setup_required" | "account_action_required" | "service_unavailable"
 export type CredentialsFailureStage = "verify_request" | "verify_http" | "verify_payload" |
   "token_request" | "token_http" | "token_payload" | "token_validation" | "internal"
 export class KeycloakCredentialsError extends Error {
@@ -55,6 +55,7 @@ export async function authenticateKeycloakCredentials(
       const error = await proof.json().catch(() => null)
       if (proof.status === 409 && error?.error === "account_setup_required") throw new KeycloakCredentialsError("account_setup_required")
       if (proof.status === 409 && error?.error === "profile_setup_required") throw new KeycloakCredentialsError("profile_setup_required")
+      if (proof.status === 409 && error?.error === "not_ready") throw new KeycloakCredentialsError("account_action_required")
       if (proof.status === 401 && error?.error === "credentials") throw new KeycloakCredentialsError("credentials")
       throw new KeycloakCredentialsError("service_unavailable", "verify_http", proof.status)
     }

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { ArrowUpRight, Download, ShieldCheck, X } from "lucide-react";
 import type { AccessPermission, Alert, EmployeeActivity, MovementEvent, OrganizationZone, Person } from "../../../lib/types";
 import { assertCsvBound, readExport } from "../../../lib/exportRead";
+import { escapeCsv } from "../../../lib/csv";
 import type { DayPattern } from "../../../lib/analyticsUtils";
 import { facilityZoneLabel, normalizeFacilityZones } from "../../../lib/facilityZones";
 import { averageWorkedHoursPerDay, employeeActivityPatterns, employeeActivityRangeDays, employeeHoursSeries } from "../../../lib/analyticsQueries";
@@ -53,9 +54,7 @@ function alertReviewLabel(alert: Alert) {
 }
 
 function csvCell(value: unknown) {
-  const raw = String(value ?? "");
-  const safe = /^[=+\-@]/.test(raw) ? `'${raw}` : raw;
-  return `"${safe.replaceAll('"', '""')}"`;
+  return escapeCsv(String(value ?? ""));
 }
 
 const PROFILE_ALERT_LIMIT = 5;

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException
 from config import settings
-from sqlalchemy import select, func, tuple_
+from sqlalchemy import String, literal_column, select, func, tuple_
 from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert
 
@@ -53,27 +53,33 @@ def validate_queued_scan_age(payload, *, now=None):
 
 async def _manual_review_candidates(db, barcode, checkpoint_ids, direction):
     """Read bounded pages without confusing an arbitrary sample with absence."""
-    query = select(PermissionRequestModel).where(
-        PermissionRequestModel.data["type"].astext == "manual_override",
-        PermissionRequestModel.data["status"].astext == "approved",
-        PermissionRequestModel.data["consumedAt"].astext.is_(None),
-        func.lower(PermissionRequestModel.data["barcode"].astext) == barcode.lower(),
-        PermissionRequestModel.data["checkpointId"].astext.in_(checkpoint_ids),
-        PermissionRequestModel.data["direction"].astext == direction,
+    def json_text(key: str):
+        return PermissionRequestModel.data.op("->>", return_type=String())(literal_column(f"'{key}'"))
+
+    source_event_id = json_text("eventId")
+    query = select(PermissionRequestModel, Movement).outerjoin(
+        Movement, Movement.id == source_event_id,
+    ).where(
+        json_text("type") == literal_column("'manual_override'"),
+        json_text("status") == literal_column("'approved'"),
+        json_text("consumedAt").is_(None),
+        func.lower(json_text("barcode")) == barcode.lower(),
+        json_text("checkpointId").in_(checkpoint_ids),
+        json_text("direction") == direction,
     ).order_by(PermissionRequestModel.created_at.desc(), PermissionRequestModel.id.desc())
     cursor, checked = None, 0
     while checked < _MAX_MANUAL_REVIEW_CANDIDATES:
         page_query = query if cursor is None else query.where(
             tuple_(PermissionRequestModel.created_at, PermissionRequestModel.id) < cursor)
         page_size = min(_MANUAL_REVIEW_PAGE_SIZE, _MAX_MANUAL_REVIEW_CANDIDATES - checked)
-        requests = (await db.scalars(page_query.limit(page_size).with_for_update()
-            .execution_options(populate_existing=True))).all()
-        for request in requests:
+        rows = (await db.execute(page_query.limit(page_size).with_for_update(
+            of=PermissionRequestModel).execution_options(populate_existing=True))).all()
+        for request, source in rows:
             checked += 1
-            yield request
-        if len(requests) < page_size:
+            yield request, source
+        if len(rows) < page_size:
             return
-        cursor = (requests[-1].created_at, requests[-1].id)
+        cursor = (rows[-1][0].created_at, rows[-1][0].id)
 
     # One identifier proves whether the bounded search was complete. Do not
     # load another JSON document or silently deny when more candidates exist.
@@ -88,7 +94,7 @@ async def _manual_review_candidates(db, barcode, checkpoint_ids, direction):
 async def _approved_manual_review(db, barcode, subject_id, subject_kind, checkpoint_id, direction, hardware_ids, now, states, current_custody, current_access):
     """Lock and return one unused approval whose entry window is still open."""
     checkpoint_ids = [checkpoint_id]
-    async for request in _manual_review_candidates(db, barcode, checkpoint_ids, direction):
+    async for request, source in _manual_review_candidates(db, barcode, checkpoint_ids, direction):
         data = request.data or {}
         try:
             valid_from = parse_validity(data.get("validFrom"))
@@ -103,7 +109,6 @@ async def _approved_manual_review(db, barcode, subject_id, subject_kind, checkpo
         source_event_id = data.get("eventId")
         if not source_event_id:
             continue
-        source = await db.get(Movement, source_event_id)
         if not source or source.result != "denied":
             continue
         if canonical_checkpoint_id(source.checkpoint_id) != canonical_checkpoint_id(data.get("checkpointId")):
@@ -140,7 +145,7 @@ async def _approved_manual_review(db, barcode, subject_id, subject_kind, checkpo
     return None
 
 
-async def record_scan(db, key, payload, terminal_id, request_scope=None):
+async def record_scan(db, key, payload, terminal_id, request_scope=None, *, validated_checkpoint_id=None):
     expected_operator = getattr(payload, "expected_operator_subject", None)
     if expected_operator and terminal_id != "browser:" + expected_operator:
         raise HTTPException(403, "This scan belongs to another operator account")
@@ -199,7 +204,15 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
     # Check only after receipt lookup: an existing receipt is authoritative and
     # can safely replay without another movement. A miss must respect today's
     # supported retention horizon before creating any business state.
-    checkpoint_id = await require_registered_checkpoint(db, payload.checkpoint_id)
+    # HTTP terminal handlers already validate and shared-lock this checkpoint
+    # while checking the terminal assignment. Reuse that same-transaction proof
+    # instead of repeating the checkpoint and zone queries on every fresh scan.
+    if validated_checkpoint_id is None:
+        checkpoint_id = await require_registered_checkpoint(db, payload.checkpoint_id)
+    else:
+        checkpoint_id = canonical_checkpoint_id(payload.checkpoint_id.strip())
+        if checkpoint_id != validated_checkpoint_id:
+            raise HTTPException(422, "Choose a registered checkpoint")
     validate_queued_scan_age(payload)
     subject = (await db.execute(select(Subject).where(
         func.lower(Subject.barcode) == payload.barcode.strip().lower()
@@ -316,6 +329,9 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None):
                 data["status"] = status_map.get(permission_state, data.get("status", "inactive"))
         if isinstance(permission.get("zones"), list):
             data["allowedZones"] = permission["zones"]
+        # Canonical selectors take precedence, including an explicit empty
+        # list. Otherwise retain legacy selectors as an additional restriction;
+        # the evaluator always intersects them with permitted zones.
         if isinstance(permission.get("checkpoints"), list):
             data["allowedCheckpoints"] = permission["checkpoints"]
         if permission.get("validFrom"):

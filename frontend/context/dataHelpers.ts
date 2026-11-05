@@ -11,7 +11,7 @@ export function mergeById<T extends { id: string }>(current: T[], updates: T[]) 
 export function scopeForPath(pathname: string): DataScope {
   if (pathname.startsWith("/terminal")) return "terminal";
   if (pathname.startsWith("/admin/dashboard")) return "dashboard";
-  if (pathname.startsWith("/admin/logs")) return "registry";
+  if (pathname.startsWith("/admin/logs")) return "logs";
   if (pathname.startsWith("/admin/registry")) return "registry";
   if (pathname.startsWith("/admin/permissions")) return "permissions";
   if (pathname.startsWith("/admin/alerts")) return "alerts";

@@ -22,16 +22,17 @@ from auth import verify_admin_request
 from database import get_db, get_read_db
 from data_limits import bounded_rows, precharge_mutation_response
 from event_outbox import enqueue_changed, enqueue_presence
-from models import AccessPermission, Alert, AlertReview, Checkpoint, CriticalAlertTrigger, HardwareAsset, Person, Subject
+from models import Alert, AlertReview, Checkpoint, CriticalAlertTrigger, Subject
 from critical_entry_restrictions import release_critical_entry_restriction
 from alert_reviews import (
     AlertReviewInput, WarningResetInput, acknowledge_alert, enrich_alert_documents, review_alert, reset_subject_warnings,
 )
 from alert_rule_assignments import (
     AlertRuleAssignmentInput, alert_rule_catalog, list_alert_rule_assignments, replace_alert_rule_assignment,
+    lock_scheduled_alert_evaluation,
 )
 from alert_queries import command_center_assignments, confirmed_people_warning_total, focused_alert_people, current_subject_warning_documents
-from zone_access import admin_zone_ids, require_alert_scope, require_subject_scope, subject_zone_condition
+from zone_access import admin_zone_ids, require_alert_scope, require_subject_scope, require_subject_grant_scope, subject_zone_condition
 import logging
 
 logger = logging.getLogger(__name__)
@@ -63,11 +64,7 @@ async def alert_rule_assignment_directory(
 ) -> dict[str, Any]:
     """List default/custom rule selections for registered employees and hardware."""
     zone_ids = await admin_zone_ids(db, _admin)
-    visible_ids = list((await db.scalars(select(Subject.id)
-        .outerjoin(Person, Person.subject_id == Subject.id)
-        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
-        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
-        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id))).all())
+    visible_ids = select(Subject.id).where(subject_zone_condition(zone_ids)).correlate(None)
     if subjectId:
         await require_subject_scope(db, _admin, subjectId)
     return await list_alert_rule_assignments(db, subjectId, subject_ids=visible_ids)
@@ -80,7 +77,11 @@ async def update_alert_rule_assignment(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
+    # Scheduled evaluation and assignment writes acquire the policy lock before
+    # subject locks. Check visibility first, then preserve that global order.
     await require_subject_scope(db, admin, subject_id)
+    await lock_scheduled_alert_evaluation(db)
+    await require_subject_grant_scope(db, admin, subject_id)
     assignment, changed = await replace_alert_rule_assignment(db, subject_id, payload.ruleIds,
         admin.get("sub", "unknown"), payload.expectedRevision, payload.irregularitySkipDates)
     if changed:
@@ -131,11 +132,7 @@ async def list_alerts(
     from event_outbox import read_event_revision
     event_revision = await read_event_revision(db)
     zone_ids = await admin_zone_ids(db, actor)
-    visible_subject_ids = list((await db.scalars(select(Subject.id)
-        .outerjoin(Person, Person.subject_id == Subject.id)
-        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
-        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
-        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id))).all())
+    visible_subject_ids = select(Subject.id).where(subject_zone_condition(zone_ids)).correlate(None)
     # -- Alerts query --
     # Retained reviews appear once, including after their source alert is purged.
     archived_status = case(
@@ -187,9 +184,10 @@ async def list_alerts(
         subject_id = subjectId.strip()
         if not subject_id:
             raise HTTPException(422, "Subject filter must not be blank")
-        if subject_id not in visible_subject_ids:
+        barcode = await db.scalar(select(Subject.barcode).where(
+            Subject.id == subject_id, subject_zone_condition(zone_ids)))
+        if barcode is None:
             raise HTTPException(404, "Subject not found")
-        barcode = await db.scalar(select(Subject.barcode).where(Subject.id == subject_id))
         legacy_identity = func.btrim(records.c.data["subjectId"].astext) == subject_id
         if barcode:
             # Legacy barcode matches apply only when no explicit identity was supplied.
@@ -250,7 +248,8 @@ async def list_alerts(
         recent_res = await db.execute(subject_history.order_by(records.c.created_at.desc(), records.c.id.asc()).limit(5))
         recent_alerts = [SimpleNamespace(**row) for row in recent_res.mappings().all()]
     enriched = await enrich_alert_documents(db, alerts + recent_alerts, focused=True,
-        subject_ids=[subjectId.strip()] if view == "subject" else visible_subject_ids)
+        subject_ids=[subjectId.strip()] if view == "subject" else None,
+        subject_query=visible_subject_ids if view != "subject" else None)
 
     # Share the evaluator's canonical row identities and global rule catalog.
     # Retained serialized IDs must not redirect a rule's displayed trigger count.
@@ -340,7 +339,7 @@ async def reset_alert_warnings(
     db: AsyncSession = Depends(get_db),
     admin: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
-    await require_subject_scope(db, admin, subject_id)
+    await require_subject_grant_scope(db, admin, subject_id)
     result = await reset_subject_warnings(db, subject_id, admin.get("sub", "unknown"), payload.reason)
     if "auditEvent" in result:
         await enqueue_changed(db)
@@ -363,7 +362,7 @@ async def release_entry_restriction(
         raise HTTPException(status_code=404, detail="Entry restriction not found")
     if marker.subject_id is None:
         raise HTTPException(status_code=422, detail="This alert has no registered subject entry restriction")
-    await require_subject_scope(db, admin, marker.subject_id)
+    await require_subject_grant_scope(db, admin, marker.subject_id)
     result = await release_critical_entry_restriction(db, alert_id, admin.get("sub", "unknown"), payload.reason)
     await enqueue_changed(db)
     await db.commit()

@@ -47,7 +47,7 @@ class UserCreateRequest(BaseModel):
     first_name: str = Field("", alias="firstName", max_length=100)
     last_name: str = Field("", alias="lastName", max_length=100)
     email: str = Field("", max_length=320)
-    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=1, max_length=128)
+    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=12, max_length=128)
     temporary_password: bool = Field(True, alias="temporaryPassword")
     roles: list[Literal["zone-admin", "operator"]] = Field(default_factory=list)
     enabled: bool = True
@@ -64,6 +64,8 @@ class UserCreateRequest(BaseModel):
     @classmethod
     def valid_password(cls, value: str) -> str:
         # Preserve the passphrase for Keycloak's configured password policy.
+        if not value.strip():
+            raise ValueError("Password must contain a non-whitespace character")
         return value
 
 
@@ -106,12 +108,14 @@ class RolesRequest(BaseModel):
 
 class PasswordResetRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    password: str = Field(min_length=1, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
     temporary: bool = True
 
     @field_validator("password")
     @classmethod
     def valid_password(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("Password must contain a non-whitespace character")
         return value
 
 
@@ -313,9 +317,12 @@ async def list_users(
 @router.get("/users/{user_id}")
 async def get_user(user_id: str, token: str = Depends(_admin_context), db: AsyncSession = Depends(get_db),
     actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
-    user = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
+    user_response, roles = await asyncio.gather(
+        _request(token, "GET", f"users/{quote(user_id, safe='')}"),
+        _user_roles(token, user_id),
+    )
+    user = user_response.json()
     assignment = await db.get(TerminalCheckpointAssignment, "browser:" + user_id)
-    roles = await _user_roles(token, user_id)
     checkpoint_id = assignment.checkpoint_id if assignment else None
     if not can_manage_user(has_master_admin_role(actor), roles):
         raise HTTPException(404, "User not found")
@@ -517,7 +524,13 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
         # second application save cannot race the restoration.
         await db.rollback()
         if recovery_failed:
-            raise HTTPException(503, f"Save incomplete. Recovery is required for Keycloak account {user_id}; reload its current state and inspect it in Keycloak before retrying.") from error
+            protection = ""
+            if role_mutations or (profile_attempted and "enabled" in payload.model_fields_set):
+                logout_error, cutoff_error = await _invalidate_user_sessions(token, user_id)
+                protection = (" Existing sessions and application tokens were revoked."
+                    if logout_error is None and cutoff_error is None else
+                    " Session revocation is incomplete; use End sessions after service recovery.")
+            raise HTTPException(503, f"Save incomplete. Recovery is required for Keycloak account {user_id}; reload its current state and inspect it in Keycloak before retrying.{protection}") from error
         raise _recovered_failure(error, "Save was rolled back; the previous account settings were restored.") from error
     if (("enabled" in payload.model_fields_set and payload.enabled is False)
             or payload.roles is not None):
@@ -537,6 +550,21 @@ async def replace_user_roles(user_id: str, payload: RolesRequest, token: str = D
     return {"roles": saved["roles"]}
 
 
+async def _invalidate_user_sessions(token: str, user_id: str) -> tuple[Exception | None, Exception | None]:
+    """Attempt both protections; order the access-token cutoff after logout."""
+    logout_error = None
+    try:
+        await _request(token, "POST", f"users/{quote(user_id, safe='')}/logout")
+    except (HTTPException, httpx.HTTPError) as error:
+        logout_error = error
+    revocation_error = None
+    try:
+        await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
+    except HTTPException as error:
+        revocation_error = error
+    return logout_error, revocation_error
+
+
 @router.put("/users/{user_id}/password")
 async def reset_password(user_id: str, payload: PasswordResetRequest, token: str = Depends(_admin_context),
     actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
@@ -544,9 +572,43 @@ async def reset_password(user_id: str, payload: PasswordResetRequest, token: str
         raise HTTPException(403, "Only a master-admin can reset account passwords")
     if not can_manage_user(True, await _user_roles(token, user_id)):
         raise HTTPException(403, "This account can only be managed through the master-admin bootstrap")
-    await _request(token, "PUT", f"users/{quote(user_id, safe='')}/reset-password", {
-        "type": "password", "value": payload.password, "temporary": payload.temporary,
-    })
+    reset_error = None
+    try:
+        await _request(token, "PUT", f"users/{quote(user_id, safe='')}/reset-password", {
+            "type": "password", "value": payload.password, "temporary": payload.temporary,
+        })
+    except HTTPException as error:
+        if error.status_code < 500:
+            # A definitive provider rejection has not changed the credential.
+            raise
+        reset_error = error
+    except httpx.HTTPError as error:
+        reset_error = error
+    # Credential changes alone do not invalidate locally verified access JWTs.
+    # Attempt both protections even if one store is unavailable. Write the
+    # cutoff after logout so tokens minted while logout is in flight are covered.
+    logout_error, revocation_error = await _invalidate_user_sessions(token, user_id)
+    if reset_error is not None:
+        # A dropped response may follow a committed password write. Never
+        # automatically retry that write or leave prior sessions untouched.
+        detail = "Password reset could not be confirmed. Try signing in with the new password before deciding whether another reset is needed. "
+        if logout_error is not None or revocation_error is not None:
+            failures = []
+            if logout_error is not None:
+                failures.append("Keycloak sessions could not be ended")
+            if revocation_error is not None:
+                failures.append("active application tokens could not be revoked")
+            detail += " and ".join(failures) + ". Use End sessions after service recovery."
+        else:
+            detail += "Existing Keycloak sessions and application tokens were revoked."
+        raise HTTPException(503, detail) from reset_error
+    if revocation_error is not None:
+        detail = ("Password changed, but Keycloak sessions could not be ended and active application tokens could not be revoked. "
+                  if logout_error is not None else "Password changed, but active application tokens could not be revoked. ")
+        raise HTTPException(503, detail + "Use End sessions after service recovery.") from revocation_error
+    if logout_error is not None:
+        raise HTTPException(503,
+            "Password changed and existing application tokens were revoked, but Keycloak sessions could not be ended. Use End sessions after identity service recovery.") from logout_error
     return {"updated": True}
 
 
@@ -557,12 +619,14 @@ async def end_user_sessions(user_id: str, token: str = Depends(_admin_context),
         raise HTTPException(403, "Only a master-admin can end account sessions")
     if not can_manage_user(True, await _user_roles(token, user_id)):
         raise HTTPException(403, "This account can only be managed through the master-admin bootstrap")
-    await _request(token, "POST", f"users/{quote(user_id, safe='')}/logout")
-    try:
-        await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
-    except HTTPException as error:
+    logout_error, revocation_error = await _invalidate_user_sessions(token, user_id)
+    if revocation_error is not None:
+        detail = ("Keycloak sessions could not be ended and active application tokens could not be revoked. "
+                  if logout_error is not None else "Keycloak sessions ended, but active application tokens could not be revoked. ")
+        raise HTTPException(503, detail + "Retry End sessions after service recovery.") from revocation_error
+    if logout_error is not None:
         raise HTTPException(503,
-            "Keycloak sessions ended, but active application tokens could not be revoked. Retry after authentication service recovery.") from error
+            "Existing application tokens were revoked, but Keycloak sessions could not be ended. Retry End sessions after identity service recovery.") from logout_error
     return {"updated": True}
 
 
@@ -583,9 +647,24 @@ async def delete_user(user_id: str, token: str = Depends(_admin_context),
     assignment = await db.get(TerminalCheckpointAssignment, identity, with_for_update=True)
     try:
         await _request(token, "DELETE", f"users/{quote(user_id, safe='')}")
-    except Exception:
+    except (HTTPException, httpx.HTTPError) as error:
         await db.rollback()
-        raise
+        if isinstance(error, HTTPException) and error.status_code < 500:
+            raise
+        try:
+            await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
+            protection = " Existing application tokens were revoked."
+        except HTTPException:
+            protection = " Active application tokens could not be revoked; use End sessions after service recovery."
+        raise HTTPException(503, "Account deletion could not be confirmed. Inspect the account before retrying." + protection) from error
+
+    # Revoke before local cleanup: a failed database commit cannot leave a
+    # deleted account's signed access tokens active.
+    revocation_error = None
+    try:
+        await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
+    except HTTPException as error:
+        revocation_error = error
 
     try:
         if assignment is not None:
@@ -597,11 +676,11 @@ async def delete_user(user_id: str, token: str = Depends(_admin_context),
     except Exception as error:
         await db.rollback()
         logger.exception("Keycloak account %s was deleted but local assignment cleanup failed", user_id)
+        protection = (" Active application tokens could not be revoked; use End sessions after service recovery."
+            if revocation_error is not None else " Existing application tokens were revoked.")
         raise HTTPException(503,
-            "The identity account was deleted, but its application assignments could not be cleared. Contact an administrator.") from error
+            "The identity account was deleted, but its application assignments could not be cleared. Contact an administrator." + protection) from error
 
-    try:
-        await revoke_principal_tokens(settings.KEYCLOAK_ISSUER, user_id)
-    except HTTPException as error:
+    if revocation_error is not None:
         raise HTTPException(503,
-            "The account was deleted, but active application tokens could not be revoked. Retry after authentication service recovery.") from error
+            "The account was deleted, but active application tokens could not be revoked. Use End sessions after authentication service recovery.") from revocation_error

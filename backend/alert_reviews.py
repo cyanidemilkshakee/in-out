@@ -90,7 +90,7 @@ def _resolve_from_directory(data, by_id, by_barcode):
     return matches[0] if len(matches) == 1 else None
 
 
-async def warning_directory(db, *, subject_ids=None, barcodes=None):
+async def warning_directory(db, *, subject_ids=None, barcodes=None, subject_query=None):
     """Bulk, authoritative warning counts independent of alert pagination/retention."""
     # This directory needs names, not complete subject metadata. Project the
     # JSON field in SQL so unrelated metadata is never loaded for alert pages.
@@ -101,10 +101,16 @@ async def warning_directory(db, *, subject_ids=None, barcodes=None):
         .outerjoin(Person, Person.subject_id == Subject.id)
         .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
         .order_by(Subject.id))
-    focused = subject_ids is not None or barcodes is not None
+    focused = subject_ids is not None or barcodes is not None or subject_query is not None
     if focused:
-        subjects_query = subjects_query.where(or_(Subject.id.in_(subject_ids or []),
-            func.lower(Subject.barcode).in_(barcodes or [])))
+        filters = []
+        if subject_ids is not None:
+            filters.append(Subject.id.in_(subject_ids))
+        if subject_query is not None:
+            filters.append(Subject.id.in_(subject_query))
+        if barcodes is not None:
+            filters.append(func.lower(Subject.barcode).in_(barcodes))
+        subjects_query = subjects_query.where(or_(*filters))
     subject_rows = await bounded_rows(db, subjects_query)
     subjects = [row[0] for row in subject_rows]
     names = {row[0].id: row[1] for row in subject_rows}
@@ -137,7 +143,7 @@ async def warning_directory(db, *, subject_ids=None, barcodes=None):
     return subjects, by_id, by_barcode, summaries, resets
 
 
-async def enrich_alert_documents(db, alerts, *, focused=False, subject_ids=None):
+async def enrich_alert_documents(db, alerts, *, focused=False, subject_ids=None, subject_query=None):
     """Return alert items and all registered-subject warning summaries in bulk."""
     ids = [alert.id for alert in alerts]
     if not focused:
@@ -150,7 +156,7 @@ async def enrich_alert_documents(db, alerts, *, focused=False, subject_ids=None)
         selected_ids.update(binding[1] for binding in bindings if binding and binding[0] == "id")
         barcodes = {binding[1] for binding in bindings if binding and binding[0] == "barcode"}
         _, by_id, by_barcode, summaries, resets = await warning_directory(db,
-            subject_ids=sorted(selected_ids), barcodes=sorted(barcodes))
+            subject_ids=sorted(selected_ids), barcodes=sorted(barcodes), subject_query=subject_query)
     items = []
     for alert in alerts:
         review = reviews.get(alert.id)

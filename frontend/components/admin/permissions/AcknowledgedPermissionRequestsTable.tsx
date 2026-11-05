@@ -15,7 +15,8 @@ export function AcknowledgedPermissionRequestsTable({ permissions, people }: {
 }) {
   const [sortKey, setSortKey] = useState<RegistrySortKey>("decidedAt");
   const [sortDirection, setSortDirection] = useState<"asc" | "desc">("desc");
-  const employeeStatuses = new Map(people.filter((person) => person.type === "employee").map((person) => [person.id, person.status] as const));
+  const employeeStatuses = useMemo(() => new Map(people.filter((person) => person.type === "employee")
+    .map((person) => [person.id, person.status] as const)), [people]);
   const sortedPermissions = useMemo(() => {
     const valueFor = (permission: PermissionRequest, key: RegistrySortKey) => {
       switch (key) {

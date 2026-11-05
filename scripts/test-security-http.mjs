@@ -56,7 +56,7 @@ try {
     sub: "synthetic-user", name: "Synthetic User", roles: [role], provider: "keycloak",
     access_token: access(role), refresh_token: "synthetic", expires_at: Math.floor(Date.now() / 1000) + 600,
   } });
-  const adminCookie = `${cookieName}=${await session("admin")}`;
+  const adminCookie = `${cookieName}=${await session("zone-admin")}`;
   const operatorCookie = `${cookieName}=${await session("operator")}`;
   for (const path of ["/admin/permissions", "/admin/registry", "/terminal"]) {
     const response = await fetch(`${appUrl}${path}`, { headers: { Cookie: adminCookie }, redirect: "manual" });

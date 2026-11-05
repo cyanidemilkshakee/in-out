@@ -111,6 +111,7 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run test:auth:http
+      - run: npm run test:auth:password-updates
       - run: node scripts/test-security-http.mjs
       - run: docker build -t inout-app-security .
       - name: Scan standalone application runtime
@@ -129,7 +130,7 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - quay.io/keycloak/keycloak:26.8.0
+          - quay.io/keycloak/keycloak:26.8.1
           - temporalio/server:1.32.1@sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049
           - temporalio/ui:2.55.0@sha256:3899d5cf749b5555c9f798d46f2423b1d6190ea391ca713db5d1bba961759e58
     steps:

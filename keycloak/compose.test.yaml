@@ -34,11 +34,11 @@ services:
       postgres: {condition: service_healthy}
 
   keycloak:
-    image: inout-keycloak:${KEYCLOAK_TEST_VERSION:-26.8.0}
+    image: inout-keycloak:${KEYCLOAK_TEST_VERSION:-26.8.1}
     build:
       context: .
       args:
-        KEYCLOAK_VERSION: ${KEYCLOAK_TEST_VERSION:-26.8.0}
+        KEYCLOAK_VERSION: ${KEYCLOAK_TEST_VERSION:-26.8.1}
     mem_limit: 1g
     command: start --optimized --http-enabled=true --import-realm
     environment:
@@ -136,7 +136,7 @@ services:
   tests:
     build:
       context: ../backend
-    command: [python, /tests/check_keycloak.py]
+    command: [python, -m, unittest, discover, -s, /tests, -p, "check_*.py"]
     volumes:
       - ./tests:/tests:ro
     depends_on:

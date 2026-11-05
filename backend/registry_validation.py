@@ -1,11 +1,12 @@
 """Registry metadata validation shared by subject writes and permission grants."""
 from typing import Any
+import re
 
 from fastapi import HTTPException
 from sqlalchemy import exc
 
 from access_validation import validate_zones
-from facility_zones import normalize_facility_document
+from facility_zones import canonical_checkpoint_id, normalize_facility_document
 from schemas import SubjectCreate
 from subject_metadata import current_subject_metadata
 
@@ -18,6 +19,24 @@ METADATA_LIMITS = {
     "owner": 100,
     "category": 80,
 }
+
+
+def validated_checkpoint_ids(value) -> list[str]:
+    """Bound and normalize checkpoint selectors before database scope checks."""
+    if not isinstance(value, list) or len(value) > 16:
+        raise HTTPException(422, "Allowed checkpoints must be a list of at most 16 checkpoint IDs")
+    result = []
+    for item in value:
+        if not isinstance(item, str):
+            raise HTTPException(422, "Allowed checkpoints must contain registered checkpoint IDs")
+        checkpoint_id = canonical_checkpoint_id(item.strip())
+        if (not checkpoint_id or len(checkpoint_id) > 64
+                or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", checkpoint_id)):
+            raise HTTPException(422, "Allowed checkpoints must contain registered checkpoint IDs")
+        if checkpoint_id in result:
+            raise HTTPException(422, "Allowed checkpoint IDs must be unique")
+        result.append(checkpoint_id)
+    return result
 
 
 def validated_metadata(payload: SubjectCreate, *, known_zone_ids=None) -> dict[str, Any]:
@@ -33,6 +52,8 @@ def validated_metadata(payload: SubjectCreate, *, known_zone_ids=None) -> dict[s
     incoming = normalize_facility_document(incoming)
     if "allowedZones" in incoming:
         incoming["allowedZones"] = validate_zones(incoming["allowedZones"], known_zone_ids=known_zone_ids)
+    if "allowedCheckpoints" in incoming:
+        incoming["allowedCheckpoints"] = validated_checkpoint_ids(incoming["allowedCheckpoints"])
     for field, limit in METADATA_LIMITS.items():
         value = incoming.get(field)
         if value is None:

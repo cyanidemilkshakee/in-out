@@ -352,7 +352,7 @@ class KeycloakAdminRecoveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_regular_admin_cannot_create_or_manage_admin_accounts_or_security(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {
             "sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
-        create = await self.create()
+        create = await self.create(roles=["zone-admin"], firstName="New", lastName="Admin", email="new@example.invalid")
         self.assertEqual(create.status_code, 403, create.text)
         self.assertEqual(self.identity.calls, [])
 
@@ -372,6 +372,51 @@ class KeycloakAdminRecoveryTests(unittest.IsolatedAsyncioTestCase):
         result = await self.client.patch("/v1/keycloak/users/existing", json={"enabled": False})
         self.assertEqual(result.status_code, 403, result.text)
         self.assertFalse(any(method in {"PUT", "POST", "DELETE"} for method, _, _ in self.identity.calls))
+
+
+    async def test_ambiguous_delete_revokes_existing_tokens_without_retrying_provider_write(self):
+        self.identity.roles = {"operator"}
+        self.identity.fail("DELETE", "users/existing")
+        with patch("routers.keycloak_admin.revoke_principal_tokens", new=AsyncMock()) as revoke:
+            result = await self.client.delete("/v1/keycloak/users/existing")
+        self.assertEqual(result.status_code, 503, result.text)
+        self.assertIn("could not be confirmed", result.json()["detail"])
+        revoke.assert_awaited_once()
+        self.assertEqual(sum(method == "DELETE" and path == "users/existing"
+            for method, path, _ in self.identity.calls), 1)
+        self.assertEqual(self.db.rollbacks, 1)
+
+    async def test_definitive_delete_rejection_leaves_tokens_untouched(self):
+        self.identity.roles = {"operator"}
+        self.identity.fail("DELETE", "users/existing", status=403)
+        with patch("routers.keycloak_admin.revoke_principal_tokens", new=AsyncMock()) as revoke:
+            result = await self.client.delete("/v1/keycloak/users/existing")
+        self.assertEqual(result.status_code, 403, result.text)
+        revoke.assert_not_awaited()
+
+    async def test_deleted_identity_tokens_are_revoked_before_local_cleanup_can_fail(self):
+        self.identity.roles = {"operator"}
+        self.db.fail_commit = True
+        async def revoke(issuer, subject):
+            self.assertTrue(self.identity.deleted)
+            self.assertEqual(self.db.commits, 0)
+        with patch("routers.keycloak_admin.revoke_principal_tokens", new=AsyncMock(side_effect=revoke)) as cutoff, \
+             patch("routers.keycloak_admin.enqueue_changed", new=AsyncMock()):
+            result = await self.client.delete("/v1/keycloak/users/existing")
+        self.assertEqual(result.status_code, 503, result.text)
+        self.assertIn("Existing application tokens were revoked", result.json()["detail"])
+        cutoff.assert_awaited_once()
+
+    async def test_failed_security_write_recovery_attempts_both_session_protections(self):
+        self.identity.fail("PUT", "users/existing", count=2)
+        with patch("routers.keycloak_admin.revoke_principal_tokens", new=AsyncMock()) as revoke:
+            result = await self.save(enabled=False)
+        self.assertEqual(result.status_code, 503, result.text)
+        self.assertIn("Recovery is required", result.json()["detail"])
+        self.assertIn("sessions and application tokens were revoked", result.json()["detail"])
+        self.assertTrue(any(method == "POST" and path == "users/existing/logout"
+            for method, path, _ in self.identity.calls))
+        revoke.assert_awaited_once()
 
 
 @unittest.skipUnless(os.getenv("TEST_DATABASE_URL"), "Set TEST_DATABASE_URL for isolated PostgreSQL integration tests")

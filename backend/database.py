@@ -62,8 +62,11 @@ def is_database_timeout(error):
 # Both engines have identical safety bounds, including when reads use a replica.
 engine = create_async_engine(settings.DATABASE_URL, **database_engine_options())
 
-# --- Read engine (a replica when READ_DATABASE_URL is configured) ---
-read_engine = create_async_engine(settings.READ_DATABASE_URL, **database_engine_options())
+# Share the pool when reads target the primary. This is the default setup and
+# avoids maintaining two independent pools (and up to 30 idle/open connections)
+# to the same PostgreSQL server. A configured read replica still gets its own.
+read_engine = (engine if settings.READ_DATABASE_URL == settings.DATABASE_URL
+               else create_async_engine(settings.READ_DATABASE_URL, **database_engine_options()))
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,

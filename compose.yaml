@@ -213,12 +213,14 @@ services:
     restart: unless-stopped
 
   keycloak:
-    networks: [web, identity-db]
-    image: inout-keycloak:${KEYCLOAK_VERSION:-26.8.0}
+    # Keep Keycloak on private app/database networks and the existing
+    # non-internal gateway network for external OIDC provider callbacks.
+    networks: [edge, web, identity-db]
+    image: inout-keycloak:${KEYCLOAK_VERSION:-26.8.1}
     build:
       context: ./keycloak
       args:
-        KEYCLOAK_VERSION: ${KEYCLOAK_VERSION:-26.8.0}
+        KEYCLOAK_VERSION: ${KEYCLOAK_VERSION:-26.8.1}
     # Database/health augmentation is cached in the image, rather than repeated
     # while the rest of the application is waiting for the identity provider.
     command: start --optimized --http-enabled=true --import-realm

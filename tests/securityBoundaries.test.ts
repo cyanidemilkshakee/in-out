@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { recordPathSegment } from "../lib/apiPath";
+import { escapeCsv } from "../lib/csv";
 import { readJsonBody, RequestBodyError } from "../lib/requestJson";
 import { collectBoundedPages, CollectionByteBudget, CollectionCapacityError } from "../lib/boundedCollection";
 import { createElement } from "react";
@@ -10,6 +11,14 @@ import { emptyData } from "../frontend/context/dataDefaults";
 import { normalizeDashboardMovement, normalizeTerminalSnapshot } from "../lib/normalizeDashboard";
 import type { DataActions, DataState } from "../frontend/context/dataTypes";
 import type { CreateEmployeeInput, CreateHardwareAssetInput, CreateVisitorInput, DataService, Person, HardwareAsset, PermissionRequest, RecordScanInput, RecordScanResult } from "../lib/types";
+
+test("CSV cells neutralize formulas after whitespace and preserve one quoted cell", () => {
+  for (const payload of ["=1+1", "+1+1", "-1+1", "@SUM(A1)", "\t=1+1", "\r=1+1", "\n=1+1", "  =1+1", "\tordinary text"]) {
+    assert.equal(escapeCsv(payload), `"'${payload.replaceAll('"', '""')}"`);
+  }
+  assert.equal(escapeCsv('Employee, "Example"'), '"Employee, ""Example"""');
+  assert.equal(escapeCsv("Employee"), '"Employee"');
+});
 
 test("command identifiers cannot change routes through traversal or encoding", () => {
   for (const value of ["..", ".", "../../keycloak/users/x", "a/b", "a\\b", "%2e%2e", "x?path=y", "x#fragment", "x\nfoo", "a".repeat(201)]) {

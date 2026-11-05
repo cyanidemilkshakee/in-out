@@ -17,7 +17,7 @@ def change(revision, previous, **fields):
 
 
 class PresenceReplayTests(unittest.IsolatedAsyncioTestCase):
-    async def collect(self, messages, watermarks, rows, *, role="admin", checkpoints=None):
+    async def collect(self, messages, watermarks, rows, *, role="zone-admin", checkpoints=None):
         subscribed = asyncio.Event()
 
         async def subscribe(ready):

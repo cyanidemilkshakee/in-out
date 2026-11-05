@@ -89,7 +89,9 @@ class DatabaseTimeoutUnitTests(unittest.IsolatedAsyncioTestCase):
 
         server = await asyncio.start_server(stall, "127.0.0.1", 0)
         port = server.sockets[0].getsockname()[1]
-        configured = Settings(_env_file=None, DATABASE_CONNECT_TIMEOUT_SECONDS=0.1)
+        # Allow Windows/import scheduling overhead before measuring a stalled
+        # PostgreSQL handshake; the outer deadline still detects a missing bound.
+        configured = Settings(_env_file=None, DATABASE_CONNECT_TIMEOUT_SECONDS=0.5)
         engine = create_async_engine(f"postgresql+asyncpg://test:test@127.0.0.1:{port}/inout_test?ssl=disable",
             **database.database_engine_options(configured))
         try:

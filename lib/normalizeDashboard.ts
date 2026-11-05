@@ -408,6 +408,8 @@ export function normalizeLogsSnapshot(raw: unknown): AppDataSnapshot {
   const items = (r.items ?? []) as unknown[];
   return {
     ...EMPTY,
+    people: (Array.isArray(r.people) ? r.people : []).map((person) => normalizeSubjectZones(person as AppDataSnapshot["people"][number])),
+    permissionRequests: ((r.permissionRequests ?? []) as unknown[]).map(normalizePermissionRequest),
     auditEvents: items.map(normalizeAuditEvent),
     // movements are lazy-fetched by queryMovements on the logs page — start empty
     movements: [],

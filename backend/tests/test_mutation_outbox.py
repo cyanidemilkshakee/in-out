@@ -37,7 +37,10 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
              patch("routers.terminal.enqueue_presence", new=AsyncMock(side_effect=enqueue)) as queue:
             payload = BrowserScanPayload(barcode="p1", checkpointId="cp-main")
             returned = await terminal.scan(payload, uuid.uuid4(), db, {"sub": "operator"})
-            self.assertIs(returned, result)
+            # The response projects a fresh terminal-safe receipt; persistence
+            # and delivery keep the original business result unchanged.
+            self.assertEqual(returned, result)
+            self.assertIsNot(returned, result)
             self.assertEqual(events, ["enqueue", "commit"])
             db.info["scan_replayed"] = True
             await terminal.scan(payload, uuid.uuid4(), db, {"sub": "operator"})

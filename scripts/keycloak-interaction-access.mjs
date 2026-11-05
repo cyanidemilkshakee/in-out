@@ -4,20 +4,22 @@ import { localKeycloakRequest } from "./keycloak-account-access.mjs";
 
 export const INTERACTION_PROTOCOL = "inout-app-interactions-v1";
 export const INTERACTION_EXTENSION_VERSION = 1;
-export const INTERACTION_KEYCLOAK_VERSION = "26.8.0";
+export const INTERACTION_KEYCLOAK_VERSION = "26.8.1";
 
-export async function interactionProviderReady(api, adminBase, client, request = localKeycloakRequest) {
+export async function interactionProviderReady(api, adminBase, client, request = localKeycloakRequest,
+  clientSecret = process.env.KEYCLOAK_CLIENT_SECRET) {
   if (client?.clientId !== "inout-frontend" || typeof client.id !== "string" || !client.id ||
       client.enabled !== true || client.publicClient !== false || client.protocol !== "openid-connect") {
     throw new Error("The enabled confidential inout-frontend client is required");
   }
-  const saved = await (await api(`/clients/${encodeURIComponent(client.id)}/client-secret`)).json();
-  if (typeof saved.value !== "string" || !saved.value || saved.value.length > 4096) {
-    throw new Error("The existing frontend client secret could not be read");
+  // Exercise the exact deployed app credential, not the secret retrieved with
+  // maintenance authority: otherwise a stale app secret can pass readiness.
+  if (typeof clientSecret !== "string" || !clientSecret || clientSecret.length > 4096) {
+    throw new Error("Set KEYCLOAK_CLIENT_SECRET to the frontend application's configured credential");
   }
   const response = await request(`${adminBase}/realms/inout/inout-auth/status`, {
     method: "GET", cache: "no-store", signal: AbortSignal.timeout(10_000),
-    headers: { Authorization: "Basic " + Buffer.from(`${encodeURIComponent(client.clientId)}:${encodeURIComponent(saved.value)}`).toString("base64") },
+    headers: { Authorization: "Basic " + Buffer.from(`${encodeURIComponent(client.clientId)}:${encodeURIComponent(clientSecret)}`).toString("base64") },
   });
   if (response.status !== 200 || Number(response.headers.get("Content-Length") || 0) > 4096) {
     void response.body?.cancel().catch(() => {});

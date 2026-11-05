@@ -14,11 +14,16 @@ from models import HardwareAsset, Movement, PermissionRequestModel, Subject
 def canonical_movement_filter(model=Movement):
     """Old reviews created a replacement event; count that revision only once."""
     review = aliased(Movement)
+    review_request_id = review.data.op("->>", return_type=Text)(literal_column("'overrideRequestId'"))
+    request_type = PermissionRequestModel.data.op("->>", return_type=Text)(literal_column("'type'"))
+    source_event_id = PermissionRequestModel.data.op("->>", return_type=Text)(literal_column("'eventId'"))
     return ~select(PermissionRequestModel.id).join(review,
-        review.data["overrideRequestId"].astext == PermissionRequestModel.id).where(
-            PermissionRequestModel.data["type"].astext == "manual_override",
-            PermissionRequestModel.data["eventId"].astext == model.id,
-            review.id != model.id,
+        review_request_id == PermissionRequestModel.id).where(
+            review_request_id.is_not(None),
+            request_type == literal_column("'manual_override'"),
+            source_event_id.is_not(None),
+            source_event_id == model.id,
+            review.id != source_event_id,
         ).correlate(model).exists()
 
 

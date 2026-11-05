@@ -43,6 +43,8 @@ class RequestAdmissionTests(unittest.IsolatedAsyncioTestCase):
         for patcher in [patch.object(settings, "KONG_TERMINAL_SECRET", "verified-gateway-secret" * 2),
                         patch("auth.enforce_behavior_admission", new=AsyncMock()),
                         patch("main.enforce_behavior_admission", new=AsyncMock()),
+                        patch("token_revocation.assert_token_active", new=AsyncMock()),
+                        patch("auth._prepare_jwks", new=AsyncMock(return_value=None)),
                         patch("auth.verify_keycloak_token", side_effect=self.claims)]:
             patcher.start()
             self.addCleanup(patcher.stop)

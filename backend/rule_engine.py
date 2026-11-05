@@ -284,17 +284,14 @@ def _movement_timestamp(movement: MovementEvent) -> float:
     return 0.0
 
 
-def _next_alert_id(existing_alerts: list[Alert], offset: int = 1) -> str:
-    """
-    Derive the next alert ID from the highest numeric suffix seen so far.
-    Port of nextAlertId() in ruleEngine.ts.
-    """
+def _highest_alert_suffix(existing_alerts: list[Alert]) -> int:
+    """Find the largest numeric suffix already used by a stored alert."""
     highest = 0
     for alert in existing_alerts:
         m = re.search(r"(\d+)$", alert.get("id", ""))
         if m:
             highest = max(highest, int(m.group(1)))
-    return f"AL-2026-{str(highest + offset).zfill(4)}"
+    return highest
 
 
 def _find_enabled_rule(
@@ -419,8 +416,10 @@ def build_workday_statuses(
         if not employee:
             continue
 
-        # Sort chronologically
-        events.sort(key=_movement_timestamp)
+        # Parse each timestamp once. The old key function parsed every event
+        # for sorting and then parsed it again while pairing entries/exits.
+        timed_events = [(_movement_timestamp(event), event) for event in events]
+        timed_events.sort(key=lambda item: item[0])
 
         entry_at: float | None = None
         last_exit_at: float | None = None
@@ -428,8 +427,7 @@ def build_workday_statuses(
         break_minutes: float = 0.0
         shift_ended: bool = False
 
-        for event in events:
-            occurred_at = _movement_timestamp(event)
+        for occurred_at, event in timed_events:
             if event.get("direction") == "entry" and entry_at is None:
                 # Count break gap between previous exit and this re-entry
                 if last_exit_at is not None and occurred_at > last_exit_at:
@@ -492,11 +490,55 @@ def evaluate_scheduled_rules(
     """
     generated: list[Alert] = []
 
+    # Rules are stable for one evaluation. Prepare lookups once instead of
+    # scanning the full catalog for every employee and workday.
+    rules_by_condition: dict[str, list[AlertRule]] = {}
+    for rule in rules:
+        condition = rule.get("conditionKey")
+        if (isinstance(condition, str) and rule.get("enabled")
+                and eligible_alert_subject_types(rule)):
+            rules_by_condition.setdefault(condition, []).append(rule)
+    assignment_sets = {
+        subject_id: set(rule_ids)
+        for subject_id, rule_ids in (rule_assignments or {}).items()
+    }
+
+    def selected_rule(condition: str, subject_id: str | None = None) -> AlertRule | None:
+        candidates = rules_by_condition.get(condition, ())
+        if subject_id is None or rule_assignments is None or subject_id not in assignment_sets:
+            return candidates[0] if candidates else None
+        selected = assignment_sets[subject_id]
+        return next((rule for rule in candidates if rule.get("id") in selected), None)
+
+    # Preserve the legacy ID sequence while scanning stored IDs only once.
+    next_alert_number = _highest_alert_suffix(existing_alerts) + 1
+
+    def next_alert_id() -> str:
+        nonlocal next_alert_number
+        value = f"AL-2026-{str(next_alert_number).zfill(4)}"
+        next_alert_number += 1
+        return value
+
+    # Alert de-duplication used to scan the full history for each person/day.
+    # These keys express the same identity rules with constant-time lookups.
+    irregularity_keys = {
+        (alert.get("ruleId"), alert.get("barcode"), alert.get("date"))
+        for alert in existing_alerts
+    }
+    no_break_subject_keys = {
+        (alert.get("ruleId"), alert.get("subjectId"), alert.get("date"))
+        for alert in existing_alerts if alert.get("subjectId")
+    }
+    no_break_legacy_keys = {
+        (alert.get("ruleId"), alert.get("barcode"), alert.get("date"))
+        for alert in existing_alerts if not alert.get("subjectId")
+    }
+
     evaluation_now = now or datetime.now(timezone.utc)
     # ------------------------------------------------------------------
     # irregularity rule
     # ------------------------------------------------------------------
-    irregularity_rule = _find_enabled_rule(rules, "irregularity")
+    irregularity_rule = selected_rule("irregularity")
     local_now = evaluation_now.astimezone(_IST)
     today = _local_date(evaluation_now)
     if irregularity_rule and local_now.hour >= _ATTENDANCE_CUTOFF_HOUR:
@@ -521,26 +563,16 @@ def evaluate_scheduled_rules(
                 continue
             if local_now.date().isoformat() in (irregularity_skip_dates or {}).get(employee_id, []):
                 continue
-            employee_rule = _find_enabled_rule(rules, "irregularity", employee_id, rule_assignments)
+            employee_rule = selected_rule("irregularity", employee_id)
             if employee_rule is None:
                 continue
-            already_raised = any(
-                a.get("ruleId") == employee_rule.get("id")
-                and a.get("barcode") == (employee.get("barcode") or employee_id)
-                and a.get("date") == today
-                for a in existing_alerts
-            )
-            already_generated = any(
-                a.get("ruleId") == employee_rule.get("id")
-                and a.get("barcode") == (employee.get("barcode") or employee_id)
-                and a.get("date") == today
-                for a in generated
-            )
-            if already_raised or already_generated:
+            barcode = employee.get("barcode") or employee_id
+            duplicate_key = (employee_rule.get("id"), barcode, today)
+            if duplicate_key in irregularity_keys:
                 continue
             generated.append(
                 Alert(
-                    id=_next_alert_id([*existing_alerts, *generated]),
+                    id=next_alert_id(),
                     severity=employee_rule.get("severity", "medium"),
                     status="open",
                     title="Attendance irregularity",
@@ -560,26 +592,26 @@ def evaluate_scheduled_rules(
                     explanation="No approved employee entry was recorded before the 6:00 PM attendance cutoff.",
                 )
             )
+            irregularity_keys.add(duplicate_key)
 
     # ------------------------------------------------------------------
     # no_break rule
     # ------------------------------------------------------------------
-    break_rule = _find_enabled_rule(rules, "no_break")
+    break_rule = selected_rule("no_break")
     if break_rule:
         employee_by_id = {employee.get("id"): employee for employee in employees or []}
         for workday in workdays:
-            workday_rule = _find_enabled_rule(rules, "no_break", workday["employeeId"], rule_assignments)
+            workday_rule = selected_rule("no_break", workday["employeeId"])
             if workday_rule is None:
                 continue
             employee_barcode = employee_by_id.get(workday["employeeId"], {}).get("barcode") or workday["employeeId"]
-            already_raised = any(
-                a.get("ruleId") == workday_rule.get("id")
-                and (
-                    a.get("subjectId") == workday["employeeId"]
-                    or (not a.get("subjectId") and a.get("barcode") in {employee_barcode, workday["employeeId"]})
-                )
-                and a.get("date") == workday["date"]
-                for a in existing_alerts
+            rule_id = workday_rule.get("id")
+            employee_id = workday["employeeId"]
+            workday_date = workday["date"]
+            already_raised = (
+                (rule_id, employee_id, workday_date) in no_break_subject_keys
+                or (rule_id, employee_barcode, workday_date) in no_break_legacy_keys
+                or (rule_id, employee_id, workday_date) in no_break_legacy_keys
             )
             if (
                 workday["breakMinutes"] > 0
@@ -590,7 +622,7 @@ def evaluate_scheduled_rules(
             hours_worked = round(workday["minutesInside"] / 60)
             generated.append(
                 Alert(
-                    id=_next_alert_id([*existing_alerts, *generated]),
+                    id=next_alert_id(),
                     severity=workday_rule.get("severity", "medium"),
                     status="open",
                     title="No break recorded",

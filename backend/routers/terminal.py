@@ -50,7 +50,8 @@ async def scan(payload: BrowserScanPayload,
     if mode != "manual" and payload.direction is not None:
         raise HTTPException(status_code=422, detail="Scan direction is controlled by the assigned checkpoint")
     result = await record_scan(db, idempotency_key, payload, identity,
-                               request_scope=request.scope if request is not None else None)
+                               request_scope=request.scope if request is not None else None,
+                               validated_checkpoint_id=checkpoint_id)
     if not db.info.get("scan_replayed"):
         event = result["decision"]["event"]
         await enqueue_presence(db, {
@@ -124,6 +125,17 @@ async def create_manual_review(
     return data
 
 
+def _checkpoint_scope_allows(checkpoint_id, checkpoint_zone, zones, checkpoint_scope):
+    """Checkpoint selectors may narrow a zone grant, never grant another zone."""
+    if not checkpoint_zone or not isinstance(zones, list) or checkpoint_zone not in zones:
+        return False
+    if checkpoint_scope is None:
+        return True
+    if not isinstance(checkpoint_scope, list):
+        return False
+    return not checkpoint_scope or checkpoint_id in checkpoint_scope
+
+
 @router.get("/bundle")
 async def get_terminal_bundle(
     db: AsyncSession = Depends(get_db),
@@ -139,12 +151,15 @@ async def get_terminal_bundle(
     event_revision = await read_event_revision(db)
     checkpoint_id = await assigned_checkpoint(db, browser_identity(operator))
 
-    checkpoint_record = await db.get(Checkpoint, checkpoint_id)
-    checkpoint_config = checkpoint_record.data if checkpoint_record else None
+    checkpoint_row = (await db.execute(
+        select(Checkpoint, OrganizationZone.name)
+        .outerjoin(OrganizationZone, OrganizationZone.id == Checkpoint.zone_id)
+        .where(Checkpoint.id == checkpoint_id)
+    )).first()
+    checkpoint_record, checkpoint_zone_name = checkpoint_row if checkpoint_row else (None, None)
     checkpoint_zone = checkpoint_record.zone_id if checkpoint_record and checkpoint_record.active else None
-    checkpoint_zone_name = await db.scalar(
-        select(OrganizationZone.name).where(OrganizationZone.id == checkpoint_zone)
-    ) if checkpoint_zone else None
+    if checkpoint_zone is None:
+        checkpoint_zone_name = None
 
     async def fetch_hardware_assets() -> list[dict[str, Any]]:
         if checkpoint_zone is None:
@@ -153,6 +168,13 @@ async def get_terminal_bundle(
             select(HardwareAsset, Subject, AccessPermission)
             .join(Subject, Subject.id == HardwareAsset.subject_id)
             .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
+            # Keep the exact precedence rules below in Python, while avoiding
+            # transferring unrelated hardware records from other zones.
+            .where(or_(
+                AccessPermission.data["zones"].contains([checkpoint_zone]),
+                HardwareAsset.data["allowedZones"].contains([checkpoint_zone]),
+                HardwareAsset.data["allowedZone"].astext == checkpoint_zone,
+            ))
         )
         visible_rows = []
         for hw, subject, permission in hw_rows:
@@ -161,7 +183,10 @@ async def get_terminal_bundle(
             zones = permission_data.get("zones") if isinstance(permission_data.get("zones"), list) else entry.get("allowedZones")
             if not isinstance(zones, list) and isinstance(entry.get("allowedZone"), str):
                 zones = [entry["allowedZone"]]
-            if checkpoint_zone in (zones or []):
+            checkpoint_scope = permission_data.get("checkpoints")
+            if not isinstance(checkpoint_scope, list):
+                checkpoint_scope = entry.get("allowedCheckpoints")
+            if _checkpoint_scope_allows(checkpoint_id, checkpoint_zone, zones, checkpoint_scope):
                 visible_rows.append((entry, subject))
         restrictions = await entry_restrictions_for_subjects(db, [subject.id for _, subject in visible_rows])
         assets: list[dict[str, Any]] = []
@@ -172,19 +197,26 @@ async def get_terminal_bundle(
         return assets
 
     async def fetch_checkpoints() -> list[dict[str, Any]]:
-        result = await db.execute(select(Checkpoint).where(Checkpoint.id == checkpoint_id))
+        if checkpoint_record is None:
+            return []
+        c = checkpoint_record
         return [{**(c.data or {}), "id": c.id, "zone": c.zone_id, "zoneId": c.zone_id,
             "zoneName": checkpoint_zone_name,
             "number": c.number, "gateType": c.gate_type, "required": c.required,
-            "active": c.active} for c in result.scalars().all()]
+            "active": c.active}]
 
     hardware_assets = await fetch_hardware_assets()
     checkpoints = await fetch_checkpoints()
+    visitor_subject_id = func.coalesce(
+        PermissionRequestModel.subject_id,
+        PermissionRequestModel.data["subjectId"].astext,
+    )
     visitor_request_rows = await bounded_rows(db,
         select(PermissionRequestModel)
         .where(PermissionRequestModel.data["type"].astext == "visitor")
         .where(PermissionRequestModel.data["checkpointId"].astext == checkpoint_id)
-        .order_by(PermissionRequestModel.created_at.desc()))
+        .distinct(visitor_subject_id)
+        .order_by(visitor_subject_id, PermissionRequestModel.created_at.desc(), PermissionRequestModel.id.desc()))
     visitor_requests: dict[str, dict[str, Any]] = {}
     for request_row in visitor_request_rows:
         request_data = dict(request_row[0].data or {})
@@ -234,7 +266,7 @@ async def get_terminal_bundle(
         if not isinstance(checkpoint_scope, list):
             checkpoint_scope = []
         checkpoint_scope = [item for item in checkpoint_scope if isinstance(item, str)]
-        checkpoint_allowed = checkpoint_id in checkpoint_scope if checkpoint_scope else checkpoint_zone in zones
+        checkpoint_allowed = _checkpoint_scope_allows(checkpoint_id, checkpoint_zone, zones, checkpoint_scope)
         permission_state = permission_data.get("state")
         if not registration_request and not (permission_state == "active" and checkpoint_allowed):
             continue

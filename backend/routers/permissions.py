@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import String, select, exc, or_, false
+from sqlalchemy import String, select, exc, or_
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +27,7 @@ from access_validation import (validate_window, validate_permission_window, vali
 from subject_metadata import current_subject_metadata
 from registry_validation import is_barcode_conflict
 from zone_access import (admin_zone_ids, require_checkpoint_scope,
-    require_subject_scope, subject_zone_condition, validate_zone_subset)
+    require_subject_scope, require_subject_grant_scope, subject_zone_condition, validate_zone_subset)
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["permissions"])
@@ -65,6 +65,7 @@ async def grant_permission(
         await require_subject_scope(db, admin, payload.subject_id)
     if payload.request_type == "hardware_custody" and payload.carrier_id:
         await require_subject_scope(db, admin, payload.carrier_id)
+        await require_subject_grant_scope(db, admin, payload.subject_id)
     if payload.requested_zones:
         requested_zones = await validate_registered_zones(db, payload.requested_zones)
         validate_zone_subset(requested_zones, allowed_zones)
@@ -314,6 +315,8 @@ async def decide_permission_request(
     reason = (payload.reason or "").strip()
     if payload.decision == "denied" and not reason:
         raise HTTPException(status_code=422, detail="A decision note is required when denying a permission request")
+    if payload.decision == "approved" and request_data.get("type") == "hardware_custody":
+        await require_subject_grant_scope(db, admin, existing_request.subject_id)
     # The row lock, decision, identity, movement and presence share one transaction.
     result = await apply_permission_decision(
         db, req_id, payload.decision, admin.get("sub", "unknown"),
@@ -399,12 +402,7 @@ async def list_permissions(
     from event_outbox import read_event_revision
     event_revision = await read_event_revision(db)
     zone_ids = await admin_zone_ids(db, _admin)
-    visible_subject_ids = list((await db.scalars(
-        select(Subject.id).outerjoin(Person, Person.subject_id == Subject.id)
-        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
-        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
-        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id)
-    )).all())
+    visible_subject_ids = select(Subject.id).where(subject_zone_condition(zone_ids)).correlate(None)
 
     async def fetch_permissions():
         requests = await fetch_requests()
@@ -423,7 +421,7 @@ async def list_permissions(
                 )),
                 or_(AuditEvent.data["zoneId"].astext.in_(zone_ids),
                     AuditEvent.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
-                    AuditEvent.data["subjectId"].astext.in_(visible_subject_ids) if visible_subject_ids else false()),
+                    AuditEvent.data["subjectId"].astext.in_(visible_subject_ids)),
             )
         )
         manually_managed_subject_ids = {
@@ -467,7 +465,7 @@ async def list_permissions(
         rows = await bounded_rows(db, select(PermissionRequestModel).where(or_(
             PermissionRequestModel.data["requestedZones"].has_any(array(list(zone_ids), type_=String)),
             PermissionRequestModel.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
-            PermissionRequestModel.subject_id.in_(visible_subject_ids) if visible_subject_ids else false(),
+            PermissionRequestModel.subject_id.in_(visible_subject_ids),
         )).order_by(PermissionRequestModel.created_at.desc()))
         return [row[0].data for row in rows]
 

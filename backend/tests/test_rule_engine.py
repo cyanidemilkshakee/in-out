@@ -18,7 +18,8 @@ from rule_engine import (  # noqa: E402
 class RuleEngineTests(unittest.TestCase):
     def test_assignment_eligibility_never_offers_hardware_or_retired_conditions(self):
         for rule in default_alert_rules():
-            expected = {"cross_building_scan": ("employee", "visitor"), "visitor_overstay": ("visitor",)}.get(
+            expected = {"cross_building_scan": ("employee", "visitor"),
+                        "visitor_overstay": ("employee", "visitor")}.get(
                 rule["conditionKey"], ("employee",))
             self.assertEqual(eligible_alert_subject_types(rule), expected)
             self.assertEqual(eligible_alert_subject_types({**rule, "enabled": False}), expected)

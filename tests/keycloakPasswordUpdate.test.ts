@@ -78,7 +78,7 @@ test("normal changes bind both preparation and mutation to the signed-in subject
 })
 
 test("invalid input and absent locks are rejected before sending credentials", async () => {
-  for (const invalid of [{ currentPassword: "" }, { newPassword: input.currentPassword }, { newPassword: " " },
+  for (const invalid of [{ currentPassword: "" }, { newPassword: input.currentPassword }, { newPassword: " " }, { newPassword: "x" }, { newPassword: "x".repeat(11) },
     { newPassword: "x".repeat(129) }, { username: "name\n" }, { otp: "123" }, { mode: "unrecognized" }]) {
     const { state, run } = fixture()
     await assert.rejects(run(invalid as Partial<PasswordUpdateInput>), failure("invalid_request"))

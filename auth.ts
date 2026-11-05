@@ -43,7 +43,7 @@ async function completedUserManagementStepUp(authTime: number | undefined, subje
   return window ? { ...window, intentId: intent!.intentId } : undefined;
 }
 
-async function enforceStepUpIdentity(subject: string, roles: string[]) {
+async function enforceStepUpIdentity(subject: string, roles: string[], authTime?: number, requireFreshAuthTime = false) {
   const cookieStore = await cookies();
   const intentCookie = cookieStore.get(USER_MANAGEMENT_STEP_UP_COOKIE)?.value;
   if (!intentCookie) {
@@ -55,6 +55,9 @@ async function enforceStepUpIdentity(subject: string, roles: string[]) {
   if (!intent) throw new AppCredentialsSignin("step_up_expired");
   if (intent.subject !== subject || !hasAdminAccess(roles)) {
     throw new AppCredentialsSignin("step_up_account_mismatch");
+  }
+  if (requireFreshAuthTime && !completedStepUpWindow(intent, authTime, subject)) {
+    throw new AppCredentialsSignin("step_up_expired");
   }
 }
 
@@ -81,7 +84,9 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
         url: `${keycloakPublicIssuer}/protocol/openid-connect/auth`,
         params: {
           scope: "openid profile email",
-          ...(passwordAction ? { kc_action: "UPDATE_PASSWORD", prompt: "login", max_age: "0" } : {}),
+          ...(passwordAction
+            ? { kc_action: "UPDATE_PASSWORD", prompt: "login", max_age: "0" }
+            : { kc_idp_hint: "zoho" }),
         },
       },
     })
@@ -110,7 +115,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
         }
         const signinCode = error && typeof error === "object" &&
           (error as { type?: unknown }).type === "CredentialsSignin" &&
-          ["credentials", "account_setup_required", "profile_setup_required", "service_unavailable"].includes((error as { code?: string }).code ?? "")
+          ["credentials", "account_setup_required", "profile_setup_required", "account_action_required", "service_unavailable"].includes((error as { code?: string }).code ?? "")
           ? (error as { code: string }).code : undefined
         const diagnostic = error && typeof error === "object" ? error as { signinStage?: unknown; providerStatus?: unknown } : undefined
         const signinStage = ["verify_request", "verify_http", "verify_payload", "token_request", "token_http",
@@ -144,7 +149,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
         }
       },
     }), keycloakProvider(), keycloakProvider("setup"), keycloakProvider("change")] : [],
-    pages: { signIn: "/login" },
+    pages: { signIn: "/login", error: "/login" },
     callbacks: {
       async redirect({ url, baseUrl }) {
         return safeAuthRedirect(url, process.env.AUTH_URL || process.env.NEXTAUTH_URL || baseUrl)
@@ -184,6 +189,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
             return null
           }
           const roles = rolesFromAccessToken(accessToken)
+          await enforceStepUpIdentity(subject, roles, authTimeFromToken(idToken), true)
           if (account.provider !== "keycloak-password-change") await clearAdminOfflineStatus(accessToken)
           const stepUp = await completedUserManagementStepUp(authTimeFromToken(idToken), subject, roles)
           const roleToken: RoleToken = {

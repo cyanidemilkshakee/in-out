@@ -14,17 +14,30 @@ export function requiredPasswordActionRedirectUris(client) {
 }
 
 export function applicationSignInReady(client) {
+  const appUrl = applicationBaseUrl();
   const passwordActionRedirectUris = requiredPasswordActionRedirectUris(client);
   return client?.enabled === true && client.publicClient === false && client.protocol === "openid-connect" &&
     client.standardFlowEnabled === true && client.directAccessGrantsEnabled === false &&
     client.implicitFlowEnabled === false && client.serviceAccountsEnabled === false &&
+    client.rootUrl === appUrl && client.baseUrl === appUrl &&
     client.attributes?.["pkce.code.challenge.method"] === "S256" &&
     client.attributes?.["inout.app-interactions.enabled"] === "true" &&
     passwordActionRedirectUris.every((uri) => client.redirectUris.includes(uri)) &&
-    client.attributes?.login_theme !== "inout";
+    client.attributes?.login_theme === "inout-app-errors";
+}
+
+function applicationBaseUrl() {
+  const configured = process.env.AUTH_URL || process.env.INOUT_APP_URL ||
+    `http://app.localhost:${process.env.APP_PORT || "1008"}`;
+  const url = new URL(configured);
+  if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.pathname !== "/" || url.search || url.hash) {
+    throw new Error("AUTH_URL must be an application origin without a path");
+  }
+  return url.origin;
 }
 
 export async function configureApplicationSignIn(api, { apply = false, log = console.log, providerReady } = {}) {
+  const appUrl = applicationBaseUrl();
   const clients = await (await api("/clients?clientId=inout-frontend")).json();
   const matches = clients.filter((candidate) => candidate.clientId === "inout-frontend");
   if (matches.length !== 1 || !matches[0]?.id) throw new Error("Exactly one inout-frontend client is required");
@@ -59,13 +72,15 @@ export async function configureApplicationSignIn(api, { apply = false, log = con
   const path = `/clients/${encodeURIComponent(client.id)}`;
   if (!applicationSignInReady(client)) {
     await api(path, { method: "PUT", body: {
+      rootUrl: appUrl,
+      baseUrl: appUrl,
       standardFlowEnabled: true,
       implicitFlowEnabled: false,
       directAccessGrantsEnabled: false,
       serviceAccountsEnabled: false,
       ...(missingPasswordActionRedirectUris.length ? { redirectUris } : {}),
-      attributes: { ...client.attributes, "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true",
-        ...(client.attributes?.login_theme === "inout" ? { login_theme: "keycloak.v2" } : {}) },
+      attributes: { ...client.attributes, login_theme: "inout-app-errors", "pkce.code.challenge.method": "S256",
+        "inout.app-interactions.enabled": "true" },
     } });
   }
   if (realmNeedsRepair) await api("", { method: "PUT", body: { loginTheme: "keycloak.v2" } });

@@ -34,6 +34,7 @@ export function DataProvider({
   const bufferedUpdates = useRef<Array<{ revision: number; update: PresenceUpdate }>>([]);
   const snapshotInFlight = useRef(false);
   const reconnectRefresh = useRef<number | undefined>(undefined);
+  const streamRefreshTimer = useRef<number | undefined>(undefined);
   const [snapshotCursor, setSnapshotCursor] = useState({ revision: initialData?.eventRevision, generation: 0 });
 
   useEffect(() => {
@@ -120,6 +121,13 @@ export function DataProvider({
 
   useEffect(() => {
     if (scope === "profile") return;
+    const scheduleStreamRefresh = () => {
+      window.clearTimeout(streamRefreshTimer.current);
+      streamRefreshTimer.current = window.setTimeout(() => {
+        streamRefreshTimer.current = undefined;
+        void refresh();
+      }, 120);
+    };
     const receiveMessage = (raw: string) => {
       if (!raw?.trim()) return;
       try {
@@ -128,7 +136,9 @@ export function DataProvider({
           const revision = ++streamRevision.current;
           if (snapshotInFlight.current) bufferedUpdates.current.push({ revision, update });
           setState((current) => applyPresenceUpdate(current, update));
-          if (update.request || update.permission || update.type === "data_changed" || (scope === "terminal" && update.type === "terminal_assignment")) void refresh();
+          if (update.request || update.permission || update.type === "data_changed" || (scope === "terminal" && update.type === "terminal_assignment")) {
+            scheduleStreamRefresh();
+          }
         }
       } catch {
         // A reconnect refresh restores state after a malformed event.
@@ -147,6 +157,8 @@ export function DataProvider({
       window.addEventListener("online", restore);
       document.addEventListener("visibilitychange", restore);
       return () => {
+        window.clearTimeout(streamRefreshTimer.current);
+        streamRefreshTimer.current = undefined;
         window.removeEventListener("inout:presence-message", receive);
         window.removeEventListener("inout:presence-sync", syncFromServer);
         window.removeEventListener("focus", restore);
@@ -179,6 +191,8 @@ export function DataProvider({
     return () => {
       eventSource.close();
       window.clearInterval(recoveryTimer);
+      window.clearTimeout(streamRefreshTimer.current);
+      streamRefreshTimer.current = undefined;
       window.removeEventListener("focus", restore);
       window.removeEventListener("online", restore);
       document.removeEventListener("visibilitychange", restore);

@@ -100,15 +100,24 @@ class CheckpointCreationTests(unittest.IsolatedAsyncioTestCase):
             verify.assert_awaited_once()
             step_up.assert_not_called()
 
-        master_admin = {"sub": "master", "realm_access": {"roles": ["master-admin", "zone-admin"]}}
+        zone_admin = {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         window = {"windowId": "synthetic-window", "expiresAt": 1_900_000_000}
-        with patch("routers.checkpoints.verify_admin_request", new=AsyncMock(return_value=master_admin)), \
+        with patch("routers.checkpoints.verify_admin_request", new=AsyncMock(return_value=zone_admin)), \
              patch("routers.checkpoints.verified_user_management_window", return_value=window) as step_up, \
              patch("routers.checkpoints.require_unlocked_window", new=AsyncMock()) as require_unlocked:
             result = await checkpoints._checkpoint_admin_context(request_context(), credentials, "proof", guard_db)
+        self.assertIs(result, zone_admin)
+        step_up.assert_called_once_with("synthetic-token", zone_admin, "proof", now=unittest.mock.ANY)
+        require_unlocked.assert_awaited_once_with(guard_db, zone_admin, window)
+
+        master_admin = {"sub": "master", "realm_access": {"roles": ["master-admin", "zone-admin"]}}
+        with patch("routers.checkpoints.verify_admin_request", new=AsyncMock(return_value=master_admin)), \
+             patch("routers.checkpoints.verified_user_management_window") as step_up, \
+             patch("routers.checkpoints.require_unlocked_window", new=AsyncMock()) as require_unlocked:
+            result = await checkpoints._checkpoint_admin_context(request_context(), credentials, None, guard_db)
         self.assertIs(result, master_admin)
-        step_up.assert_called_once_with("synthetic-token", master_admin, "proof", now=unittest.mock.ANY)
-        require_unlocked.assert_awaited_once_with(guard_db, master_admin, window)
+        step_up.assert_not_called()
+        require_unlocked.assert_not_awaited()
 
 
 if __name__ == "__main__":

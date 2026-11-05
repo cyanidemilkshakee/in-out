@@ -8,12 +8,13 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, func, or_
+from sqlalchemy import String, select, func, or_
+from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_read_db
-from models import AuditEvent
-from models import AccessPermission, Checkpoint, HardwareAsset, Person, Subject
+from data_limits import bounded_rows
+from models import AuditEvent, Checkpoint, PermissionRequestModel, Person, Subject
 from auth import verify_admin_request
 from zone_access import admin_zone_ids, subject_zone_condition
 
@@ -30,6 +31,7 @@ async def list_audit_events(
     category: Optional[str] = Query(None, description="Filter by data->>'category'"),
     startAt: Optional[str] = Query(None),
     endAt: Optional[str] = Query(None),
+    includeContext: bool = Query(False),
     db: AsyncSession = Depends(get_read_db),
     actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
@@ -38,15 +40,11 @@ async def list_audit_events(
     Optional ?category= filters on the JSONB data->>'category' field.
     """
     zone_ids = await admin_zone_ids(db, actor)
-    visible_subject_ids = list((await db.scalars(select(Subject.id)
-        .outerjoin(Person, Person.subject_id == Subject.id)
-        .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)
-        .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
-        .where(subject_zone_condition(zone_ids)).distinct().order_by(Subject.id))).all())
     scope = or_(
         AuditEvent.data["zoneId"].astext.in_(zone_ids),
         AuditEvent.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
-        AuditEvent.data["subjectId"].astext.in_(visible_subject_ids),
+        AuditEvent.data["subjectId"].astext.in_(
+            select(Subject.id).where(subject_zone_condition(zone_ids)).correlate(None)),
     )
     q = select(AuditEvent).where(scope)
     count_q = select(func.count()).select_from(AuditEvent).where(scope)
@@ -74,7 +72,7 @@ async def list_audit_events(
     rows_res = await db.execute(q.order_by(AuditEvent.created_at.desc(), AuditEvent.id).limit(limit).offset(offset))
     events = rows_res.scalars().all()
 
-    return {
+    response = {
         "items":  [
             {
                 **(e.data or {}),
@@ -89,3 +87,30 @@ async def list_audit_events(
         "limit":  limit,
         "offset": offset,
     }
+    if includeContext:
+        visible_subjects = select(Subject.id).where(subject_zone_condition(zone_ids)).correlate(None)
+        subject_rows = await bounded_rows(db,
+            select(Subject.id, Subject.barcode, Subject.kind,
+                   Person.data["name"].astext, Person.data["status"].astext)
+            .join(Person, Person.subject_id == Subject.id)
+            .where(Subject.kind.in_(("employee", "visitor")), subject_zone_condition(zone_ids))
+            .order_by(Subject.id))
+        response["people"] = [
+            {"id": subject_id, "barcode": barcode, "type": kind,
+             "name": name or barcode, "status": status or "active",
+             "allowedZones": [], "inside": False}
+            for subject_id, barcode, kind, name, status in subject_rows
+        ]
+        requests = await bounded_rows(db,
+            select(PermissionRequestModel.data)
+            .where(PermissionRequestModel.data["status"].astext.in_(("approved", "denied")))
+            .where(PermissionRequestModel.data["notificationDismissedAt"].astext.is_not(None))
+            .where(or_(
+                PermissionRequestModel.data["requestedZones"].has_any(array(list(zone_ids), type_=String)),
+                PermissionRequestModel.data["checkpointId"].astext.in_(
+                    select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
+                PermissionRequestModel.subject_id.in_(visible_subjects),
+            ))
+            .order_by(PermissionRequestModel.created_at.desc(), PermissionRequestModel.id.desc()))
+        response["permissionRequests"] = [row[0] for row in requests]
+    return response

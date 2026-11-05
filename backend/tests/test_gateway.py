@@ -14,14 +14,17 @@ class GatewayIdentityTests(unittest.IsolatedAsyncioTestCase):
         secret = 'isolated-test-secret-at-least-32-characters'
         def request(headers):
             return Request({'type': 'http', 'method': 'POST', 'headers': [(k.lower().encode(), v.encode()) for k, v in headers.items()]})
-        with patch('main.settings.KONG_TERMINAL_SECRET', secret):
+        with patch('main.settings.KONG_TERMINAL_SECRET', secret), \
+             patch('main.enforce_behavior_admission', new=AsyncMock()) as admission:
             for headers in ({}, {'X-Client-Verify':'SUCCESS', 'X-Client-DN':'CN=old', 'X-Proxy-Secret':secret},
                 {'X-Inout-Terminal-DN':'CN=test', 'X-Inout-Gateway-Secret':'wrong'},
                 {'X-Inout-Gateway-Secret':secret}):
                 with self.assertRaises(HTTPException):
                     await verify_mtls_terminal(request(headers))
-            self.assertEqual(await verify_mtls_terminal(request({
-                'X-Inout-Terminal-DN':'CN=test', 'X-Inout-Gateway-Secret':secret})), 'CN=test')
+            admission.assert_not_awaited()
+            verified_request = request({'X-Inout-Terminal-DN':'CN=test', 'X-Inout-Gateway-Secret':secret})
+            self.assertEqual(await verify_mtls_terminal(verified_request), 'CN=test')
+            admission.assert_awaited_once_with(verified_request, 'terminal:CN=test')
 
     async def test_idle_presence_stream_emits_heartbeats_and_cleans_up(self):
         pubsub = Mock(subscribe=AsyncMock(), unsubscribe=AsyncMock(), aclose=AsyncMock(),

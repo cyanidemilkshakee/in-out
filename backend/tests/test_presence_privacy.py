@@ -20,10 +20,14 @@ class PresencePrivacyTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         # Privacy fixtures mock identity/event I/O independently of admission.
         for target in ("routers.presence.acquire_stream_lease",
-                       "routers.presence.renew_stream_lease", "routers.presence.release_stream_lease"):
+                       "routers.presence.renew_stream_lease", "routers.presence.release_stream_lease",
+                       "auth.enforce_behavior_admission", "token_revocation.assert_token_active"):
             admission = patch(target, new=AsyncMock(return_value=True))
             admission.start()
             self.addCleanup(admission.stop)
+        keys = patch("auth._prepare_jwks", new=AsyncMock(return_value=None))
+        keys.start()
+        self.addCleanup(keys.stop)
         self.app = FastAPI()
         self.app.include_router(presence.router)
         now = datetime.now(timezone.utc)
@@ -51,7 +55,7 @@ class PresencePrivacyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.fetch("/v1/presence", "operator")).status_code, 403)
             self.assertEqual((await self.fetch("/v1/presence", "no-role")).status_code, 403)
             self.db.execute.assert_not_awaited()
-            administrator = await self.fetch("/v1/presence", "admin")
+            administrator = await self.fetch("/v1/presence", "zone-admin")
             self.assertEqual(administrator.status_code, 200)
             self.assertEqual(administrator.json()[0]["barcode"], "PRIVATE-BARCODE")
 
@@ -80,7 +84,7 @@ class PresencePrivacyTests(unittest.IsolatedAsyncioTestCase):
         events, assignment = await self.stream("operator", messages, ["cp-main"] * (len(messages) + 1))
         self.assertEqual(events, [{"type": "data_changed"}, {"type": "data_changed"}, {"type": "terminal_assignment"}, {"type": "data_changed"}])
         self.assertEqual(assignment.await_count, len(messages) + 1)
-        administrator, lookup = await self.stream("admin", messages, [])
+        administrator, lookup = await self.stream("zone-admin", messages, [])
         # Admin streams are zone-scoped; the refresh hint keeps other-zone
         # subjects, identities and review details out of the SSE payload.
         self.assertEqual(administrator, [{"type": "data_changed"} for _ in messages])

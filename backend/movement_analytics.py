@@ -7,11 +7,13 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import and_, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from auth import verify_admin_request
 from database import get_read_db
 from config import settings
 from data_limits import bounded_rows
-from models import Alert, AlertReview, Movement, PresenceState, Subject
+from models import Alert, AlertReview, Checkpoint, Movement, PresenceState, Subject
 from movement_history import canonical_movement_filter, movement_history
+from zone_access import admin_zone_ids, checkpoint_zone_condition, subject_zone_condition
 
 router = APIRouter()
 RESTRICTED_DENIAL_CODES = (
@@ -65,13 +67,26 @@ def listed_alert_records():
     ).subquery("analytics_alerts")
 
 
+def alert_zone_condition(records, zone_ids):
+    """Explicit historical location takes precedence over current subject access."""
+    checkpoint_id = func.nullif(func.btrim(records.c.data["checkpointId"].astext), "")
+    zone_id = func.nullif(func.btrim(records.c.data["zoneId"].astext), "")
+    return or_(
+        checkpoint_id.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
+        and_(checkpoint_id.is_(None), zone_id.in_(zone_ids)),
+        and_(checkpoint_id.is_(None), zone_id.is_(None), subject_zone_condition(zone_ids)),
+    )
+
+
 @router.get("/dashboard-analytics")
 async def dashboard_analytics(
     subjectGroup: str = Query("people", pattern="^(people|hardware)$"),
     startAt: Optional[str] = Query(None),
     endAt: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_read_db),
+    actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
+    zone_ids = await admin_zone_ids(db, actor)
     end = min(parse_bound(endAt), datetime.now(timezone.utc)) if endAt else datetime.now(timezone.utc)
     start = parse_bound(startAt) if startAt else None
     if start and start > end:
@@ -81,20 +96,20 @@ async def dashboard_analytics(
     except OverflowError as error:
         raise HTTPException(422, "Date range is too large for a comparison period") from error
     history = movement_history(hardware_only=True) if subjectGroup == "hardware" else Movement
+    scan_filters = scan_conditions(history)
     periods = {"current": history.occurred_at <= end}
     if start:
         periods["current"] &= history.occurred_at >= start
         periods["previous"] = and_(history.occurred_at >= previous_start, history.occurred_at < start)
     columns = [func.count().filter(period & condition).label(f"{name}_{key}")
-        for name, period in periods.items() for key, condition in scan_conditions(history).items()]
+        for name, period in periods.items() for key, condition in scan_filters.items()]
     kinds = ["hardware"] if subjectGroup == "hardware" else ["employee", "visitor"]
-    movement_query = select(*columns).where(history.subject_type.in_(kinds), history.occurred_at <= end)
+    movement_query = select(*columns).where(history.subject_type.in_(kinds), history.occurred_at <= end,
+        checkpoint_zone_condition(history, zone_ids))
     if history is Movement:
         movement_query = movement_query.where(canonical_movement_filter())
     if previous_start:
         movement_query = movement_query.where(history.occurred_at >= previous_start)
-    counters = (await db.execute(movement_query)).mappings().one()
-
     records = listed_alert_records()
     explicit_identity = func.coalesce(AlertReview.subject_id, func.nullif(func.btrim(records.c.data["subjectId"].astext), ""))
     legacy_identity = explicit_identity.is_(None) & (func.lower(Subject.barcode) == func.lower(func.btrim(records.c.data["barcode"].astext)))
@@ -109,19 +124,29 @@ async def dashboard_analytics(
         alert_periods["previous"] = and_(records.c.created_at >= previous_start, records.c.created_at < start)
     alert_query = select(*(func.count().filter(condition).label(name) for name, condition in alert_periods.items()))\
         .select_from(records).outerjoin(AlertReview, AlertReview.alert_id == records.c.id)\
-        .outerjoin(Subject, alert_subject).where(~func.coalesce(excluded, False))
+        .outerjoin(Subject, alert_subject).where(~func.coalesce(excluded, False),
+            alert_zone_condition(records, zone_ids))
     # Unbound alerts belong to the people overview, never to the hardware view.
     alert_query = alert_query.where(Subject.kind == "hardware" if subjectGroup == "hardware"
         else or_(Subject.kind.in_(kinds), Subject.id.is_(None)))
     if previous_start:
         alert_query = alert_query.where(records.c.created_at >= previous_start)
-    alert_counts = (await db.execute(alert_query)).mappings().one()
-    inside = await db.scalar(select(func.count()).select_from(PresenceState)
-        .join(Subject, Subject.id == PresenceState.subject_id).where(Subject.kind.in_(kinds), PresenceState.state == "inside"))
+    movement_totals = movement_query.subquery("movement_totals")
+    alert_totals = alert_query.subquery("alert_totals")
+    inside_total = select(func.count()).select_from(PresenceState).join(
+        Subject, Subject.id == PresenceState.subject_id
+    ).where(Subject.kind.in_(kinds), PresenceState.state == "inside",
+        subject_zone_condition(zone_ids)).scalar_subquery()
+    summary = (await db.execute(select(
+        *movement_totals.c,
+        *alert_totals.c,
+        inside_total.label("active_inside"),
+    ))).mappings().one()
     def period_payload(name):
-        values = {key: int(counters[f"{name}_{key}"] or 0) for key in scan_conditions()}
+        values = {key: int(summary[f"{name}_{key}"] or 0) for key in scan_filters}
         return {"scanAnalytics": {**{key: value for key, value in values.items() if key.startswith("total")},
-            "activeInside": int(inside or 0)}, "breakdown": values, "alertCount": int(alert_counts[name] or 0)}
+            "activeInside": int(summary["active_inside"] or 0)}, "breakdown": values,
+            "alertCount": int(summary[name] or 0)}
     return {"current": period_payload("current"), "previous": period_payload("previous") if start else None,
         "startAt": start.isoformat() if start else None, "endAt": end.isoformat(),
         "previousStartAt": previous_start.isoformat() if previous_start else None,
@@ -170,8 +195,11 @@ async def employee_activity(
     days: int = Query(7, ge=1, le=365),
     endAt: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_read_db),
+    actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
-    if not await db.scalar(select(Subject.id).where(Subject.id == subjectId, Subject.kind == "employee")):
+    zone_ids = await admin_zone_ids(db, actor)
+    if not await db.scalar(select(Subject.id).where(Subject.id == subjectId, Subject.kind == "employee",
+            subject_zone_condition(zone_ids))):
         raise HTTPException(404, "Employee not found")
     end = min(parse_bound(endAt), datetime.now(timezone.utc)) if endAt else datetime.now(timezone.utc)
     today_start = datetime.combine(end.astimezone(FACILITY_ZONE).date(), datetime.min.time(), FACILITY_ZONE).astimezone(timezone.utc)
@@ -183,7 +211,8 @@ async def employee_activity(
     except OverflowError as error:
         raise HTTPException(422, "Date range is too large for a comparison period") from error
     base = select(Movement.direction, Movement.occurred_at).where(Movement.subject_id == subjectId,
-        Movement.subject_type == "employee", Movement.result == "approved", canonical_movement_filter())
+        Movement.subject_type == "employee", Movement.result == "approved", canonical_movement_filter(),
+        checkpoint_zone_condition(Movement, zone_ids))
     seed = (await db.execute(base.where(Movement.occurred_at < previous_start)
         .order_by(Movement.occurred_at.desc(), Movement.id.desc()).limit(1))).first()
     rows = await bounded_rows(db, base.where(Movement.occurred_at >= previous_start, Movement.occurred_at <= end)
@@ -202,8 +231,10 @@ async def employee_activity_summary(
     days: int = Query(7, ge=1, le=365),
     endAt: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_read_db),
+    actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """Return per-employee work hours per calendar day for one shared date range."""
+    zone_ids = await admin_zone_ids(db, actor)
     end = min(parse_bound(endAt), datetime.now(timezone.utc)) if endAt else datetime.now(timezone.utc)
     today_start = datetime.combine(end.astimezone(FACILITY_ZONE).date(), datetime.min.time(), FACILITY_ZONE).astimezone(timezone.utc)
     try:
@@ -212,36 +243,16 @@ async def employee_activity_summary(
         raise HTTPException(422, "Date range is too large") from error
 
     employee_ids = [row[0] for row in await bounded_rows(db,
-        select(Subject.id).where(Subject.kind == "employee").order_by(Subject.id))]
+        select(Subject.id).where(Subject.kind == "employee", subject_zone_condition(zone_ids))
+        .order_by(Subject.id))]
     if not employee_ids:
         return {"averages": {}, "days": days, "startAt": start.isoformat(), "endAt": end.isoformat()}
 
-    conditions = (Movement.subject_id.in_(employee_ids), Movement.subject_type == "employee",
-        Movement.result == "approved", canonical_movement_filter())
-    prior_events = select(
-        Movement.subject_id.label("subject_id"),
-        Movement.direction.label("direction"),
-        Movement.occurred_at.label("occurred_at"),
-        func.row_number().over(
-            partition_by=Movement.subject_id,
-            order_by=(Movement.occurred_at.desc(), Movement.id.desc()),
-        ).label("event_rank"),
-    ).where(*conditions, Movement.occurred_at < start).subquery()
-    seed_rows = await bounded_rows(db, select(
-        prior_events.c.subject_id, prior_events.c.direction, prior_events.c.occurred_at,
-    ).where(prior_events.c.event_rank == 1))
-    range_rows = await bounded_rows(db, select(
-        Movement.subject_id, Movement.direction, Movement.occurred_at,
-    ).where(*conditions, Movement.occurred_at >= start, Movement.occurred_at <= end)
-        .order_by(Movement.subject_id, Movement.occurred_at, Movement.id), maximum=settings.DATA_ANALYTICS_MAX_ROWS)
-
-    events_by_employee: dict[str, list[tuple[str, datetime]]] = {employee_id: [] for employee_id in employee_ids}
-    for row in seed_rows:
-        if row.subject_id in events_by_employee:
-            events_by_employee[row.subject_id].append((row.direction, row.occurred_at))
-    for row in range_rows:
-        if row.subject_id in events_by_employee:
-            events_by_employee[row.subject_id].append((row.direction, row.occurred_at))
+    # Share the registry's indexed predecessor lookup and bounded range read.
+    # Keeping this pairing logic centralized prevents the dashboard summary and
+    # registry page from drifting on overnight work or pre-range open shifts.
+    from registry_reads import employee_activity_rows
+    events_by_employee = await employee_activity_rows(db, employee_ids, start, end, zone_ids=zone_ids)
 
     averages: dict[str, Optional[float]] = {}
     for employee_id, events in events_by_employee.items():

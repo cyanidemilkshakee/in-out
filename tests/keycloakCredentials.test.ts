@@ -100,6 +100,11 @@ test("only explicit post-proof setup status opens the setup UI; old password-gra
   for (const [body, status, expected] of [
     [{ error: "account_setup_required" }, 409, "account_setup_required"],
     [{ error: "account_setup_required" }, 401, "service_unavailable"],
+    [{ error: "not_ready" }, 409, "account_action_required"],
+    [{ error: "not_ready" }, 401, "service_unavailable"],
+    [{ error: "not_ready" }, 403, "service_unavailable"],
+    [{ error: "not_ready" }, 503, "service_unavailable"],
+    [{ error: "unrecognized_account_action" }, 409, "service_unavailable"],
     [{ error: "invalid_grant", error_description: "Account is not fully set up" }, 400, "service_unavailable"],
     [{ error: "invalid_client" }, 401, "service_unavailable"],
     [{ private: "secret" }, 429, "service_unavailable"],

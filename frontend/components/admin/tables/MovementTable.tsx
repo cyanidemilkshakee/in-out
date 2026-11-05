@@ -1,4 +1,4 @@
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown } from 'lucide-react';
 import type {
   MovementEvent,
@@ -37,7 +37,7 @@ export function MovementTable({
   onSort: (column: VisibleColumn) => void;
 }) {
   const visibleColumnCount = Math.max(1, Object.values(visibleColumns).filter(Boolean).length);
-  const peopleById = new Map(people.map((person) => [person.id, person] as const));
+  const peopleById = useMemo(() => new Map(people.map((person) => [person.id, person] as const)), [people]);
   const columnOrder: VisibleColumn[] = layout === "logs"
     ? ["date", "time", "name", "type", "result", "checkpoint", "scanType", "direction", "active", "barcode"]
     : ["date", "time", "createdAt", "name", "active", "type", "direction", "checkpoint", "result", "barcode", "scanType", "eventId"];

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDataActions } from "../../../context/DataContext";
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react";
 import type { AlertPage, AlertSortKey, Person, SortDirection } from "../../../../lib/types";
@@ -29,8 +29,8 @@ export function AlertsHistoryTable({ search, subjectId, startAt, endAt, people, 
   const [sortKey, setSortKey] = useState<AlertSortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
   const needle = search.trim().slice(0, 200);
-  const subjectStatuses = new Map(people.map((person) => [person.id, person.status] as const));
-  const subjectStatusesByBarcode = new Map(people.map((person) => [person.barcode, person.status] as const));
+  const subjectStatuses = useMemo(() => new Map(people.map((person) => [person.id, person.status] as const)), [people]);
+  const subjectStatusesByBarcode = useMemo(() => new Map(people.map((person) => [person.barcode, person.status] as const)), [people]);
 
   useEffect(() => { setOffset(0); }, [endAt, needle, sortDirection, sortKey, startAt, subjectId]);
   useEffect(() => {

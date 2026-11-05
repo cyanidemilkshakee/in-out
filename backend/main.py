@@ -45,7 +45,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     await close_keycloak_admin_client()
     await engine.dispose()
-    await read_engine.dispose()
+    if read_engine is not engine:
+        await read_engine.dispose()
     await close_redis_pool()
     await close_temporal_client()
     logger.info("All connection pools closed.")
@@ -148,9 +149,10 @@ async def process_scan(
         )
 
     try:
-        await require_checkpoint(db, "mtls:" + cert_terminal_id, payload.checkpoint_id)
+        checkpoint_id = await require_checkpoint(db, "mtls:" + cert_terminal_id, payload.checkpoint_id)
         scan_options = {"request_scope": request.scope} if request is not None else {}
-        raw_response = await record_scan(db, idempotency_key, payload, payload.terminal_id, **scan_options)
+        raw_response = await record_scan(db, idempotency_key, payload, payload.terminal_id,
+            validated_checkpoint_id=checkpoint_id, **scan_options)
         response = ScanResponse(**raw_response)
         if not db.info.get("scan_replayed"):
             await enqueue_presence(db, {
@@ -178,13 +180,13 @@ async def process_scan(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@app.get("/health/live")
+@app.get("/health/live", include_in_schema=False)
 async def health_live() -> dict:
     """Kubernetes liveness probe — always returns 200 if the process is alive."""
     return {"status": "ok"}
 
 
-@app.get("/health/ready")
+@app.get("/health/ready", include_in_schema=False)
 async def health_ready(db: AsyncSession = Depends(get_read_db)) -> dict:
     """Readiness probe for the API's required data and event dependencies."""
     try:

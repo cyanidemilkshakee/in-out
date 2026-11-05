@@ -9,7 +9,7 @@ import type { Checkpoint, OrganizationZone } from "../../../lib/types";
 import { DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES, USER_MANAGEMENT_STEP_UP_DURATIONS, formatStepUpCountdown, isStepUpDurationMinutes } from "../../../lib/userManagementStepUp";
 import { CreateUserForm, UserDetailsForm, type ManagedUserFormValue } from "./ManagedUserForm";
 import { StepUpDurationSelect } from "./StepUpDurationSelect";
-import { PASSWORD_MAX_LENGTH } from "../../../lib/passwordLimits";
+import { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH } from "../../../lib/passwordLimits";
 import styles from "./UserManagement.module.css";
 
 const emptyForm: ManagedUserFormValue = {
@@ -804,7 +804,7 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
                 <form className={styles.passwordForm} onSubmit={resetPassword}>
                   <label className={styles.field}>
                     New password
-                    <input required maxLength={PASSWORD_MAX_LENGTH} type="password" autoComplete="new-password" disabled={busy} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="Enter new password" />
+                    <input required minLength={PASSWORD_MIN_LENGTH} maxLength={PASSWORD_MAX_LENGTH} type="password" autoComplete="new-password" disabled={busy} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} placeholder="At least 12 characters" />
                   </label>
                   <label className={styles.checkRow}>
                     <input type="checkbox" checked={temporaryPassword} disabled={busy} onChange={(event) => setTemporaryPassword(event.target.checked)} />

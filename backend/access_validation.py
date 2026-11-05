@@ -13,7 +13,9 @@ ACCESS_START_GRACE = timedelta(minutes=5)
 
 def parse_validity(value):
     if not isinstance(value, str) or not re.fullmatch(
-        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,6})?)?(?:Z|[+-]\d{2}:\d{2})?", value
+        r"[0-9]{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12][0-9]|3[01])"
+        r"T(?:[01][0-9]|2[0-3]):[0-5][0-9](?::[0-5][0-9](?:\.[0-9]{1,6})?)?"
+        r"(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])?", value
     ):
         raise HTTPException(422, "Validity must be an ISO date-time")
     try:

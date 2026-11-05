@@ -10,7 +10,7 @@
   "resetPasswordAllowed": true,
   "editUsernameAllowed": false,
   "bruteForceProtected": true,
-  "passwordPolicy": "",
+  "passwordPolicy": "length(12) and notUsername(undefined) and notEmail(undefined) and passwordBlacklist(inout-common-passwords.txt)",
   "accessTokenLifespan": 300,
   "eventsEnabled": true,
   "eventsExpiration": 2592000,
@@ -24,6 +24,8 @@
     "CODE_TO_TOKEN",
     "CODE_TO_TOKEN_ERROR",
     "REFRESH_TOKEN_ERROR",
+    "UPDATE_CREDENTIAL",
+    "UPDATE_CREDENTIAL_ERROR",
     "UPDATE_PASSWORD",
     "UPDATE_PASSWORD_ERROR",
     "RESET_PASSWORD",
@@ -39,6 +41,8 @@
     {
       "clientId": "inout-frontend",
       "name": "InOut Frontend",
+      "rootUrl": "${INOUT_APP_URL}",
+      "baseUrl": "${INOUT_APP_URL}",
       "enabled": true,
       "clientAuthenticatorType": "client-secret",
       "secret": "${KEYCLOAK_CLIENT_SECRET}",
@@ -58,6 +62,7 @@
       "protocol": "openid-connect",
       "fullScopeAllowed": false,
       "attributes": {
+        "login_theme": "inout-app-errors",
         "inout.app-interactions.enabled": "true",
         "post.logout.redirect.uris": "${INOUT_APP_URL}/login##${INOUT_APP_URL}/logout/complete",
         "pkce.code.challenge.method": "S256"

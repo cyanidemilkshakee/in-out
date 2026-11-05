@@ -112,6 +112,57 @@ async def require_subject_scope(db, actor: dict, subject_id: str) -> Subject:
     return subject
 
 
+async def require_subject_grant_scope(db, actor: dict, subject_id: str) -> Subject:
+    """Authorize subject-global grants against every effective access zone.
+
+    Reads may use an overlapping zone. Custody and entry-hold changes affect
+    the entire subject, so overlap alone cannot authorize these mutations.
+    Hold the subject lock through the caller's business transaction.
+    """
+    from sqlalchemy.orm import selectinload
+
+    await require_subject_scope(db, actor, subject_id)
+    subject = await db.scalar(select(Subject).where(Subject.id == subject_id)
+        .options(selectinload(Subject.person), selectinload(Subject.hardware))
+        .with_for_update().execution_options(populate_existing=True))
+    if subject is None:
+        raise HTTPException(404, "Subject not found")
+    if has_master_admin_role(actor):
+        return subject
+    allowed = set(await admin_zone_ids(db, actor))
+    permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == subject_id)
+        .order_by(AccessPermission.id).limit(1).with_for_update()
+        .execution_options(populate_existing=True))
+    metadata = subject.hardware if subject.kind == "hardware" else subject.person
+    data = (metadata.data if metadata else {}) or {}
+    grant = (permission.data if permission else {}) or {}
+    zones = grant.get("zones") if "zones" in grant else data.get("allowedZones")
+    if zones is None and isinstance(data.get("allowedZone"), str):
+        zones = [data["allowedZone"]]
+    if not isinstance(zones, list) or len(zones) > 100 or any(not isinstance(zone, str) or not zone for zone in zones):
+        raise HTTPException(409, "Subject access scope is unavailable; refresh before changing global access")
+    zones = set(zones)
+    if "All Zones" in zones:
+        zones.remove("All Zones")
+        zones.update(await active_zone_ids(db))
+    checkpoints = grant.get("checkpoints") if "checkpoints" in grant else data.get("allowedCheckpoints")
+    if checkpoints is not None and (not isinstance(checkpoints, list) or len(checkpoints) > 16 or
+            any(not isinstance(value, str) or not value for value in checkpoints)):
+        raise HTTPException(409, "Subject checkpoint scope is unavailable; refresh before changing global access")
+    if checkpoints:
+        effective = set()
+        for checkpoint_id in sorted(set(checkpoints)):
+            checkpoint = await db.get(Checkpoint, checkpoint_id)
+            if checkpoint is None:
+                raise HTTPException(409, "Subject checkpoint scope is unavailable; refresh before changing global access")
+            if checkpoint.active and checkpoint.zone_id in zones:
+                effective.add(checkpoint.zone_id)
+        zones = effective
+    if not zones <= allowed:
+        raise HTTPException(403, "This change affects access outside your assigned zones; a master-admin or an admin assigned to all affected zones is required")
+    return subject
+
+
 async def require_alert_scope(db, actor: dict, alert_id: str) -> dict:
     """Resolve a live or retained alert and enforce its branch boundary."""
     from fastapi import HTTPException

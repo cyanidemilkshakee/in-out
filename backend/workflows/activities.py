@@ -102,13 +102,6 @@ async def run_alert_rule_evaluation() -> int:
             "message": "Alert evaluation exceeds its configured capacity; no partial evaluation was performed",
             "resource": resource, "maximum": maximum})
 
-    async def preflight_capacity(db, query, resource, maximum):
-        # Count at most cap+1 identifiers, rather than materializing JSON or
-        # counting an unbounded table. A cap is a rejection, never a sample.
-        count = await db.scalar(select(func.count()).select_from(query.limit(maximum + 1).subquery()))
-        if count > maximum:
-            reject_capacity(resource, maximum)
-
     def require_complete(rows, resource, maximum):
         if len(rows) > maximum:
             reject_capacity(resource, maximum)
@@ -133,15 +126,24 @@ async def run_alert_rule_evaluation() -> int:
             Subject.id.in_(subjects_query))
         movements_query = select(MovementModel.id).where(MovementModel.occurred_at >= since)
         alerts_query = select(AlertModel.id).where(AlertModel.created_at >= since)
-        from models import AlertRule
-        for query, resource, maximum in (
+        # Check all capacity bounds in one round trip. Each subquery stops at
+        # cap+1, so this retains fail-closed behavior without full-table counts.
+        capacity_limits = (
             (subjects_query, "subjects", settings.ALERT_EVALUATION_MAX_SUBJECTS),
             (people_query, "people", settings.ALERT_EVALUATION_MAX_SUBJECTS),
             (movements_query, "movements", settings.ALERT_EVALUATION_MAX_MOVEMENTS),
             (alerts_query, "alerts", settings.ALERT_EVALUATION_MAX_ALERTS),
-            (select(AlertRule.id), "rules", settings.ALERT_EVALUATION_MAX_RULES),
-        ):
-            await preflight_capacity(db, query, resource, maximum)
+        )
+        capacity_select = select(*(
+            select(func.count()).select_from(query.limit(maximum + 1).subquery())
+                .scalar_subquery().label(resource)
+            for query, resource, maximum in capacity_limits
+        ))
+        capacity_counts = (await db.execute(capacity_select)).mappings().one()
+        for _, resource, maximum in capacity_limits:
+            if capacity_counts[resource] > maximum:
+                reject_capacity(resource, maximum)
+
         rules = await alert_rule_catalog(db, maximum_rows=settings.ALERT_EVALUATION_MAX_RULES)
         if not rules:
             return 0

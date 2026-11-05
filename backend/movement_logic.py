@@ -148,13 +148,14 @@ def _is_hardware(subject: Any) -> bool:
 
 
 def _zone_allowed(subject: Any, checkpoint: Checkpoint) -> bool:
+    allowed: list[str] = subject.get("allowedZones", [])
+    if not isinstance(allowed, list) or not ("All Zones" in allowed or (
+            bool(checkpoint.get("zone")) and checkpoint["zone"] in allowed)):
+        return False
     allowed_checkpoints = subject.get("allowedCheckpoints")
     if isinstance(allowed_checkpoints, list) and allowed_checkpoints:
         return checkpoint.get("id") in allowed_checkpoints
-    allowed: list[str] = subject.get("allowedZones", [])
-    if "All Zones" in allowed:
-        return True
-    return bool(checkpoint.get("zone")) and checkpoint["zone"] in allowed
+    return True
 
 
 def _direction_for(checkpoint: Checkpoint, subject: Any | None) -> Direction:

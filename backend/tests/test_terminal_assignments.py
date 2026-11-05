@@ -35,7 +35,9 @@ class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(roles=roles), patch("auth.verify_keycloak_token", return_value={
                 "sub": "caller", "iat": int(time.time()), "exp": int(time.time()) + 300,
                 "jti": "terminal-assignment-test-token", "realm_access": {"roles": roles}, "auth_time": auth_time,
-            }), patch("routers.keycloak_admin._request", new=AsyncMock()) as identity:
+            }), patch("token_revocation.assert_token_active", new=AsyncMock()), \
+                patch("auth.enforce_behavior_admission", new=AsyncMock()), \
+                patch("routers.keycloak_admin._request", new=AsyncMock()) as identity:
                 async with httpx.AsyncClient(transport=httpx.ASGITransport(app), base_url="http://test") as client:
                     response = await client.patch("/v1/keycloak/users/operator", headers={"Authorization": "Bearer test"}, json={"checkpointId": "server-room"})
                 self.assertEqual(response.status_code, expected, response.text)
@@ -116,7 +118,7 @@ class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
         with patch("main.record_scan", new=AsyncMock(return_value=response)) as scan, patch("main.enqueue_presence", new=AsyncMock()) as queue:
             result = await process_scan(payload, key, db, "CN=door-a")
         self.assertFalse(result.allowed)
-        scan.assert_awaited_once_with(db, key, payload, "door-a")
+        scan.assert_awaited_once_with(db, key, payload, "door-a", validated_checkpoint_id="server-room")
         db.commit.assert_awaited_once()
         self.assertIs(queue.await_args.args[0], db)
         self.assertEqual(queue.await_args.args[1]["subject_id"], "person")
@@ -132,5 +134,5 @@ class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
         key = uuid.uuid4()
         with patch("main.record_scan", new=AsyncMock(return_value=response)) as scan, patch("main.enqueue_presence", new=AsyncMock()):
             await process_scan(payload, key, db, "CN=door-a", request=request)
-        scan.assert_awaited_once_with(db, key, payload, "door-a", request_scope=request.scope)
+        scan.assert_awaited_once_with(db, key, payload, "door-a", validated_checkpoint_id="server-room", request_scope=request.scope)
         db.commit.assert_awaited_once()

@@ -43,8 +43,10 @@ test("application repair enables its form and stock setup, preserving provider s
   assert.equal(await configureApplicationSignIn(state.api, { apply: true, log: state.log }), true);
   assert.equal(applicationSignInReady(state.client), true);
   assert.deepEqual(state.writes, [{ standardFlowEnabled: true, implicitFlowEnabled: false,
+    rootUrl: "http://app.localhost:1008", baseUrl: "http://app.localhost:1008",
     directAccessGrantsEnabled: false, serviceAccountsEnabled: false,
-    attributes: { ...state.original.attributes, "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true" } }, { loginTheme: "keycloak.v2" }]);
+    attributes: { ...state.original.attributes, login_theme: "inout-app-errors", "pkce.code.challenge.method": "S256",
+      "inout.app-interactions.enabled": "true" } }, { loginTheme: "keycloak.v2" }]);
   for (const field of ["secret", "redirectUris", "webOrigins", "protocolMappers"]) assert.deepEqual(state.client[field], state.original[field]);
   assert.equal(await configureApplicationSignIn(state.api, { apply: true, log: state.log }), true);
   assert.equal(state.writes.length, 2, "A repeated repair must not rewrite the client or realm");
@@ -55,7 +57,8 @@ test("application repair enables its form and stock setup, preserving provider s
 
 test("already configured application sign-in performs no writes", async () => {
   const state = fixture({ standardFlowEnabled: true, implicitFlowEnabled: false, directAccessGrantsEnabled: false,
-    serviceAccountsEnabled: false, attributes: { "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true" } });
+    rootUrl: "http://app.localhost:1008", baseUrl: "http://app.localhost:1008", serviceAccountsEnabled: false,
+    attributes: { login_theme: "inout-app-errors", "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true" } });
   state.realm.loginTheme = "keycloak.v2";
   assert.equal(await configureApplicationSignIn(state.api, { apply: true, log: state.log }), true);
   assert.deepEqual(state.writes, []);
@@ -63,7 +66,8 @@ test("already configured application sign-in performs no writes", async () => {
 
 test("removing only the previous realm login leaves an already configured client untouched", async () => {
   const state = fixture({ standardFlowEnabled: true, implicitFlowEnabled: false, directAccessGrantsEnabled: false,
-    serviceAccountsEnabled: false, attributes: { "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true" } });
+    rootUrl: "http://app.localhost:1008", baseUrl: "http://app.localhost:1008", serviceAccountsEnabled: false,
+    attributes: { login_theme: "inout-app-errors", "pkce.code.challenge.method": "S256", "inout.app-interactions.enabled": "true" } });
   assert.equal(await configureApplicationSignIn(state.api, { apply: true, log: state.log }), true);
   assert.deepEqual(state.writes, [{ loginTheme: "keycloak.v2" }]);
   assert.deepEqual(state.client, state.original);
@@ -96,7 +100,10 @@ test("provider success without persisted S256 policy is not reported as repaired
 test("new realms enable the confidential application form while Postman remains code-only", () => {
   const realm = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
   const app = realm.clients.find(client => client.clientId === "inout-frontend");
-  assert.equal(applicationSignInReady(app), true);
+  assert.equal(app.baseUrl, "${INOUT_APP_URL}");
+  assert.equal(app.rootUrl, "${INOUT_APP_URL}");
+  assert.equal(app.attributes.login_theme, "inout-app-errors");
+  assert.equal(applicationSignInReady({ ...app, baseUrl: "http://app.localhost:1008", rootUrl: "http://app.localhost:1008" }), true);
   assert.equal(realm.loginTheme, undefined, "New realms must use Keycloak's built-in fallback");
   for (const clientId of ["inout-frontend", "inout-postman"]) {
     const client = realm.clients.find(candidate => candidate.clientId === clientId);
@@ -118,7 +125,7 @@ test("an absent or rejected extension probe never changes a working legacy clien
 test("repair removes a client branding override without replacing unrelated attributes", async () => {
   const state = fixture({ attributes: { login_theme: "inout", custom: "preserved" } });
   await configureApplicationSignIn(state.api, { apply: true, log: state.log });
-  assert.equal(state.client.attributes.login_theme, "keycloak.v2");
+  assert.equal(state.client.attributes.login_theme, "inout-app-errors");
   assert.equal(state.client.attributes.custom, "preserved");
 });
 

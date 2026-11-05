@@ -7,7 +7,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import AsyncMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -193,10 +193,19 @@ class AuthenticationTests(unittest.TestCase):
 
 class ConcurrentAuthenticationTests(unittest.IsolatedAsyncioTestCase):
     setUpClass = classmethod(AuthenticationTests.setUpClass.__func__)
-    setUp = AuthenticationTests.setUp
     claims = AuthenticationTests.claims
     token = AuthenticationTests.token
     response = AuthenticationTests.response
+
+    def setUp(self):
+        AuthenticationTests.setUp(self)
+        # Exercise the real revocation check without connecting to a running
+        # Redis. Signature/JWKS verification remains real in these fixtures.
+        self.revocation_store = AsyncMock()
+        self.revocation_store.mget.return_value = (None, None)
+        store = patch("token_revocation.get_redis_pool", return_value=self.revocation_store)
+        store.start()
+        self.addCleanup(store.stop)
 
     async def parallel_requests(self, token, count=24):
         app = FastAPI()
@@ -216,6 +225,14 @@ class ConcurrentAuthenticationTests(unittest.IsolatedAsyncioTestCase):
             responses = await self.parallel_requests(token)
         self.assertEqual([r.status_code for r in responses], [200] * 24)
         self.assertEqual(fetch_keys.call_count, 1)
+
+    async def test_revoked_signed_tokens_are_rejected_after_key_verification(self):
+        self.revocation_store.mget.return_value = (str(time.time()), None)
+        with patch("auth.httpx.get", return_value=self.response("old")) as fetch_keys:
+            responses = await self.parallel_requests(self.token(), count=3)
+        self.assertEqual([response.status_code for response in responses], [401] * 3)
+        self.assertEqual(fetch_keys.call_count, 1)
+        self.assertEqual(self.revocation_store.mget.await_count, 3)
 
     async def test_expired_cache_parallel_requests_join_refresh_and_remove_retired_key(self):
         with patch("auth.httpx.get", return_value=self.response("old")), patch("auth.time.monotonic", return_value=100):

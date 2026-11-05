@@ -877,7 +877,7 @@ try {
   const operatorTerminal = await request("/terminal", operator);
   assert.equal(operatorTerminal.status, 200);
   const operatorTerminalHtml = await operatorTerminal.text();
-  assert.ok(operatorTerminalHtml.includes("Assigned checkpoint") && operatorTerminalHtml.includes("Main Entrance"));
+  assert.ok(operatorTerminalHtml.includes("Assigned location") && operatorTerminalHtml.includes("Checkpoint") && operatorTerminalHtml.includes("Main Entrance"));
   assert.ok(operatorTerminalHtml.includes("Account security") && operatorTerminalHtml.includes("Sign out"));
   assert.equal(operatorTerminalHtml.includes('href="/admin/users"'), false, "Operator terminal menu must not offer user management");
   const terminalSnapshot = await request("/api/data?scope=terminal", operator);
@@ -899,9 +899,11 @@ try {
     const switchedJar = new Map(ownFormJar);
     const started = await stepUpRequest(jarHeader(switchedJar), { durationMinutes: 15 });
     applyResponseCookies(switchedJar, started);
-    assert.equal((await submitCredentials(switchedJar, { username: "different-admin" }, "/admin/users")).destination.pathname, "/admin/users");
+    const switched = await submitCredentials(switchedJar, { username: "different-admin" }, "/admin/users");
+    assert.equal(switched.destination.pathname, "/login");
+    assert.equal(switched.destination.searchParams.get("code"), "step_up_account_mismatch");
     assert.ok(switchedJar.has(intentCookieName) && switchedJar.has(lockCookieName), "A different account must not consume another administrator's own-form intent");
-    assert.equal((await decodeJarSession(switchedJar)).sub, "different-admin");
+    assert.equal((await decodeJarSession(switchedJar)).sub, "test-user", "Rejected reauthentication must preserve the original account");
     await assertIdentityBlocked(jarHeader(switchedJar));
   }
   let completedCredentialJar;
@@ -1016,9 +1018,9 @@ try {
     assert.equal(management.status, 200);
     const managementHtml = await management.text();
     assert.ok(managementHtml.includes('aria-label="Re-authentication expires in '));
-    const extendButton = managementHtml.match(/<button\b([^>]*aria-label="Extend access"[^>]*)>/);
+    const extendButton = managementHtml.match(/<button\b([^>]*aria-label="Re-authenticate to extend access"[^>]*)>/);
     assert.ok(extendButton && /\btype="button"/.test(extendButton[1]) && !/\bdisabled(?:=|\s|$)/.test(extendButton[1]), "The extension controls must include an enabled Extend button");
-    assert.ok(managementHtml.includes('aria-label="Lock user management"'));
+    assert.ok(managementHtml.includes('aria-label="Lock user management now"'));
     assertDurationSelect(managementHtml, durationMinutes, "Duration");
     const selectedSession = await (await request("/api/auth/session", active)).json();
     assert.equal(selectedSession.authTime, authTime);
@@ -1040,19 +1042,26 @@ try {
   ]) await assertIdentityBlocked(await activeStepUpCookie(60, stepUpNow - 30, invalid));
 
   const longAuthTime = Math.floor(Date.now() / 1000) - 6 * 60;
-  const longSession = await activeStepUpCookie(60, longAuthTime, {
-    roles: ["master-admin"], access_token: accessToken("master-admin"),
-  });
+  const longSession = await activeStepUpCookie(60, longAuthTime);
   const beforeMutation = Date.now();
   const identityMutation = await request("/api/keycloak", longSession, { method: "POST",
     headers: { "Content-Type": "application/json", Origin: appUrl },
-    body: JSON.stringify({ action: "endSessions", userId: "synthetic-user" }) });
+    body: JSON.stringify({ action: "updateUser", userId: "synthetic-user", input: { enabled: false } }) });
   assert.equal(identityMutation.status, 200);
-  assert.equal(identityRequests.at(-1).method, "POST");
-  assertForwardedProof(identityRequests.at(-1), 60, longAuthTime, beforeMutation, Date.now(), accessToken("master-admin"));
+  assert.equal(identityRequests.at(-1).method, "PATCH");
+  assertForwardedProof(identityRequests.at(-1), 60, longAuthTime, beforeMutation, Date.now());
+  const masterSession = await activeStepUpCookie(60, longAuthTime, {
+    roles: ["master-admin"], access_token: accessToken("master-admin"),
+  });
+  const masterMutation = await request("/api/keycloak", masterSession, { method: "POST",
+    headers: { "Content-Type": "application/json", Origin: appUrl },
+    body: JSON.stringify({ action: "endSessions", userId: "synthetic-user" }) });
+  assert.equal(masterMutation.status, 200);
+  assert.equal(identityRequests.at(-1).authorization, `Bearer ${accessToken("master-admin")}`);
+  assert.equal(identityRequests.at(-1).proof, undefined, "Master-admin authority explicitly bypasses the ordinary admin step-up window");
   await assertIdentityBlocked(longSession, 403, { method: "POST",
     headers: { "Content-Type": "application/json", Origin: "https://untrusted.example.invalid" },
-    body: JSON.stringify({ action: "endSessions", userId: "synthetic-user" }) });
+    body: JSON.stringify({ action: "updateUser", userId: "synthetic-user", input: { enabled: false } }) });
 
   const lock = await request("/api/auth/step-up", longSession, { method: "DELETE", headers: { Origin: appUrl } });
   assert.equal(lock.status, 200);
@@ -1133,7 +1142,7 @@ try {
     applyResponseCookies(differentAccountJar, completed);
     assert.ok(differentAccountJar.has(intentCookieName) && differentAccountJar.has(lockCookieName), "Switching account cannot consume another admin's intent");
     const otherSession = await (await request("/api/auth/session", jarHeader(differentAccountJar))).json();
-    assert.equal(otherSession.subject, "different-admin");
+    assert.equal(otherSession.subject, "test-user", "OIDC reauthentication must preserve the original account when another account is rejected");
     assert.equal(otherSession.stepUpExpiresAt, undefined);
     await assertIdentityBlocked(jarHeader(differentAccountJar));
   }

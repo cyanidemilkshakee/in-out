@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
-from models import Subject, AccessPermission, PermissionRequestModel, Checkpoint, OrganizationZone, TerminalCheckpointAssignment
+from models import Subject, AccessPermission, AuditEvent, PermissionRequestModel, Checkpoint, OrganizationZone, TerminalCheckpointAssignment
 from schemas import SubjectCreate
 from routers.registry import create_subject
 
@@ -53,6 +53,11 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
             item = patch(target, new=AsyncMock(return_value=1))
             item.start()
             self.addCleanup(item.stop)
+        for target, attribute in (("temporal_worker.get_temporal_client", "temporal"),
+                                  ("redis_client.publish_presence_update", "publish")):
+            item = patch(target, new=AsyncMock())
+            setattr(self, attribute, item.start())
+            self.addCleanup(item.stop)
 
     def visitor(self):
         return SubjectCreate(barcode="guest-1", kind="visitor", data={
@@ -69,8 +74,8 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         db.add.side_effect = added.append
 
         async def commit():
-            self.assertEqual(len(added), 3)
-            self.assertEqual({type(row) for row in added}, {Subject, AccessPermission, PermissionRequestModel})
+            self.assertEqual(len(added), 4)
+            self.assertEqual({type(row) for row in added}, {Subject, AccessPermission, PermissionRequestModel, AuditEvent})
             events.append("commit")
 
         async def refresh(_):
@@ -93,6 +98,7 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         subject = next(row for row in added if isinstance(row, Subject))
         permission = next(row for row in added if isinstance(row, AccessPermission))
         request = next(row for row in added if isinstance(row, PermissionRequestModel))
+        audit = next(row for row in added if isinstance(row, AuditEvent))
         self.assertEqual(result.id, subject.id)
         self.assertNotEqual(result.id, "spoofed")
         self.assertEqual(subject.person.data["status"], "pending_approval")
@@ -103,10 +109,15 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(request.subject_id, subject.id)
         self.assertEqual(request.data["requestedZones"], ["a"])
         self.assertEqual(request.data["validTo"], subject.person.data["validTo"])
+        self.assertEqual(audit.data["subjectId"], subject.id)
+        self.assertEqual(audit.data["actor"], "operator")
+        self.assertEqual(audit.data["zoneId"], "a")
+        self.assertEqual(audit.data["after"]["status"], "pending_approval")
         db.commit.assert_awaited_once()
         db.rollback.assert_not_awaited()
         start.assert_awaited_once_with(db, request.id, visitor=True)
-        temporal.start_workflow.assert_not_awaited()
+        self.temporal.assert_not_awaited()
+        self.publish.assert_not_awaited()
         self.assertEqual(events, ["enqueue", "commit", "refresh"])
 
     async def test_duplicate_barcode_rolls_back_registration_without_publication(self):
@@ -117,7 +128,11 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(HTTPException) as error:
                 await create_subject(self.visitor(), db, {"sub": "operator"})
         self.assertEqual(error.exception.status_code, 409)
-        self.assertEqual(db.add.call_count, 3)
+        self.assertEqual(db.add.call_count, 4)
+        self.assertEqual({type(call.args[0]) for call in db.add.call_args_list},
+                         {Subject, AccessPermission, PermissionRequestModel, AuditEvent})
         db.commit.assert_awaited_once()
         db.rollback.assert_awaited_once()
         db.refresh.assert_not_awaited()
+        self.temporal.assert_not_awaited()
+        self.publish.assert_not_awaited()

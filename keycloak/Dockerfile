@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-ARG KEYCLOAK_VERSION=26.8.0
+ARG KEYCLOAK_VERSION=26.8.1
 FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION} AS provider-api
 
 # Compile against the exact runtime JARs, without fetching a second dependency
@@ -20,10 +20,12 @@ FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION} AS builder
 ENV KC_DB=postgres \
     KC_HEALTH_ENABLED=true
 COPY --from=provider /inout-app-interactions.jar /opt/keycloak/providers/inout-app-interactions.jar
+COPY themes/ /opt/keycloak/themes/
 RUN /opt/keycloak/bin/kc.sh build
 
 FROM quay.io/keycloak/keycloak:${KEYCLOAK_VERSION}
 COPY --from=builder /opt/keycloak/ /opt/keycloak/
+COPY password-blacklists/ /opt/keycloak/data/password-blacklists/
 ENV KC_DB=postgres \
     KC_HEALTH_ENABLED=true
 ENTRYPOINT ["/opt/keycloak/bin/kc.sh"]

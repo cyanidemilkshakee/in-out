@@ -2,6 +2,7 @@
 import base64
 import concurrent.futures
 import hashlib
+import json
 import secrets
 import time
 import unittest
@@ -47,7 +48,7 @@ class InteractionTests(unittest.TestCase):
     def test_client_authentication_origin_gate_and_public_boundary(self):
         response = self.client.get(BASE + "/status", auth=CLIENT)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"extensionVersion": 1, "keycloakVersion": "26.8.0", "protocol": "inout-app-interactions-v1"})
+        self.assertEqual(response.json(), {"extensionVersion": 1, "keycloakVersion": "26.8.1", "protocol": "inout-app-interactions-v1"})
         self.assertIn("no-store", response.headers["cache-control"])
         for options in ({}, {"auth": httpx.BasicAuth("inout-frontend", "incorrect-fixture-secret")},
                         {"auth": CLIENT, "headers": {"Origin": "http://foreign.invalid"}}):
@@ -253,6 +254,7 @@ class InteractionTests(unittest.TestCase):
     def test_setup_policy_failure_is_atomic_and_unsupported_actions_remain(self):
         path = "/users/" + self.user["id"]
         new_password = secrets.token_urlsafe(32)
+        original_policy = self.fixture.admin_request("GET", "").json().get("passwordPolicy", "")
         try:
             self.fixture.admin_request("PUT", path, json={"requiredActions": ["UPDATE_PASSWORD"]}).raise_for_status()
             self.assertEqual(self.proof().json(), {"error": "account_setup_required"})
@@ -260,10 +262,20 @@ class InteractionTests(unittest.TestCase):
             rejected = self.post("verify", {"mode": "setup", "username": self.user["username"],
                 "currentPassword": self.user["password"], "newPassword": "short", "expectedSubject": self.user["id"]})
             self.assertEqual(rejected.status_code, 422, rejected.text)
+            failed_events = self.fixture.admin_request("GET", "/events", params={
+                "type": "UPDATE_CREDENTIAL_ERROR", "user": self.user["id"], "max": 20,
+            }).json()
+            self.assertTrue(any(event.get("error") == "password_rejected" and
+                event.get("details", {}).get("credential_type") == "password" for event in failed_events), failed_events)
             self.assertIn("UPDATE_PASSWORD", self.fixture.admin_request("GET", path).json()["requiredActions"])
             completed = self.post("verify", {"mode": "setup", "username": self.user["username"],
                 "currentPassword": self.user["password"], "newPassword": new_password, "expectedSubject": self.user["id"]})
             self.assertEqual(completed.status_code, 200, completed.text)
+            success_events = self.fixture.admin_request("GET", "/events", params={
+                "type": "UPDATE_CREDENTIAL", "user": self.user["id"], "max": 20,
+            }).json()
+            self.assertTrue(any(event.get("details", {}).get("credential_type") == "password" for event in success_events), success_events)
+            self.assertNotIn(new_password, json.dumps([failed_events, success_events]))
             self.user["password"] = new_password
             self.fixture.admin_request("PUT", path, json={"requiredActions": ["UPDATE_PASSWORD", "CONFIGURE_TOTP"]}).raise_for_status()
             blocked = self.post("verify", {"mode": "setup", "username": self.user["username"],
@@ -271,7 +283,7 @@ class InteractionTests(unittest.TestCase):
             self.assertEqual(blocked.status_code, 401)
             self.assertEqual(sorted(self.fixture.admin_request("GET", path).json()["requiredActions"]), ["CONFIGURE_TOTP", "UPDATE_PASSWORD"])
         finally:
-            self.fixture.admin_request("PUT", "", json={"passwordPolicy": ""}).raise_for_status()
+            self.fixture.admin_request("PUT", "", json={"passwordPolicy": original_policy}).raise_for_status()
             self.fixture.admin_request("PUT", path, json={"requiredActions": []}).raise_for_status()
 
     def test_native_otp_verification_is_required_and_replay_is_rejected(self):

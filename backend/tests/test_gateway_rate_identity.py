@@ -50,6 +50,11 @@ class GatewayRateIdentityTests(unittest.IsolatedAsyncioTestCase):
         patcher = patch("request_admission.record_behavior_failure", new=AsyncMock())
         patcher.start()
         self.addCleanup(patcher.stop)
+        self.revocation_store = AsyncMock()
+        self.revocation_store.mget.return_value = (None, None)
+        patcher = patch("token_revocation.get_redis_pool", return_value=self.revocation_store)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def token(self, **changes):
         claims = {"iss": self.issuer, "aud": "inout-frontend", "sub": "alice",
@@ -116,6 +121,13 @@ class GatewayRateIdentityTests(unittest.IsolatedAsyncioTestCase):
     async def test_authentication_outage_fails_closed(self):
         self.fetch_keys.side_effect = httpx.ConnectError("isolated offline fixture")
         self.assertEqual((await self.callback()).status_code, 503)
+
+    async def test_signed_but_revoked_tokens_cannot_select_a_quota_identity(self):
+        self.revocation_store.mget.return_value = (str(time.time()), None)
+        response = await self.callback()
+        self.assertEqual(response.status_code, 401)
+        self.assertNotIn("identity", response.json())
+        self.revocation_store.mget.assert_awaited_once()
 
     async def test_callback_does_not_grant_an_application_role(self):
         # Valid realm users may be identified for accounting, but the real

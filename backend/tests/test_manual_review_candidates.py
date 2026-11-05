@@ -37,7 +37,8 @@ class ManualReviewCandidatesTests(unittest.IsolatedAsyncioTestCase):
         source = SimpleNamespace(id="source", subject_id="p1", result="denied", direction="entry",
             checkpoint_id="cp-main", occurred_at=NOW - timedelta(minutes=21),
             data={"barcode": "p1", "hardwareIds": []})
-        return SimpleNamespace(scalars=AsyncMock(side_effect=[ScalarRows(page) for page in pages]),
+        return SimpleNamespace(execute=AsyncMock(side_effect=[
+                SimpleNamespace(all=lambda page=page: [(request, source) for request in page]) for page in pages]),
             scalar=AsyncMock(return_value=more), get=AsyncMock(return_value=source))
 
     async def approved(self, db):
@@ -50,9 +51,9 @@ class ManualReviewCandidatesTests(unittest.IsolatedAsyncioTestCase):
         valid = self.request("original", valid=True, created_at=NOW - timedelta(minutes=20))
         db = self.db([expired, [valid]])
         self.assertIs(await self.approved(db), valid)
-        self.assertEqual(db.scalars.await_count, 2)
+        self.assertEqual(db.execute.await_count, 2)
         db.scalar.assert_not_awaited()
-        db.get.assert_awaited_once()
+        db.get.assert_not_awaited()  # The source scan is joined into the bounded page.
 
     async def test_ordinary_valid_grant_needs_one_query_and_keeps_python_validation(self):
         invalid = self.request("malformed")
@@ -62,7 +63,7 @@ class ManualReviewCandidatesTests(unittest.IsolatedAsyncioTestCase):
         valid = self.request("valid", valid=True)
         db = self.db([[invalid, wrong_context, valid]])
         self.assertIs(await self.approved(db), valid)
-        db.scalars.assert_awaited_once()
+        db.execute.assert_awaited_once()
         db.scalar.assert_not_awaited()
 
     async def test_tied_timestamps_advance_by_id_and_retain_row_locks(self):
@@ -71,7 +72,7 @@ class ManualReviewCandidatesTests(unittest.IsolatedAsyncioTestCase):
         db = self.db([first, [valid]])
         with patch.object(terminal_scans, "_MANUAL_REVIEW_PAGE_SIZE", 2):
             self.assertIs(await self.approved(db), valid)
-        statement = db.scalars.await_args_list[1].args[0]
+        statement = db.execute.await_args_list[1].args[0]
         compiled = statement.compile(dialect=postgresql.dialect())
         self.assertIn("(permission_requests.created_at, permission_requests.id) <", str(compiled))
         self.assertIn("permission_requests.created_at DESC, permission_requests.id DESC", str(compiled))
@@ -89,7 +90,7 @@ class ManualReviewCandidatesTests(unittest.IsolatedAsyncioTestCase):
                 await self.approved(db)
         self.assertEqual(raised.exception.status_code, 503)
         self.assertEqual(raised.exception.detail["code"], "manual_review_capacity_exceeded")
-        self.assertEqual(db.scalars.await_count, 2)
+        self.assertEqual(db.execute.await_count, 2)
         db.scalar.assert_awaited_once()
         statement = db.scalar.await_args.args[0]
         self.assertEqual(statement._limit_clause.value, 1)
@@ -101,13 +102,13 @@ class ManualReviewCandidatesTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(terminal_scans, "_MANUAL_REVIEW_PAGE_SIZE", 2), \
              patch.object(terminal_scans, "_MAX_MANUAL_REVIEW_CANDIDATES", 2):
             self.assertIsNone(await self.approved(db))
-        db.scalars.assert_awaited_once()
+        db.execute.assert_awaited_once()
         db.scalar.assert_awaited_once()
 
     async def test_short_page_proves_absence_without_overflow_probe(self):
         db = self.db([[self.request("expired")]])
         self.assertIsNone(await self.approved(db))
-        db.scalars.assert_awaited_once()
+        db.execute.assert_awaited_once()
         db.scalar.assert_not_awaited()
 
 

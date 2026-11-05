@@ -1,4 +1,5 @@
 import { keycloakInteractionRequest, validInteractionSubject, type KeycloakInteractionConfig } from "./keycloakInteractions"
+import { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH } from "./passwordLimits"
 
 export type PasswordUpdateFailureCode = "invalid_request" | "credentials" | "not_ready" | "state_changed" |
   "password_policy" | "service_unavailable" | "update_unconfirmed"
@@ -33,9 +34,9 @@ function validateInput(input: PasswordUpdateInput) {
   if (!input || !["setup", "change"].includes(input.mode) ||
       typeof input.username !== "string" || !input.username.trim() || input.username.length > 254 || /[\u0000-\u001f\u007f]/.test(input.username) ||
       typeof input.currentPassword !== "string" || !input.currentPassword || input.currentPassword.length > 128 ||
-      typeof input.newPassword !== "string" || !input.newPassword.trim() || input.newPassword.length > 128 || input.newPassword === input.currentPassword ||
+      typeof input.newPassword !== "string" || !input.newPassword.trim() || input.newPassword.length < PASSWORD_MIN_LENGTH || input.newPassword.length > PASSWORD_MAX_LENGTH || input.newPassword === input.currentPassword ||
       (input.otp !== undefined && (typeof input.otp !== "string" || (input.otp !== "" && !/^\d{6,8}$/.test(input.otp))))) {
-    throw new PasswordUpdateError("invalid_request", 400, "Enter the account, current password and a different new password of at most 128 characters.")
+    throw new PasswordUpdateError("invalid_request", 400, `Enter the account, current password and a different new password of ${PASSWORD_MIN_LENGTH} to ${PASSWORD_MAX_LENGTH} characters.`)
   }
   if (input.mode === "change" && !validInteractionSubject(input.expectedSubject)) throw credentialsError()
 }

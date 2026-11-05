@@ -239,7 +239,8 @@ class DataQueryBoundsTests(unittest.IsolatedAsyncioTestCase):
                          ("p1", "EMP-1", "inside"))
 
     async def test_terminal_rejects_unbounded_hardware_before_filtering_json(self):
-        db = Database([(None, None, None)] * 100)
+        checkpoint = SimpleNamespace(id="cp-main", zone_id="a", active=True, data={})
+        db = Database([(checkpoint, "Zone A")], [(None, None, None)] * 100)
         with patch("routers.terminal.assigned_checkpoint", new=AsyncMock(return_value="cp-main")):
             await self.rejected(terminal.get_terminal_bundle(db=db, operator={"sub": "operator"}), db)
 

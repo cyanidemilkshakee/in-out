@@ -50,6 +50,15 @@ class PermissionWindowTests(unittest.TestCase):
             with self.subTest(start=start):
                 self.assertEqual(permission_horizon(parse_validity(start)), parse_validity(end))
 
+    def test_clock_and_offset_components_are_rejected_before_runtime_normalization(self):
+        for value in ("2026-01-01T24:00", "2026-01-01T24:00:00Z",
+                      "2026-01-01T12:00:00+00:60", "2026-01-01T12:00:00-01:60",
+                      "2026-01-01T12:00:00+24:00"):
+            with self.subTest(value=value):
+                with self.assertRaises(HTTPException) as raised:
+                    parse_validity(value)
+                self.assertEqual(raised.exception.status_code, 422)
+
     def test_start_grace_is_inclusive_and_uses_the_exact_instant(self):
         now = parse_validity("2026-10-06T12:00:00.250000+05:30")
         earliest = now - ACCESS_START_GRACE

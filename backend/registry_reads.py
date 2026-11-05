@@ -1,7 +1,8 @@
 """Bounded Registry pages and compact summaries; full histories stay on demand."""
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import String, bindparam, case, func, or_, select, true
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import selectinload
 
 from config import settings
@@ -42,19 +43,25 @@ def subject_search_conditions(kind, search):
     return conditions
 
 
-async def employee_activity_rows(db, employee_ids, start, end):
+async def employee_activity_rows(db, employee_ids, start, end, *, zone_ids=None):
+    employee_ids = list(dict.fromkeys(employee_ids))
     if not employee_ids:
         return {}
-    conditions = (Movement.subject_id.in_(employee_ids), Movement.subject_type == "employee",
-                  Movement.result == "approved", canonical_movement_filter())
-    prior = select(Movement.subject_id, Movement.direction, Movement.occurred_at,
-        func.row_number().over(partition_by=Movement.subject_id,
-            order_by=(Movement.occurred_at.desc(), Movement.id.desc())).label("event_rank"))\
-        .where(*conditions, Movement.occurred_at < start).subquery()
-    seeds = await bounded_rows(db, select(prior.c.subject_id, prior.c.direction, prior.c.occurred_at)
-        .where(prior.c.event_rank == 1), maximum=settings.DATA_ANALYTICS_MAX_ROWS)
+    conditions = (Movement.subject_type == "employee", Movement.result == "approved",
+                  canonical_movement_filter(),
+                  *([checkpoint_zone_condition(Movement, zone_ids)] if zone_ids is not None else []))
+    requested_ids = bindparam("requested_employee_ids", type_=ARRAY(String))
+    requested = select(func.unnest(requested_ids).label("subject_id")).subquery("requested_employees")
+    prior = (select(Movement.direction.label("direction"), Movement.occurred_at.label("occurred_at"))
+        .where(*conditions, Movement.subject_id == requested.c.subject_id, Movement.occurred_at < start)
+        .order_by(Movement.occurred_at.desc(), Movement.id.desc()).limit(1)
+        .lateral("latest_prior_movement"))
+    seed_query = (select(requested.c.subject_id, prior.c.direction, prior.c.occurred_at)
+        .select_from(requested.join(prior, true())).params(requested_employee_ids=employee_ids))
+    seeds = await bounded_rows(db, seed_query, maximum=settings.DATA_ANALYTICS_MAX_ROWS)
     rows = await bounded_rows(db, select(Movement.subject_id, Movement.direction, Movement.occurred_at)
-        .where(*conditions, Movement.occurred_at >= start, Movement.occurred_at <= end)
+        .where(Movement.subject_id.in_(employee_ids), *conditions,
+            Movement.occurred_at >= start, Movement.occurred_at <= end)
         .order_by(Movement.subject_id, Movement.occurred_at, Movement.id), maximum=settings.DATA_ANALYTICS_MAX_ROWS)
     grouped = {employee_id: [] for employee_id in employee_ids}
     for row in [*seeds, *rows]:
@@ -93,7 +100,7 @@ async def registry_trend(db, kind, days, end, zone_ids=None):
         if scope is not None:
             employee_query = employee_query.where(scope)
         ids = [row[0] for row in await bounded_rows(db, employee_query)]
-        events = await employee_activity_rows(db, ids, start - timedelta(days=days), end)
+        events = await employee_activity_rows(db, ids, start - timedelta(days=days), end, zone_ids=zone_ids)
         points = []
         for employee_events in events.values():
             for period_start, period_end in ((start, end), (start - timedelta(days=days), start - timedelta(microseconds=1))):
@@ -145,7 +152,7 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
     sorted_activity = None
     if sort_key == "averageHours" and kind == "employee":
         ids = [row[0] for row in await bounded_rows(db, source.with_only_columns(Subject.id).order_by(Subject.id))]
-        sorted_activity = await employee_activity_rows(db, ids, activity_start, now)
+        sorted_activity = await employee_activity_rows(db, ids, activity_start, now, zone_ids=zone_ids)
         averages = {subject_id: round(sum(day["workedHours"] for day in build_activity_days(events, activity_start, now)) / days, 2)
                     if events else None for subject_id, events in sorted_activity.items()}
         ids.sort(key=lambda subject_id: (averages[subject_id] if averages[subject_id] is not None else -1, subject_id),
@@ -175,7 +182,7 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
     activity_days = {}
     if kind == "employee":
         activity = ({subject_id: sorted_activity[subject_id] for subject_id in ids} if sorted_activity is not None else
-                    await employee_activity_rows(db, ids, activity_start, now))
+                    await employee_activity_rows(db, ids, activity_start, now, zone_ids=zone_ids))
         for subject_id, events in activity.items():
             day_data = build_activity_days(events, activity_start, now)
             activity_days[subject_id] = day_data[-1:]

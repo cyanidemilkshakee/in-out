@@ -5,6 +5,20 @@ import { isSuccessfulUserManagementCallback, USER_MANAGEMENT_STEP_UP_COOKIE, USE
 import { AuthRequestError, prepareAuthRequest, publicAuthSession, safeAuthResponseUrl } from "../../../../lib/authRequestBoundary";
 import { issuedAuthSession, isCompletedAdminStepUpToken } from "../../../../lib/authCallbackSession";
 
+const appAuthErrorCodes = new Set([
+  "AccessDenied", "AccountNotLinked", "AdapterError", "CallbackRouteError", "Configuration", "CredentialsSignin",
+  "DuplicateConditionalUI", "EmailSignInError", "ErrorPageLoop", "EventError", "ExperimentalFeatureNotEnabled",
+  "identity_provider_failure", "InvalidCallbackUrl", "InvalidCheck", "InvalidEndpoints", "InvalidProvider",
+  "JWTSessionError", "MissingAdapter", "MissingAdapterMethods", "MissingAuthorize", "MissingCSRF", "MissingSecret",
+  "MissingWebAuthnAutocomplete", "OAuthAccountNotLinked", "OAuthCallback", "OAuthCallbackError", "OAuthProfileParseError",
+  "OAuthSignin", "OAuthSignInError", "SessionTokenError", "SignOutError", "UnknownAction", "UntrustedHost",
+  "UnsupportedStrategy", "Verification", "WebAuthnVerificationError",
+]);
+
+function appAuthErrorCode(value: string | null) {
+  return value && appAuthErrorCodes.has(value) ? value : "auth_failed";
+}
+
 function secureCookie(request: NextRequest) {
   try {
     return new URL(process.env.AUTH_URL || process.env.NEXTAUTH_URL || request.url).protocol === "https:";
@@ -189,7 +203,10 @@ async function publicResponse(request: NextRequest, response: Response, origin: 
   if (response.status >= 400) {
     if (request.nextUrl.pathname === "/api/auth/error") {
       const error = request.nextUrl.searchParams.get("error");
-      return localRedirect(request, `/login?error=${error === "Configuration" ? "Configuration" : "auth_failed"}`, origin);
+      return localRedirect(request, `/login?error=${appAuthErrorCode(error)}`, origin);
+    }
+    if (["/api/auth/callback/keycloak", "/api/auth/callback/keycloak-password-change"].includes(request.nextUrl.pathname)) {
+      return localRedirect(request, "/login?error=OAuthCallbackError", origin);
     }
     if (request.nextUrl.pathname === "/api/auth/callback/keycloak-password-setup") {
       const headers = responseHeaders(response);

@@ -228,19 +228,26 @@ public final class InteractionResource {
                 }
                 if ((mode.equals("setup") && !actions.equals(Set.of("UPDATE_PASSWORD"))) ||
                     (mode.equals("change") && !actions.isEmpty())) throw failure(401, "credentials");
+                EventBuilder credentialEvent = event(EventType.UPDATE_CREDENTIAL).client(client).user(user)
+                    .detail(Details.CREDENTIAL_TYPE, "password");
                 try {
                     if (!user.credentialManager().updateCredential(UserCredentialModel.password(newPassword, false))) {
+                        credentialEvent.clone().error(Errors.PASSWORD_REJECTED);
+                        credentialEvent.clone().event(EventType.UPDATE_PASSWORD).error(Errors.PASSWORD_REJECTED);
                         session.getTransactionManager().setRollbackOnly();
                         throw failure(422, "password_policy");
                     }
                 } catch (ModelException exception) {
+                    credentialEvent.clone().error(Errors.PASSWORD_REJECTED);
+                    credentialEvent.clone().event(EventType.UPDATE_PASSWORD).error(Errors.PASSWORD_REJECTED);
                     session.getTransactionManager().setRollbackOnly();
                     throw failure(422, "password_policy");
                 }
                 user.removeRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
                 auth.removeRequiredAction(UserModel.RequiredAction.UPDATE_PASSWORD);
                 AuthenticationManager.logSuccess(session, auth);
-                event(EventType.UPDATE_PASSWORD).client(client).user(user).success();
+                credentialEvent.success();
+                credentialEvent.clone().event(EventType.UPDATE_PASSWORD).success();
                 return reply(200, Map.of("ok", true, "subject", user.getId()));
             } finally {
                 if (!retain) session.authenticationSessions().removeRootAuthenticationSession(realm, root);
@@ -298,7 +305,7 @@ public final class InteractionResource {
     }
 
     private ClientModel client(boolean enabledRequired) {
-        if (!Version.VERSION.equals("26.8.0")) throw failure(503, "service_unavailable");
+        if (!Version.VERSION.equals("26.8.1")) throw failure(503, "service_unavailable");
         if (!"https".equals(session.getContext().getUri().getBaseUri().getScheme()) &&
             realm.getSslRequired().isRequired(session.getContext().getConnection())) throw failure(403, "not_ready");
         List<String> authorization = original.getHttpHeaders().getRequestHeaders().get(HttpHeaders.AUTHORIZATION);

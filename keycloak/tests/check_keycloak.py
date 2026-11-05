@@ -512,18 +512,17 @@ class KeycloakCompatibilityTests(unittest.TestCase):
                 errors.append(html.unescape(error[1]).strip())
         self.assertEqual(errors[0], errors[1], "An unknown account and an incorrect password must have the same message")
 
-    def test_provider_has_no_password_strength_policy(self):
+    def test_provider_rejects_weak_passwords_without_changing_the_credential(self):
         realm = self.admin_request("GET", "").json()
-        self.assertFalse(realm.get("passwordPolicy", ""), "Realm must not enforce password-strength requirements")
+        self.assertIn("length(12)", realm.get("passwordPolicy", ""))
+        self.assertIn("notUsername", realm["passwordPolicy"])
+        self.assertIn("notEmail", realm["passwordPolicy"])
         user = self.users["operator"]
-        accepted = self.admin_request("PUT", f"/users/{user['id']}/reset-password", json={
-            "type": "password", "value": "x", "temporary": False,
-        })
-        accepted.raise_for_status()
-        # Restore the fixture credential before continuing the sign-in checks.
-        self.admin_request("PUT", f"/users/{user['id']}/reset-password", json={
-            "type": "password", "value": user["password"], "temporary": False,
-        }).raise_for_status()
+        for password in ("x", "password123456"):
+            rejected = self.admin_request("PUT", f"/users/{user['id']}/reset-password", json={
+                "type": "password", "value": password, "temporary": False,
+            })
+            self.assertEqual(rejected.status_code, 400, rejected.text)
         self.sign_in("operator")
         self.admin_request("PUT", f"/users/{user['id']}/reset-password", json={
             "type": "password", "value": user["password"], "temporary": True,

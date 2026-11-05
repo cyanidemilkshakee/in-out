@@ -5,6 +5,7 @@ import { isSameOriginAuthRequest } from "../../../../../lib/authRequestBoundary"
 import { readJsonBody, RequestBodyError } from "../../../../../lib/requestJson";
 import { PasswordUpdateError, updateKeycloakPassword } from "../../../../../lib/keycloakPasswordUpdate";
 import { USER_MANAGEMENT_STEP_UP_COOKIE } from "../../../../../lib/userManagementStepUp";
+import { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH } from "../../../../../lib/passwordLimits";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -86,10 +87,10 @@ async function updatePassword(request: NextRequest) {
   if ((input.mode !== "setup" && input.mode !== "change") || typeof input.username !== "string" ||
       !input.username.trim() || input.username.length > 254 || /[\u0000-\u001f\u007f]/.test(input.username) ||
       typeof input.currentPassword !== "string" || !input.currentPassword || input.currentPassword.length > 128 ||
-      typeof input.newPassword !== "string" || !input.newPassword || input.newPassword.length > 128 ||
+      typeof input.newPassword !== "string" || !input.newPassword.trim() || input.newPassword.length < PASSWORD_MIN_LENGTH || input.newPassword.length > PASSWORD_MAX_LENGTH ||
       input.newPassword !== input.confirmPassword || input.newPassword === input.currentPassword ||
       (input.otp !== undefined && (typeof input.otp !== "string" || (input.otp !== "" && !/^\d{6,8}$/.test(input.otp))))) {
-    return json({ error: "Enter your current password and matching new passwords of up to 128 characters. The new password must be different." }, 400);
+    return json({ error: `Enter your current password and matching new passwords of ${PASSWORD_MIN_LENGTH} to ${PASSWORD_MAX_LENGTH} characters. The new password must be different.` }, 400);
   }
   const session = await apiSession();
   if (request.cookies.has(USER_MANAGEMENT_STEP_UP_COOKIE)) {

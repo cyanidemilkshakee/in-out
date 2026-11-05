@@ -6,7 +6,7 @@ export const DATA_SCOPE_ENDPOINTS: Partial<Record<DataScope, string>> = {
   all: "/v1/dashboard",
   alerts: "/v1/alerts",
   permissions: "/v1/permissions",
-  logs: "/v1/audit-events",
+  logs: "/v1/audit-events?includeContext=true",
   registry: "/v1/registry/bundle",
   terminal: "/v1/terminal/bundle",
 };

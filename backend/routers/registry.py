@@ -32,7 +32,7 @@ from models import (
     Checkpoint,
 )
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
-from access_validation import (require_registered_checkpoint, validate_window,
+from access_validation import (parse_validity, require_registered_checkpoint, validate_window,
     validate_permission_window, validate_registered_zones)
 from permission_decisions import enqueue_decision, permission_version
 from subject_metadata import current_subject_metadata, validate_subject_metadata_size
@@ -40,6 +40,7 @@ from manual_review_policy import revised_access_data
 from registry_validation import (
     METADATA_LIMITS as _METADATA_LIMITS,
     is_barcode_conflict as _is_barcode_conflict,
+    validated_checkpoint_ids,
     validated_metadata as _validated_metadata,
 )
 from zone_access import admin_zone_ids, checkpoint_zone_condition, require_checkpoint_scope, require_subject_scope, subject_zone_condition, validate_zone_subset
@@ -51,6 +52,129 @@ bundle_router = APIRouter(prefix="/v1/registry", tags=["registry"])
 
 _MAX_LIMIT = 200
 _DEFAULT_LIMIT = 50
+
+
+async def _validate_checkpoint_grants(db, actor, value, zones, *, kind):
+    """Checkpoint grants narrow zone access; they cannot add another branch."""
+    checkpoint_ids = validated_checkpoint_ids(value)
+    if kind == "visitor" and len(checkpoint_ids) != 1:
+        raise HTTPException(422, "Visitor access must select exactly one checkpoint")
+    for checkpoint_id in sorted(checkpoint_ids):
+        await require_registered_checkpoint(db, checkpoint_id)
+        checkpoint = await require_checkpoint_scope(db, actor, checkpoint_id)
+        if checkpoint.zone_id not in zones:
+            raise HTTPException(422, "Allowed checkpoints must belong to the subject's allowed zones")
+    return checkpoint_ids
+
+
+def _registry_grant_broadens(previous, permission, patch, *, kind):
+    """Compare against the same canonical status/window used during scans."""
+    if kind == "hardware" and any(field in patch and patch[field] != previous.get(field)
+                                  for field in ("ownerId", "assignedEmployeeId")):
+        # Custody is subject-global; moving a shared asset to another carrier
+        # must not grant that carrier authority at an unmanaged branch.
+        return True
+    canonical = permission.data if permission else {}
+    state = canonical.get("state")
+    status = ({"active": "pre_approved" if kind == "visitor" else "active",
+               "revoked": "inactive", "restricted": "restricted", "pending_approval": "pending_approval",
+               "expired": "expired"}.get(state, previous.get("status")) if state else previous.get("status"))
+    allowed_status = "pre_approved" if kind == "visitor" else "active"
+    if "status" in patch:
+        requested = patch["status"]
+        if permission and requested in {"active", "pre_approved"}:
+            requested = allowed_status
+        if requested == allowed_status and status != allowed_status:
+            return True
+    for field in ("validFrom", "validTo"):
+        if field not in patch:
+            continue
+        old = canonical.get(field) or previous.get(field)
+        new = patch[field]
+        if old == new or not old:
+            continue
+        if not new:
+            return True  # A blank bound means unlimited access at scan time.
+        try:
+            old_at, new_at = parse_validity(old), parse_validity(new)
+        except HTTPException:
+            return True  # Repairing an invalid legacy bound can enable entry.
+        if (field == "validFrom" and new_at < old_at) or (field == "validTo" and new_at > old_at):
+            return True
+    return False
+
+
+def _registry_access_snapshot(barcode, data):
+    """Retain only bounded security fields, never arbitrary subject metadata."""
+    snapshot = {"barcode": str(barcode or "")[:64]}
+    for field, limit in (("status", 64), ("validFrom", 40), ("validTo", 40),
+                         ("ownerId", 128), ("assignedEmployeeId", 128)):
+        value = (data or {}).get(field)
+        if isinstance(value, str):
+            snapshot[field] = value[:limit]
+    for field, maximum, width in (("allowedZones", 100, 128), ("allowedCheckpoints", 16, 64)):
+        values = (data or {}).get(field)
+        if isinstance(values, list):
+            snapshot[field] = [value[:width] for value in values[:maximum] if isinstance(value, str)]
+    return snapshot
+
+
+async def _registry_history_zones(db, subject_id, *documents):
+    """Keep audit visibility with the affected subject, including pending visits."""
+    zones = set()
+    checkpoint_ids = set()
+    for document in documents:
+        document = document or {}
+        for field in ("allowedZones", "zones"):
+            values = document.get(field)
+            if isinstance(values, list):
+                zones.update(value for value in values if isinstance(value, str) and value and value != "All Zones")
+        checkpoint_id = document.get("checkpointId")
+        if isinstance(checkpoint_id, str) and checkpoint_id:
+            checkpoint_ids.add(checkpoint_id)
+    for checkpoint_id in sorted(checkpoint_ids):
+        checkpoint = await db.get(Checkpoint, checkpoint_id)
+        if checkpoint is not None:
+            zones.add(checkpoint.zone_id)
+    if not zones:
+        # Subject scope also recognizes saved pending visitor requests. Use
+        # their branch snapshot, never every branch assigned to the actor.
+        requests = await db.scalars(select(PermissionRequestModel.data).where(
+            PermissionRequestModel.subject_id == subject_id,
+            PermissionRequestModel.data["status"].astext == "pending"))
+        for request in requests.all():
+            values = request.get("requestedZones") if isinstance(request, dict) else None
+            if isinstance(values, list):
+                zones.update(value for value in values if isinstance(value, str) and value)
+    if not zones:
+        raise HTTPException(409, "Registry audit scope is unavailable; refresh this subject before changing it")
+    return zones
+
+
+def _audit_registry_mutation(db, action, actor, subject, *, before=None, after=None, zone_ids=()):
+    """Write history in the business transaction, including after deletion.
+
+    One scoped event per affected branch keeps retained deletion history
+    visible without relying on a Subject row that no longer exists.
+    """
+    now = datetime.now(timezone.utc)
+    mutation_id = uuid.uuid4().hex
+    for zone_id in sorted({value[:128] for value in zone_ids if isinstance(value, str) and value}):
+        audit_id = "AUD-" + uuid.uuid4().hex
+        data = {"id": audit_id, "category": "security", "action": f"Registry subject {action}",
+                "subjectId": subject.id, "subjectType": subject.kind,
+                "subjectName": subject.barcode, "barcode": subject.barcode,
+                "zoneId": zone_id, "mutationId": mutation_id, "relatedId": mutation_id,
+                "actor": actor.get("sub", "unknown"),
+                "role": "Administrator" if has_admin_role(actor) else "Operator",
+                "reason": f"Registry record {action}", "createdAt": now.isoformat()}
+        if before is not None:
+            data["before"] = before
+        if after is not None:
+            data["after"] = after
+        db.add(AuditEvent(id=audit_id, created_at=now, data=data))
+
+
 async def _hardware_employee(db, employee_id, role):
     if not isinstance(employee_id, str) or not employee_id.strip():
         raise HTTPException(422, f"Choose a registered employee as the hardware {role}")
@@ -214,6 +338,14 @@ async def create_subject(
             await validate_registered_zones(db, requested_zones), actor_zones)
     else:
         requested_zones = []
+    if "allowedCheckpoints" in incoming:
+        if payload.kind == "visitor":
+            if incoming["allowedCheckpoints"] not in ([], [visitor_checkpoint.id]):
+                raise HTTPException(422, "Visitor access must use the selected registration checkpoint")
+            incoming["allowedCheckpoints"] = [visitor_checkpoint.id]
+        else:
+            incoming["allowedCheckpoints"] = await _validate_checkpoint_grants(
+                db, actor, incoming["allowedCheckpoints"], requested_zones, kind=payload.kind)
     if payload.kind == "visitor":
         incoming["validFrom"] = valid_from
         incoming["validTo"] = valid_to
@@ -255,7 +387,8 @@ async def create_subject(
                 "assignment": "Temporary visitor" if payload.kind == "visitor" else payload.kind.title(),
                 "state": "pending_approval" if payload.kind == "visitor" else "active" if data["status"] == "active" else "revoked" if payload.kind == "employee" and data["status"] == "inactive" else "restricted",
                 "zones": data.get("allowedZones") or [],
-                **({"checkpoints": [visitor_checkpoint.id]} if payload.kind == "visitor" and visitor_checkpoint else {}),
+                **({"checkpoints": [visitor_checkpoint.id]} if payload.kind == "visitor" and visitor_checkpoint
+                   else {"checkpoints": incoming["allowedCheckpoints"]} if "allowedCheckpoints" in incoming else {}),
                 "validFrom": data.get("validFrom") or "",
                 "validTo": data.get("validTo") or data.get("validUntil") or "",
                 "source": "request" if payload.kind == "visitor" else "policy",
@@ -296,6 +429,8 @@ async def create_subject(
         # Approval rows reference the identity by ID rather than through an
         # ORM relationship. Flush the parent within the same transaction first.
         await db.flush([new_sub])
+        _audit_registry_mutation(db, "created", actor, new_sub,
+            after=_registry_access_snapshot(barcode, data), zone_ids=requested_zones)
         if visitor_request:
             await enqueue_workflow_start(db, request_id, visitor=True)
             await enqueue_decision(db, {"request": visitor_request, "person": data})
@@ -373,6 +508,8 @@ async def update_subject(
     for field, limit in _METADATA_LIMITS.items():
         if field in patch and (not isinstance(patch[field], str) or not patch[field].strip() or len(patch[field]) > limit):
             raise HTTPException(422, f"{field} must be non-empty text of at most {limit} characters")
+        if field in patch:
+            patch[field] = patch[field].strip()
 
     metadata = sub.hardware if sub.kind == "hardware" else sub.person
     current_data = dict(metadata.data or {}) if metadata else {}
@@ -386,9 +523,40 @@ async def update_subject(
             allow_past_start="validFrom" not in patch)
     validate_subject_metadata_size(current_data)
     previous_metadata = dict(metadata.data or {}) if metadata else {}
+    previous_barcode = sub.barcode
     current_data = revised_access_data(previous_metadata, current_data,
         force=barcode.casefold() != sub.barcode.casefold())
     validate_subject_metadata_size(current_data)
+    permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == sub.id)
+        .execution_options(autoflush=False))
+    effective_zones = (patch["allowedZones"] if "allowedZones" in patch else
+        permission.data["zones"] if permission and isinstance(permission.data.get("zones"), list)
+        else current_data.get("allowedZones") or [])
+    if "allowedCheckpoints" in patch:
+        # An empty selector removes every checkpoint restriction. The zones
+        # actually enforced by the terminal may come from a canonical grant
+        # rather than metadata, so authorize that complete resulting scope.
+        checkpoint_ids = validated_checkpoint_ids(patch["allowedCheckpoints"])
+        if not checkpoint_ids and any(zone not in actor_zones for zone in effective_zones):
+            raise HTTPException(403, "Removing checkpoint restrictions requires access to every resulting organization zone")
+        checkpoint_ids = await _validate_checkpoint_grants(db, _admin, checkpoint_ids, effective_zones, kind=sub.kind)
+        current_data["allowedCheckpoints"] = patch["allowedCheckpoints"] = checkpoint_ids
+        current_data = revised_access_data(previous_metadata, current_data,
+            force=barcode.casefold() != sub.barcode.casefold())
+        validate_subject_metadata_size(current_data)
+    if (any(zone not in actor_zones for zone in effective_zones)
+            and _registry_grant_broadens(previous_metadata, permission, patch, kind=sub.kind)):
+        # Global status/window fields can reactivate another branch's grant.
+        # Preserve restrictive edits, but authorize every effective checkpoint
+        # when the retained zone list includes a branch outside actor scope.
+        canonical_checkpoints = permission.data.get("checkpoints") if permission else None
+        resulting_checkpoints = (patch["allowedCheckpoints"] if "allowedCheckpoints" in patch else
+            canonical_checkpoints if isinstance(canonical_checkpoints, list)
+            else current_data.get("allowedCheckpoints"))
+        if not resulting_checkpoints:
+            raise HTTPException(403, "Broadening access requires control of every resulting zone or checkpoint")
+        if "allowedCheckpoints" not in patch:
+            await _validate_checkpoint_grants(db, _admin, resulting_checkpoints, effective_zones, kind=sub.kind)
     # Validate the merged document, including server fields, before changing
     # barcode, ORM metadata, or access permission state in this transaction.
     if payload.barcode is not None:
@@ -401,18 +569,27 @@ async def update_subject(
     if metadata:
         metadata.data = current_data
     # Flush barcode and metadata together inside the conflict handler below.
-    permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == sub.id)
-        .execution_options(autoflush=False))
     if permission:
+        previous_permission = dict(permission.data or {})
         permission_data = {**permission.data, "subjectName": current_data.get("name", sub.barcode),
             "updatedAt": datetime.now(timezone.utc).isoformat(), "updatedBy": _admin.get("sub", "unknown")}
         for source, target in (("allowedZones", "zones"), ("validFrom", "validFrom"), ("validTo", "validTo")):
             if source in patch:
                 permission_data[target] = patch[source]
+        if "allowedCheckpoints" in patch:
+            permission_data["checkpoints"] = patch["allowedCheckpoints"]
         if "status" in patch:
             permission_data["state"] = {"pre_approved": "active", "inactive": "revoked", "maintenance": "restricted"}.get(patch["status"], patch["status"])
         permission.data = revised_access_data(permission.data, permission_data, permission=True)
+    else:
+        previous_permission = {}
     try:
+        before = _registry_access_snapshot(previous_barcode, previous_metadata)
+        after = _registry_access_snapshot(barcode, current_data)
+        audit_zones = await _registry_history_zones(db, sub.id,
+            previous_metadata, current_data, previous_permission, permission.data if permission else {})
+        _audit_registry_mutation(db, "updated", _admin, sub,
+            before=before, after=after, zone_ids=audit_zones)
         await enqueue_changed(db)
         await db.commit()
     except HTTPException:
@@ -441,7 +618,8 @@ async def delete_subject(
 ):
     """Delete a subject. Postgres CASCADE will remove person/hardware associations."""
     await require_subject_scope(db, _admin, subject_id)
-    stmt = select(Subject).where(Subject.id == subject_id).with_for_update()
+    stmt = select(Subject).where(Subject.id == subject_id).with_for_update().options(
+        selectinload(Subject.person), selectinload(Subject.hardware)).execution_options(populate_existing=True)
     result = await db.execute(stmt)
     sub = result.scalar_one_or_none()
 
@@ -459,9 +637,19 @@ async def delete_subject(
     try:
         # Let database cascades remove metadata/presence while history FKs
         # protect subjects that have already participated in a scan/review.
+        metadata = sub.hardware if sub.kind == "hardware" else sub.person
+        previous_data = metadata.data if metadata else {}
+        before = _registry_access_snapshot(sub.barcode, previous_data)
+        permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == sub.id))
+        audit_zones = await _registry_history_zones(db, sub.id, previous_data, permission.data if permission else {})
         await db.execute(delete(Subject).where(Subject.id == subject_id))
+        _audit_registry_mutation(db, "deleted", _admin, sub,
+            before=before, zone_ids=audit_zones)
         await enqueue_changed(db)
         await db.commit()
+    except HTTPException:
+        await db.rollback()
+        raise
     except exc.IntegrityError:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Subject has recorded history; restrict access instead of deleting it")

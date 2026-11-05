@@ -186,6 +186,63 @@
   cursor: wait;
 }
 
+.ssoSection {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 18px;
+}
+
+.ssoDivider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--ui-text-secondary, #64746e);
+  font-size: var(--type-13, 13px);
+}
+
+.ssoDivider::before,
+.ssoDivider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--border, #d2ddd7);
+  content: "";
+}
+
+.ssoButton {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 46px;
+  padding: 11px 16px;
+  border: 1px solid var(--border, #d2ddd7);
+  border-radius: var(--radius, 9px);
+  background: var(--surface, #fff);
+  color: var(--ui-text-primary, #17211d);
+  font-family: inherit;
+  font-size: var(--type-15, 15px);
+  font-weight: var(--weight-semibold, 600);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, opacity 0.15s ease;
+}
+
+.ssoButton:hover:not(:disabled) {
+  border-color: var(--ui-accent, #087443);
+  background: color-mix(in srgb, var(--ui-accent, #087443) 5%, var(--surface, #fff));
+}
+
+.ssoButton:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ui-accent, #087443) 18%, transparent);
+  outline-offset: 2px;
+}
+
+.ssoButton:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
 .recoveryLink {
   display: block;
   width: 100%;
