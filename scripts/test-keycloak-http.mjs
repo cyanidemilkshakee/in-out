@@ -34,6 +34,7 @@ const revocationRequests = [];
 const passwordGrants = [];
 const availabilityUpdates = [];
 let stallAvailability = false;
+let availabilityGate;
 let limitedApiRoute;
 let limitedApiResponseKey = "detail";
 const upstreamTokens = [];
@@ -252,6 +253,13 @@ const upstream = createServer(async (req, res) => {
     let body = "";
     for await (const chunk of req) body += chunk;
     availabilityUpdates.push(JSON.parse(body));
+    if (availabilityGate) {
+      const gate = availabilityGate;
+      gate.started();
+      await gate.release;
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
     if (stallAvailability) {
       setTimeout(() => res.end(JSON.stringify({ ok: true })), 7_000).unref();
       return;
@@ -268,6 +276,16 @@ const upstream = createServer(async (req, res) => {
     return;
   }
   if (req.url === "/v1/keycloak/users" || req.url.startsWith("/v1/keycloak/users?") || req.url.startsWith("/v1/keycloak/users/")) {
+    // The operation itself enforces persisted window revocation. The BFF
+    // intentionally avoids a redundant window preflight before every command.
+    if (req.headers["x-inout-step-up"]) {
+      const proof = signedPayload(req.headers["x-inout-step-up"], "inout:user-management-step-up:v1.");
+      if (revokedWindows.has(proof.windowId)) {
+        for await (const _chunk of req) { /* Drain synthetic bodies. */ }
+        res.writeHead(401).end(JSON.stringify({ detail: "Step-up authentication required before managing users" }));
+        return;
+      }
+    }
     identityRequests.push({ authorization: req.headers.authorization, proof: req.headers["x-inout-step-up"], method: req.method });
     for await (const _chunk of req) { /* Drain synthetic command bodies. */ }
     res.end(JSON.stringify(req.method === "GET" ? { items: [], first: 0, max: 50 } : { ok: true }));
@@ -612,7 +630,22 @@ try {
     assert.equal((await request("/api/profile", jarHeader(failedJar))).status, 401);
   }
   const ownFormJar = new Map();
-  const passwordLogin = await submitCredentials(ownFormJar);
+  let releaseAvailability;
+  let availabilityStarted;
+  const availabilitySeen = new Promise(resolve => { availabilityStarted = resolve; });
+  availabilityGate = { started: availabilityStarted, release: new Promise(resolve => { releaseAvailability = resolve; }) };
+  let passwordLogin;
+  let loginDeadline;
+  try {
+    [passwordLogin] = await Promise.race([
+      Promise.all([submitCredentials(ownFormJar), availabilitySeen]),
+      new Promise((_, reject) => { loginDeadline = setTimeout(() => reject(new Error("Sign-in waited for an unfinished availability update")), 4_000); }),
+    ]);
+  } finally {
+    clearTimeout(loginDeadline);
+    releaseAvailability();
+    availabilityGate = undefined;
+  }
   assert.equal(passwordLogin.destination.href, `${appUrl}/admin`);
   assert.equal(ownFormJar.has(browserSsoCookieName), false, "A direct password login must not claim a browser SSO session");
   const ownFormSession = await decodeJarSession(ownFormJar);

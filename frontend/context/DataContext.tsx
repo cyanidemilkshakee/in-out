@@ -8,6 +8,7 @@ import { useDataActions as useDataActionSet } from "./useDataActions";
 import type { DataActions, DataProviderProps, DataState } from "./dataTypes";
 import { applyPresenceUpdate, parsePresenceUpdate, type PresenceUpdate } from "./presenceUpdates";
 import { createRefreshCoordinator } from "../../lib/refreshCoordinator";
+import { createRefreshScheduler } from "../../lib/refreshScheduler";
 
 export type { DataActions, DataState } from "./dataTypes";
 
@@ -34,7 +35,9 @@ export function DataProvider({
   const bufferedUpdates = useRef<Array<{ revision: number; update: PresenceUpdate }>>([]);
   const snapshotInFlight = useRef(false);
   const reconnectRefresh = useRef<number | undefined>(undefined);
-  const streamRefreshTimer = useRef<number | undefined>(undefined);
+  const snapshotRevision = useRef(initialData?.eventRevision);
+  const needsStreamSnapshot = useRef(false);
+  const [streamGeneration, setStreamGeneration] = useState(0);
   const [snapshotCursor, setSnapshotCursor] = useState({ revision: initialData?.eventRevision, generation: 0 });
 
   useEffect(() => {
@@ -59,7 +62,7 @@ export function DataProvider({
     const revisionAtStart = streamRevision.current;
     snapshotInFlight.current = true;
     bufferedUpdates.current = [];
-    setState((current) => ({ ...current, isLoading: true, error: null }));
+    setState((current) => current.error ? { ...current, error: null } : current);
     try {
       const snapshot = await service.getSnapshot(scope);
       if (version !== refreshVersion.current) return;
@@ -70,6 +73,11 @@ export function DataProvider({
       const base: DataState = { ...emptyData, ...snapshot, isLoading: false, error: null };
       setState(updates.reduce((next, item) => applyPresenceUpdate(next, item.update), base));
       setSnapshotCursor(previous => ({ revision: snapshot.eventRevision, generation: previous.generation + 1 }));
+      snapshotRevision.current = snapshot.eventRevision;
+      if (needsStreamSnapshot.current) {
+        needsStreamSnapshot.current = false;
+        setStreamGeneration(generation => generation + 1);
+      }
       bufferedUpdates.current = [];
     } catch (error) {
       if (version !== refreshVersion.current) return;
@@ -101,6 +109,10 @@ export function DataProvider({
   }, [refreshQueue]);
   const syncSnapshot = useCallback(() => refreshQueue.active
     ? refreshQueue.coordinator.request() : Promise.resolve(), [refreshQueue]);
+  // Display invalidations can accept the in-flight snapshot and queue a fresh
+  // follow-up. Repeated hints must not continually discard a slow read.
+  const reconcileSnapshot = useCallback(() => refreshQueue.active
+    ? refreshQueue.coordinator.request(true) : Promise.resolve(), [refreshQueue]);
 
   useEffect(() => {
     refreshQueue.active = true;
@@ -114,6 +126,7 @@ export function DataProvider({
       return stop;
     }
     setState({ ...emptyData, isLoading: !clientManaged, error: null });
+    snapshotRevision.current = undefined;
     // A remounted effect must not join a read invalidated by its cleanup.
     void refresh();
     return stop;
@@ -121,13 +134,7 @@ export function DataProvider({
 
   useEffect(() => {
     if (scope === "profile") return;
-    const scheduleStreamRefresh = () => {
-      window.clearTimeout(streamRefreshTimer.current);
-      streamRefreshTimer.current = window.setTimeout(() => {
-        streamRefreshTimer.current = undefined;
-        void refresh();
-      }, 120);
-    };
+    const streamRefresh = createRefreshScheduler(() => void reconcileSnapshot(), 120, 1_000);
     const receiveMessage = (raw: string) => {
       if (!raw?.trim()) return;
       try {
@@ -137,7 +144,7 @@ export function DataProvider({
           if (snapshotInFlight.current) bufferedUpdates.current.push({ revision, update });
           setState((current) => applyPresenceUpdate(current, update));
           if (update.request || update.permission || update.type === "data_changed" || (scope === "terminal" && update.type === "terminal_assignment")) {
-            scheduleStreamRefresh();
+            streamRefresh.request();
           }
         }
       } catch {
@@ -147,7 +154,7 @@ export function DataProvider({
     if (pathname.startsWith("/admin")) {
       // The admin chrome owns one shared stream for page data and alert counts.
       const receive = (event: Event) => receiveMessage((event as CustomEvent<string>).detail);
-      const syncFromServer = () => void refresh();
+      const syncFromServer = () => void reconcileSnapshot();
       const restore = () => {
         if (document.visibilityState === "visible") void syncSnapshot();
       };
@@ -157,8 +164,7 @@ export function DataProvider({
       window.addEventListener("online", restore);
       document.addEventListener("visibilitychange", restore);
       return () => {
-        window.clearTimeout(streamRefreshTimer.current);
-        streamRefreshTimer.current = undefined;
+        streamRefresh.cancel();
         window.removeEventListener("inout:presence-message", receive);
         window.removeEventListener("inout:presence-sync", syncFromServer);
         window.removeEventListener("focus", restore);
@@ -166,21 +172,21 @@ export function DataProvider({
         document.removeEventListener("visibilitychange", restore);
       };
     }
-    const eventSource = new EventSource(snapshotCursor.revision === undefined ? "/api/presence" : `/api/presence?since=${snapshotCursor.revision}`);
-    let needsSnapshot = false;
-    const recoveryTimer = window.setInterval(() => { if (needsSnapshot) void refresh(); }, 5_000);
+    const revision = snapshotRevision.current;
+    const eventSource = new EventSource(revision === undefined ? "/api/presence" : `/api/presence?since=${revision}`);
+    const recoveryTimer = window.setInterval(() => { if (needsStreamSnapshot.current) void reconcileSnapshot(); }, 5_000);
     eventSource.onopen = () => {
       // Reconcile the initial snapshot and any gap left by a lost connection.
       window.clearTimeout(reconnectRefresh.current);
-      if (snapshotCursor.revision === undefined) reconnectRefresh.current = window.setTimeout(() => void refresh(), 250);
+      if (revision === undefined) reconnectRefresh.current = window.setTimeout(() => void reconcileSnapshot(), 250);
     };
     eventSource.onmessage = (event) => {
       receiveMessage(event.data);
     };
     eventSource.addEventListener("snapshot_required", () => {
-      needsSnapshot = true;
+      needsStreamSnapshot.current = true;
       eventSource.close();
-      void refresh();
+      void reconcileSnapshot();
     });
     const restore = () => {
       if (document.visibilityState === "visible") void syncSnapshot();
@@ -191,15 +197,14 @@ export function DataProvider({
     return () => {
       eventSource.close();
       window.clearInterval(recoveryTimer);
-      window.clearTimeout(streamRefreshTimer.current);
-      streamRefreshTimer.current = undefined;
+      streamRefresh.cancel();
       window.removeEventListener("focus", restore);
       window.removeEventListener("online", restore);
       document.removeEventListener("visibilitychange", restore);
       window.clearTimeout(reconnectRefresh.current);
       reconnectRefresh.current = undefined;
     };
-  }, [refresh, syncSnapshot, scope, pathname, snapshotCursor]);
+  }, [reconcileSnapshot, syncSnapshot, scope, pathname, streamGeneration]);
 
   const actions = useDataActionSet({ service, setState, refresh });
 

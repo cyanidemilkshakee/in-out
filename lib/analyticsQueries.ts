@@ -1,5 +1,10 @@
 import type { EmployeeActivity, MovementQuery } from "./types";
 import type { DayPattern } from "./analyticsUtils";
+const dayLabelFormatter = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+const monthLabelFormatter = new Intl.DateTimeFormat("en-GB", { month: "short", year: "2-digit", timeZone: "UTC" });
+const facilityDateFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+});
 
 export function dashboardMovementLogHref(
   subjectGroup: "people" | "hardware",
@@ -49,15 +54,13 @@ export function employeeActivityPatterns(activity: EmployeeActivity): DayPattern
     // dateObj is a facility calendar date, represented at UTC midnight everywhere.
     const dateObj = new Date(`${day.date}T00:00:00Z`);
     return { ...day, dateObj,
-      dateStr: dateObj.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }) };
+      dateStr: dayLabelFormatter.format(dateObj) };
   });
 }
 
 export function employeeHoursSeries(activity: EmployeeActivity, range: "1W" | "1M" | "1Y") {
   const byDay = new Map(activity.days.map(day => [day.date, day.workedHours]));
-  const facilityDate = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(activity.endAt));
+  const facilityDate = facilityDateFormatter.format(new Date(activity.endAt));
   const lastDay = new Date(`${facilityDate}T00:00:00Z`);
   const days = range === "1W" ? 7 : range === "1M" ? 30 : 365;
   const buckets = new Map<string, { label: string; hours: number }>();
@@ -70,9 +73,7 @@ export function employeeHoursSeries(activity: EmployeeActivity, range: "1W" | "1
     const existing = buckets.get(bucket);
     const hours = byDay.get(key) ?? 0;
     if (existing) existing.hours += hours;
-    else buckets.set(bucket, { label: date.toLocaleDateString("en-GB", {
-      timeZone: "UTC", month: "short", ...(range === "1Y" ? { year: "2-digit" } : { day: "numeric" }),
-    }), hours });
+    else buckets.set(bucket, { label: (range === "1Y" ? monthLabelFormatter : dayLabelFormatter).format(date), hours });
   }
   return { labels: [...buckets.values()].map(bucket => bucket.label),
     dataPoints: [...buckets.values()].map(bucket => Number(bucket.hours.toFixed(2))) };

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { formatCsvBlob } from "../lib/csv";
 import { test } from "node:test";
 import { ReportReadBudget } from "../lib/reportReadBudget";
 import { CollectionCapacityError } from "../lib/boundedCollection";
@@ -79,4 +80,47 @@ test("invalid totals and page sizes fail without continuing pagination", async (
     try { await assert.rejects(budget.load(async () => page), /invalid report/); }
     finally { budget.dispose(); }
   }
+});
+
+test("chunked CSV preserves Unicode, BOM, column order, formula protection and quoted newlines", async () => {
+  const records = [{ name: "Zoë🧭", note: " \t=SUM(1,2)" }, { name: 'A, "B"', note: "line\nnext" }];
+  const expected = '\uFEFF"Name","Note"\r\n"Zoë🧭","\' \t=SUM(1,2)"\r\n"A, ""B""","line\nnext"';
+  const bytes = new TextEncoder().encode(expected);
+  const blob = await formatCsvBlob(["Name", "Note"], records, row => [row.name, row.note], { bom: true, maximumBytes: bytes.length });
+  assert.equal(blob.type, "text/csv;charset=utf-8");
+  assert.deepEqual(new Uint8Array(await blob.arrayBuffer()), bytes);
+  await assert.rejects(formatCsvBlob(["Name", "Note"], records, row => [row.name, row.note], { bom: true, maximumBytes: bytes.length - 1 }), /export limit/);
+  assert.equal(await (await formatCsvBlob(["Value"], [null], value => [value], { newline: "\n" })).text(), '"Value"\n""');
+});
+
+test("large CSV formatting yields between bounded row batches and keeps every row", async () => {
+  let formatted = 0;
+  const yields: number[] = [];
+  const blob = await formatCsvBlob(["id"], Array.from({ length: 513 }, (_, id) => id), id => { formatted++; return [id]; }, {
+    yieldControl: async () => { yields.push(formatted); },
+  });
+  assert.deepEqual(yields, [256, 512]);
+  assert.equal((await blob.text()).split("\r\n").length, 514);
+  assert.ok((await blob.text()).endsWith('"512"'));
+  let timerRan = false;
+  const timer = setTimeout(() => { timerRan = true; }, 0);
+  try {
+    await formatCsvBlob(["id"], Array.from({ length: 257 }, (_, id) => id), id => [id]);
+    assert.equal(timerRan, true);
+  } finally { clearTimeout(timer); }
+});
+
+test("CSV cancellation stops row transformation and byte overflow fails before consuming the collection", async () => {
+  const controller = new AbortController();
+  let formatted = 0;
+  await assert.rejects(formatCsvBlob(["id"], Array.from({ length: 1_000 }, (_, id) => id), id => { formatted++; return [id]; }, {
+    signal: controller.signal,
+    yieldControl: async () => { controller.abort(); },
+  }), { name: "AbortError" });
+  assert.equal(formatted, 256);
+  formatted = 0;
+  await assert.rejects(formatCsvBlob(["id"], [1, 2], id => { formatted++; return [id]; }, { signal: controller.signal }), { name: "AbortError" });
+  assert.equal(formatted, 0);
+  await assert.rejects(formatCsvBlob(["id"], ["🧭".repeat(20), "unread"], value => { formatted++; return [value]; }, { maximumBytes: 32 }), /export limit/);
+  assert.equal(formatted, 1);
 });

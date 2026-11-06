@@ -7,7 +7,7 @@ export function assertCsvBound(content: string) {
 /** One admitted consistent backend read; formatting stays identical to the UI. */
 export async function readExport<T>(source: "registry" | "movements" | "alerts" | "permissions",
   query: Record<string, string | number | undefined> = {}, signal?: AbortSignal): Promise<T> {
-  const params = new URLSearchParams({ resource: "export", source });
+  const params = new URLSearchParams({ resource: "export", source, lean: "true" });
   for (const [key, value] of Object.entries(query)) if (value !== undefined && value !== "") params.set(key, String(value));
   const response = await fetch(`/api/data?${params}`, { signal, cache: "no-store" });
   const body = await response.json();

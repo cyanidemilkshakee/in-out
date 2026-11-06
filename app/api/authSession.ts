@@ -10,6 +10,7 @@ import { currentRequestId, normalizedRequestId, withRequestContext } from "../..
 const requestSessions = new AsyncLocalStorage<{ session: AppSession | null }>()
 // React's server cache is scoped to the current render, never shared by users.
 const renderedRequestId = cache(async () => normalizedRequestId((await incomingHeaders()).get("X-Request-ID")))
+const renderedSession = cache(async () => await auth() as AppSession | null)
 
 export function withApiSession(handler: (request: NextRequest) => Promise<Response>) {
   // Auth.js writes refreshed/invalidated session cookies to the response.
@@ -39,7 +40,7 @@ export function withApiSession(handler: (request: NextRequest) => Promise<Respon
 
 export async function apiSession(): Promise<AppSession | null> {
   const context = requestSessions.getStore()
-  return context ? context.session : await auth() as AppSession | null
+  return context ? context.session : renderedSession()
 }
 
 export async function apiRequestId(): Promise<string> {

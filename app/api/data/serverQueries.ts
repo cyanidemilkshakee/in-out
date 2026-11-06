@@ -4,6 +4,6 @@ import { callPythonApi } from "../pythonApi";
  * History and person settings are fetched when the operator opens them.
  */
 export async function loadAllAlerts(parentSignal?: AbortSignal) {
-  return callPythonApi("/v1/alerts?view=command&limit=50&offset=0&sortDirection=asc", "GET",
+  return callPythonApi("/v1/alerts?view=command&limit=50&offset=0&sortDirection=asc&includeDirectory=false", "GET",
     undefined, undefined, { signal: parentSignal });
 }

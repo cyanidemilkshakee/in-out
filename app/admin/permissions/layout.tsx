@@ -9,6 +9,6 @@ export default function PermissionsDataLayout({
   children: ReactNode;
 }) {
   return (
-    <ScopedDataProvider scope="permissions">{children}</ScopedDataProvider>
+    <ScopedDataProvider scope="permissions" clientManaged>{children}</ScopedDataProvider>
   );
 }

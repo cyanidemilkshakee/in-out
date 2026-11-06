@@ -30,6 +30,7 @@ from models import (
     HardwareAsset,
     PermissionRequestModel,
     Checkpoint,
+    OrganizationZone,
 )
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
 from access_validation import (parse_validity, require_registered_checkpoint, validate_window,
@@ -54,14 +55,34 @@ _MAX_LIMIT = 200
 _DEFAULT_LIMIT = 50
 
 
-async def _validate_checkpoint_grants(db, actor, value, zones, *, kind):
+async def _validate_checkpoint_grants(db, actor, value, zones, *, kind, actor_zones=None):
     """Checkpoint grants narrow zone access; they cannot add another branch."""
     checkpoint_ids = validated_checkpoint_ids(value)
     if kind == "visitor" and len(checkpoint_ids) != 1:
         raise HTTPException(422, "Visitor access must select exactly one checkpoint")
+    if not checkpoint_ids:
+        return checkpoint_ids
+    checkpoints = {checkpoint.id: checkpoint for checkpoint in await db.scalars(
+        select(Checkpoint).where(Checkpoint.id.in_(checkpoint_ids)).order_by(Checkpoint.id))}
+    # Keep the same retirement barrier as individual checkpoint validation,
+    # acquiring each affected zone's shared lock once for this transaction.
+    zone_ids = {checkpoint.zone_id for checkpoint in checkpoints.values() if checkpoint.zone_id}
+    registered_zones = {zone.id: zone for zone in await db.scalars(
+        select(OrganizationZone).where(OrganizationZone.id.in_(zone_ids))
+        .order_by(OrganizationZone.id).with_for_update(read=True))}
     for checkpoint_id in sorted(checkpoint_ids):
-        await require_registered_checkpoint(db, checkpoint_id)
-        checkpoint = await require_checkpoint_scope(db, actor, checkpoint_id)
+        checkpoint = checkpoints.get(checkpoint_id)
+        if checkpoint is None or checkpoint.active is False:
+            raise HTTPException(422, "Checkpoint not registered")
+        zone = registered_zones.get(checkpoint.zone_id)
+        if checkpoint.zone_id and (zone is None or zone.active is False):
+            raise HTTPException(422, "Checkpoint is in an inactive organization zone")
+        if zone is None:
+            raise HTTPException(404, "Organization zone not found")
+        if actor_zones is None:
+            actor_zones = await admin_zone_ids(db, actor)
+        if checkpoint.zone_id not in actor_zones:
+            raise HTTPException(403, "This organization zone is outside your assigned scope")
         if checkpoint.zone_id not in zones:
             raise HTTPException(422, "Allowed checkpoints must belong to the subject's allowed zones")
     return checkpoint_ids
@@ -345,7 +366,8 @@ async def create_subject(
             incoming["allowedCheckpoints"] = [visitor_checkpoint.id]
         else:
             incoming["allowedCheckpoints"] = await _validate_checkpoint_grants(
-                db, actor, incoming["allowedCheckpoints"], requested_zones, kind=payload.kind)
+                db, actor, incoming["allowedCheckpoints"], requested_zones, kind=payload.kind,
+                actor_zones=actor_zones)
     if payload.kind == "visitor":
         incoming["validFrom"] = valid_from
         incoming["validTo"] = valid_to
@@ -437,7 +459,6 @@ async def create_subject(
         else:
             await enqueue_changed(db)
         await db.commit()
-        await db.refresh(new_sub)
     except HTTPException:
         await db.rollback()
         raise
@@ -453,7 +474,7 @@ async def create_subject(
         logger.error("Error creating subject", extra={"exception_type": type(error).__name__})
         raise HTTPException(status_code=500, detail="Internal server error")
 
-    return SubjectResponse(id=new_sub.id, barcode=new_sub.barcode, kind=new_sub.kind, data=data, request=visitor_request)
+    return response
 
 
 @router.put("/{subject_id}", response_model=SubjectResponse)
@@ -539,7 +560,8 @@ async def update_subject(
         checkpoint_ids = validated_checkpoint_ids(patch["allowedCheckpoints"])
         if not checkpoint_ids and any(zone not in actor_zones for zone in effective_zones):
             raise HTTPException(403, "Removing checkpoint restrictions requires access to every resulting organization zone")
-        checkpoint_ids = await _validate_checkpoint_grants(db, _admin, checkpoint_ids, effective_zones, kind=sub.kind)
+        checkpoint_ids = await _validate_checkpoint_grants(db, _admin, checkpoint_ids, effective_zones,
+            kind=sub.kind, actor_zones=actor_zones)
         current_data["allowedCheckpoints"] = patch["allowedCheckpoints"] = checkpoint_ids
         current_data = revised_access_data(previous_metadata, current_data,
             force=barcode.casefold() != sub.barcode.casefold())
@@ -556,7 +578,8 @@ async def update_subject(
         if not resulting_checkpoints:
             raise HTTPException(403, "Broadening access requires control of every resulting zone or checkpoint")
         if "allowedCheckpoints" not in patch:
-            await _validate_checkpoint_grants(db, _admin, resulting_checkpoints, effective_zones, kind=sub.kind)
+            await _validate_checkpoint_grants(db, _admin, resulting_checkpoints, effective_zones,
+                kind=sub.kind, actor_zones=actor_zones)
     # Validate the merged document, including server fields, before changing
     # barcode, ORM metadata, or access permission state in this transaction.
     if payload.barcode is not None:
@@ -671,6 +694,7 @@ async def registry_bundle(
     sortKey: str = Query("name", pattern="^(name|createdAt|barcode|status|inside|owner|category|company|host|validTo|latestScan|averageHours)$"),
     sortDirection: str = Query("asc", pattern="^(asc|desc)$"),
     includeOverview: bool = Query(True),
+    includeRelated: bool = Query(True),
     actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """Return the complete registry read model in one admin request."""
@@ -685,7 +709,7 @@ async def registry_bundle(
         from registry_reads import registry_page
         return {**await registry_page(db, kind=kind, limit=limit, offset=offset, search=search,
             days=days, sort_key=sortKey, sort_direction=sortDirection, include_overview=includeOverview,
-            zone_ids=zone_ids),
+            zone_ids=zone_ids, include_related=includeRelated),
             "eventRevision": event_revision}
     subjects = [row[0] for row in await bounded_rows(db,
         select(Subject).options(

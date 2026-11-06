@@ -22,6 +22,7 @@ import { useDataActions, useDataState } from "../../../frontend/context/DataCont
 import { isMovementEventId } from "../../../lib/movementReferences";
 import { movementAnalyticsFilters } from "../../../lib/analyticsQueries";
 import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
+import { createRefreshScheduler } from "../../../lib/refreshScheduler";
 import {
   compactRangeBounds,
   parseDateInput,
@@ -209,6 +210,12 @@ function LogsWorkspace() {
   const activeTab: LogsTab = requestedTab === "permissions" || requestedTab === "alerts" ? requestedTab : "movements";
   const initialQueryPending = useRef(Boolean(initialMovementPage) && activeTab === "movements");
   const lastChartQuery = useRef<string | null>(null);
+  const activeMovementRead = useRef<AbortController | null>(null);
+  const refreshPending = useRef(false);
+  const refreshScheduler = useMemo(() => createRefreshScheduler(() => {
+    if (activeMovementRead.current) refreshPending.current = true;
+    else setQueryRevision(current => current + 1);
+  }, 250), []);
   const subjectId = searchParams.get("subject") || undefined;
   const { startAt: alertStartAt, endAt: alertEndAt } = movementAnalyticsFilters(new URLSearchParams(searchParams.toString()));
   const [alertHistoryPage, setAlertHistoryPage] = useState<AlertPage>({ items: [], total: 0, limit: 50, offset: 0 });
@@ -267,14 +274,7 @@ function LogsWorkspace() {
   }, [activeTab, eventIdLookup, filtersReady]);
 
   useEffect(() => {
-    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-    const reloadLedger = () => {
-      if (refreshTimer !== undefined) return;
-      refreshTimer = setTimeout(() => {
-        refreshTimer = undefined;
-        setQueryRevision(current => current + 1);
-      }, 250);
-    };
+    const reloadLedger = () => refreshScheduler.request();
     const receiveMovement = (event: Event) => {
       try {
         const update = JSON.parse((event as CustomEvent<string>).detail);
@@ -288,11 +288,11 @@ function LogsWorkspace() {
     window.addEventListener("inout:presence-message", receiveMovement);
     window.addEventListener("inout:presence-sync", reloadLedger);
     return () => {
-      clearTimeout(refreshTimer);
+      refreshScheduler.cancel();
       window.removeEventListener("inout:presence-message", receiveMovement);
       window.removeEventListener("inout:presence-sync", reloadLedger);
     };
-  }, []);
+  }, [refreshScheduler]);
 
   const rangeBounds = useMemo(() => {
     if (linkedRange) return {
@@ -356,6 +356,9 @@ function LogsWorkspace() {
     }
     const includeChart = lastChartQuery.current !== chartQuery;
     const controller = new AbortController();
+    activeMovementRead.current = controller;
+    refreshPending.current = false;
+    refreshScheduler.cancel();
     setIsQuerying(true);
     setQueryError("");
     void queryMovements({
@@ -385,10 +388,17 @@ function LogsWorkspace() {
         }
       })
       .finally(() => {
-        if (!controller.signal.aborted) setIsQuerying(false);
+        if (controller.signal.aborted) return;
+        activeMovementRead.current = null;
+        setIsQuerying(false);
+        if (refreshPending.current) {
+          refreshPending.current = false;
+          refreshScheduler.request();
+        }
       });
     return () => {
       controller.abort();
+      if (activeMovementRead.current === controller) activeMovementRead.current = null;
     };
   }, [
     activeTab,
@@ -409,6 +419,7 @@ function LogsWorkspace() {
     sortKey,
     statusFilter,
     subjectTypeFilter,
+    refreshScheduler,
   ]);
 
   function updateSort(column: VisibleColumn) {

@@ -43,7 +43,7 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
     headers["Authorization"] = `Bearer ${accessToken}`
   }
 
-  const protectedFacilityMutation = (method === "POST" || method === "DELETE") &&
+  const protectedFacilityMutation = (method === "POST" || method === "PATCH" || method === "DELETE") &&
     /^\/v1\/(?:checkpoints|zones)(?:\/[^/?]+)?(?:\?.*)?$/.test(path);
   if (!hasMasterAdminAccess(session.roles) &&
       (/^\/v1\/keycloak\/users(?:\/|\?|$)/.test(path) || /^\/v1\/user-management\/(?:window|lock)$/.test(path) ||
@@ -62,7 +62,7 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
   try {
     const timeout = AbortSignal.timeout(options.timeoutMs ?? UPSTREAM_TIMEOUT_MS);
     const upstreamSignal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
-    const upstreamStartedAt = performance.now();
+    const finishUpstream = currentServerTiming()?.begin("upstream");
     let res: Response;
     try {
       res = await fetch(url, {
@@ -73,7 +73,7 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
         body: body !== undefined ? JSON.stringify(body) : undefined,
       });
     } finally {
-      currentServerTiming()?.add("upstream", performance.now() - upstreamStartedAt);
+      finishUpstream?.();
     }
     responseRequestIds.set(res, headers["X-Request-ID"]);
     if (!res.ok) {

@@ -124,10 +124,10 @@ async def _admin_context(
     step_up: Annotated[str | None, Header(alias="X-InOut-Step-Up")] = None,
     db: AsyncSession = Depends(get_window_guard_db),
     request: Request = None,
+    claims: dict = Depends(verify_admin_request),
 ) -> str:
     if credentials is None:
         raise HTTPException(status_code=401, detail="Bearer token required")
-    claims = await verify_admin_request(credentials, request)
     if not has_master_admin_role(claims):
         window = verified_user_management_window(credentials.credentials, claims, step_up, now=time.time())
         await require_unlocked_window(db, claims, window)
@@ -272,6 +272,9 @@ async def list_users(
     if search.strip():
         query += f"&search={quote(search.strip(), safe='')}"
     users = (await _request(token, "GET", query)).json()
+    # Advance by the provider page, even when zone filtering leaves no visible
+    # users. A scoped empty page is not proof that the provider is exhausted.
+    has_more = len(users) == max_results
     users = [user for user in users if isinstance(user, dict)]
     identities = ["browser:" + user["id"] for user in users if isinstance(user.get("id"), str)]
     assignments = (await db.execute(select(TerminalCheckpointAssignment)
@@ -285,6 +288,12 @@ async def list_users(
     zones_by_user: dict[str, list[str]] = {}
     for assignment in zone_assignments:
         zones_by_user.setdefault(assignment.admin_subject, []).append(assignment.zone_id)
+    allowed_zones = await admin_zone_ids(db, actor)
+    if not has_master_admin_role(actor):
+        # Checkpoint assignments already establish that out-of-zone users
+        # cannot be shown. Avoid remote role requests for those accounts.
+        users = [user for user in users
+            if checkpoint_zones.get(checkpoints.get("browser:" + user.get("id", ""), "")) in allowed_zones]
     role_limit = asyncio.Semaphore(8)
 
     async def user_roles(user_id: str) -> tuple[str, list[str]]:
@@ -293,11 +302,9 @@ async def list_users(
 
     user_ids = [user["id"] for user in users if isinstance(user.get("id"), str)]
     roles_by_user = dict(await asyncio.gather(*(user_roles(user_id) for user_id in user_ids)))
-    allowed_zones = await admin_zone_ids(db, actor)
     if not has_master_admin_role(actor):
         users = [user for user in users
-            if roles_by_user.get(user.get("id", ""), []) == ["operator"]
-            and checkpoint_zones.get(checkpoints.get("browser:" + user.get("id", ""), "")) in allowed_zones]
+            if roles_by_user.get(user.get("id", ""), []) == ["operator"]]
     return {
         "items": [
             _user_summary(
@@ -311,6 +318,8 @@ async def list_users(
         ],
         "first": first,
         "max": max_results,
+        "hasMore": has_more,
+        "nextFirst": first + max_results if has_more else None,
     }
 
 

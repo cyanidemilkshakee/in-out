@@ -75,7 +75,7 @@ function redirectToLoginAfterSessionExpiry() {
   window.location.assign(`/login?from=${encodeURIComponent(currentPath)}`);
 }
 
-async function readResponse<T>(response: Response, signal?: AbortSignal): Promise<T> {
+export async function readResponse<T>(response: Response, signal?: AbortSignal): Promise<T> {
   const body = (await response.json().catch((error: unknown) => {
     // A superseded read may be cancelled after its headers have arrived.
     // Preserve that cancellation rather than reporting malformed JSON.

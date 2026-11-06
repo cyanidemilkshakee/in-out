@@ -40,6 +40,14 @@ export function parsePresenceUpdate(raw: string): PresenceUpdate | null {
 
 export function applyPresenceUpdate(current: DataState, update: PresenceUpdate): DataState {
   if (update.revision !== undefined && current.eventRevision !== undefined && update.revision <= current.eventRevision) return current;
+  // Scoped streams usually send invalidation hints, not subject documents.
+  // Advancing their cursor must not rebuild every data slice or recalculate
+  // occupancy before the authoritative snapshot arrives.
+  const hasPresence = !!update.subject_id && (update.state === "inside" || update.state === "outside");
+  if (!hasPresence && !update.movement && !update.people?.length && !update.hardwareAssets?.length &&
+      !update.request && !update.permission && !update.alerts?.length) {
+    return update.revision === undefined ? current : { ...current, eventRevision: update.revision };
+  }
   update = { ...update,
     alerts: update.alerts?.map(normalizeAlert),
     movement: update.movement ? normalizeDashboardMovement(update.movement as unknown as Record<string, unknown>) : undefined,
@@ -65,7 +73,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
     ? update.request
     : undefined;
   const visitorPermission = update.permission?.subjectType === "visitor" ? update.permission : undefined;
-  const terminalVisitors = current.terminalVisitors.map(visitor => {
+  const terminalVisitors = visitorRequest || visitorPermission ? current.terminalVisitors.map(visitor => {
     if (visitorRequest?.subjectId === visitor.id) {
       return {
         ...visitor,
@@ -88,12 +96,18 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
         validFrom: visitorPermission.validFrom, validTo: visitorPermission.validTo };
     }
     return visitor;
-  });
+  }) : current.terminalVisitors;
   const alerts = update.alerts ? mergeAlerts(current.alerts, update.alerts) : current.alerts;
   const permissions = update.permission ? mergeById(current.permissions, [update.permission]) : current.permissions;
-  const updatePresence = <T extends Person | HardwareAsset>(items: T[]): T[] => items.map(item =>
-    acceptPresence && update.subject_id === item.id && (update.state === "inside" || update.state === "outside")
-      ? { ...item, inside: update.state === "inside" } : item);
+  const updatePresence = <T extends Person | HardwareAsset>(items: T[]): T[] => {
+    if (!acceptPresence || !hasPresence) return items;
+    const index = items.findIndex(item => item.id === update.subject_id);
+    const inside = update.state === "inside";
+    if (index < 0 || items[index].inside === inside) return items;
+    const next = items.slice();
+    next[index] = { ...items[index], inside };
+    return next;
+  };
   // Manual review finalizes the original scan ID. Apply that revision once;
   // retries of an older scan must not undo the review or a later exit.
   const people = mergeById(updatePresence(current.people), acceptPresence ? update.people ?? [] : []);
@@ -103,9 +117,10 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
     const before = current.people.find(person => person.id === movement.subjectId);
     const after = people.find(person => person.id === movement.subjectId);
     occupancyDelta = before && after ? Number(after.inside) - Number(before.inside) : movement.direction === "entry" ? 1 : -1;
-  } else if (!movement) {
+  } else if (!movement && people !== current.people) {
+    const afterById = new Map(people.map(person => [person.id, person]));
     for (const person of current.people) {
-      const after = people.find(item => item.id === person.id);
+      const after = afterById.get(person.id);
       if (after) occupancyDelta += Number(after.inside) - Number(person.inside);
     }
   }
@@ -141,6 +156,7 @@ export function applyPresenceUpdate(current: DataState, update: PresenceUpdate):
     ...current, people, hardwareAssets, permissionRequests, alerts, permissions, terminalVisitors,
     ...(update.revision !== undefined ? { eventRevision: update.revision } : {}),
     movements: movement ? mergeById(current.movements, [movement]).slice(0, 100) : current.movements,
-    scanAnalytics: { ...analytics, activeInside: Math.max(0, current.scanAnalytics.activeInside + occupancyDelta) },
+    scanAnalytics: occupancyDelta === 0 ? analytics
+      : { ...analytics, activeInside: Math.max(0, current.scanAnalytics.activeInside + occupancyDelta) },
   };
 }

@@ -1,11 +1,10 @@
 import { AppChrome } from "../../frontend/components/AppChrome";
 import { SecurityTerminal } from "../../frontend/components/terminal/SecurityTerminal";
-import { auth } from "../../auth";
-import type { AppSession } from "../../lib/keycloakSession";
+import { apiSession } from "../api/authSession";
 import { hasAdminAccess } from "../../lib/applicationRoles";
 
 export default async function TerminalPage() {
-  const session = await auth() as AppSession | null;
+  const session = await apiSession();
   return (
     <AppChrome role="security">
       <SecurityTerminal

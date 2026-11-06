@@ -379,6 +379,12 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         result = (await self.client.get("/v1/alerts", params={"subjectId": "h1"})).json()
         self.assertEqual([item["id"] for item in result["items"]], [other])
         self.assertEqual(len(result["warnings"]), 2)
+        focused = (await self.client.get("/v1/alerts", params={"subjectId": "h1", "includeDirectory": False})).json()
+        self.assertEqual(focused["items"], result["items"])
+        self.assertEqual([warning["subjectId"] for warning in focused["warnings"]], ["h1"])
+        self.assertEqual(focused["rules"], result["rules"])
+        empty = (await self.client.get("/v1/alerts", params={"search": "no matching alert", "includeDirectory": False})).json()
+        self.assertEqual((empty["items"], empty["warnings"]), ([], []))
         result = (await self.client.get("/v1/alerts", params={"limit": 1, "offset": 1})).json()
         self.assertEqual((result["total"], len(result["items"])), (2, 1))
 

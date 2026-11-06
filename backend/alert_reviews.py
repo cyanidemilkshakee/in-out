@@ -113,6 +113,8 @@ async def warning_directory(db, *, subject_ids=None, barcodes=None, subject_quer
         subjects_query = subjects_query.where(or_(*filters))
     subject_rows = await bounded_rows(db, subjects_query)
     subjects = [row[0] for row in subject_rows]
+    if focused and not subjects:
+        return [], {}, {}, {}, {}
     names = {row[0].id: row[1] for row in subject_rows}
     selected_ids = [subject.id for subject in subjects]
     resets_query = select(WarningReset)
@@ -144,7 +146,7 @@ async def warning_directory(db, *, subject_ids=None, barcodes=None, subject_quer
 
 
 async def enrich_alert_documents(db, alerts, *, focused=False, subject_ids=None, subject_query=None):
-    """Return alert items and all registered-subject warning summaries in bulk."""
+    """Return alert items with all or explicitly focused warning summaries."""
     ids = [alert.id for alert in alerts]
     if not focused:
         _, by_id, by_barcode, summaries, resets = await warning_directory(db)
@@ -232,7 +234,7 @@ async def acknowledge_alert(db, alert_id):
     if await db.get(AlertReview, alert_id, populate_existing=True):
         raise HTTPException(409, "Reviewed alerts are final; reset the subject warnings to clear accepted warnings")
     if (alert.data or {}).get("status") == "acknowledged":
-        return (await enrich_alert_documents(db, [alert]))["items"][0]
+        return (await enrich_alert_documents(db, [alert], focused=True))["items"][0]
     if subject:
         await _require_previous_alerts_reviewed(db, alert, subject)
         warning_count = await confirmed_warning_count(db, subject.id)
@@ -240,7 +242,7 @@ async def acknowledge_alert(db, alert_id):
             raise HTTPException(409, "Reset this person's confirmed warnings before acknowledging another alert")
     alert.data = {**(alert.data or {}), "status": "acknowledged", "id": alert.id}
     await db.flush()
-    return (await enrich_alert_documents(db, [alert]))["items"][0]
+    return (await enrich_alert_documents(db, [alert], focused=True))["items"][0]
 
 
 def _audit(actor, action, reason, *, subject=None, related_id=None, extra=None):
@@ -261,7 +263,8 @@ async def _review_response(db, alert, review):
         alert = Alert(id=review.alert_id, created_at=review.alert_created_at,
             data={**review.alert_data, "status": "acknowledged" if review.alert_data.get("warningReset")
                 else "warned" if review.decision == "confirmed" else "resolved"})
-    enriched = await enrich_alert_documents(db, [alert])
+    enriched = await enrich_alert_documents(db, [alert], focused=True,
+        subject_ids=[review.subject_id] if review.subject_id else [])
     warning = next((item for item in enriched["warnings"] if item["subjectId"] == review.subject_id), None)
     return {"alert": enriched["items"][0], "warning": warning}
 
@@ -346,7 +349,7 @@ async def reset_subject_warnings(db, subject_id, actor, reason):
     restriction = await db.get(CriticalEntryRestriction, subject_id, populate_existing=True)
     active_hold = restriction is not None and restriction.active
     if reset and not current_reviews and not active_hold:
-        _, _, _, summaries, _ = await warning_directory(db)
+        _, _, _, summaries, _ = await warning_directory(db, subject_ids=[subject_id])
         return {"warning": summaries[subject_id], "entryRestriction": summaries[subject_id]["entryRestriction"]}
     now = datetime.now(timezone.utc)
     if reset is None:
@@ -372,7 +375,7 @@ async def reset_subject_warnings(db, subject_id, actor, reason):
         extra={"previousWarningCount": len(current_reviews), "entryRestrictionLifted": active_hold})
     db.add(audit)
     await db.flush()
-    _, _, _, summaries, _ = await warning_directory(db)
+    _, _, _, summaries, _ = await warning_directory(db, subject_ids=[subject_id])
     response = {"warning": summaries[subject_id], "entryRestriction": summaries[subject_id]["entryRestriction"],
         "auditEvent": audit.data}
     if release and "auditEvent" in release:

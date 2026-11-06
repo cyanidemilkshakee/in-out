@@ -1,9 +1,9 @@
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Annotated, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import String, select, exc, or_
 from sqlalchemy.dialects.postgresql import array
 from sqlalchemy.orm import selectinload
@@ -300,18 +300,6 @@ async def decide_permission_request(
         requested_zones = await validate_registered_zones(db, request_data.get("requestedZones") or [])
         validate_zone_subset(requested_zones, await admin_zone_ids(db, admin))
 
-    existing_request = await db.scalar(select(PermissionRequestModel).where(
-        PermissionRequestModel.id == req_id).with_for_update())
-    if existing_request is None:
-        raise HTTPException(404, "Request not found")
-    request_data = existing_request.data or {}
-    checkpoint_id = request_data.get("checkpointId")
-    if isinstance(checkpoint_id, str) and checkpoint_id:
-        await require_checkpoint_scope(db, admin, checkpoint_id)
-    else:
-        requested_zones = await validate_registered_zones(db, request_data.get("requestedZones") or [])
-        validate_zone_subset(requested_zones, await admin_zone_ids(db, admin))
-
     reason = (payload.reason or "").strip()
     if payload.decision == "denied" and not reason:
         raise HTTPException(status_code=422, detail="A decision note is required when denying a permission request")
@@ -390,6 +378,15 @@ async def dismiss_permission_notification(
 async def list_permissions(
     db: AsyncSession = Depends(get_read_db),
     _admin: dict = Depends(verify_admin_request),
+    view: Annotated[Literal["directory", "pending"] | None, Query()] = None,
+    limit: int = Query(25, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    search: str | None = Query(None, max_length=200),
+    subjectGroup: Literal["people", "hardware"] | None = Query(None),
+    state: Literal["all", "active", "pending_approval", "restricted", "revoked", "expired"] | None = Query(None),
+    subjectId: str | None = Query(None, min_length=1, max_length=200),
+    requestId: str | None = Query(None, min_length=1, max_length=200),
+    typeGroup: Literal["manual", "other"] | None = Query(None),
 ) -> dict[str, Any]:
     """
     Return a consolidated snapshot:
@@ -402,6 +399,15 @@ async def list_permissions(
     from event_outbox import read_event_revision
     event_revision = await read_event_revision(db)
     zone_ids = await admin_zone_ids(db, _admin)
+    if view:
+        from permission_reads import permission_directory_page, pending_permission_page
+        if view == "directory":
+            page = await permission_directory_page(db, zone_ids, limit=limit, offset=offset, search=search,
+                subject_group=subjectGroup, state=state, subject_id=subjectId)
+        else:
+            page = await pending_permission_page(db, zone_ids, limit=limit, offset=offset, search=search,
+                subject_id=subjectId, request_id=requestId, type_group=typeGroup)
+        return {**page, "eventRevision": event_revision}
     visible_subject_ids = select(Subject.id).where(subject_zone_condition(zone_ids)).correlate(None)
 
     async def fetch_permissions():

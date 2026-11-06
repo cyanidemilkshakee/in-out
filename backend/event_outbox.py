@@ -17,6 +17,10 @@ logger = logging.getLogger(__name__)
 MAX_EVENT_BYTES = 256 * 1024
 MAX_REPLAY_EVENTS = 500
 MAX_REPLAY_BYTES = 4 * 1024 * 1024
+_DELIVERY_LANES = {
+    "presence": ("presence",),
+    "workflow": ("workflow_start", "workflow_signal"),
+}
 
 _ENQUEUE = text("""
     WITH revision AS (
@@ -149,16 +153,32 @@ async def _deliver(kind: str, payload: dict):
             # the authenticated, committed database decision remains final.
 
 
-async def dispatch_one(*, deliver=None, sessions=None) -> bool:
+def _next_delivery(lane: str | None, now: datetime):
+    """Only a lane's oldest unacknowledged record can be leased.
+
+    Choose the head before testing availability or leases. A head in backoff,
+    or owned by another worker, must not let a later revision/signal overtake
+    it. Independent lanes can still progress through the same durable table.
+    """
+    if lane is not None and lane not in _DELIVERY_LANES:
+        raise ValueError("Invalid durable event delivery lane")
+    lanes = _DELIVERY_LANES.values() if lane is None else (_DELIVERY_LANES[lane],)
+    heads = [select(EventOutbox.id).where(EventOutbox.delivered_at.is_(None),
+        EventOutbox.kind.in_(kinds)).order_by(EventOutbox.id).limit(1)
+        .correlate(None).scalar_subquery() for kinds in lanes]
+    return select(EventOutbox).where(EventOutbox.id.in_(heads),
+        EventOutbox.delivered_at.is_(None), EventOutbox.available_at <= now,
+        (EventOutbox.lease_until.is_(None) | (EventOutbox.lease_until <= now)),
+    ).order_by(EventOutbox.id).limit(1).with_for_update(skip_locked=True)
+
+
+async def dispatch_one(*, deliver=None, sessions=None, lane: str | None = None) -> bool:
     sessions = sessions or AsyncSessionLocal
     deliver = deliver or _deliver
     owner = str(uuid.uuid4())
     async with sessions() as db:
         now = datetime.now(timezone.utc)
-        item = await db.scalar(select(EventOutbox).where(EventOutbox.delivered_at.is_(None),
-            EventOutbox.available_at <= now,
-            (EventOutbox.lease_until.is_(None) | (EventOutbox.lease_until <= now)),
-        ).order_by(EventOutbox.id).limit(1).with_for_update(skip_locked=True))
+        item = await db.scalar(_next_delivery(lane, now))
         if item is None:
             return False
         item.lease_owner, item.lease_until = owner, now + timedelta(seconds=30)
@@ -186,24 +206,53 @@ async def dispatch_one(*, deliver=None, sessions=None) -> bool:
     return True
 
 
-async def run_dispatcher(stop: asyncio.Event):
-    next_cleanup = 0.0
+async def _run_delivery_lane(stop: asyncio.Event, lane: str, *, deliver=None, sessions=None):
     while not stop.is_set():
         try:
-            busy = await dispatch_one()
-            if asyncio.get_running_loop().time() >= next_cleanup:
-                await prune_delivered()
-                next_cleanup = asyncio.get_running_loop().time() + 60
+            busy = await dispatch_one(lane=lane, deliver=deliver, sessions=sessions)
         except asyncio.CancelledError:
             raise
         except Exception:
-            logger.exception("Durable event dispatcher unavailable")
+            logger.exception("Durable event delivery lane unavailable", extra={"event_lane": lane})
             busy = False
         if not busy:
             try:
                 await asyncio.wait_for(stop.wait(), timeout=0.25)
             except asyncio.TimeoutError:
                 pass
+
+
+async def _run_cleanup(stop: asyncio.Event, *, sessions=None):
+    while not stop.is_set():
+        try:
+            await prune_delivered(sessions=sessions)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Durable event cleanup unavailable")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=60)
+        except asyncio.TimeoutError:
+            pass
+
+
+async def run_dispatcher(stop: asyncio.Event, *, deliver=None, sessions=None):
+    # Exactly one delivery per lane in this process. Database head selection
+    # also preserves ordering across multiple worker processes and restarts.
+    tasks = [asyncio.create_task(_run_delivery_lane(stop, lane, deliver=deliver, sessions=sessions),
+        name=f"durable-{lane}-delivery") for lane in _DELIVERY_LANES]
+    tasks.append(asyncio.create_task(_run_cleanup(stop, sessions=sessions), name="durable-event-cleanup"))
+    try:
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            task.result()
+        if not stop.is_set():
+            raise RuntimeError("Durable event delivery task exited unexpectedly")
+    finally:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
 async def prune_delivered(*, sessions=None):

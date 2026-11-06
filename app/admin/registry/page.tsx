@@ -9,7 +9,8 @@ import { EmployeeTable } from "../../../frontend/components/admin/tables/Employe
 import { RegistryCreateDialog } from "../../../frontend/components/admin/tables/RegistryCreateDialog";
 import { useDataActions } from "../../../frontend/context/DataContext";
 import { employeeActivityPatterns, employeeActivityRangeDays } from "../../../lib/analyticsQueries";
-import { assertCsvBound, readExport } from "../../../lib/exportRead";
+import { readExport } from "../../../lib/exportRead";
+import { formatCsvBlob } from "../../../lib/csv";
 import { createRefreshScheduler } from "../../../lib/refreshScheduler";
 import type { TimeRange } from "../../../lib/dateRanges";
 import type { HardwareAsset, Person, RegistryKind, RegistryPage as RegistryPageData, RegistrySortKey, SortDirection } from "../../../lib/types";
@@ -24,17 +25,11 @@ const REGISTRY_TABS = [
 ] as const;
 const PAGE_SIZE = 25;
 
-function csvCell(value: unknown) {
-  const raw = String(value ?? "");
-  return `"${(/^[=+\-@]/.test(raw) ? `'${raw}` : raw).replaceAll('"', '""')}"`;
-}
-
-function downloadCsv(filename: string, rows: Array<Record<string, unknown>>) {
-  if (!rows.length) return;
-  const columns = Object.keys(rows[0]);
-  const csv = [columns.map(csvCell).join(","), ...rows.map(row => columns.map(column => csvCell(row[column])).join(","))].join("\r\n");
-  assertCsvBound(csv);
-  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+async function downloadCsv<T>(filename: string, columns: string[], records: T[], values: (record: T) => unknown[], signal: AbortSignal) {
+  if (!records.length) return;
+  const blob = await formatCsvBlob(columns, records, values, { signal, bom: true });
+  signal.throwIfAborted();
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = filename;
@@ -60,6 +55,7 @@ function RegistryWorkspace() {
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
   const exportController = useRef<AbortController | null>(null);
+  const exportPending = useRef(false);
   useEffect(() => () => exportController.current?.abort(), []);
   const overviewKey = useRef("");
   const activeRead = useRef<AbortController | null>(null);
@@ -150,7 +146,8 @@ function RegistryWorkspace() {
   const reload = () => setRevision(value => value + 1);
 
   async function handleExport() {
-    if (exporting) return;
+    if (exportPending.current) return;
+    exportPending.current = true;
     setExporting(true);
     setError("");
     const controller = new AbortController();
@@ -161,7 +158,7 @@ function RegistryWorkspace() {
         sortKey, sortDirection }, controller.signal);
       const records: Array<Person | HardwareAsset> = kind === "hardware" ? result.hardwareAssets : result.people;
       const averages = result.averages;
-      const rows: Array<Record<string, unknown>> = records.map(record => kind === "employee" ? {
+      const rowForRecord = (record: Person | HardwareAsset): Record<string, unknown> => kind === "employee" ? {
         name: record.name, barcode: record.barcode, allowedZones: record.allowedZones.join("; "), status: record.status, inside: record.inside,
         [`avgWorkHoursPerDay_${timeRange}`]: averages[record.id] ?? "", createdAt: record.createdAt,
       } : kind === "visitor" ? {
@@ -169,10 +166,14 @@ function RegistryWorkspace() {
         purpose: "purpose" in record ? record.purpose : "", validFrom: "validFrom" in record ? record.validFrom : "", validTo: "validTo" in record ? record.validTo : "",
         status: record.status, inside: record.inside,
       } : { name: record.name, barcode: record.barcode, owner: "owner" in record ? record.owner : "", category: "category" in record ? record.category : "",
-        allowedZones: record.allowedZones.join("; "), status: record.status, inside: record.inside, createdAt: record.createdAt });
-      downloadCsv(`inout-${tab.tab}-${new Date().toISOString().slice(0, 10)}.csv`, rows);
+        allowedZones: record.allowedZones.join("; "), status: record.status, inside: record.inside, createdAt: record.createdAt };
+      const columns = records.length ? Object.keys(rowForRecord(records[0])) : [];
+      await downloadCsv(`inout-${tab.tab}-${new Date().toISOString().slice(0, 10)}.csv`, columns, records, record => {
+        const row = rowForRecord(record);
+        return columns.map(column => row[column]);
+      }, controller.signal);
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to export registry."); }
-    finally { clearTimeout(timer); setExporting(false); }
+    finally { clearTimeout(timer); exportPending.current = false; setExporting(false); }
   }
 
   return <AdminPageFrame title="Registry" metric={frameMetric}

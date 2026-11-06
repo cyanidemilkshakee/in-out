@@ -78,7 +78,7 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
 
         with patch("permission_decisions.apply_permission_decision", new=AsyncMock(return_value=result)), \
              patch("routers.permissions._include_entry_restrictions", new=AsyncMock()), \
-             patch("routers.permissions.require_checkpoint_scope", new=AsyncMock()), \
+             patch("routers.permissions.require_checkpoint_scope", new=AsyncMock()) as scope, \
              patch("routers.permissions.enqueue_workflow_signal", new=AsyncMock(side_effect=signal)), \
              patch("routers.permissions.enqueue_decision", new=AsyncMock(side_effect=event)):
             returned = await permissions.decide_permission_request("request",
@@ -86,6 +86,8 @@ class MutationOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(order, ["signal", "event", "commit"])
         self.assertFalse(returned["workflowSignaled"])
         self.assertTrue(returned["workflowQueued"])
+        db.scalar.assert_awaited_once()
+        scope.assert_awaited_once_with(db, {"sub": "admin"}, "cp-main")
 
     async def test_alert_batches_preserve_all_alerts_with_bounded_delivery_records(self):
         alerts = [{"id": f"alert-{index}", "reason": "x" * (MAX_EVENT_BYTES // 2)} for index in range(4)]

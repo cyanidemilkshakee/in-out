@@ -49,3 +49,4 @@ build/
 
 # Postman collections
 postman/collections/
+/tmp/

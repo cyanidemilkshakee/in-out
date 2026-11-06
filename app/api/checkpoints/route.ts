@@ -11,6 +11,13 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function errorResponse(error: unknown) {
+  if (error instanceof PythonApiError && error.status === 401 &&
+      error.message === "Step-up authentication required before managing users") {
+    return NextResponse.json({
+      error: "Fresh re-authentication is required to manage checkpoints.",
+      code: "STEP_UP_REQUIRED",
+    }, { status: 403 });
+  }
   const message = error instanceof Error ? error.message : "Checkpoint request failed.";
   const status = error instanceof PythonApiError || error instanceof RequestBodyError ? error.status : 400;
   return NextResponse.json({ error: message }, { status });
@@ -40,6 +47,10 @@ async function checkpointsRequest(request: NextRequest) {
 
     const checkpointId = request.nextUrl.searchParams.get("checkpointId")?.trim();
     if (!checkpointId) return NextResponse.json({ error: "Checkpoint ID is required." }, { status: 400 });
+    if (request.method === "PATCH") {
+      const body = requireObject(await readJsonBody(request), "Checkpoint");
+      return NextResponse.json({ data: await callPythonApi(`/v1/checkpoints/${encodeURIComponent(checkpointId)}`, "PATCH", body) });
+    }
     await callPythonApi(`/v1/checkpoints/${encodeURIComponent(checkpointId)}`, "DELETE");
     return new NextResponse(null, { status: 204 });
   } catch (error) {
@@ -49,4 +60,5 @@ async function checkpointsRequest(request: NextRequest) {
 
 export const GET = withApiSession(checkpointsRequest);
 export const POST = withApiSession(checkpointsRequest);
+export const PATCH = withApiSession(checkpointsRequest);
 export const DELETE = withApiSession(checkpointsRequest);

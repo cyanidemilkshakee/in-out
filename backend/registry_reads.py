@@ -1,9 +1,10 @@
 """Bounded Registry pages and compact summaries; full histories stay on demand."""
+from bisect import bisect_left
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import String, bindparam, case, func, or_, select, true
 from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import contains_eager, selectinload
 
 from config import settings
 from critical_entry_restrictions import entry_restrictions_for_subjects
@@ -90,21 +91,23 @@ def trend_summary(points, start, end, days, average):
             "isUp": value >= prior, "startAt": start.isoformat(), "endAt": end.isoformat()}
 
 
-async def registry_trend(db, kind, days, end, zone_ids=None):
+async def _employee_overview_activity(db, days, end, zone_ids):
+    query = select(Subject.id).where(Subject.kind == "employee")
+    if zone_ids is not None:
+        query = query.where(subject_zone_condition(zone_ids))
+    ids = [row[0] for row in await bounded_rows(db, query)]
+    return await employee_activity_rows(db, ids, end - timedelta(days=2 * days), end, zone_ids=zone_ids)
+
+
+async def registry_trend(db, kind, days, end, zone_ids=None, *, employee_events=None):
     start = end - timedelta(days=days)
-    scope = subject_zone_condition(zone_ids) if zone_ids is not None else None
     if kind == "employee":
-        employee_query = select(Subject.id).outerjoin(Person, Person.subject_id == Subject.id)\
-            .outerjoin(HardwareAsset, HardwareAsset.subject_id == Subject.id)\
-            .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id).where(Subject.kind == kind)
-        if scope is not None:
-            employee_query = employee_query.where(scope)
-        ids = [row[0] for row in await bounded_rows(db, employee_query)]
-        events = await employee_activity_rows(db, ids, start - timedelta(days=days), end, zone_ids=zone_ids)
+        if employee_events is None:
+            employee_events = await _employee_overview_activity(db, days, end, zone_ids)
         points = []
-        for employee_events in events.values():
+        for events in employee_events.values():
             for period_start, period_end in ((start, end), (start - timedelta(days=days), start - timedelta(microseconds=1))):
-                for day in build_activity_days(employee_events, period_start, period_end):
+                for day in build_activity_days(events, period_start, period_end):
                     midnight = datetime.fromisoformat(day["date"]).replace(tzinfo=FACILITY_ZONE).astimezone(timezone.utc)
                     points.append((max(midnight, period_start), day["workedHours"]))
         return trend_summary(points, start, end, days, True)
@@ -135,7 +138,7 @@ async def registry_trend(db, kind, days, end, zone_ids=None):
 
 
 async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort_direction, include_overview,
-                        zone_ids=None):
+                        zone_ids=None, include_related=True):
     conditions = subject_search_conditions(kind, search)
     if zone_ids is not None:
         conditions.append(subject_zone_condition(zone_ids))
@@ -169,8 +172,11 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
             if sort_key == "latestScan" else func.lower(func.coalesce(metadata[sort_key].astext, "")))
         ordered = sort_column.desc() if sort_direction == "desc" else sort_column.asc()
         source = source.limit(limit).offset(offset)
+    # These primary-key, one-to-one tables are already joined for scope/sort.
+    # Populate their relationships from the same rows rather than re-reading
+    # all three tables in separate select-in queries for every page.
     subjects = (await db.scalars(source.order_by(ordered, Subject.id).options(
-        selectinload(Subject.person), selectinload(Subject.hardware), selectinload(Subject.presence_state)))).all()
+        contains_eager(Subject.person), contains_eager(Subject.hardware), contains_eager(Subject.presence_state)))).all()
     ids = [subject.id for subject in subjects]
     restrictions = await entry_restrictions_for_subjects(db, ids)
     documents = [subject_document(subject, restrictions) for subject in subjects]
@@ -178,15 +184,33 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
     if zone_ids is not None:
         latest_query = latest_query.where(checkpoint_zone_condition(Movement, zone_ids))
     latest = (await db.scalars(latest_query
-        .distinct(Movement.subject_id).order_by(Movement.subject_id, Movement.occurred_at.desc(), Movement.id.desc()))).all() if ids else []
+        .distinct(Movement.subject_id).order_by(Movement.subject_id, Movement.occurred_at.desc(), Movement.id.desc()))).all() if ids and include_related else []
     activity_days = {}
-    if kind == "employee":
-        activity = ({subject_id: sorted_activity[subject_id] for subject_id in ids} if sorted_activity is not None else
-                    await employee_activity_rows(db, ids, activity_start, now, zone_ids=zone_ids))
+    overview_activity = None
+    if kind == "employee" and (sorted_activity is None or include_related):
+        if sorted_activity is not None:
+            activity = {subject_id: sorted_activity[subject_id] for subject_id in ids}
+        elif include_overview:
+            overview_activity = await _employee_overview_activity(db, days, now, zone_ids)
+            activity = {}
+            for subject_id in ids:
+                if subject_id in overview_activity:
+                    events = overview_activity[subject_id]
+                    first = bisect_left(events, activity_start, key=lambda event: event[1])
+                    # Match the narrower query's one predecessor and inclusive
+                    # start, retaining the original movement-ID tie ordering.
+                    activity[subject_id] = events[max(0, first - 1):]
+            missing = [subject_id for subject_id in ids if subject_id not in activity]
+            if missing:
+                activity.update(await employee_activity_rows(db, missing, activity_start, now, zone_ids=zone_ids))
+        else:
+            activity = await employee_activity_rows(db, ids, activity_start, now, zone_ids=zone_ids)
         for subject_id, events in activity.items():
             day_data = build_activity_days(events, activity_start, now)
-            activity_days[subject_id] = day_data[-1:]
-            averages[subject_id] = round(sum(day["workedHours"] for day in day_data) / days, 2) if events else None
+            if include_related:
+                activity_days[subject_id] = day_data[-1:]
+            if sorted_activity is None:
+                averages[subject_id] = round(sum(day["workedHours"] for day in day_data) / days, 2) if events else None
     result = {"kind": kind, "people": documents if kind != "hardware" else [],
               "hardwareAssets": documents if kind == "hardware" else [], "movements": [movement_document(row) for row in latest],
               "activityDays": activity_days, "averages": {subject_id: averages.get(subject_id) for subject_id in ids},
@@ -194,7 +218,7 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
               "checkpoints": [{**(checkpoint.data or {}), "id": checkpoint.id} for checkpoint in (await db.scalars(
                   select(Checkpoint).where(Checkpoint.active.is_(True),
                       *([Checkpoint.zone_id.in_(zone_ids)] if zone_ids is not None else []))
-                  .order_by(Checkpoint.zone_id, Checkpoint.number))).all()]}
+                  .order_by(Checkpoint.zone_id, Checkpoint.number))).all()] if include_related else []}
     if include_overview:
         counter_filters = [Subject.kind == kind]
         if zone_ids is not None:
@@ -210,7 +234,7 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
             .outerjoin(PresenceState, PresenceState.subject_id == Subject.id)
             .where(*counter_filters))).mappings().one()
         result.update(summary={key: int(value or 0) for key, value in counters.items()},
-                      trend=await registry_trend(db, kind, days, now, zone_ids))
+                      trend=await registry_trend(db, kind, days, now, zone_ids, employee_events=overview_activity))
     return result
 
 

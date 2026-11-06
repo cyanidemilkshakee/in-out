@@ -106,9 +106,7 @@ export default function AdminLayoutClient({ children, isMasterAdmin }: { childre
     window.localStorage.setItem("inout-admin-theme", nextTheme);
   }
 
-  return (
-    <AppChrome role="admin">
-    <AdminLiveProvider>
+  const content = (
       <main className="admin-console admin-shell-layout" data-master-admin={isMasterAdmin ? "true" : undefined}>
         {isMasterAdmin ? <header className="master-admin-topbar">
           <Link className="master-admin-brand" href="/admin/users" aria-label="In / Out user management">IN / OUT <span>Organization administration</span></Link>
@@ -137,7 +135,11 @@ export default function AdminLayoutClient({ children, isMasterAdmin }: { childre
           )}
         </button>
       </main>
-    </AdminLiveProvider>
+  );
+
+  return (
+    <AppChrome role="admin">
+      {isMasterAdmin ? content : <AdminLiveProvider>{content}</AdminLiveProvider>}
     </AppChrome>
   );
 }

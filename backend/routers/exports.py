@@ -22,6 +22,7 @@ router = APIRouter(prefix="/v1/exports", tags=["reports"])
 class ExportQuery(BaseModel):
     model_config = ConfigDict(extra="forbid")
     source: Literal["movements", "alerts", "permissions", "registry"]
+    lean: bool = False
     kind: Literal["employee", "visitor", "hardware"] | None = None
     days: int = Field(1, ge=1, le=365)
     search: str | None = Field(None, max_length=200)
@@ -72,15 +73,17 @@ async def build_export(db, query: ExportQuery, actor):
             raise HTTPException(422, "Choose a registry subject kind")
         result = await _existing_read(registry.registry_bundle, db, actor, kind=query.kind, days=query.days,
             search=query.search, sortKey=query.sortKey, sortDirection=query.sortDirection,
-            limit=maximum + 1, offset=0, includeOverview=False)
+            limit=maximum + 1, offset=0, includeOverview=False, includeRelated=not query.lean)
     elif query.source == "movements":
         result = await _existing_read(movements.list_movements, db, actor, limit=maximum + 1, page_size=maximum + 1,
             search=query.search, checkpoint=query.checkpoint, subjectGroup=query.subjectGroup,
             subject_id=query.subject_id, result=query.result, direction=query.direction, scanType=query.scanType,
-            denialCategory=query.denialCategory, sortKey="createdAt", sortDirection=query.sortDirection, **dates)
+            denialCategory=query.denialCategory, sortKey="createdAt", sortDirection=query.sortDirection,
+            includeNotes=not query.lean, **dates)
     elif query.source == "alerts":
         result = await _existing_read(alerts.list_alerts, db, actor, limit=maximum + 1, status=query.status,
-            search=query.search, subjectId=query.subject_id, sortKey="createdAt", sortDirection=query.sortDirection, **dates)
+            search=query.search, subjectId=query.subject_id, sortKey="createdAt", sortDirection=query.sortDirection,
+            includeDirectory=not query.lean, includeRules=not query.lean, **dates)
     else:
         result = await _existing_read(audit.list_audit_events, db, actor, limit=maximum + 1, category="permission", **dates)
     if result["total"] > maximum:

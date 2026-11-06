@@ -43,6 +43,18 @@ class CheckpointCreate(BaseModel):
         return value
 
 
+class CheckpointRename(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    name: str = Field(min_length=1, max_length=80)
+
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, value: str) -> str:
+        if not _CHECKPOINT_NAME.fullmatch(value) or not any(character.isalnum() for character in value):
+            raise ValueError("Checkpoint name must contain a letter or number and no control characters")
+        return value
+
+
 async def _checkpoint_admin_context(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -183,6 +195,48 @@ async def create_checkpoint(
     except IntegrityError as error:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Checkpoint number is already used in this zone") from error
+    except Exception:
+        await db.rollback()
+        raise
+
+
+@router.patch("/{checkpoint_id}")
+async def rename_checkpoint(
+    checkpoint_id: str,
+    payload: CheckpointRename,
+    db: AsyncSession = Depends(get_db),
+    actor: dict[str, Any] = Depends(_checkpoint_admin_context),
+) -> dict[str, Any]:
+    """Rename a checkpoint while preserving its stable ID and assignments."""
+    checkpoint = await require_checkpoint_scope(db, actor, checkpoint_id)
+    try:
+        await db.execute(select(func.pg_advisory_xact_lock(
+            func.hashtextextended(f"checkpoint-registry:{checkpoint.zone_id}", 0)))
+        )
+        effective_name = func.coalesce(
+            func.nullif(Checkpoint.data["gateLabel"].astext, ""), Checkpoint.data["name"].astext)
+        duplicate = await db.scalar(select(Checkpoint.id).where(
+            Checkpoint.zone_id == checkpoint.zone_id,
+            Checkpoint.active.is_(True),
+            Checkpoint.id != checkpoint_id,
+            func.lower(effective_name) == payload.name.casefold(),
+        ).limit(1))
+        if duplicate:
+            raise HTTPException(status_code=409, detail="A checkpoint with this name already exists in the zone")
+
+        checkpoint.data = {
+            **(checkpoint.data or {}),
+            "name": payload.name,
+            "gateLabel": payload.name,
+        }
+        now = datetime.now(timezone.utc)
+        db.add(_audit(checkpoint.id, payload.name, checkpoint.zone_id, actor, "checkpoint_renamed", now))
+        await enqueue_changed(db)
+        await db.commit()
+        return _checkpoint_document(checkpoint)
+    except HTTPException:
+        await db.rollback()
+        raise
     except Exception:
         await db.rollback()
         raise

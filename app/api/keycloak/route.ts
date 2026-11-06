@@ -5,13 +5,16 @@ import { readJsonBody, RequestBodyError } from "../../../lib/requestJson";
 import { requireObject } from "../data/bff";
 import { isActiveUserManagementStepUp, USER_MANAGEMENT_STEP_UP_LOCK_COOKIE } from "../../../lib/userManagementStepUp";
 import { identityCommandTimeoutMs } from "../../../lib/identityRequestPolicy";
-import { userManagementWindowUnlocked } from "../../../lib/serverUserManagement";
 import { hasAdminAccess, hasMasterAdminAccess } from "../../../lib/applicationRoles";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function errorResponse(error: unknown) {
+  if (error instanceof PythonApiError && error.status === 401 &&
+      error.message === "Step-up authentication required before managing users") {
+    return NextResponse.json({ error: "Fresh re-authentication is required to manage users.", code: "STEP_UP_REQUIRED" }, { status: 403 });
+  }
   const message = error instanceof Error ? error.message : "Identity request failed.";
   return NextResponse.json({ error: message }, {
     status: error instanceof PythonApiError || error instanceof RequestBodyError ? error.status : 400,
@@ -31,8 +34,7 @@ async function identityRequest(request: NextRequest) {
     const masterAdmin = hasMasterAdminAccess(session.roles);
     if (!masterAdmin && (
       !isActiveUserManagementStepUp(session) ||
-      request.cookies.has(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE) ||
-      !await userManagementWindowUnlocked(session)
+      request.cookies.has(USER_MANAGEMENT_STEP_UP_LOCK_COOKIE)
     )) {
       return NextResponse.json(
         { error: "Fresh re-authentication is required to manage users.", code: "STEP_UP_REQUIRED" },

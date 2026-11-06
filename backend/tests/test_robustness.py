@@ -72,7 +72,6 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_step_up_times_fail_closed(self):
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials="token")
         for auth_time in (True, float("nan"), float("inf"), 10**20):
-            with patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value={"auth_time": auth_time})):
-                with self.assertRaises(HTTPException) as error:
-                    await keycloak_admin._admin_context(credentials)
-                self.assertEqual(error.exception.status_code, 401)
+            with self.assertRaises(HTTPException) as error:
+                await keycloak_admin._admin_context(credentials, claims={"auth_time": auth_time})
+            self.assertEqual(error.exception.status_code, 401)

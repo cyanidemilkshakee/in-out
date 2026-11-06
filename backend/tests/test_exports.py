@@ -82,6 +82,41 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ExportCancellationTests(unittest.IsolatedAsyncioTestCase):
+    async def test_lean_export_selects_compact_reads_but_keeps_legacy_defaults(self):
+        cases = (("alerts", {}, {"includeDirectory": False, "includeRules": False}),
+            ("registry", {"kind": "employee"}, {"includeRelated": False}),
+            ("movements", {}, {"includeNotes": False}))
+        for source, extra, expected in cases:
+            with self.subTest(source=source):
+                payload = {"total": 1, "people" if source == "registry" else "items": [{"id": "record-1"}]}
+                with patch.object(exports, "read_event_revision", new=AsyncMock(return_value=3)), \
+                     patch.object(exports, "_existing_read", new=AsyncMock(return_value=payload.copy())) as read:
+                    result = await exports.build_export(object(), exports.ExportQuery(source=source, lean=True, **extra), {})
+                    self.assertEqual(result, {**payload, "eventRevision": 3})
+                    for key, value in expected.items():
+                        self.assertIs(read.await_args.kwargs[key], value)
+                    await exports.build_export(object(), exports.ExportQuery(source=source, **extra), {})
+                    for key in expected:
+                        self.assertIs(read.await_args.kwargs[key], True)
+
+    async def test_lean_export_preserves_complete_result_and_row_byte_guards(self):
+        for payload, status in (({"total": 2, "items": [{"id": "one"}]}, 409),
+                                ({"total": 10_001, "items": []}, 422)):
+            with self.subTest(status=status), \
+                 patch.object(exports, "read_event_revision", new=AsyncMock(return_value=3)), \
+                 patch.object(exports, "_existing_read", new=AsyncMock(return_value=payload)):
+                from fastapi import HTTPException
+                with self.assertRaises(HTTPException) as error:
+                    await exports.build_export(object(), exports.ExportQuery(source="alerts", lean=True), {})
+                self.assertEqual(error.exception.status_code, status)
+        with patch.object(exports, "read_event_revision", new=AsyncMock(return_value=3)), \
+             patch.object(exports, "_existing_read", new=AsyncMock(return_value={"total": 1, "items": [{"id": "one"}]})), \
+             patch.object(settings, "MAX_DATA_RESPONSE_BYTES", 1):
+            from fastapi import HTTPException
+            with self.assertRaises(HTTPException) as error:
+                await exports.build_export(object(), exports.ExportQuery(source="alerts", lean=True), {})
+            self.assertEqual(error.exception.status_code, 413)
+
     async def test_disconnect_cancels_database_read(self):
         cancelled = asyncio.Event()
 

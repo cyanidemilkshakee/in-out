@@ -1,6 +1,6 @@
 import type { Checkpoint } from "../lib/types";
 
-async function request<T>(method: "GET" | "POST" | "DELETE", body?: unknown, checkpointId?: string): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", body?: unknown, checkpointId?: string): Promise<T> {
   const query = checkpointId ? `?checkpointId=${encodeURIComponent(checkpointId)}` : "";
   const response = await fetch(`/api/checkpoints${query}`, {
     method,
@@ -24,6 +24,10 @@ export async function listCheckpoints(): Promise<Checkpoint[]> {
 
 export function createCheckpoint(input: { zoneId: string; name?: string; preset?: "back_gate" | "custom" }): Promise<Checkpoint> {
   return request<Checkpoint>("POST", input);
+}
+
+export function updateCheckpointName(checkpointId: string, name: string): Promise<Checkpoint> {
+  return request<Checkpoint>("PATCH", { name }, checkpointId);
 }
 
 export function deleteCheckpoint(checkpointId: string): Promise<void> {

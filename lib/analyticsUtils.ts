@@ -47,18 +47,13 @@ export interface DayPattern {
 export type PersonSessionIndex = Map<string, DayPattern[]>;
 
 const MAX_BREAK_DURATION_MS = 2 * 60 * 60 * 1000;
+const facilityPartsFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "Asia/Kolkata", year: "numeric", month: "numeric", day: "numeric",
+  hour: "numeric", minute: "numeric", second: "numeric", hour12: false,
+});
 
 function facilityDateParts(timestamp: number) {
-  const parts = new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "numeric",
-    day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    second: "numeric",
-    hour12: false,
-  }).formatToParts(new Date(timestamp));
+  const parts = facilityPartsFormatter.formatToParts(new Date(timestamp));
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     Number(parts.find((part) => part.type === type)?.value ?? 0);
   return {

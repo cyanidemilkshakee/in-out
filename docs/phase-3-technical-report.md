@@ -51,13 +51,13 @@ Zone and checkpoint mutations require an authenticated administrator, an active 
 
 ## 4. Migration and deployment boundary
 
-The prior public/secure categories do not provide a safe, unambiguous mapping to organization branches. The new migration creates zones A and B and their four default checkpoints, but deliberately refuses to continue if legacy InOut application tables contain records. It does not infer new ownership for old movements, permissions, assignments, or audit records, and it is intentionally not reversible.
+The migration carries existing Phase 2 data forward. It maps the former `public`/Main Entrance location to Zone A and `secure`/Server Room to Zone B, retains existing checkpoint IDs so operator assignments and movement history remain valid, and normalizes typed zone references in registry, permission, movement, alert, audit, review, retry, and pending outbox records. Existing custom checkpoints remain in their mapped branch and receive unique local numbers; required Front Gates and optional Back Gates are added only when missing. The migration fails and rolls back if a checkpoint has no recognized legacy zone, rather than guessing its branch.
 
-The database reset was not performed as part of this work; the owner said they will handle the disposable development database. Before applying this migration, reset only the intended disposable InOut application database through the approved Compose workflow. Do not remove Temporal databases, shared data, or volumes as a shortcut. After reset, apply the migration and validate the seeded A/B zones and default checkpoints before using the environment.
+The migration does not reset the application database or touch Temporal databases and volumes. Existing non-master admin accounts start with no zone assignment because the previous schema did not record branch-scoped admins; a master-admin must assign their active zones in **Manage users**. Master-admins retain access to all active zones. After migration, verify the A/B zones, checkpoint assignments, and current administrator zone assignments.
 
 ## 5. Verification status and remaining gate
 
-Frontend tests, TypeScript typechecking, Python bytecode compilation, and `git diff --check` passed during implementation. The isolated backend integration/database migration rehearsal was not run because the local Python test environment was unavailable. Accordingly, the migration has not been verified against a live disposable database, and the owner-controlled reset and post-migration smoke test remain deployment gates.
+Frontend tests, TypeScript typechecking, Python bytecode compilation, and `git diff --check` passed during implementation. The isolated backend integration/database migration rehearsal was not run because the local Python test environment was unavailable. The data-preserving migration therefore still needs a PostgreSQL rehearsal and post-migration smoke check before deployment.
 
 Focused regression coverage is present for zone scope, zone retirement, checkpoint creation/retirement, admin-zone assignments, and user-management authorization. Those test files are not claimed as executed in the verification above.
 

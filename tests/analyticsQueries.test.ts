@@ -3,8 +3,41 @@ import { test } from "node:test";
 import { HttpDataService } from "../services/httpDataService";
 import { comparePeriods, dashboardMovementLogHref, employeeActivityPatterns, employeeHoursSeries, movementAnalyticsFilters } from "../lib/analyticsQueries";
 import { getAggregateDrillDownData, getDashboardKPIs } from "../lib/analyticsUtils";
-import { createRefreshScheduler } from "../lib/refreshScheduler";
+import { createReadRefreshGate, createRefreshScheduler } from "../lib/refreshScheduler";
 import type { DashboardAnalytics, EmployeeActivity } from "../lib/types";
+
+test("parallel profile reads finish before a burst triggers one later refresh", () => {
+  let refreshes = 0;
+  const gate = createReadRefreshGate(() => { refreshes++; });
+  const reads = [gate.begin(), gate.begin(), gate.begin()];
+  for (let index = 0; index < 100; index++) gate.request();
+  reads[0]();
+  reads[1]();
+  assert.equal(refreshes, 0);
+  reads[2]();
+  assert.equal(refreshes, 1);
+  // Effect cleanup and asynchronous finally can both finish the same read.
+  reads.forEach(finish => finish());
+  assert.equal(refreshes, 1);
+  gate.request();
+  assert.equal(refreshes, 2);
+});
+
+test("closing a profile discards pending reconciliation without corrupting later read counts", () => {
+  let refreshes = 0;
+  const gate = createReadRefreshGate(() => { refreshes++; });
+  const first = gate.begin();
+  gate.request();
+  gate.cancel();
+  first();
+  first();
+  assert.equal(refreshes, 0);
+  const remounted = gate.begin();
+  gate.request();
+  assert.equal(refreshes, 0);
+  remounted();
+  assert.equal(refreshes, 1);
+});
 
 test("every read query forwards its cancellation signal without adding it to URL filters", async () => {
   const originalFetch = globalThis.fetch;

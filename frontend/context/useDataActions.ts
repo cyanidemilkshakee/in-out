@@ -18,7 +18,7 @@ import type {
   RecordScanInput,
   TerminalVisitor,
 } from "../../lib/types";
-import type { DataActions, DataActionDependencies } from "./dataTypes";
+import type { DataActions, DataActionDependencies, DataState } from "./dataTypes";
 import { mergeById } from "./dataHelpers";
 import { mergePermissionRequests } from "../../lib/permissionRequestRevisions";
 import { mergeAlerts } from "../../lib/alertRevisions";
@@ -26,6 +26,13 @@ import { applyPresenceUpdate } from "./presenceUpdates";
 import { refreshOpenAlertCount } from "./activityEvents";
 
 export function useDataActions({ service, setState, refresh }: DataActionDependencies): DataActions {
+  // Successful commands already return their authoritative documents. Keep
+  // reconciliation visible on failure without delaying their success feedback.
+  const reconcile = useCallback((restoreMissing?: (current: DataState) => DataState) => {
+    void refresh().then(() => { if (restoreMissing) setState(restoreMissing); }).catch(error => setState(current => ({ ...current,
+      error: error instanceof Error ? error.message : "Unable to refresh application data.",
+    })));
+  }, [refresh, setState]);
   // Always use a fresh authenticated no-store bundle, never IndexedDB policy.
   const loadTerminalReplayPolicy = useCallback<DataActions["loadTerminalReplayPolicy"]>(
     async () => (await service.getSnapshot("terminal")).terminalReplayPolicy, [service]);
@@ -52,23 +59,22 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       setState((current) => ({ ...current, people: mergeById(current.people, [employee]) }));
       // Refresh this page's scoped snapshot. Other admin scopes are refreshed
       // by the backend live event or when their route is opened.
-      // Re-merge in case a read replica has not caught up with the write yet.
-      await refresh();
-      setState((current) => ({ ...current, people: mergeById(current.people, [employee]) }));
+      reconcile(current => current.people.some(person => person.id === employee.id) ? current
+        : { ...current, people: mergeById(current.people, [employee]) });
       return employee;
     },
-    [service, setState, refresh]
+    [service, setState, reconcile]
   );
 
   const createHardwareAsset = useCallback(
     async (input: CreateHardwareAssetInput) => {
       const asset = await service.createHardwareAsset(input);
       setState((current) => ({ ...current, hardwareAssets: mergeById(current.hardwareAssets, [asset]) }));
-      await refresh();
-      setState((current) => ({ ...current, hardwareAssets: mergeById(current.hardwareAssets, [asset]) }));
+      reconcile(current => current.hardwareAssets.some(item => item.id === asset.id) ? current
+        : { ...current, hardwareAssets: mergeById(current.hardwareAssets, [asset]) });
       return asset;
     },
-    [service, setState, refresh]
+    [service, setState, reconcile]
   );
 
   const updatePerson = useCallback(
@@ -99,9 +105,9 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     const result = await service.reviewAlert(alertId, decision, reason);
     setState(current => ({ ...current, alerts: mergeAlerts(current.alerts, [result.alert]) }));
     refreshOpenAlertCount();
-    await refresh();
+    reconcile();
     return result.alert;
-  }, [service, setState, refresh]);
+  }, [service, setState, reconcile]);
 
   const resetAlertWarnings = useCallback(async (subjectId: string, reason: string) => {
     await service.resetAlertWarnings(subjectId, reason);
@@ -134,9 +140,9 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
         : result.hardwareAsset ? mergeById(current.hardwareAssets, [result.hardwareAsset]) : current.hardwareAssets,
       auditEvents: result.auditEvent ? mergeById(current.auditEvents, [result.auditEvent]) : current.auditEvents,
     }));
-    await refresh();
+    reconcile();
     return result.request;
-  }, [service, setState, refresh]);
+  }, [service, setState, reconcile]);
 
   const releaseEntryRestriction = useCallback(async (alertId: string, reason: string) => {
     await service.releaseEntryRestriction(alertId, reason);
@@ -167,10 +173,10 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
           auditEvents: result.auditEvent ? mergeById(current.auditEvents, [result.auditEvent]) : current.auditEvents,
         };
       });
-      await refresh();
+      reconcile();
       return result.request;
     },
-    [service, setState, refresh]
+    [service, setState, reconcile]
   );
 
   const queryAlerts = useCallback(
@@ -213,19 +219,17 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
           ? [terminalVisitor, ...current.terminalVisitors]
           : current.terminalVisitors,
       }));
-      await refresh();
-      setState((current) => ({
-        ...current,
-        people: mergeById(current.people, [result.visitor]),
+      reconcile(current => ({ ...current,
+        people: current.people.some(person => person.id === result.visitor.id) ? current.people
+          : mergeById(current.people, [result.visitor]),
         permissionRequests: mergePermissionRequests(current.permissionRequests, [result.request]),
         terminalVisitors: current.terminalAssignment?.checkpointId === input.checkpointId &&
-          !current.terminalVisitors.some((visitor) => visitor.id === terminalVisitor.id)
-          ? [terminalVisitor, ...current.terminalVisitors]
-          : current.terminalVisitors,
+          !current.terminalVisitors.some(visitor => visitor.id === terminalVisitor.id)
+          ? [terminalVisitor, ...current.terminalVisitors] : current.terminalVisitors,
       }));
       return result;
     },
-    [service, setState, refresh]
+    [service, setState, reconcile]
   );
 
   const dismissPermissionNotification = useCallback(

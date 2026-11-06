@@ -1,14 +1,13 @@
 import { UserManagement } from "../../../frontend/components/admin/UserManagement";
-import { auth } from "../../../auth";
+import { apiSession } from "../../api/authSession";
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import type { AppSession } from "../../../lib/keycloakSession";
 import { isActiveUserManagementStepUp, USER_MANAGEMENT_STEP_UP_LOCK_COOKIE } from "../../../lib/userManagementStepUp";
 import { userManagementWindowUnlocked } from "../../../lib/serverUserManagement";
 import { hasAdminAccess, hasMasterAdminAccess } from "../../../lib/applicationRoles";
 
 export default async function ManageUsersPage() {
-  const session = await auth() as AppSession | null;
+  const session = await apiSession();
   if (!session?.access_token || !hasAdminAccess(session.roles)) redirect("/login");
   const isMasterAdmin = hasMasterAdminAccess(session.roles);
   if (!isMasterAdmin) {

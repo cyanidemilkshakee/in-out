@@ -41,6 +41,10 @@ class ZoneCreate(BaseModel):
         return value
 
 
+class ZoneRename(ZoneCreate):
+    """Validated display-name update; the stable zone ID is deliberately retained."""
+
+
 async def _master_admin_context(
     request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
@@ -151,6 +155,42 @@ async def create_zone(
     except IntegrityError as error:
         await db.rollback()
         raise HTTPException(status_code=409, detail="Zone or its default checkpoint IDs already exist") from error
+    except Exception:
+        await db.rollback()
+        raise
+
+
+@router.patch("/{zone_id}")
+async def rename_zone(
+    zone_id: str,
+    payload: ZoneRename,
+    db: AsyncSession = Depends(get_db),
+    actor: dict[str, Any] = Depends(_master_admin_context),
+) -> dict[str, Any]:
+    """Rename a branch without changing its ID or linked records."""
+    try:
+        await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("organization-zone-registry", 0))))
+        zone = await db.scalar(select(OrganizationZone).where(
+            OrganizationZone.id == zone_id).with_for_update())
+        if zone is None or not zone.active:
+            raise HTTPException(status_code=404, detail="Organization zone not found")
+        duplicate = await db.scalar(select(OrganizationZone.id).where(
+            OrganizationZone.id != zone_id,
+            func.lower(OrganizationZone.name) == payload.name.casefold()).limit(1))
+        if duplicate:
+            raise HTTPException(status_code=409, detail="A zone with this name already exists")
+        zone.name = payload.name
+        now = datetime.now(timezone.utc)
+        db.add(_zone_audit(zone, actor, "zone_renamed", now))
+        await enqueue_changed(db)
+        await db.commit()
+        return {"id": zone.id, "name": zone.name, "active": zone.active}
+    except HTTPException:
+        await db.rollback()
+        raise
+    except IntegrityError as error:
+        await db.rollback()
+        raise HTTPException(status_code=409, detail="A zone with this name already exists") from error
     except Exception:
         await db.rollback()
         raise

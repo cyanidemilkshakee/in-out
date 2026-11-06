@@ -78,9 +78,6 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual({type(row) for row in added}, {Subject, AccessPermission, PermissionRequestModel, AuditEvent})
             events.append("commit")
 
-        async def refresh(_):
-            events.append("refresh")
-
         async def enqueue(db_arg, result):
             self.assertIs(db_arg, db)
             self.assertEqual(events, [])
@@ -90,7 +87,7 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(set(result), {"request", "person"})
 
         db.commit.side_effect = commit
-        db.refresh.side_effect = refresh
+        db.refresh.side_effect = AssertionError("A committed registration already has its complete response")
         with patch("routers.registry.enqueue_decision", new=AsyncMock(side_effect=enqueue)), \
              patch("routers.registry.enqueue_workflow_start", new=AsyncMock()) as start:
             result = await create_subject(self.visitor(), db, {"sub": "operator", "realm_access": {"roles": ["operator"]}})
@@ -118,7 +115,8 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
         start.assert_awaited_once_with(db, request.id, visitor=True)
         self.temporal.assert_not_awaited()
         self.publish.assert_not_awaited()
-        self.assertEqual(events, ["enqueue", "commit", "refresh"])
+        self.assertEqual(events, ["enqueue", "commit"])
+        db.refresh.assert_not_awaited()
 
     async def test_duplicate_barcode_rolls_back_registration_without_publication(self):
         db = session()

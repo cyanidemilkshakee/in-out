@@ -42,8 +42,17 @@ def session(subject=None, permission=None, checkpoints=None):
             return OrganizationZone(id=value, name=value, active=True)
         return permission
 
+    async def scalars(query):
+        model = query.column_descriptions[0].get("entity")
+        if model is Checkpoint:
+            return ScalarRows(checkpoint for checkpoint in checkpoints.values() if checkpoint is not None)
+        if model is OrganizationZone and query.column_descriptions[0]["expr"] is OrganizationZone:
+            return ScalarRows(OrganizationZone(id=value, name=value, active=True)
+                for value in {checkpoint.zone_id for checkpoint in checkpoints.values() if checkpoint is not None})
+        return ScalarRows(["a"])
+
     return Mock(execute=AsyncMock(return_value=result), scalar=AsyncMock(side_effect=scalar),
-                scalars=AsyncMock(return_value=ScalarRows(["a"])), get=AsyncMock(side_effect=get),
+                scalars=AsyncMock(side_effect=scalars), get=AsyncMock(side_effect=get),
                 add=Mock(), flush=AsyncMock(), commit=AsyncMock(), refresh=AsyncMock(),
                 rollback=AsyncMock(), info={})
 

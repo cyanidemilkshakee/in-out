@@ -36,6 +36,10 @@ async function zonesRequest(request: NextRequest) {
 
     const zoneId = request.nextUrl.searchParams.get("zoneId")?.trim();
     if (!zoneId) return NextResponse.json({ error: "Zone ID is required." }, { status: 400 });
+    if (request.method === "PATCH") {
+      const body = requireObject(await readJsonBody(request), "Organization zone");
+      return NextResponse.json({ data: await callPythonApi(`/v1/zones/${encodeURIComponent(zoneId)}`, "PATCH", body) });
+    }
     await callPythonApi(`/v1/zones/${encodeURIComponent(zoneId)}`, "DELETE");
     return new NextResponse(null, { status: 204 });
   } catch (error) {
@@ -45,4 +49,5 @@ async function zonesRequest(request: NextRequest) {
 
 export const GET = withApiSession(zonesRequest);
 export const POST = withApiSession(zonesRequest);
+export const PATCH = withApiSession(zonesRequest);
 export const DELETE = withApiSession(zonesRequest);

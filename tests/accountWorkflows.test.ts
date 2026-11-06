@@ -1,10 +1,57 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { listManagedUsers, updateManagedUser, type ManagedUser } from "../services/keycloakUserService";
+import { listManagedUserPage, listManagedUsers, updateManagedUser, type ManagedUser } from "../services/keycloakUserService";
+import { readPendingPermissions, readPermissionDirectory } from "../services/permissionReadService";
 import { identityCommandTimeoutMs } from "../lib/identityRequestPolicy";
 
 const user = (id: number): ManagedUser => ({ id: String(id), username: `user-${id}`, firstName: "", lastName: "",
   email: "", enabled: id % 2 === 0, emailVerified: false, roles: ["operator"], checkpointId: "cp-main", canManage: true });
+
+test("one account page stays bounded and empty scoped pages retain the provider continuation", async () => {
+  const original = globalThis.fetch;
+  const controller = new AbortController();
+  let calls = 0;
+  globalThis.fetch = async (input, options) => {
+    calls++;
+    const url = new URL(String(input), "https://app.invalid");
+    assert.equal(url.searchParams.get("first"), "25");
+    assert.equal(url.searchParams.get("max"), "25");
+    assert.equal(url.searchParams.get("search"), "A&B / Jane");
+    assert.equal(options?.signal, controller.signal);
+    return Response.json({ data: { items: [], first: 25, max: 25, hasMore: true, nextFirst: 50 } });
+  };
+  try {
+    const page = await listManagedUserPage(" A&B / Jane ", 25, controller.signal);
+    assert.equal(calls, 1);
+    assert.equal(page.hasMore, true);
+    assert.equal(page.nextFirst, 50);
+    globalThis.fetch = async () => Response.json({ data: { items: [], first: 25, max: 25, hasMore: true, nextFirst: 25 } });
+    await assert.rejects(listManagedUserPage("", 25), /invalid directory page/);
+  } finally { globalThis.fetch = original; }
+});
+
+test("permission reads keep independent bounds, filters, exact links, and cancellation", async () => {
+  const original = globalThis.fetch;
+  const controller = new AbortController();
+  const calls: URL[] = [];
+  globalThis.fetch = async (input, options) => {
+    calls.push(new URL(String(input), "https://app.invalid"));
+    assert.equal(options?.signal, controller.signal);
+    return Response.json({ data: { items: [], total: 0, limit: 25, offset: 50 } });
+  };
+  try {
+    await readPermissionDirectory({ limit: 25, offset: 50, state: "restricted", search: "A&B", subjectId: "subject/1" }, controller.signal);
+    await readPendingPermissions({ limit: 1, offset: 0, typeGroup: "manual", requestId: "request/1" }, controller.signal);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].searchParams.get("search"), "A&B");
+    assert.equal(calls[0].searchParams.get("subjectId"), "subject/1");
+    assert.equal(calls[0].searchParams.get("state"), "restricted");
+    assert.equal(calls[0].searchParams.get("offset"), "50");
+    assert.equal(calls[1].searchParams.get("limit"), "1");
+    assert.equal(calls[1].searchParams.get("requestId"), "request/1");
+    assert.equal(calls[1].searchParams.get("typeGroup"), "manual");
+  } finally { globalThis.fetch = original; }
+});
 
 test("directory loads every provider page and forwards the same encoded search", async () => {
   const original = globalThis.fetch;

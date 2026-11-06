@@ -110,7 +110,7 @@ class EventOutboxTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver))
         self.assertEqual(deliver.await_count, 2)
 
-    async def test_concurrent_dispatchers_claim_distinct_rows_and_expired_leases_recover(self):
+    async def test_presence_lane_cannot_overtake_leased_head_and_expired_leases_recover(self):
         one, two = await self.queue(), await self.queue()
         entered, release = asyncio.Event(), asyncio.Event()
         seen = []
@@ -123,10 +123,11 @@ class EventOutboxTests(unittest.IsolatedAsyncioTestCase):
 
         task = asyncio.create_task(outbox.dispatch_one(sessions=self.sessions, deliver=deliver))
         await entered.wait()
-        self.assertTrue(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver))
+        self.assertFalse(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="presence"))
         release.set()
         await task
-        self.assertEqual(sorted(seen), [one, two])
+        self.assertTrue(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="presence"))
+        self.assertEqual(seen, [one, two])
         three = await self.queue()
         async with self.sessions() as db:
             row = await db.get(EventOutbox, three)
@@ -135,6 +136,83 @@ class EventOutboxTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         self.assertTrue(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver))
         self.assertEqual(seen[-1], three)
+
+    async def test_retry_backoff_blocks_only_its_lane_and_preserves_presence_revision_order(self):
+        one, two = await self.queue(), await self.queue()
+        deliver = AsyncMock(side_effect=RuntimeError("isolated delivery outage"))
+        self.assertTrue(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="presence"))
+        self.assertFalse(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="presence"))
+        self.assertEqual(deliver.await_count, 1)
+        async with self.sessions() as db:
+            await outbox.enqueue_workflow_start(db, "independent-request")
+            await db.commit()
+        workflow = AsyncMock()
+        self.assertTrue(await outbox.dispatch_one(sessions=self.sessions, deliver=workflow, lane="workflow"))
+        self.assertEqual(workflow.await_args.args[0], "workflow_start")
+        async with self.sessions() as db:
+            row = await db.get(EventOutbox, one)
+            row.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await db.commit()
+        deliver.side_effect = None
+        self.assertTrue(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="presence"))
+        self.assertTrue(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="presence"))
+        self.assertEqual([call.args[1]["revision"] for call in deliver.await_args_list], [one, one, two])
+
+    async def test_workflow_signal_waits_for_its_start_in_backoff(self):
+        async with self.sessions() as db:
+            start = await outbox.enqueue_workflow_start(db, "ordered-request")
+            signal = await outbox.enqueue_workflow_signal(db, "override-ordered-request", ["approved"])
+            await db.commit()
+        deliver = AsyncMock(side_effect=RuntimeError("isolated Temporal outage"))
+        self.assertTrue(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="workflow"))
+        self.assertFalse(await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="workflow"))
+        async with self.sessions() as db:
+            first, second = await db.get(EventOutbox, start), await db.get(EventOutbox, signal)
+            self.assertEqual(first.attempts, 1)
+            self.assertEqual(second.attempts, 0)
+            first.available_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+            await db.commit()
+        deliver.side_effect = None
+        await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="workflow")
+        await outbox.dispatch_one(sessions=self.sessions, deliver=deliver, lane="workflow")
+        self.assertEqual([call.args[0] for call in deliver.await_args_list],
+            ["workflow_start", "workflow_start", "workflow_signal"])
+
+    async def test_presence_progresses_during_stalled_temporal_delivery_and_replay_stays_complete(self):
+        async with self.sessions() as db:
+            workflow = await outbox.enqueue_workflow_start(db, "stalled-request")
+            await db.commit()
+        revision = await self.queue()
+        entered, presence_delivered, stop = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def deliver(kind, _payload):
+            if kind == "workflow_start":
+                entered.set()
+                await asyncio.Event().wait()
+            else:
+                await entered.wait()
+                presence_delivered.set()
+
+        with patch.object(outbox, "prune_delivered", new=AsyncMock()):
+            task = asyncio.create_task(outbox.run_dispatcher(stop, sessions=self.sessions, deliver=deliver))
+            try:
+                await asyncio.wait_for(presence_delivered.wait(), 3)
+                # Wait for the presence acknowledgement without relying on a
+                # fixed sleep or requiring the unrelated workflow to finish.
+                async def acknowledged():
+                    while True:
+                        async with self.sessions() as db:
+                            if (await db.get(EventOutbox, revision)).delivered_at is not None:
+                                return
+                        await asyncio.sleep(0.01)
+                await asyncio.wait_for(acknowledged(), 3)
+                async with self.sessions() as db:
+                    self.assertIsNone((await db.get(EventOutbox, workflow)).delivered_at)
+                    replay = await outbox.replay_events(db, 0, revision)
+                    self.assertEqual([row[0] for row in replay], [revision])
+            finally:
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
 
     async def test_cancelled_delivery_is_recovered_after_lease_expires(self):
         identifier = await self.queue()

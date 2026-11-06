@@ -156,15 +156,18 @@ async def run_alert_rule_evaluation() -> int:
                 for row in assignments if row.rules_customized}
             skip_dates = {row.subject_id: row.irregularity_skip_dates
                 if isinstance(row.irregularity_skip_dates, list) else [] for row in assignments}
-            movement_query = select(MovementModel).where(MovementModel.occurred_at >= since)
+            # Attendance rules consume only these authoritative movement
+            # columns. Avoid loading every retained scan/asset JSON document.
+            movement_query = select(MovementModel.subject_id, MovementModel.result, MovementModel.direction,
+                MovementModel.subject_type, MovementModel.occurred_at).where(MovementModel.occurred_at >= since)
             if scoped:
                 movement_query = movement_query.where(MovementModel.subject_id.in_(subject_ids))
-            movement_rows = require_complete(list((await db.scalars(movement_query
+            movement_rows = require_complete(list((await db.execute(movement_query
                 .order_by(MovementModel.occurred_at, MovementModel.id)
                 .limit(settings.ALERT_EVALUATION_MAX_MOVEMENTS + 1)
                 .execution_options(populate_existing=True))).all()), "movements", settings.ALERT_EVALUATION_MAX_MOVEMENTS)
             from movement_logic import _current_date, _current_time
-            movements = [{**m.data, "subjectId": m.subject_id, "result": m.result, "direction": m.direction,
+            movements = [{"subjectId": m.subject_id, "result": m.result, "direction": m.direction,
                 "subjectType": m.subject_type, "createdAt": m.occurred_at.isoformat(),
                 "date": _current_date(m.occurred_at), "time": _current_time(m.occurred_at)} for m in movement_rows]
             people_rows = require_complete((await db.execute(
@@ -174,7 +177,7 @@ async def run_alert_rule_evaluation() -> int:
             people = [{**current_subject_metadata(subject.kind, person.data),
                 "id": subject.id, "barcode": subject.barcode, "type": subject.kind}
                 for person, subject in people_rows]
-            existing_query = select(AlertModel).where(AlertModel.created_at >= since)
+            existing_query = select(AlertModel.data).where(AlertModel.created_at >= since)
             if scoped:
                 # Preserve legacy alert deduplication by either the explicit
                 # identity or the original barcode; names never bind identity.
@@ -186,7 +189,7 @@ async def run_alert_rule_evaluation() -> int:
                 .limit(settings.ALERT_EVALUATION_MAX_ALERTS + 1)
                 .execution_options(populate_existing=True))).all()), "alerts", settings.ALERT_EVALUATION_MAX_ALERTS)
             triggered = evaluate_scheduled_rules(rules, movements,
-                build_workday_statuses(movements, people, now=evaluation_now), [row.data for row in existing],
+                build_workday_statuses(movements, people, now=evaluation_now), existing,
                 employees=people, now=evaluation_now, rule_assignments=rule_assignments,
                 irregularity_skip_dates=skip_dates)
             # Continuous presence has no movement-history cutoff; evaluate

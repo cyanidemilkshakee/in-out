@@ -159,6 +159,7 @@ async def list_movements(
     offset: int = Query(0, ge=0),
     page: int = Query(1, ge=1),
     page_size: int = Query(_DEFAULT_LIMIT, ge=1, le=_MAX_LIMIT, alias="pageSize"),
+    includeNotes: bool = Query(True),
     db: AsyncSession = Depends(get_read_db),
     actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
@@ -210,7 +211,7 @@ async def list_movements(
 
     # -- Notes for paged items --
     notes_map: dict[str, list[str]] = {}
-    if item_ids:
+    if includeNotes and item_ids:
         note_rows = await bounded_rows(db,
             select(MovementNote.event_id, MovementNote.note)
             .where(MovementNote.event_id.in_(item_ids))
@@ -270,14 +271,15 @@ async def movement_analytics(
     subject_type: Optional[str] = Query(None, pattern="^(employee|visitor|hardware)$"),
     since: Optional[str] = Query(None),
     bucket: str = Query("hour", pattern="^(hour|day)$"),
+    includeSample: bool = Query(True),
     db: AsyncSession = Depends(get_read_db),
     actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """Return compact movement aggregates plus a bounded chart sample.
 
     ``buckets`` is the scalable contract for charts. ``items`` remains a
-    capped compatibility sample while the existing report UI is migrated away
-    from raw event charts.
+    capped compatibility sample; bucket-only charts can set includeSample=false
+    to avoid loading raw event documents.
     """
     history = (Movement if subjectGroup == "people" and not eventId else
         movement_history(include_replaced=bool(eventId), hardware_only=subjectGroup == "hardware" and not eventId))
@@ -303,9 +305,12 @@ async def movement_analytics(
         .group_by(bucket_column)
         .order_by(bucket_column)
     )
-    sample_result = await db.execute(
-        select(history).where(*where).order_by(history.occurred_at.desc(), history.id).limit(500)
-    )
+    samples = []
+    if includeSample:
+        sample_result = await db.execute(
+            select(history).where(*where).order_by(history.occurred_at.desc(), history.id).limit(500)
+        )
+        samples = sample_result.scalars().all()
     checkpoint_result = await db.execute(select(Checkpoint).where(
         Checkpoint.active.is_(True), Checkpoint.zone_id.in_(zone_ids))
         .order_by(Checkpoint.zone_id, Checkpoint.number))
@@ -319,7 +324,7 @@ async def movement_analytics(
         "items": [
             {**movement.data, "id": movement.id, "syncState": movement.sync_state,
              "createdAt": movement.occurred_at.isoformat()}
-            for movement in sample_result.scalars().all()
+            for movement in samples
         ],
         "checkpoints": [{**checkpoint.data, "id": checkpoint.id, "zoneId": checkpoint.zone_id,
             "number": checkpoint.number, "gateType": checkpoint.gate_type, "required": checkpoint.required}

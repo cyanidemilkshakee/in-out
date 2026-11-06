@@ -12,8 +12,8 @@ import {
 import type { Alert, AuditEvent, MovementEvent, MovementQuery } from "../../../../lib/types";
 import { CalendarDatePicker } from "../../analytics/CalendarDatePicker";
 import { parseDateInput } from "../../../../lib/dateRanges";
-import { escapeCsv } from "../../../../lib/csv";
-import { assertCsvBound, readExport } from "../../../../lib/exportRead";
+import { formatCsvBlob } from "../../../../lib/csv";
+import { readExport } from "../../../../lib/exportRead";
 import { facilityToday, validateHistoricalDateRange } from "../../../../lib/dateTimeValidation";
 import styles from "./ReportBuilder.module.css";
 
@@ -83,7 +83,10 @@ export function ReportBuilder({
   const [alertSeverity, setAlertSeverity] = useState<"all" | Alert["severity"]>("all");
   const [permissionDecision, setPermissionDecision] = useState<"all" | "granted" | "denied">("all");
   const [generated, setGenerated] = useState(false);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [loadingRecords, setIsGenerating] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
+  const isGenerating = loadingRecords || isDownloading;
+  const exportPending = useRef(false);
   const exportController = useRef<AbortController | null>(null);
   const [generationError, setGenerationError] = useState("");
   const [reportMovements, setReportMovements] = useState(movements);
@@ -184,12 +187,13 @@ export function ReportBuilder({
   }, [activeSource, alertSeverity, alertStatus, endDate, movementCheckpoint, movementDenialCategory, movementDirection, movementResult, movementScanType, movementSubjectGroup, permissionDecision, reportAlerts, reportAuditEvents, reportMovements, startDate]);
 
   async function generateReport() {
-    if (isGenerating || !dateRangeValid) return;
+    if (exportPending.current || isGenerating || !dateRangeValid) return;
     const dateErrors = validateHistoricalDateRange(startDate, endDate);
     if (dateErrors.start || dateErrors.end) {
       setGenerationError(dateErrors.start || dateErrors.end || "Choose a valid date range.");
       return;
     }
+    exportPending.current = true;
     setIsGenerating(true);
     setGenerationError("");
     setGenerated(false);
@@ -239,6 +243,7 @@ export function ReportBuilder({
       setGenerationError(error instanceof Error ? error.message : "Unable to load all report records.");
     } finally {
       clearTimeout(timer);
+      exportPending.current = false;
       setIsGenerating(false);
     }
   }
@@ -283,25 +288,28 @@ export function ReportBuilder({
   const rangeLabel = startDate && endDate ? `${formatDate(startDate)} – ${formatDate(endDate)}`
     : startDate ? `From ${formatDate(startDate)}` : endDate ? `Through ${formatDate(endDate)}` : "All history";
 
-  function downloadCsv() {
+  async function downloadCsv() {
+    if (exportPending.current || !rows.length) return;
+    exportPending.current = true;
+    setIsDownloading(true);
+    setGenerationError("");
+    const controller = new AbortController();
+    exportController.current = controller;
+    const timer = setTimeout(() => controller.abort(), 30_000);
     const header = ["Source", "Date", "Time", "Subject", "Outcome", "Details", "Reference"];
-    const content = [
-      header.map(escapeCsv).join(","),
-      ...rows.map((row) =>
-        [row.source, row.date, row.time, row.subject, row.outcome, row.details, row.reference]
-          .map(escapeCsv)
-          .join(",")
-      ),
-    ].join("\n");
-    try { assertCsvBound(content); }
-    catch (error) { setGenerationError(error instanceof Error ? error.message : "The CSV is too large."); return; }
-    const blob = new Blob([content], { type: "text/csv;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `in-out-audit-report-${new Date().toISOString().slice(0, 10)}.csv`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+    try {
+      const blob = await formatCsvBlob(header, rows,
+        row => [row.source, row.date, row.time, row.subject, row.outcome, row.details, row.reference],
+        { signal: controller.signal, newline: "\n" });
+      controller.signal.throwIfAborted();
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `in-out-audit-report-${new Date().toISOString().slice(0, 10)}.csv`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (error) { setGenerationError(error instanceof Error ? error.message : "Unable to prepare the CSV."); }
+    finally { clearTimeout(timer); exportPending.current = false; setIsDownloading(false); }
   }
 
   return (
@@ -457,9 +465,9 @@ export function ReportBuilder({
                 {generated ? "Close" : "Cancel"}
               </button>
               {generated ? (
-                <button className={styles.primary} type="button" onClick={downloadCsv} disabled={!rows.length}>
-                  <Download size={17} />
-                  Download CSV
+                <button className={styles.primary} type="button" onClick={() => void downloadCsv()} disabled={!rows.length || isGenerating}>
+                  {isDownloading ? <LoaderCircle className={styles.spinner} size={17} /> : <Download size={17} />}
+                  {isDownloading ? "Preparing CSV…" : "Download CSV"}
                 </button>
               ) : (
                 <button

@@ -29,6 +29,39 @@ test("snapshot cursors survive normalization and replay cannot double-count an a
   assert.equal(parsePresenceUpdate('{"revision":-1}'), null);
 });
 
+test("live invalidation hints preserve data references and never change occupancy", () => {
+  const current: DataState = { ...emptyData, isLoading: false, error: null, eventRevision: 10 };
+  const hinted = applyPresenceUpdate(current, { type: "data_changed", revision: 11, people: [], hardwareAssets: [], alerts: [] });
+  assert.equal(hinted.eventRevision, 11);
+  for (const key of ["people", "hardwareAssets", "terminalVisitors", "movements", "permissions", "permissionRequests", "alerts", "scanAnalytics"] as const) {
+    assert.equal(hinted[key], current[key], `${key} must remain unchanged by a hint`);
+  }
+  assert.equal(applyPresenceUpdate(hinted, { type: "data_changed" }), hinted);
+  assert.equal(applyPresenceUpdate(hinted, { type: "terminal_assignment" }), hinted);
+  assert.equal(applyPresenceUpdate(hinted, { revision: 9 }), hinted);
+});
+
+test("batched presence updates count existing subject transitions once and retain unrelated slices", () => {
+  const people = normalizeTerminalSnapshot({ subjects: Array.from({ length: 1_000 }, (_, index) => ({
+    id: `employee-${index}`, kind: "employee", name: `Employee ${index}`, barcode: `EMP-${index}`,
+    inside: index < 100,
+  })) }).people;
+  const current: DataState = { ...emptyData, people, isLoading: false, error: null,
+    scanAnalytics: { ...emptyData.scanAnalytics, activeInside: 100 } };
+  const updated = applyPresenceUpdate(current, { people: [
+    ...people.slice(0, 50).map(person => ({ ...person, inside: false })),
+    ...people.slice(100, 200).map(person => ({ ...person, inside: true })),
+  ] });
+  assert.equal(updated.scanAnalytics.activeInside, 150);
+  assert.equal(updated.people.filter(person => person.inside).length, 150);
+  assert.equal(updated.hardwareAssets, current.hardwareAssets);
+  assert.equal(updated.terminalVisitors, current.terminalVisitors);
+  assert.equal(updated.movements, current.movements);
+  const renamed = applyPresenceUpdate(updated, { people: [{ ...updated.people[0], name: "Renamed" }] });
+  assert.equal(renamed.scanAnalytics, updated.scanAnalytics);
+  assert.equal(renamed.people[0].name, "Renamed");
+});
+
 test("complete export uses one request, preserves cancellation and rejects errors and oversized CSV", async () => {
   const originalFetch = globalThis.fetch;
   const controller = new AbortController();
@@ -41,7 +74,7 @@ test("complete export uses one request, preserves cancellation and rejects error
   try {
     const result = await readExport<{ items: unknown[] }>("movements", { subject_id: "p1" }, controller.signal);
     assert.equal(result.items.length, 220);
-    assert.deepEqual(calls, ["/api/data?resource=export&source=movements&subject_id=p1"]);
+    assert.deepEqual(calls, ["/api/data?resource=export&source=movements&lean=true&subject_id=p1"]);
     globalThis.fetch = async () => Response.json({ error: "Narrow the filters" }, { status: 422 });
     await assert.rejects(readExport("movements"), /Narrow the filters/);
     assert.throws(() => assertCsvBound("x".repeat(16 * 1024 * 1024 + 1)), /export limit/);
@@ -73,6 +106,28 @@ test("server timings remain isolated across overlapping requests and contain onl
   assert.match(second.header(), /(?:^|, )upstream;dur=22\.00(?:,|$)/);
   assert.doesNotMatch(second.header(), /auth;|11\.00/);
   assert.equal(currentServerTiming(), undefined);
+});
+
+test("parallel upstream timings report wall time separately from cumulative work", () => {
+  let now = 0;
+  const timing = new ServerTiming(() => now);
+  const first = timing.begin("upstream");
+  now = 5;
+  const second = timing.begin("upstream");
+  now = 10;
+  first();
+  first(); // Ending a span twice must not corrupt the active overlap count.
+  now = 20;
+  second();
+  assert.match(timing.header(), /(?:^|, )upstream;dur=25\.00(?:,|$)/);
+  assert.match(timing.header(), /(?:^|, )upstream_wall;dur=20\.00(?:,|$)/);
+  now = 25;
+  const third = timing.begin("upstream");
+  now = 30;
+  third();
+  assert.match(timing.header(), /(?:^|, )upstream_wall;dur=25\.00(?:,|$)/);
+  timing.begin("unsafe;name")();
+  assert.doesNotMatch(timing.header(), /unsafe/);
 });
 
 async function withTransportFixture(work: (api: typeof import("../app/api/pythonApi"), bff: typeof import("../app/api/data/bff")) => Promise<void>) {
@@ -193,6 +248,8 @@ test("chrome counts and exports each make a single focused upstream read", async
     const exported = await bff.handleGet(new NextRequest("https://app.invalid/api/data?resource=export&source=movements&subject_id=p1"), new ServerTiming());
     assert.equal((await exported.json()).data.eventRevision, 3);
     assert.deepEqual(paths, ["/v1/alerts?view=count&status=active", "/v1/exports?source=movements&subject_id=p1"]);
+    await bff.handleGet(new NextRequest("https://app.invalid/api/data?resource=export&source=alerts&lean=true"), new ServerTiming());
+    assert.equal(paths.at(-1), "/v1/exports?source=alerts&lean=true");
   });
 });
 
@@ -333,7 +390,8 @@ test("alert snapshots load one command page and preserve global rules and counts
     { id: "rule-cross-building-scan", conditionKey: "cross_building_scan", eligibleSubjectTypes: ["employee", "visitor"], recentTriggers: 3 },
     { id: "rule-visitor-overstay", conditionKey: "visitor_overstay", eligibleSubjectTypes: ["visitor"], recentTriggers: 4 },
   ];
-  const assignments = [{ subjectId: "employee-1", subjectType: "employee", ruleIds: ["rule-no-break"] }];
+  const assignments = [{ subjectId: "outside-page", subjectName: "Outside page", subjectType: "employee",
+    ruleIds: ["rule-no-break"], irregularitySkipDates: [new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)] }];
   const calls: string[] = [];
   require.cache[sessionPath] = { ...module, id: sessionPath, filename: sessionPath, loaded: true,
     exports: {
@@ -348,8 +406,11 @@ test("alert snapshots load one command page and preserve global rules and counts
     if (url.pathname === "/v1/alerts") {
       assert.equal(url.searchParams.get("view"), "command");
       assert.equal(url.searchParams.get("limit"), "50");
+      assert.equal(url.searchParams.get("includeDirectory"), "false");
       return Response.json({ rules, assignments, total: 5000, limit: 50, offset: 0,
         summary: { openCount: 5000, confirmedWarnings: 18 },
+        warnings: [{ subjectId: "employee-1", subjectType: "employee", count: 2 }],
+        people: [{ id: "employee-1", type: "employee", name: "On this page" }],
         items: [{ id: "alert-1" }, { id: "alert-2" }] });
     }
     throw new Error("Unexpected snapshot route");
@@ -364,8 +425,11 @@ test("alert snapshots load one command page and preserve global rules and counts
     assert.equal(snapshot.alertRules.length, 4);
     assert.deepEqual(snapshot.alertRules[3].eligibleSubjectTypes, ["visitor"]);
     assert.equal(snapshot.alertRules[3].recentTriggers, 4);
+    assert.deepEqual(snapshot.alertWarnings.map((warning) => warning.subjectId), ["employee-1"]);
+    assert.equal(snapshot.alertRuleAssignments[0].subjectId, "outside-page");
+    assert.deepEqual(snapshot.alertRuleAssignments[0].irregularitySkipDates, assignments[0].irregularitySkipDates);
     assert.deepEqual(snapshot.alertSummary, { openCount: 5000, confirmedWarnings: 18, limit: 50, offset: 0 });
-    assert.deepEqual(calls, ["/v1/alerts?view=command&limit=50&offset=0&sortDirection=asc"]);
+    assert.deepEqual(calls, ["/v1/alerts?view=command&limit=50&offset=0&sortDirection=asc&includeDirectory=false"]);
   } finally {
     globalThis.fetch = originalFetch;
     if (originalSession) require.cache[sessionPath] = originalSession;
@@ -375,6 +439,58 @@ test("alert snapshots load one command page and preserve global rules and counts
     if (originalQueries) require.cache[queriesPath] = originalQueries;
     else delete require.cache[queriesPath];
   }
+});
+
+test("command paging omits the directory while selected people outside that page retain current reviewed warnings", async () => {
+  await withTransportFixture(async (_api, bff) => {
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    const review = { decision: "confirmed", reason: "Verified", reviewedAt: "2026-11-05T08:00:00Z", reviewedBy: "admin" };
+    const warning = { id: "retained-warning", subjectId: "outside-page", subjectName: "Outside page", status: "warned",
+      createdAt: "2026-11-05T07:00:00Z", warningCount: 2, review, entryRestriction: { active: true } };
+    globalThis.fetch = async input => {
+      const url = new URL(String(input));
+      if (url.searchParams.get("view") === "command") {
+        assert.equal(url.searchParams.get("includeDirectory"), "false");
+        return Response.json({ items: [], warnings: [], people: [], total: 5000, limit: 50, offset: 50,
+          rules: [{ id: "rule-no-break" }], assignments: [{ subjectId: "outside-page", irregularitySkipDates: ["2026-11-06"] }],
+          summary: { openCount: 5000, confirmedWarnings: 18 } });
+      }
+      assert.equal(url.searchParams.get("view"), "subject");
+      assert.equal(url.searchParams.get("subjectId"), "outside-page");
+      return Response.json({ items: [warning], currentWarnings: [warning], recentAlerts: [warning],
+        warnings: [{ subjectId: "outside-page", count: 2 }], people: [{ id: "outside-page", type: "employee", name: "Outside page" }],
+        assignments: [{ subjectId: "outside-page", ruleIds: ["rule-no-break"] }], total: 1 });
+    };
+    const command = await bff.handleGet(new NextRequest("https://app.invalid/api/data?resource=alerts&view=command&offset=50"), new ServerTiming());
+    const commandData = (await command.json()).data;
+    assert.equal(commandData.summary.confirmedWarnings, 18);
+    assert.equal(commandData.assignments[0].subjectId, "outside-page");
+    assert.equal(commandData.rules[0].id, "rule-no-break");
+    const detail = await bff.handleGet(new NextRequest("https://app.invalid/api/data?resource=alerts&view=subject&subjectId=outside-page"), new ServerTiming());
+    const detailData = (await detail.json()).data;
+    assert.equal(detailData.people[0].id, "outside-page");
+    assert.equal(detailData.warnings[0].count, 2);
+    assert.deepEqual(detailData.currentWarnings[0].review, review);
+    assert.equal(detailData.currentWarnings[0].entryRestriction.active, true);
+    assert.equal(detailData.currentWarnings[0].warningCount, 2);
+  });
+});
+
+test("ordinary alert history skips unused rules and directories while explicit catalog reads remain available", async () => {
+  await withTransportFixture(async (_api, bff) => {
+    const { NextRequest } = require("next/server") as typeof import("next/server");
+    const queries: URLSearchParams[] = [];
+    globalThis.fetch = async input => {
+      queries.push(new URL(String(input)).searchParams);
+      return Response.json({ items: [{ id: "alert-1", title: "No break recorded", warningCount: 2 }], total: 1 });
+    };
+    const history = await bff.handleGet(new NextRequest("https://app.invalid/api/data?resource=alerts&subjectId=employee-1"), new ServerTiming());
+    assert.equal((await history.json()).data.items[0].warningCount, 2);
+    assert.equal(queries[0].get("includeDirectory"), "false");
+    assert.equal(queries[0].get("includeRules"), "false");
+    await bff.handleGet(new NextRequest("https://app.invalid/api/data?resource=alerts&includeRules=true"), new ServerTiming());
+    assert.equal(queries[1].get("includeRules"), "true");
+  });
 });
 
 test("delayed pending live events cannot reopen a completed permission or resurrect its notification", () => {

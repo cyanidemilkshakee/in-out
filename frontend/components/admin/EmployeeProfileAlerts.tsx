@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Alert, AlertRule, AlertRuleAssignment, AlertWarningSummary, Person } from "../../../lib/types";
 import { useDataActions } from "../../context/DataContext";
 import { parsePresenceUpdate } from "../../context/presenceUpdates";
+import { createRefreshCoordinator } from "../../../lib/refreshCoordinator";
+import { createRefreshScheduler } from "../../../lib/refreshScheduler";
 import { AlertActivity } from "./alerts/AlertActivity";
 import { RuleAssignments } from "./alerts/RuleAssignments";
 import { WarningSummary } from "./alerts/WarningSummary";
@@ -78,12 +80,13 @@ export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged 
   }, [showHistory, historyOffset, historyRevision, person.id, queryAlerts]);
 
   useEffect(() => {
-    void reload().catch(() => {});
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    function scheduleReload() {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(() => { void reload().catch(() => {}); }, 300);
-    }
+    let active = true;
+    const refreshQueue = createRefreshCoordinator(async () => {
+      if (active) await reload().catch(() => {});
+    });
+    const scheduler = createRefreshScheduler(() => { void refreshQueue.request(true); }, 300);
+    const scheduleReload = () => scheduler.request();
+    void refreshQueue.request();
     function onMessage(event: Event) {
       const raw = (event as CustomEvent<unknown>).detail;
       if (typeof raw !== "string") return;
@@ -104,8 +107,10 @@ export function EmployeeProfileAlerts({ person, initialAlerts, onHistoryChanged 
     window.addEventListener("online", scheduleReload);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
+      active = false;
+      scheduler.cancel();
+      refreshQueue.clearPending();
       loadController.current?.abort();
-      if (timer) clearTimeout(timer);
       window.removeEventListener("inout:presence-message", onMessage);
       window.removeEventListener("inout:presence-sync", scheduleReload);
       window.removeEventListener("focus", scheduleReload);

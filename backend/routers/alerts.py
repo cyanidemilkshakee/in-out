@@ -120,12 +120,16 @@ async def list_alerts(
     search: Optional[str] = Query(None, max_length=200),
     view: Optional[str] = Query(None, pattern="^(command|subject|count)$"),
     reviewState: Optional[str] = Query(None, pattern="^(needs_review|reviewed)$"),
+    includeDirectory: bool = Query(True),
+    includeRules: bool = Query(True),
     db: AsyncSession = Depends(get_read_db),
     actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
     """
     Return paginated alerts and all alert rules.
     Optional ?status= filters alerts by data->>'status'.
+    Set includeDirectory=false when only page-related warning summaries are needed.
+    Set includeRules=false for item-only reads; command/subject views retain rules.
     """
     if view == "subject" and (not subjectId or not subjectId.strip()):
         raise HTTPException(422, "A registered subject is required for this view")
@@ -249,25 +253,27 @@ async def list_alerts(
         recent_alerts = [SimpleNamespace(**row) for row in recent_res.mappings().all()]
     enriched = await enrich_alert_documents(db, alerts + recent_alerts, focused=True,
         subject_ids=[subjectId.strip()] if view == "subject" else None,
-        subject_query=visible_subject_ids if view != "subject" else None)
+        subject_query=visible_subject_ids if view != "subject" and includeDirectory else None)
 
     # Share the evaluator's canonical row identities and global rule catalog.
     # Retained serialized IDs must not redirect a rule's displayed trigger count.
-    rule_data = await alert_rule_catalog(db)
-    recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
-    rule_id_column = records.c.data["ruleId"].astext
-    # Count triggers in SQL rather than loading every recent JSON document.
-    # Only catalog IDs can appear in the response, bounding grouped rows even
-    # when retained alert history contains many retired or invalid rules.
-    recent_rows = await bounded_rows(db, select(rule_id_column, func.count())
-        .where(records.c.created_at >= recent_cutoff, branch_filter,
-               rule_id_column.in_([rule["id"] for rule in rule_data]))
-        .group_by(rule_id_column))
-    recent_triggers = {rule_id: int(count) for rule_id, count in recent_rows}
-    rule_data = [
-        {**rule, "recentTriggers": recent_triggers.get(str(rule.get("id")), 0)}
-        for rule in rule_data
-    ]
+    rule_data = []
+    if includeRules or view:
+        rule_data = await alert_rule_catalog(db)
+        recent_cutoff = datetime.now(timezone.utc) - timedelta(days=7)
+        rule_id_column = records.c.data["ruleId"].astext
+        # Count triggers in SQL rather than loading every recent JSON document.
+        # Only catalog IDs can appear in the response, bounding grouped rows even
+        # when retained alert history contains many retired or invalid rules.
+        recent_rows = await bounded_rows(db, select(rule_id_column, func.count())
+            .where(records.c.created_at >= recent_cutoff, branch_filter,
+                   rule_id_column.in_([rule["id"] for rule in rule_data]))
+            .group_by(rule_id_column))
+        recent_triggers = {rule_id: int(count) for rule_id, count in recent_rows}
+        rule_data = [
+            {**rule, "recentTriggers": recent_triggers.get(str(rule.get("id")), 0)}
+            for rule in rule_data
+        ]
 
     result = {
         "items":  enriched["items"][:len(alerts)],

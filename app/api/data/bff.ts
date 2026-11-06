@@ -7,6 +7,7 @@ import {
   normalizeDashboardMovement,
   normalizeDataScope,
   normalizeAccessPermission,
+  normalizePermissionRequest,
 } from "../../../lib/normalizeDashboard";
 import { normalizeSubjectZones } from "../../../lib/facilityZones";
 import { callPythonApi } from "../pythonApi";
@@ -88,6 +89,20 @@ function normalizeCheckpointLabels(value: unknown): string[] {
 export async function handleGet(request: NextRequest, timing: ServerTiming) {
   const load = (path: string) => callPythonApi(path, "GET", undefined, undefined, { signal: request.signal });
   const resource = request.nextUrl.searchParams.get("resource");
+  if (resource === "permissionDirectory" || resource === "pendingPermissions") {
+    const query = new URLSearchParams(request.nextUrl.searchParams);
+    query.delete("resource");
+    query.set("view", resource === "permissionDirectory" ? "directory" : "pending");
+    const raw = await load(`/v1/permissions?${query}`);
+    return response(resource === "pendingPermissions" ? { ...raw, items: (raw.items ?? []).map(normalizePermissionRequest),
+      people: (raw.people ?? []).map(normalizeSubjectZones),
+      hardwareAssets: (raw.hardwareAssets ?? []).map(normalizeSubjectZones),
+    } : { ...raw,
+      items: (raw.items ?? []).map(normalizeAccessPermission),
+      people: (raw.people ?? []).map(normalizeSubjectZones),
+      hardwareAssets: (raw.hardwareAssets ?? []).map(normalizeSubjectZones),
+    }, timing);
+  }
   if (resource === "export") {
     const query = new URLSearchParams(request.nextUrl.searchParams);
     query.delete("resource");
@@ -146,7 +161,7 @@ export async function handleGet(request: NextRequest, timing: ServerTiming) {
     const query = queryParams.toString();
     const pageRequest = load(`/v1/movements?${query}`);
     const analyticsRequest = includeChart
-      ? load(`/v1/movements/analytics?${query}`)
+      ? load(`/v1/movements/analytics?${query}${query ? "&" : ""}includeSample=false`)
       : Promise.resolve({ items: [], checkpoints: [], summary: {}, buckets: [] });
     const [page, analytics] = await Promise.all([pageRequest, analyticsRequest]);
     return response(
@@ -176,6 +191,8 @@ export async function handleGet(request: NextRequest, timing: ServerTiming) {
   if (request.nextUrl.searchParams.get("resource") === "alerts") {
     const queryParams = new URLSearchParams(request.nextUrl.searchParams.toString());
     queryParams.delete("resource");
+    if (!queryParams.has("view") || queryParams.get("view") === "command") queryParams.set("includeDirectory", "false");
+    if (!queryParams.has("view") && !queryParams.has("includeRules")) queryParams.set("includeRules", "false");
     const query = queryParams.toString();
     const raw = await load(`/v1/alerts${query ? `?${query}` : ""}`);
     return response(

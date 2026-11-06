@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Check,
@@ -9,7 +9,9 @@ import {
   ShieldCheck,
   X,
 } from "lucide-react";
-import { useDataActions, useDataState } from "../../../frontend/context/DataContext";
+import { useDataActions } from "../../../frontend/context/DataContext";
+import { readPendingPermissions, readPermissionDirectory, type PendingPermissionPage, type PermissionDirectoryPage } from "../../../services/permissionReadService";
+import { createRefreshScheduler } from "../../../lib/refreshScheduler";
 import type { AccessPermission, PermissionRequest } from "../../../lib/types";
 import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
 import { facilityZoneLabel, formatFacilityZones } from "../../../lib/facilityZones";
@@ -18,42 +20,63 @@ import { AccessDirectory } from "../../../frontend/components/admin/permissions/
 import { ManualReviewCard } from "../../../frontend/components/admin/permissions/ManualReviewCard";
 import { RequestDialog, type RequestContext } from "../../../frontend/components/admin/permissions/RequestDialog";
 import { useOrganizationZones } from "../../../frontend/hooks/useOrganizationZones";
-import { formatRequestDate, permissionDisplayState, permissionWindowLabels, requestApprovalLabel, REQUEST_LABELS } from "../../../frontend/components/admin/permissions/requestPresentation";
+import { formatRequestDate, permissionWindowLabels, requestApprovalLabel, REQUEST_LABELS } from "../../../frontend/components/admin/permissions/requestPresentation";
 import requestStyles from "../../../frontend/components/admin/permissions/Requests.module.css";
 
 type DirectoryTab = "people" | "hardware";
 
-function isOneTimeManualReviewRecord(permission: AccessPermission) {
-  const isUnregisteredPlaceholder = permission.subjectName.trim().toLowerCase() === "unregistered barcode";
-  const isOneTimeReview = permission.subjectType === "visitor" && permission.assignment === "One visit" &&
-    (permission.updatedBy === "manual-review" || permission.reason?.startsWith("Manual approval covers one entry"));
-  return isUnregisteredPlaceholder || isOneTimeReview;
-}
-
 export default function PermissionManagerPage() {
-  const {
-    permissions,
-    permissionRequests,
-    people,
-    hardwareAssets,
-    checkpoints,
-    isLoading,
-    error,
-  } = useDataState();
+  const query = useSearchParams();
+  const [directory, setDirectory] = useState<PermissionDirectoryPage | null>(null);
+  const [manualPage, setManualPage] = useState<PendingPermissionPage | null>(null);
+  const [otherPage, setOtherPage] = useState<PendingPermissionPage | null>(null);
+  const [focusedPage, setFocusedPage] = useState<PendingPermissionPage | null>(null);
+  const [directoryOffset, setDirectoryOffset] = useState(0);
+  const [manualOffset, setManualOffset] = useState(0);
+  const [otherOffset, setOtherOffset] = useState(0);
+  const [directorySubject, setDirectorySubject] = useState(query.get("subject") || undefined);
+  const [revision, setRevision] = useState(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const activeRead = useRef<AbortController | null>(null);
+  const refreshPending = useRef(false);
+  const refreshScheduler = useMemo(() => createRefreshScheduler(() => {
+    if (activeRead.current) refreshPending.current = true;
+    else setRevision(value => value + 1);
+  }), []);
+  const refresh = useCallback(async () => { setRevision(value => value + 1); }, []);
+  const permissions = directory?.items ?? [];
+  const people = useMemo(() => [...new Map([...(manualPage?.people ?? []), ...(otherPage?.people ?? []), ...(focusedPage?.people ?? []), ...(directory?.people ?? [])]
+    .map(person => [person.id, person])).values()], [manualPage, otherPage, focusedPage, directory]);
+  const hardwareAssets = useMemo(() => [...new Map([...(manualPage?.hardwareAssets ?? []), ...(otherPage?.hardwareAssets ?? []), ...(focusedPage?.hardwareAssets ?? []), ...(directory?.hardwareAssets ?? [])]
+    .map(asset => [asset.id, asset])).values()], [manualPage, otherPage, focusedPage, directory]);
+  const checkpoints = directory?.checkpoints ?? manualPage?.checkpoints ?? [];
+  const permissionRequests = useMemo(() => [...new Map([
+    ...(focusedPage?.items ?? []), ...(manualPage?.items ?? []), ...(otherPage?.items ?? []),
+  ].map(request => [request.id, request])).values()], [focusedPage, manualPage, otherPage]);
   const {
     decidePermissionRequest,
     updatePerson,
     updateHardwareAsset,
-    refresh,
   } = useDataActions();
   const { zones: organizationZones } = useOrganizationZones();
+  const hardwareById = useMemo(() => new Map(hardwareAssets.map(asset => [asset.id, asset])), [hardwareAssets]);
+  const checkpointsById = useMemo(() => new Map(checkpoints.map(checkpoint => [checkpoint.id, checkpoint])), [checkpoints]);
+  const permissionsBySubject = useMemo(() => {
+    const bySubject = new Map<string, AccessPermission>();
+    for (const permission of permissions) {
+      if (!bySubject.has(permission.subjectId)) bySubject.set(permission.subjectId, permission);
+    }
+    return bySubject;
+  }, [permissions]);
   const checkpointLabel = (checkpointId?: string) => {
-    const checkpoint = checkpoints.find((item) => item.id === checkpointId);
+    const checkpoint = checkpointId ? checkpointsById.get(checkpointId) : undefined;
     return checkpoint ? `${facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone, organizationZones)} · ${checkpoint.name}` : checkpointId || "Not specified";
   };
   const requestedCheckpointLabel = (checkpointIds?: string[]) => checkpointIds?.map((id) => checkpointLabel(id)).join(", ") ?? "";
   const [tab, setTab] = useState<DirectoryTab>("people");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [stateFilter, setStateFilter] = useState("all");
   const [feedback, setFeedback] = useState("");
   const [actionError, setActionError] = useState("");
@@ -65,11 +88,74 @@ export default function PermissionManagerPage() {
   const [selectedRequestId, setSelectedRequestId] = useState("");
   const [requestFocusVersion, setRequestFocusVersion] = useState(0);
   const [highlightSubjectId, setHighlightSubjectId] = useState("");
-  const query = useSearchParams();
   const handledQueryRef = useRef("");
   const focusedVersionRef = useRef(-1);
   const focusedSubjectRef = useRef("");
   const decisionNoteRefs = useRef<Record<string, HTMLInputElement | HTMLTextAreaElement | null>>({});
+
+  useEffect(() => {
+    const timer = setTimeout(() => { setDebouncedSearch(search); setDirectoryOffset(0); }, 200);
+    return () => clearTimeout(timer);
+  }, [search]);
+  useEffect(() => {
+    const reload = () => refreshScheduler.request();
+    window.addEventListener("inout:presence-message", reload);
+    window.addEventListener("inout:presence-sync", reload);
+    const restore = () => { if (document.visibilityState === "visible") reload(); };
+    window.addEventListener("focus", restore);
+    window.addEventListener("online", restore);
+    document.addEventListener("visibilitychange", restore);
+    return () => {
+      refreshScheduler.cancel();
+      window.removeEventListener("inout:presence-message", reload);
+      window.removeEventListener("inout:presence-sync", reload);
+      window.removeEventListener("focus", restore);
+      window.removeEventListener("online", restore);
+      document.removeEventListener("visibilitychange", restore);
+    };
+  }, [refreshScheduler]);
+  useEffect(() => {
+    if (search !== debouncedSearch) return;
+    const controller = new AbortController();
+    activeRead.current = controller;
+    refreshPending.current = false;
+    refreshScheduler.cancel();
+    setIsLoading(true);
+    setError(null);
+    const subjectId = query.get("subject") || undefined;
+    const requestId = query.get("request") || undefined;
+    void Promise.all([
+      readPermissionDirectory({ limit: 25, offset: directoryOffset, search: debouncedSearch.trim() || undefined, subjectGroup: directorySubject ? undefined : tab, state: stateFilter === "all" ? undefined : stateFilter, subjectId: directorySubject }, controller.signal),
+      readPendingPermissions({ limit: 25, offset: manualOffset, typeGroup: "manual" }, controller.signal),
+      readPendingPermissions({ limit: 25, offset: otherOffset, typeGroup: "other" }, controller.signal),
+      subjectId || requestId ? readPendingPermissions({ limit: 1, offset: 0, subjectId, requestId }, controller.signal) : Promise.resolve(null),
+    ]).then(([directoryResult, manualResult, otherResult, focusedResult]) => {
+      if (controller.signal.aborted) return;
+      setDirectory(directoryResult);
+      setManualPage(manualResult);
+      setOtherPage(otherResult);
+      setFocusedPage(focusedResult);
+      for (const [result, setOffset] of [[directoryResult, setDirectoryOffset], [manualResult, setManualOffset], [otherResult, setOtherOffset]] as const) {
+        if (result.offset > 0 && result.offset >= result.total) setOffset(Math.max(0, Math.ceil(result.total / 25) - 1) * 25);
+      }
+      const revisions = [directoryResult.eventRevision, manualResult.eventRevision, otherResult.eventRevision].filter((value): value is number => Number.isSafeInteger(value));
+      if (revisions.length === 3) window.dispatchEvent(new CustomEvent("inout:snapshot-revision", { detail: { revision: Math.min(...revisions), scope: "permissions" } }));
+    }).catch(cause => {
+      if (controller.signal.aborted) return;
+      setError(cause instanceof Error ? cause.message : "Unable to load permissions.");
+      controller.abort();
+      activeRead.current = null;
+      setIsLoading(false);
+      if (refreshPending.current) { refreshPending.current = false; refreshScheduler.request(); }
+    })
+      .finally(() => {
+        if (controller.signal.aborted) return;
+        activeRead.current = null;
+        setIsLoading(false);
+        if (refreshPending.current) { refreshPending.current = false; refreshScheduler.request(); }
+      });
+    return () => { controller.abort(); if (activeRead.current === controller) activeRead.current = null; };
+  }, [debouncedSearch, search, tab, stateFilter, directorySubject, directoryOffset, manualOffset, otherOffset, revision, query, refreshScheduler]);
 
   async function runAction(action: () => Promise<void>): Promise<boolean> {
     if (busy) return false;
@@ -77,6 +163,7 @@ export default function PermissionManagerPage() {
     setActionError("");
     try {
       await action();
+      void refresh();
       return true;
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Unable to save the permission decision.");
@@ -106,13 +193,9 @@ export default function PermissionManagerPage() {
   function revokePermission(permission: AccessPermission) {
     return runAction(async () => {
       if (permission.subjectType === "hardware") {
-        const asset = hardwareAssets.find((item) => item.id === permission.subjectId);
-        if (!asset) throw new Error("The hardware record could not be found.");
-        await updateHardwareAsset(asset.id, { status: "restricted" });
+        await updateHardwareAsset(permission.subjectId, { status: "restricted" });
       } else {
-        const person = people.find((item) => item.id === permission.subjectId);
-        if (!person) throw new Error("The person record could not be found.");
-        await updatePerson(person.id, { status: "restricted" });
+        await updatePerson(permission.subjectId, { status: "restricted" });
       }
       setFeedback(`${permission.subjectName}: access revoked and marked restricted.`);
     });
@@ -130,15 +213,17 @@ export default function PermissionManagerPage() {
     }
     if (subjectId) {
       setHighlightSubjectId(subjectId);
-      const permission = permissions.find((item) => item.subjectId === subjectId);
-      setTab(permission?.subjectType === "hardware" || hardwareAssets.some((item) => item.id === subjectId) ? "hardware" : "people");
+      setDirectorySubject(subjectId);
+      setDirectoryOffset(0);
+      const permission = permissionsBySubject.get(subjectId);
+      setTab(permission?.subjectType === "hardware" || hardwareById.has(subjectId) ? "hardware" : "people");
       setSearch(""); setStateFilter("all");
     }
     const request = permissionRequests.find((item) => requestId ? item.id === requestId : item.subjectId === subjectId && item.status === "pending");
     if (request?.status === "pending") focusRequest(request.id);
     else if (request) setFeedback(`${request.subjectName}: this permission request has already been decided.`);
     else if (requestId) setFeedback("This permission request is no longer pending.");
-  }, [query, isLoading, error, permissions, permissionRequests, hardwareAssets]);
+  }, [query, isLoading, error, permissionsBySubject, permissionRequests, hardwareById]);
 
   useEffect(() => {
     if (!selectedRequestId || requestContext || focusedVersionRef.current === requestFocusVersion) return;
@@ -150,35 +235,7 @@ export default function PermissionManagerPage() {
     });
     return () => window.cancelAnimationFrame(frame);
   }, [selectedRequestId, pendingRequests, requestContext, requestFocusVersion]);
-  const managedPermissions = useMemo(
-    () => permissions.filter((permission) => !isOneTimeManualReviewRecord(permission)),
-    [permissions]
-  );
-  const approvedVisitorIds = useMemo(() => new Set(permissionRequests
-    .filter((request) => request.status === "approved" && (request.type === "visitor" || request.type === "zone_access"))
-    .map((request) => request.subjectId)), [permissionRequests]);
-  const directoryPermissions = useMemo(() => managedPermissions.filter((permission) => {
-    if (permission.subjectType !== "visitor") return true;
-    if (permission.state === "pending_approval") return false;
-    if (permission.state === "active" || permission.source !== "request") return true;
-    return approvedVisitorIds.has(permission.subjectId);
-  }), [managedPermissions, approvedVisitorIds]);
-  const directoryRows = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    return directoryPermissions.filter((permission) => {
-      const typeMatches = tab === "people"
-        ? permission.subjectType === "employee" || permission.subjectType === "visitor"
-        : permission.subjectType === "hardware";
-      const stateMatches = stateFilter === "all" || permissionDisplayState(permission) === stateFilter;
-      const searchMatches =
-        !needle ||
-        [permission.subjectName, permission.assignment, people.find((person) => person.id === permission.subjectId)?.barcode, hardwareAssets.find((asset) => asset.id === permission.subjectId)?.barcode, hardwareAssets.find((asset) => asset.id === permission.subjectId)?.assignedEmployeeName, ...permission.zones, formatFacilityZones(permission.zones, organizationZones)]
-          .join(" ")
-          .toLowerCase()
-          .includes(needle);
-      return typeMatches && stateMatches && searchMatches;
-    }).sort((left, right) => left.subjectName.localeCompare(right.subjectName));
-  }, [directoryPermissions, search, stateFilter, tab, people, hardwareAssets, organizationZones]);
+  const directoryRows = permissions;
   useEffect(() => {
     if (!highlightSubjectId || selectedRequestId || requestContext || focusedSubjectRef.current === highlightSubjectId) return;
     const frame = window.requestAnimationFrame(() => {
@@ -205,6 +262,13 @@ export default function PermissionManagerPage() {
         reason ?? "",
         decision === "approved" && request.type === "manual_override" ? (validForMinutes[request.id] ?? DEFAULT_MANUAL_REVIEW_MINUTES) : undefined
       );
+      const removeDecided = (current: PendingPermissionPage | null) => current ? { ...current,
+        items: current.items.filter(item => item.id !== request.id),
+        total: Math.max(0, current.total - 1),
+      } : current;
+      if (request.type === "manual_override") setManualPage(removeDecided);
+      else setOtherPage(removeDecided);
+      setFocusedPage(current => current ? { ...current, items: current.items.filter(item => item.id !== request.id) } : current);
       setDecisionNotes((current) => {
         const next = { ...current };
         delete next[request.id];
@@ -223,6 +287,14 @@ export default function PermissionManagerPage() {
       setSelectedRequestId("");
       setFeedback(`${request.subjectName}: permission ${decision === "approved" ? "approved" : "denied"}.`);
     });
+  }
+
+  function pageControls(label: string, offset: number, total: number, setOffset: (offset: number) => void) {
+    return total > 25 ? <nav className="pagination" aria-label={label}>
+      <button className={requestStyles.contextLink} type="button" disabled={busy || isLoading || offset === 0} onClick={() => setOffset(Math.max(0, offset - 25))}>Previous</button>
+      <span>{offset + 1}–{Math.min(offset + 25, total)} of {total}</span>
+      <button className={requestStyles.contextLink} type="button" disabled={busy || isLoading || offset + 25 >= total} onClick={() => setOffset(offset + 25)}>Next</button>
+    </nav> : null;
   }
 
   return (
@@ -252,9 +324,10 @@ export default function PermissionManagerPage() {
       ) : null}
 
       <div className={requestStyles.managerLayout}>
-        <AccessDirectory rows={directoryRows} hardwareAssets={hardwareAssets} checkpoints={checkpoints} zoneLabels={organizationZones} tab={tab} onTabChange={setTab}
-          search={search} onSearchChange={setSearch} stateFilter={stateFilter} onStateFilterChange={setStateFilter}
-          highlightedSubjectId={highlightSubjectId} busy={busy} isLoading={isLoading} error={error} total={directoryPermissions.length}
+        <AccessDirectory rows={directoryRows} hardwareAssets={hardwareAssets} checkpoints={checkpoints} zoneLabels={organizationZones} tab={tab} onTabChange={value => { setTab(value); setDirectoryOffset(0); setDirectorySubject(undefined); }}
+          search={search} onSearchChange={value => { setSearch(value); setDirectorySubject(undefined); }} stateFilter={stateFilter} onStateFilterChange={value => { setStateFilter(value); setDirectoryOffset(0); setDirectorySubject(undefined); }}
+          highlightedSubjectId={highlightSubjectId} busy={busy} isLoading={isLoading} error={error} total={directory?.total ?? 0}
+          pagination={pageControls("Access directory pages", directoryOffset, directory?.total ?? 0, setDirectoryOffset)}
           onReviewRequest={(permission) => {
             const request = pendingRequests.find((item) => item.subjectId === permission.subjectId);
             if (request) focusRequest(request.id);
@@ -266,7 +339,7 @@ export default function PermissionManagerPage() {
           <section className={requestStyles.queuePanel} aria-labelledby="manual-review-title">
             <div className={requestStyles.queueHeading}>
               <div className={requestStyles.sectionTitle}><span className={requestStyles.reviewIcon} aria-hidden="true"><Clock3 size={20} strokeWidth={1.7} /></span><div><h2 id="manual-review-title">Manual reviews</h2><p>Terminal exceptions awaiting a decision.</p></div></div>
-              <span className={requestStyles.queueCount}>{manualReviewRequests.length} pending</span>
+              <span className={requestStyles.queueCount}>{manualPage?.total ?? 0} pending</span>
             </div>
             <div className={`${requestStyles.reviewList} scrollable-content`}>
               {isLoading && pendingRequests.length === 0 ? (
@@ -299,13 +372,14 @@ export default function PermissionManagerPage() {
                 <div className={requestStyles.queueEmpty}><span className={requestStyles.emptyIcon}><ShieldCheck size={28} strokeWidth={1.4} /></span><strong>All caught up</strong><span>New terminal manual reviews will appear here.</span></div>
               )}
             </div>
+            {pageControls("Manual review pages", manualOffset, manualPage?.total ?? 0, setManualOffset)}
           </section>
 
-          {otherPendingRequests.length > 0 && (
+          {(otherPendingRequests.length > 0 || (otherPage?.total ?? 0) > 0) && (
             <section className={requestStyles.queuePanel} aria-labelledby="other-pending-title">
               <div className={requestStyles.queueHeading}>
                 <h2 id="other-pending-title">Other pending permissions</h2>
-                <span className={requestStyles.queueCount}>{otherPendingRequests.length} pending</span>
+                <span className={requestStyles.queueCount}>{otherPage?.total ?? 0} pending</span>
               </div>
               <div className={`${requestStyles.reviewList} scrollable-content`}>
                 {otherPendingRequests.map((request) => (
@@ -377,12 +451,13 @@ export default function PermissionManagerPage() {
               </article>
                 ))}
               </div>
+              {pageControls("Other permission pages", otherOffset, otherPage?.total ?? 0, setOtherOffset)}
             </section>
           )}
         </div>
       </div>
 
-      {requestContext && <RequestDialog mode="grant" context={requestContext} onClose={() => setRequestContext(null)} onReview={(requestId) => { setRequestContext(null); focusRequest(requestId); }} onRevokeAccess={revokePermission} onSubmitted={(request) => { setRequestContext(null); setFeedback(`${request.subjectName}: ${REQUEST_LABELS[request.type].toLowerCase()} granted.`); setHighlightSubjectId(request.subjectId); setTab(request.type === "hardware_custody" || hardwareAssets.some((asset) => asset.id === request.subjectId) ? "hardware" : "people"); setSearch(""); setStateFilter("all"); void refresh(); }} />}
+      {requestContext && <RequestDialog mode="grant" context={requestContext} checkpoints={checkpoints} onClose={() => setRequestContext(null)} onReview={(requestId) => { setRequestContext(null); focusRequest(requestId); }} onRevokeAccess={revokePermission} onSubmitted={(request, group) => { setRequestContext(null); setFeedback(`${request.subjectName}: ${REQUEST_LABELS[request.type].toLowerCase()} granted.`); setHighlightSubjectId(request.subjectId); setDirectorySubject(request.subjectId); setDirectoryOffset(0); setTab(group ?? (request.type === "hardware_custody" || hardwareById.has(request.subjectId) ? "hardware" : "people")); setSearch(""); setStateFilter("all"); void refresh(); }} />}
     </div>
   );
 }

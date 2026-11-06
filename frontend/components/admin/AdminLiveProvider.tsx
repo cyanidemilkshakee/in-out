@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { HttpDataService } from "../../../services/httpDataService";
 import { createRefreshCoordinator } from "../../../lib/refreshCoordinator";
+import { createRefreshScheduler } from "../../../lib/refreshScheduler";
 
 const service = new HttpDataService();
 const OpenAlertCountContext = createContext<number | null>(null);
@@ -10,7 +11,6 @@ const OpenAlertCountContext = createContext<number | null>(null);
 export function AdminLiveProvider({ children }: { children: ReactNode }) {
   const [openAlertCount, setOpenAlertCount] = useState(0);
   const requestVersion = useRef(0);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const [resume, setResume] = useState<{ revision?: number; scope?: string; generation: number }>({ generation: 0 });
   const latestRevision = useRef<number | undefined>(undefined);
   const activeScope = useRef<string | undefined>(undefined);
@@ -22,7 +22,7 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
       const detail = (event as CustomEvent<{ revision: number; scope: string }>).detail;
       if (!detail || !Number.isSafeInteger(detail.revision) || detail.revision < 0) return;
       awaitingSnapshot.current = false;
-      if (needsSnapshot.current || activeScope.current !== detail.scope || latestRevision.current === undefined || detail.revision > latestRevision.current) {
+      if (needsSnapshot.current || activeScope.current !== detail.scope || latestRevision.current === undefined) {
         activeScope.current = detail.scope;
         latestRevision.current = detail.revision;
         needsSnapshot.current = false;
@@ -59,10 +59,8 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
     // Read once after the stream opens so the initial count covers the setup
     // gap. Fall back when SSE is slow or unavailable instead of blocking it.
     const initialTimer = setTimeout(loadInitialCount, 1_000);
-    const scheduleRefresh = () => {
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => void refreshAlerts.request(true), 200);
-    };
+    const refreshSchedule = createRefreshScheduler(() => void refreshAlerts.request(true), 200, 1_000);
+    const scheduleRefresh = () => refreshSchedule.request();
     source.onopen = () => {
       clearTimeout(initialTimer);
       initialCountRequested = true;
@@ -74,7 +72,7 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
     source.onerror = loadInitialCount;
     source.onmessage = event => {
       try {
-        const revision = JSON.parse(event.data).revision;
+        const revision = event.lastEventId ? Number(event.lastEventId) : JSON.parse(event.data).revision;
         if (Number.isSafeInteger(revision)) latestRevision.current = revision;
       } catch { /* Normal parsing below also discards malformed messages. */ }
       window.dispatchEvent(new CustomEvent("inout:presence-message", { detail: event.data }));
@@ -107,7 +105,7 @@ export function AdminLiveProvider({ children }: { children: ReactNode }) {
       source.close();
       clearTimeout(initialTimer);
       clearInterval(recoveryTimer);
-      clearTimeout(timer.current);
+      refreshSchedule.cancel();
       refreshAlerts.clearPending();
       requestVersion.current++;
       window.removeEventListener("inout:alerts-changed", scheduleRefresh);

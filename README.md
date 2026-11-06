@@ -789,6 +789,51 @@ Keep these values until the staged upgrade completes. The legacy guard validates
 
 Follow the [official sequential-upgrade procedure](https://docs.temporal.io/self-hosted-guide/upgrade-server). The documented target chain is **1.26.3 → 1.27.4 → 1.28.4 → 1.29.7 → 1.30.7 → 1.31.3 → 1.32.1**; recheck release instructions, intermediate image availability and digests before executing maintenance. Rehearse the entire chain on a restored isolated copy first. Back up both Temporal databases, roles, namespace/configuration and worker revision. Stop workflow starters, scheduler and workers. At each stage, update both schemas with matching official SQL tooling before starting that server, allow roughly ten minutes per version for all History shards' conversion, and verify health and persisted-history replay. Preserve namespace settings and four shards. Never skip minors, delete histories or forge a marker to bypass the guard.
 
+### Latency regression workflows
+
+The approved implementation and measurement boundaries are recorded in
+[the latency remediation plan](docs/latency-remediation-plan.md). Interactive
+permission views and CSV clients explicitly
+select bounded or lean contracts. No service was removed and no schema migration
+is required. Deploy the worker replicas on the same revision to apply ordered
+presence/workflow delivery consistently.
+
+Run `npm test`, `npm run build`, and `npm run test:python`. PostgreSQL cases require
+the existing dedicated test database configuration. The October 16 benchmark
+records the historical handler baseline.
+
+1. **Continuous scans and slow reads.** Keep Dashboard, Logs, Registry, and an
+   employee profile open. Generate fixture scans while delaying snapshot reads
+   beyond one second. Reads must finish and queue a bounded follow-up. The
+   terminal stream stays connected across ordinary
+   snapshots. Force a replay gap, then verify snapshot recovery and event deduplication.
+2. **Permission pagination and deep links.** Use more than 25 directory records and
+   pending requests of every type. Search names/barcodes, switch access states and
+   people/hardware, page both queues, and open links to records outside the first
+   page. Inspect current zones/custody, approve/deny, and verify the card disappears
+   and updated access remains scoped. Search literal `%`, `_`, and backslashes too.
+3. **Account pagination and assignment.** Use multiple provider pages, including a
+   page whose accounts are all outside a zone administrator's scope. Load more must
+   remain available when the raw provider has another page. Search and edit an
+   account, assign a checkpoint, and verify role and step-up/window revocation checks.
+4. **Slow workflow delivery.** Use the outbox test fixture to stall a workflow RPC.
+   Presence must continue independently. Retry and cancel deliveries, expire a
+   lease, and restart the worker. Verify that revisions follow lane order and
+   workflow starts precede signals. Repeat during Temporal startup failure.
+5. **Sign-in availability ordering.** Hold the synthetic availability response open
+   while completing sign-in. Authentication must finish independently. Set a newer
+   offline return time before releasing the delayed reset and verify it survives.
+   Ordinary logout still clears the app session and attempts required provider revocation.
+6. **Large CSV exports.** Export fixture rows with Unicode, quoted multiline text,
+   and spreadsheet-formula prefixes. Check unchanged columns, order, escaping, and
+   BOM/newlines. Cancel while formatting and exceed the UTF-8 byte cap. The UI must
+   remain responsive and canceled/oversized exports must not download a partial file.
+7. **Bounded retention and evaluator parity.** In the database test fixture, seed
+   501 expired eligible records plus recent records and alert/manual-review evidence.
+   A dry run counts candidates. Applied maintenance uses multiple bounded transactions
+   and preserves evidence. Compare projected evaluator input with legacy rich documents
+   for attendance, breaks, denied scans, visitors, and deduplicated existing alerts.
+
 After the full operational chain has actually completed, stop writers/server again and verify schemas **1.19 / 1.14**. As the scoped `inout_temporal` owner, attest the validated baseline in **each Temporal database**, keeping stage evidence with the backup:
 
 ```sql

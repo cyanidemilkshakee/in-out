@@ -173,7 +173,7 @@ export function RegistryCreateDialog({
         <label className={styles.field}><span>Checkpoint</span><select value={visitorForm.checkpointId} onChange={(event) => {
           const checkpoint = checkpoints.find((item) => item.id === event.target.value);
           setVisitorForm((current) => ({ ...current, checkpointId: event.target.value, allowedZones: checkpoint ? [checkpoint.zoneId ?? checkpoint.zone] : [] }));
-        }} required><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((checkpoint) => <option key={checkpoint.id} value={checkpoint.id}>{facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone, zones)} · {checkpoint.name}{checkpoint.gateLabel ? ` · ${checkpoint.gateLabel}` : ""}</option>)}</select></label>
+        }} required><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((checkpoint) => <option key={checkpoint.id} value={checkpoint.id}>{facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone, zones)} · {checkpoint.gateLabel && checkpoint.gateLabel.trim().toLowerCase() !== checkpoint.name.trim().toLowerCase() ? `${checkpoint.name} · ${checkpoint.gateLabel}` : checkpoint.gateLabel || checkpoint.name}</option>)}</select></label>
         <label className={`${styles.field} ${styles.creationFieldSpan}`}><span>Purpose</span><textarea value={visitorForm.purpose ?? ""} onChange={(event) => setVisitorForm((current) => ({ ...current, purpose: event.target.value }))} placeholder="Purpose (optional)" maxLength={1000} rows={2} /></label>
       </div>}
 

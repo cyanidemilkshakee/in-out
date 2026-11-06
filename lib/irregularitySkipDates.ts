@@ -1,6 +1,12 @@
 import { parseFacilityDate } from "./dateTimeValidation";
 
 const FACILITY_TIME_ZONE = "Asia/Kolkata";
+const datePartsFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: FACILITY_TIME_ZONE, year: "numeric", month: "2-digit", day: "2-digit",
+});
+const dateLabelFormatter = new Intl.DateTimeFormat("en-IN", {
+  timeZone: FACILITY_TIME_ZONE, year: "numeric", month: "short", day: "numeric",
+});
 
 export function isIrregularitySkipDate(value: string, now = new Date()) {
   const { today, max } = irregularitySkipDateRange(now);
@@ -8,12 +14,7 @@ export function isIrregularitySkipDate(value: string, now = new Date()) {
 }
 
 export function irregularitySkipDateRange(now = new Date()) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: FACILITY_TIME_ZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
+  const parts = datePartsFormatter.formatToParts(now);
   const part = (type: "year" | "month" | "day") => parts.find((value) => value.type === type)?.value ?? "00";
   const today = `${part("year")}-${part("month")}-${part("day")}`;
   const [year, month, day] = today.split("-").map(Number);
@@ -27,10 +28,5 @@ export function formatIrregularitySkipDate(date: string) {
   const parsed = new Date(`${date}T12:00:00Z`);
   // Keep the locale explicit so SSR (Node) and the browser produce identical
   // text during hydration. The facility UI uses the Indian date convention.
-  return Number.isNaN(parsed.getTime()) ? date : new Intl.DateTimeFormat("en-IN", {
-    timeZone: FACILITY_TIME_ZONE,
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  }).format(parsed);
+  return Number.isNaN(parsed.getTime()) ? date : dateLabelFormatter.format(parsed);
 }

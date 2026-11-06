@@ -14,6 +14,7 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials
 from config import settings
 from routers import keycloak_admin
+from auth import verify_admin_request
 from user_management_step_up import verified_user_management_window, STEP_UP_PROOF_DOMAIN
 
 NOW = 1_800_000_000
@@ -163,38 +164,43 @@ class UserManagementStepUpTests(StepUpSettingsFixture, unittest.TestCase):
 class UserManagementStepUpDependencyTests(StepUpSettingsFixture, unittest.IsolatedAsyncioTestCase):
     async def test_direct_dependency_call_defaults_to_no_header_and_still_requires_admin_bearer(self):
         credentials = HTTPAuthorizationCredentials(scheme="Bearer", credentials=TOKEN)
-        with patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value={"auth_time": NOW})) as verify, \
-             patch("routers.keycloak_admin.time.time", return_value=NOW):
+        claims = {"auth_time": NOW}
+        with patch("routers.keycloak_admin.time.time", return_value=NOW):
             with self.assertRaises(HTTPException) as error:
-                await keycloak_admin._admin_context(credentials)
+                await keycloak_admin._admin_context(credentials, claims=claims)
             self.assertEqual(error.exception.status_code, 401)
-            verify.assert_awaited_once_with(credentials, None)
-        with patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock()) as verify:
-            with self.assertRaises(HTTPException) as error:
-                await keycloak_admin._admin_context(None, proof_for(payload_for()))
-            self.assertEqual(error.exception.status_code, 401)
-            verify.assert_not_awaited()
-        with patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(side_effect=HTTPException(403, "Admin required"))):
-            with self.assertRaises(HTTPException) as error:
-                await keycloak_admin._admin_context(credentials, proof_for(payload_for()))
-            self.assertEqual(error.exception.status_code, 403)
+        with self.assertRaises(HTTPException) as error:
+            await keycloak_admin._admin_context(None, proof_for(payload_for()), claims=claims)
+        self.assertEqual(error.exception.status_code, 401)
 
     async def test_http_header_uses_signed_duration_and_never_falls_back_on_invalid_proof(self):
         app = FastAPI()
         @app.get("/protected")
-        async def protected(_token=Depends(keycloak_admin._admin_context)):
+        async def protected(_token=Depends(keycloak_admin._admin_context), actor=Depends(verify_admin_request)):
             return {"accepted": True}
         payload = payload_for(duration=60, auth_time=NOW - 3599)
-        with patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value={"auth_time": payload["authTime"]})), \
-             patch("routers.keycloak_admin.time.time", return_value=NOW), \
-             patch("routers.keycloak_admin.require_unlocked_window", new=AsyncMock()):
+        verification_count = 0
+        async def verified_admin():
+            nonlocal verification_count
+            verification_count += 1
+            return {"auth_time": payload["authTime"]}
+        app.dependency_overrides[verify_admin_request] = verified_admin
+        with patch("routers.keycloak_admin.time.time", return_value=NOW), \
+             patch("routers.keycloak_admin.require_unlocked_window", new=AsyncMock()) as guard:
             async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
                 headers = {"Authorization": "Bearer " + TOKEN, "X-InOut-Step-Up": proof_for(payload)}
                 self.assertEqual((await client.get("/protected", headers=headers)).status_code, 200)
+                self.assertEqual(verification_count, 1, "The guard and handler must share one verified administrator")
+                guard.assert_awaited_once()
                 self.assertEqual((await client.get("/protected", headers={"Authorization": "Bearer " + TOKEN})).status_code, 401)
                 self.assertEqual((await client.get("/protected", headers={**headers, "X-InOut-Step-Up": "invalid"})).status_code, 401)
                 with patch("routers.keycloak_admin.time.time", return_value=NOW + 1):
                     self.assertEqual((await client.get("/protected", headers=headers)).status_code, 401)
+                async def forbidden_admin():
+                    raise HTTPException(403, "Admin required")
+                app.dependency_overrides[verify_admin_request] = forbidden_admin
+                self.assertEqual((await client.get("/protected", headers=headers)).status_code, 403)
+                self.assertEqual(guard.await_count, 1, "Rejected authentication or proof must never reach the authorization guard")
 
 
 if __name__ == "__main__":

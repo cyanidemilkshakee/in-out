@@ -13,16 +13,29 @@ export type ManagedUser = {
   canManage: boolean;
 };
 
-async function request<T>(method: "GET" | "POST", body?: unknown, query?: string): Promise<T> {
+async function request<T>(method: "GET" | "POST", body?: unknown, query?: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/keycloak${query ? `?${query}` : ""}`, {
     method,
     headers: method === "POST" ? { "Content-Type": "application/json" } : undefined,
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
+    signal,
   });
   const payload = await response.json().catch(() => null) as { data?: T; error?: string } | null;
   if (!response.ok || !payload?.data) throw new Error(payload?.error ?? "Identity request failed.");
   return payload.data;
+}
+
+export type ManagedUserPage = { items: ManagedUser[]; first: number; max: number; hasMore: boolean; nextFirst: number | null };
+export const MANAGED_USER_PAGE_SIZE = 25;
+
+export async function listManagedUserPage(search = "", first = 0, signal?: AbortSignal): Promise<ManagedUserPage> {
+  const page = await request<ManagedUserPage>("GET", undefined,
+    `search=${encodeURIComponent(search.trim())}&first=${first}&max=${MANAGED_USER_PAGE_SIZE}`, signal);
+  if (!Array.isArray(page.items) || typeof page.hasMore !== "boolean" || (page.hasMore && (!Number.isSafeInteger(page.nextFirst) || page.nextFirst! <= first))) {
+    throw new Error("Identity service returned an invalid directory page.");
+  }
+  return page;
 }
 
 export async function listManagedUsers(search = "") {

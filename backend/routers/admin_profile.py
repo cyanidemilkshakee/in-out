@@ -28,11 +28,32 @@ class ProfileUpdateRequest(BaseModel):
 class AvailabilityUpdateRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True, extra="forbid")
     offline_until: Optional[datetime] = Field(None, alias="offlineUntil")
+    clear_before: Optional[datetime] = Field(None, alias="clearBefore")
 
 
-def _review_note_policy(_settings: Optional[dict[str, bool]]) -> dict[str, bool]:
+_AVAILABILITY_CHANGED_AT = "_availabilityChangedAt"
+
+
+def _availability_changed_at(settings):
+    value = (settings or {}).get(_AVAILABILITY_CHANGED_AT)
+    try:
+        parsed = datetime.fromisoformat(value) if isinstance(value, str) else None
+        return parsed if parsed and parsed.tzinfo is not None else None
+    except ValueError:
+        return None
+
+
+def _review_note_policy(_settings: Optional[dict[str, Any]]) -> dict[str, bool]:
     """Denial notes are required; administrator approval notes remain optional."""
     return {"requireReviewNote": True}
+
+
+def _stored_settings(settings):
+    policy: dict[str, Any] = _review_note_policy(settings)
+    changed_at = _availability_changed_at(settings)
+    if changed_at:
+        policy[_AVAILABILITY_CHANGED_AT] = changed_at.isoformat()
+    return policy
 
 
 def _serialize_account(account):
@@ -48,7 +69,7 @@ async def _identity_profile(db, admin):
     await db.execute(select(func.pg_advisory_xact_lock(func.hashtextextended("profile:" + subject, 0))))
     account = await db.scalar(select(AdminAccount).where(AdminAccount.keycloak_subject == subject).with_for_update())
     if account:
-        policy = _review_note_policy(account.settings)
+        policy = _stored_settings(account.settings)
         if account.settings != policy:
             account.settings = policy
             db.info["profile_initialized"] = True
@@ -88,7 +109,7 @@ async def update_admin_profile(payload: ProfileUpdateRequest, db: AsyncSession =
     updates = payload.model_dump(exclude_none=True)
     for key, value in updates.items():
         if key == "settings":
-            value = _review_note_policy(value)
+            value = _stored_settings(account.settings)
         setattr(account, key, value)
     await enqueue_changed(db)
     await db.commit()
@@ -100,14 +121,28 @@ async def update_admin_availability(payload: AvailabilityUpdateRequest, db: Asyn
                                     admin: dict = Depends(verify_admin_request)) -> dict[str, Any]:
     """Record an explicit, short-lived expected admin return time after SSO logout."""
     offline_until = payload.offline_until
+    now = datetime.now(timezone.utc)
+    if payload.clear_before:
+        if payload.clear_before.tzinfo is None or payload.offline_until is not None:
+            raise HTTPException(422, "clearBefore requires a timezone and an online availability update")
+        if (payload.clear_before - now).total_seconds() > 60:
+            raise HTTPException(422, "clearBefore cannot be in the future")
     if offline_until:
         if offline_until.tzinfo is None:
             raise HTTPException(status_code=422, detail="offlineUntil must include a timezone")
-        seconds = (offline_until - datetime.now(timezone.utc)).total_seconds()
+        seconds = (offline_until - now).total_seconds()
         if seconds < 60 or seconds > 24 * 60 * 60:
             raise HTTPException(status_code=422, detail="offlineUntil must be between one minute and 24 hours from now")
     account = await _identity_profile(db, admin)
+    changed_at = _availability_changed_at(account.settings)
+    stale_clear = payload.clear_before and changed_at and changed_at > payload.clear_before
+    if stale_clear or (account.offline_until is None and offline_until is None):
+        if db.info.get("profile_initialized"):
+            await enqueue_changed(db)
+        await db.commit()
+        return {"offline_until": account.offline_until.isoformat() if account.offline_until else None}
     account.offline_until = offline_until
+    account.settings = {**_stored_settings(account.settings), _AVAILABILITY_CHANGED_AT: now.isoformat()}
     await enqueue_changed(db)
     await db.commit()
     return {"offline_until": account.offline_until.isoformat() if account.offline_until else None}

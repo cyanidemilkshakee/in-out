@@ -431,7 +431,9 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
 
     current_custody = {asset["id"]: {field: asset.get(field) for field in
         ("ownerId", "assignedEmployeeId")} for asset in hardware}
-    manual_approval_request = None if location_conflict else await _approved_manual_review(
+    # A held entry cannot consume a manual grant. Avoid locking/searching
+    # approval history until the hold is lifted; exits still use their grants.
+    manual_approval_request = None if location_conflict or (event["direction"] == "entry" and held) else await _approved_manual_review(
         db, subject.barcode, subject.id, subject.kind, checkpoint.id, event["direction"],
         payload.selected_hardware_ids, now, states, current_custody, current_access,
     )

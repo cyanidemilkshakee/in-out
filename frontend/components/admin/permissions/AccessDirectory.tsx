@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, type ReactNode } from "react";
 import { ChevronRight, Package, Search, ShieldAlert, SlidersHorizontal, UserRound, UsersRound, X } from "lucide-react";
 import type { AccessPermission, Checkpoint, HardwareAsset } from "../../../../lib/types";
 import type { OrganizationZone } from "../../../../lib/types";
@@ -13,7 +14,7 @@ function entryAction(permission: AccessPermission) {
   return permission.state === "pending_approval" ? "Review permission" : "Manage";
 }
 
-export function AccessDirectory({ rows, hardwareAssets, checkpoints = [], zoneLabels = [], tab, onTabChange, search, onSearchChange, stateFilter, onStateFilterChange, highlightedSubjectId, busy, isLoading, error, total, onReviewRequest, onManageAccess, onReassign }: {
+export function AccessDirectory({ rows, hardwareAssets, checkpoints = [], zoneLabels = [], tab, onTabChange, search, onSearchChange, stateFilter, onStateFilterChange, highlightedSubjectId, busy, isLoading, error, total, pagination, onReviewRequest, onManageAccess, onReassign }: {
   rows: AccessPermission[];
   hardwareAssets: HardwareAsset[];
   checkpoints?: Checkpoint[];
@@ -29,15 +30,18 @@ export function AccessDirectory({ rows, hardwareAssets, checkpoints = [], zoneLa
   isLoading: boolean;
   error: string | null;
   total: number;
+  pagination?: ReactNode;
   onReviewRequest: (permission: AccessPermission) => void;
   onManageAccess: (permission: AccessPermission) => void;
   onReassign: (permission: AccessPermission) => void;
 }) {
+  const hardwareById = useMemo(() => new Map(hardwareAssets.map(asset => [asset.id, asset])), [hardwareAssets]);
+  const checkpointsById = useMemo(() => new Map(checkpoints.map(checkpoint => [checkpoint.id, checkpoint])), [checkpoints]);
   return (
     <section className={styles.directoryPanel} aria-labelledby="directory-title">
       <div className={styles.directoryHeading}>
         <div className={styles.sectionTitle}><span className={styles.sectionIcon} aria-hidden="true"><UsersRound size={20} strokeWidth={1.7} /></span><div><h2 id="directory-title">Access directory</h2><p>People and assets. Their access scopes and time windows.</p></div></div>
-        <span className={styles.directoryCount} aria-label={`${rows.length} matching permissions`}>{rows.length}</span>
+        <span className={styles.directoryCount} aria-label={`${total} matching permissions`}>{total}</span>
       </div>
       <div className={styles.directoryToolbar}>
       <div className={styles.directoryTabs} role="group" aria-label="Permission subject type">
@@ -55,12 +59,12 @@ export function AccessDirectory({ rows, hardwareAssets, checkpoints = [], zoneLa
         {isLoading && !total ? <p className={styles.directoryEmpty} role="status">Loading access permissions…</p> : error && !total ? <p className={styles.directoryEmpty}>Access permissions are unavailable. Use Retry above.</p> : !rows.length ? <div className={styles.directoryEmpty}><span className={styles.emptyIcon} aria-hidden="true"><Search size={24} strokeWidth={1.5} /></span><strong>{total ? "No matching permissions" : "Your directory starts here"}</strong><span>{total ? "Try another name, barcode, or access state." : "Registered subjects and granted permissions will appear here."}</span>{(search || stateFilter !== "all") && <button type="button" className={styles.contextLink} onClick={() => { onSearchChange(""); onStateFilterChange("all"); }}>Clear filters</button>}</div> : rows.map((permission) => {
           const checkpointScope = permission.subjectType === "visitor" && permission.checkpoints?.length
             ? permission.checkpoints.map((id) => {
-              const item = checkpoints.find((candidate) => candidate.id === id);
+              const item = checkpointsById.get(id);
               return item ? `${facilityZoneLabel(item.zoneId ?? item.zone, zoneLabels)} · ${item.name}` : id;
             }).join(", ")
             : "";
           const scope = checkpointScope ? `Checkpoints · ${checkpointScope}` : formatFacilityZones(permission.zones, zoneLabels) || "No zones assigned";
-          const asset = hardwareAssets.find((item) => item.id === permission.subjectId);
+          const asset = hardwareById.get(permission.subjectId);
           const action = entryAction(permission);
           const restriction = permission.entryRestriction?.active ? permission.entryRestriction : undefined;
           const displayState = permissionDisplayState(permission);
@@ -94,6 +98,7 @@ export function AccessDirectory({ rows, hardwareAssets, checkpoints = [], zoneLa
           );
         })}
       </div>
+      {pagination}
     </section>
   );
 }

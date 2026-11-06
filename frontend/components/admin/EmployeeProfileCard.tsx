@@ -5,13 +5,13 @@ import { createPortal } from "react-dom";
 import Link from "next/link";
 import { ArrowUpRight, Download, ShieldCheck, X } from "lucide-react";
 import type { AccessPermission, Alert, EmployeeActivity, MovementEvent, OrganizationZone, Person } from "../../../lib/types";
-import { assertCsvBound, readExport } from "../../../lib/exportRead";
-import { escapeCsv } from "../../../lib/csv";
+import { readExport } from "../../../lib/exportRead";
+import { formatCsvBlob } from "../../../lib/csv";
 import type { DayPattern } from "../../../lib/analyticsUtils";
 import { facilityZoneLabel, normalizeFacilityZones } from "../../../lib/facilityZones";
 import { averageWorkedHoursPerDay, employeeActivityPatterns, employeeActivityRangeDays, employeeHoursSeries } from "../../../lib/analyticsQueries";
 import { eventTimestamp } from "../../../lib/dateRanges";
-import { createRefreshScheduler } from "../../../lib/refreshScheduler";
+import { createReadRefreshGate, createRefreshScheduler } from "../../../lib/refreshScheduler";
 import { useDataActions } from "../../context/DataContext";
 import { WorkPatternChart } from "./WorkPatternChart";
 import { EmployeeProfileAlerts } from "./EmployeeProfileAlerts";
@@ -53,14 +53,10 @@ function alertReviewLabel(alert: Alert) {
   return alert.status === "acknowledged" ? "Needs review" : "Open";
 }
 
-function csvCell(value: unknown) {
-  return escapeCsv(String(value ?? ""));
-}
-
 const PROFILE_ALERT_LIMIT = 5;
 const PROFILE_MOVEMENT_LIMIT = 7;
 
-function exportMovementCsv(person: Person, movements: MovementEvent[]) {
+async function exportMovementCsv(person: Person, movements: MovementEvent[], signal: AbortSignal) {
   if (!movements.length) return;
   const columns: Array<[string, (movement: MovementEvent) => unknown]> = [
     ["eventId", (movement) => movement.id],
@@ -79,13 +75,11 @@ function exportMovementCsv(person: Person, movements: MovementEvent[]) {
     ["source", (movement) => movement.source],
     ["paperReference", (movement) => movement.paperReference],
   ];
-  const csv = [
-    columns.map(([name]) => csvCell(name)).join(","),
-    ...movements.map((movement) => columns.map(([, value]) => csvCell(value(movement))).join(",")),
-  ].join("\r\n");
-  assertCsvBound(csv);
+  const blob = await formatCsvBlob(columns.map(([name]) => name), movements,
+    movement => columns.map(([, value]) => value(movement)), { signal, bom: true });
+  signal.throwIfAborted();
   const slug = person.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "employee";
-  const url = URL.createObjectURL(new Blob([`\uFEFF${csv}`], { type: "text/csv;charset=utf-8" }));
+  const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
   link.download = `movement-logs-${slug}-${new Date().toISOString().slice(0, 10)}.csv`;
@@ -142,8 +136,11 @@ export function EmployeeProfileCard({
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
   const [profileRevision, setProfileRevision] = useState(0);
+  const profileRefreshGate = useMemo(() => createReadRefreshGate(() => setProfileRevision(value => value + 1)), [person.id]);
+  const profileRefreshScheduler = useMemo(() => createRefreshScheduler(() => profileRefreshGate.request()), [profileRefreshGate]);
   const [exportingHistory, setExportingHistory] = useState(false);
   const exportController = useRef<AbortController | null>(null);
+  const exportPending = useRef(false);
   useEffect(() => () => exportController.current?.abort(), []);
   const historyPerson = useRef(person.id);
   const [activity, setActivity] = useState<EmployeeActivity | null>(null);
@@ -161,10 +158,15 @@ export function EmployeeProfileCard({
   const subjectMovementRevision = useMemo(() => initialMovements.map(movement =>
     [movement.id, movement.result, movement.direction, movement.scanType, movement.createdAt, movement.manualReviewedAt].join(":"))
     .join("|"), [initialMovements]);
+  const observedMovements = useRef({ personId: person.id, revision: subjectMovementRevision });
+  useEffect(() => {
+    const previous = observedMovements.current;
+    observedMovements.current = { personId: person.id, revision: subjectMovementRevision };
+    if (previous.personId === person.id && previous.revision !== subjectMovementRevision) profileRefreshScheduler.request();
+  }, [person.id, subjectMovementRevision, profileRefreshScheduler]);
 
   useEffect(() => {
-    const scheduler = createRefreshScheduler(() => setProfileRevision(value => value + 1));
-    const refresh = () => scheduler.request();
+    const refresh = () => profileRefreshScheduler.request();
     const receive = (event: Event) => {
       try {
         const update = JSON.parse((event as CustomEvent<string>).detail);
@@ -174,30 +176,33 @@ export function EmployeeProfileCard({
     };
     window.addEventListener("inout:presence-message", receive);
     window.addEventListener("inout:presence-sync", refresh);
-    return () => { scheduler.cancel(); window.removeEventListener("inout:presence-message", receive); window.removeEventListener("inout:presence-sync", refresh); };
-  }, [person.id]);
+    return () => { profileRefreshScheduler.cancel(); profileRefreshGate.cancel(); window.removeEventListener("inout:presence-message", receive); window.removeEventListener("inout:presence-sync", refresh); };
+  }, [person.id, profileRefreshScheduler, profileRefreshGate]);
 
   useEffect(() => {
     const controller = new AbortController();
+    const finishRead = profileRefreshGate.begin();
+    profileRefreshScheduler.cancel();
     setPermissionsLoading(true);
     void querySubjectProfile(person.id, controller.signal)
       .then(profile => { if (!controller.signal.aborted) setProfilePermissions(profile.permissions.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))); })
       .catch(() => { if (!controller.signal.aborted) setHistoryError("Permissions could not be loaded."); })
-      .finally(() => { if (!controller.signal.aborted) setPermissionsLoading(false); });
-    return () => controller.abort();
-  }, [person.id, querySubjectProfile, profileRevision]);
+      .finally(() => { if (!controller.signal.aborted) setPermissionsLoading(false); finishRead(); });
+    return () => { controller.abort(); finishRead(); };
+  }, [person.id, querySubjectProfile, profileRevision, profileRefreshGate, profileRefreshScheduler]);
 
   async function downloadMovementHistory() {
-    if (exportingHistory) return;
+    if (exportPending.current) return;
+    exportPending.current = true;
     setExportingHistory(true);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 30_000);
     exportController.current = controller;
     try {
       const result = await readExport<{ items: MovementEvent[] }>("movements", { subject_id: person.id }, controller.signal);
-      exportMovementCsv(person, result.items);
+      await exportMovementCsv(person, result.items, controller.signal);
     } catch (error) { setHistoryError(error instanceof Error ? error.message : "Unable to export movement history."); }
-    finally { clearTimeout(timer); setExportingHistory(false); }
+    finally { clearTimeout(timer); exportPending.current = false; setExportingHistory(false); }
   }
 
   useEffect(() => {
@@ -249,6 +254,7 @@ export function EmployeeProfileCard({
 
   useEffect(() => {
     const movementLoadController = new AbortController();
+    const finishRead = profileRefreshGate.begin();
     movementMoreController.current?.abort();
     movementMoreController.current = null;
     movementMorePending.current = false;
@@ -267,12 +273,13 @@ export function EmployeeProfileCard({
         setMovementLogs(page.items);
         setMovementLogCount(page.total);
       }).catch(() => { if (!movementLoadController.signal.aborted) setHistoryError("Some movement history could not be loaded."); })
-      .finally(() => { if (!movementLoadController.signal.aborted) setHistoryLoading(false); });
+      .finally(() => { if (!movementLoadController.signal.aborted) setHistoryLoading(false); finishRead(); });
     return () => {
       movementLoadController.abort();
       movementMoreController.current?.abort();
+      finishRead();
     };
-  }, [person.id, queryMovements, subjectMovementRevision, profileRevision]);
+  }, [person.id, queryMovements, profileRevision, profileRefreshGate]);
 
   useEffect(() => {
     setMounted(true);
@@ -280,15 +287,16 @@ export function EmployeeProfileCard({
 
   useEffect(() => {
     const controller = new AbortController();
+    const finishRead = profileRefreshGate.begin();
     setActivity(null);
     setActivityLoading(true);
     setActivityError("");
     void queryEmployeeActivity({ subjectId: person.id, days: timeRange === "1Y" ? 365 : timeRange === "1M" ? 30 : 7 }, controller.signal)
       .then(result => { if (!controller.signal.aborted) setActivity(result); })
       .catch(() => { if (!controller.signal.aborted) setActivityError("Worked hours could not be loaded."); })
-      .finally(() => { if (!controller.signal.aborted) setActivityLoading(false); });
-    return () => controller.abort();
-  }, [person.id, timeRange, queryEmployeeActivity, subjectMovementRevision, profileRevision]);
+      .finally(() => { if (!controller.signal.aborted) setActivityLoading(false); finishRead(); });
+    return () => { controller.abort(); finishRead(); };
+  }, [person.id, timeRange, queryEmployeeActivity, profileRevision, profileRefreshGate]);
 
   const { labels, dataPoints } = useMemo(() => activity
     ? employeeHoursSeries(activity, timeRange) : { labels: [], dataPoints: [] }, [activity, timeRange]);

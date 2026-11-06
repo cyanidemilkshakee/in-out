@@ -4,6 +4,9 @@ export type TimeRange = "1D" | "1W" | "1M" | "1Y";
 
 const DAY_IN_MS = 24 * 60 * 60 * 1000;
 const FACILITY_OFFSET_MS = (5 * 60 + 30) * 60 * 1000;
+const facilityPartsFormatter = new Intl.DateTimeFormat("en-CA", {
+  timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit",
+});
 
 export type DashboardTimeRange =
   | "Today"
@@ -14,12 +17,7 @@ export type DashboardTimeRange =
   | "Custom";
 
 function facilityDateParts(date: Date) {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Kolkata",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(date);
+  const parts = facilityPartsFormatter.formatToParts(date);
   const numberPart = (type: Intl.DateTimeFormatPartTypes) =>
     Number(parts.find((part) => part.type === type)?.value ?? 0);
   return {

@@ -1,6 +1,6 @@
 import type { OrganizationZone } from "../lib/types";
 
-async function request<T>(method: "GET" | "POST" | "DELETE", body?: unknown, zoneId?: string): Promise<T> {
+async function request<T>(method: "GET" | "POST" | "PATCH" | "DELETE", body?: unknown, zoneId?: string): Promise<T> {
   const query = zoneId ? `?zoneId=${encodeURIComponent(zoneId)}` : "";
   const response = await fetch(`/api/zones${query}`, {
     method,
@@ -24,6 +24,10 @@ export async function listZones(): Promise<OrganizationZone[]> {
 
 export function createZone(name: string): Promise<OrganizationZone> {
   return request<OrganizationZone>("POST", { name });
+}
+
+export function updateZoneName(zoneId: string, name: string): Promise<Pick<OrganizationZone, "id" | "name" | "active">> {
+  return request<Pick<OrganizationZone, "id" | "name" | "active">>("PATCH", { name }, zoneId);
 }
 
 export function deleteZone(zoneId: string): Promise<void> {

@@ -2,32 +2,41 @@ import NextAuth, { CredentialsSignin, customFetch, type NextAuthConfig } from "n
 import Keycloak from "next-auth/providers/keycloak"
 import Credentials from "next-auth/providers/credentials"
 import { cookies } from "next/headers"
+import { after } from "next/server"
 import { authTimeFromToken, invalidSession, keycloakSession, rolesFromAccessToken, subjectFromAccessToken, type RoleToken } from "./lib/keycloakSession"
 import { refreshKeycloakTokenSingleFlight } from "./lib/keycloakRefresh"
 import { completedStepUpWindow, USER_MANAGEMENT_STEP_UP_COOKIE, USER_MANAGEMENT_STEP_UP_LOCK_COOKIE, verifyStepUpIntent } from "./lib/userManagementStepUp"
 import { safeAuthRedirect } from "./lib/authRequestBoundary"
 import { boundedIdentityResponse, verifyKeycloakToken, verifyKeycloakTokenPair } from "./lib/keycloakTokenValidation"
 import { authenticateKeycloakCredentials, KeycloakCredentialsError, type VerifiedCredentials } from "./lib/keycloakCredentials"
-import { hasAdminAccess } from "./lib/applicationRoles"
+import { hasAdminAccess, hasMasterAdminAccess } from "./lib/applicationRoles"
 
 const keycloakConfigured = !!process.env.KEYCLOAK_CLIENT_ID &&
   !!process.env.KEYCLOAK_CLIENT_SECRET && !!process.env.KEYCLOAK_ISSUER
 const keycloakPublicIssuer = (process.env.KEYCLOAK_ISSUER_PUBLIC || process.env.KEYCLOAK_ISSUER)?.replace(/\/+$/, "")
 
-async function clearAdminOfflineStatus(accessToken: unknown): Promise<void> {
+async function clearAdminOfflineStatus(accessToken: unknown, clearBefore: string): Promise<void> {
   const apiUrl = process.env.PYTHON_API_URL?.replace(/\/$/, "")
-  if (typeof accessToken !== "string" || !accessToken || !apiUrl || !hasAdminAccess(rolesFromAccessToken(accessToken))) return
+  const roles = typeof accessToken === "string" ? rolesFromAccessToken(accessToken) : []
+  if (typeof accessToken !== "string" || !accessToken || !apiUrl || !hasAdminAccess(roles) || hasMasterAdminAccess(roles)) return
   try {
     await fetch(`${apiUrl}/v1/admin/profile/availability`, {
       method: "PATCH",
       headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ offlineUntil: null }),
+      body: JSON.stringify({ offlineUntil: null, clearBefore }),
       cache: "no-store",
       signal: AbortSignal.timeout(5_000),
     })
   } catch {
     // Availability must never block a valid Keycloak sign-in.
   }
+}
+
+function clearAdminOfflineStatusAfterSignIn(accessToken: unknown) {
+  // Capture the sign-in time before deferring. A later explicit sign-out or
+  // availability change must win even if this request reaches the API late.
+  const clearBefore = new Date().toISOString()
+  after(() => clearAdminOfflineStatus(accessToken, clearBefore))
 }
 
 class AppCredentialsSignin extends CredentialsSignin {
@@ -160,7 +169,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
             const identity = (user as { verifiedIdentity?: VerifiedCredentials } | undefined)?.verifiedIdentity
             if (!identity || identity.id !== account.providerAccountId) return null
             const stepUp = await completedUserManagementStepUp(identity.authTime, identity.id, identity.roles)
-            await clearAdminOfflineStatus(identity.accessToken)
+            clearAdminOfflineStatusAfterSignIn(identity.accessToken)
             return {
               ...token, sub: identity.id, provider: "credentials",
               access_token: identity.accessToken, refresh_token: identity.refreshToken,
@@ -190,7 +199,7 @@ function keycloakConfig(serverOnly: boolean): NextAuthConfig {
           }
           const roles = rolesFromAccessToken(accessToken)
           await enforceStepUpIdentity(subject, roles, authTimeFromToken(idToken), true)
-          if (account.provider !== "keycloak-password-change") await clearAdminOfflineStatus(accessToken)
+          if (account.provider !== "keycloak-password-change") clearAdminOfflineStatusAfterSignIn(accessToken)
           const stepUp = await completedUserManagementStepUp(authTimeFromToken(idToken), subject, roles)
           const roleToken: RoleToken = {
           ...token,
