@@ -1,0 +1,32 @@
+.page {
+  box-sizing: border-box;
+  display: grid;
+  min-height: 100dvh;
+  place-items: center;
+  padding: clamp(20px, 5vw, 64px);
+  background: var(--bg, #edf3f0);
+  color: var(--ui-text-primary, #17211d);
+  font-family: var(--admin-font, system-ui, sans-serif);
+}
+.card {
+  box-sizing: border-box;
+  width: min(100%, 560px);
+  padding: clamp(24px, 5vw, 40px);
+  border: 1px solid var(--border, #d2ddd7);
+  border-radius: var(--radius, 12px);
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow, 0 8px 22px rgb(17 24 39 / 8%));
+}
+.icon { display: grid; width: 42px; height: 42px; place-items: center; margin-bottom: 20px; border: 1px solid color-mix(in srgb, #b56b00 24%, transparent); border-radius: 50%; background: color-mix(in srgb, #b56b00 10%, transparent); color: #875100; font-size: 24px; font-weight: 700; }
+.eyebrow { margin: 0 0 8px; color: var(--ui-text-secondary, #64746e); font-size: 12px; font-weight: 700; letter-spacing: .08em; }
+.card h1 { margin: 0; font-size: clamp(24px, 4vw, 30px); font-weight: 700; letter-spacing: -.025em; line-height: 1.2; }
+.message { margin: 14px 0 22px; color: var(--ui-text-secondary, #52615b); font-size: 16px; line-height: 1.6; }
+.requirement { display: grid; gap: 4px; padding: 14px 16px; border: 1px solid var(--border, #d2ddd7); border-radius: var(--radius, 9px); background: color-mix(in srgb, var(--bg, #edf3f0) 55%, var(--surface, #fff)); }
+.requirement span { color: var(--ui-text-secondary, #64746e); font-size: 13px; }
+.requirement strong { font-size: 15px; font-weight: 700; }
+.nextStep { margin: 18px 0 0; color: var(--ui-text-secondary, #64746e); font-size: 14px; line-height: 1.6; }
+.actions { display: flex; justify-content: flex-end; margin-top: 24px; }
+.actions button { min-height: 42px; padding: 9px 16px; border: 1px solid #087443; border-radius: var(--radius, 9px); background: #087443; color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.actions button:hover { background: #066238; }
+.actions button:focus-visible { outline: 3px solid color-mix(in srgb, #087443 22%, transparent); outline-offset: 2px; }
+@media (max-width: 500px) { .page { padding: 16px; } .card { padding: 24px 20px; } }

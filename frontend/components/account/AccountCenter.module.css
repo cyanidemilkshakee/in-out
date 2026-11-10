@@ -1,5 +1,6 @@
 .page { --account-surface: var(--admin-surface, var(--surface)); --account-bg: var(--admin-bg, var(--bg)); --account-line: var(--admin-line, var(--border)); --account-ink: var(--admin-text, var(--ui-text-primary)); display: grid; gap: 18px; width: min(100% - 32px, 880px); margin: 0 auto; padding: 32px 0 56px; color: var(--ui-text-primary); }
 .header { display: flex; align-items: flex-start; gap: 14px; padding: 4px 0 10px; }
+.header > div, .sectionHeading > div { min-width: 0; overflow-wrap: anywhere; }
 .headerIcon, .sectionIcon { display: grid; flex: 0 0 44px; place-items: center; width: 44px; height: 44px; border: 1px solid var(--account-line); border-radius: 12px; background: var(--account-surface); color: var(--ui-text-secondary); }
 .eyebrow { margin: 0 0 4px; color: var(--ui-text-secondary); font-size: 12px; font-weight: var(--weight-bold); letter-spacing: .09em; }
 .header h1 { margin: 0; font-size: clamp(24px, 4vw, 32px); line-height: 1.2; }
@@ -24,14 +25,14 @@
 .verification[data-verified="true"] { color: var(--ui-text-positive); }
 .hint, .empty { margin: 0; color: var(--ui-text-secondary); font-size: 13px; line-height: 1.5; }
 .verifyRow { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
-.primaryButton, .secondaryButton { display: inline-flex; align-items: center; justify-content: center; justify-self: start; min-height: 40px; padding: 8px 14px; border: 1px solid transparent; border-radius: 9px; font: inherit; font-weight: var(--weight-semibold); cursor: pointer; }
+.primaryButton, .secondaryButton { display: inline-flex; align-items: center; justify-content: center; justify-self: start; max-width: 100%; min-height: 40px; padding: 8px 14px; border: 1px solid transparent; border-radius: 9px; font: inherit; font-weight: var(--weight-semibold); overflow-wrap: anywhere; cursor: pointer; }
 .primaryButton { background: var(--account-ink); color: var(--ui-text-inverse); }
 .primaryButton:hover:not(:disabled) { border-color: var(--ui-border-hover); }
 .secondaryButton { border-color: var(--account-line); background: transparent; color: var(--ui-text-primary); }
 .secondaryButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--account-bg); }
 .primaryButton:disabled, .secondaryButton:disabled { cursor: wait; opacity: .6; }
 .credentials { display: grid; }
-.credential { display: flex; align-items: end; justify-content: space-between; gap: 14px; padding: 12px 0; border-top: 1px solid var(--account-line); }
+.credential { display: flex; align-items: flex-end; justify-content: space-between; gap: 14px; padding: 12px 0; border-top: 1px solid var(--account-line); }
 .credential > div { display: grid; flex: 1; gap: 10px; min-width: 0; }
 .credential > div > strong { font-size: 15px; }
 .requiredActions { display: grid; gap: 0; margin: 0; padding: 0; list-style: none; }
@@ -42,12 +43,18 @@
 .buttonRow { display: flex; flex-wrap: wrap; gap: 10px; }
 .secret { display: block; overflow-wrap: anywhere; padding: 12px; border: 1px solid var(--account-line); border-radius: 9px; background: var(--account-bg); font-size: 15px; letter-spacing: .04em; }
 .recoveryCodes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.recoveryCodes code { padding: 9px 10px; border: 1px solid var(--account-line); border-radius: 8px; background: var(--account-bg); font-size: 14px; }
-.notice { margin: 0; padding: 11px 13px; border: 1px solid var(--admin-line); border-radius: 9px; font-size: 14px; }
+.recoveryCodes code { min-width: 0; padding: 9px 10px; border: 1px solid var(--account-line); border-radius: 8px; background: var(--account-bg); font-size: 14px; overflow-wrap: anywhere; }
+.notice { margin: 0; padding: 11px 13px; border: 1px solid var(--admin-line); border-radius: 9px; font-size: 14px; overflow-wrap: anywhere; }
 .notice[data-kind="success"] { color: var(--ui-text-positive); }
 .notice[data-kind="error"] { color: var(--ui-text-danger); }
 .loading { display: inline-flex; align-items: center; gap: 8px; color: var(--ui-text-secondary); }
 .spinner { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 600px) { .page { width: min(100% - 24px, 880px); padding-top: 20px; } .card { padding: 15px; } .twoColumn, .recoveryCodes { grid-template-columns: minmax(0, 1fr); } .credential { align-items: stretch; flex-direction: column; } .requiredAction { align-items: stretch; flex-direction: column; } }
+@media (max-width: 767px) {
+  .page { width: min(100% - 24px, 880px); padding-top: 20px; }
+  .card { padding: 15px; }
+  .twoColumn, .recoveryCodes { grid-template-columns: minmax(0, 1fr); }
+  .credential, .requiredAction { align-items: stretch; flex-direction: column; }
+  .field input, .field select { font-size: 16px; }
+}
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

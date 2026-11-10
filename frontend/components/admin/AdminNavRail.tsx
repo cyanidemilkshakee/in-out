@@ -3,9 +3,9 @@
 import { useEffect, useRef, useState, type CSSProperties, type FocusEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, BookUser, Clock3, Grid2X2, Heart, History, Key, LockKeyhole, LockKeyholeOpen, LogOut, ScanLine, UserCog, UsersRound } from "lucide-react";
+import { Bell, BookUser, Clock3, Cpu, Grid2X2, Heart, History, Key, LockKeyhole, LockKeyholeOpen, LogOut, MapPin, ScanLine, UserCog, UsersRound } from "lucide-react";
 import { formatStepUpCountdown } from "../../../lib/userManagementStepUp";
-import { useOpenAlertCount } from "./AdminLiveProvider";
+import { useOpenAlertCountOrZero } from "./AdminLiveProvider";
 
 const navigationItems = [
   { path: "/admin/dashboard", icon: Grid2X2, label: "Dashboard", exact: true },
@@ -14,6 +14,12 @@ const navigationItems = [
   { path: "/admin/alerts", icon: Bell, label: "Alert Command Center" },
   { path: "/admin/registry", icon: BookUser, label: "Registry" },
   { path: "/terminal", icon: ScanLine, label: "Terminal", exact: true },
+];
+
+const masterNavigationItems = [
+  { path: "/admin/users", icon: UsersRound, label: "Manage users", exact: true },
+  { path: "/admin/employee-zone-access", icon: MapPin, label: "Employee zone access", exact: true },
+  { path: "/admin/zone-assignments", icon: Cpu, label: "Hardware zone access", exact: true },
 ];
 
 const returnOptions = [
@@ -26,7 +32,7 @@ function returnTime(minutes: number) {
 }
 
 export function AdminNavRail({ scrollTint, isMasterAdmin = false }: { scrollTint: number; isMasterAdmin?: boolean }) {
-  const openAlertCount = useOpenAlertCount();
+  const openAlertCount = useOpenAlertCountOrZero();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -37,9 +43,7 @@ export function AdminNavRail({ scrollTint, isMasterAdmin = false }: { scrollTint
   const stepUpRequestVersion = useRef(0);
   const isDashboard = pathname === "/admin/dashboard";
   const homePath = isMasterAdmin ? "/admin/users" : "/admin/dashboard";
-  const visibleNavigationItems = isMasterAdmin
-    ? [{ path: "/admin/users", icon: UsersRound, label: "Manage users", exact: true }]
-    : navigationItems;
+  const visibleNavigationItems = isMasterAdmin ? masterNavigationItems : navigationItems;
   const railStyle = { "--admin-rail-tint": `${Math.round(scrollTint * 100)}%` } as CSSProperties;
   const closeAccountMenu = () => setAccountOpen(false);
 
@@ -48,6 +52,7 @@ export function AdminNavRail({ scrollTint, isMasterAdmin = false }: { scrollTint
   }
 
   useEffect(() => {
+    if (isMasterAdmin) return;
     let mounted = true;
     const refreshStepUpStatus = async () => {
       const version = ++stepUpRequestVersion.current;
@@ -77,7 +82,7 @@ export function AdminNavRail({ scrollTint, isMasterAdmin = false }: { scrollTint
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshStepUpStatus);
     };
-  }, [pathname]);
+  }, [isMasterAdmin, pathname]);
 
   useEffect(() => {
     if (stepUpExpiresAt === null) return;
@@ -91,6 +96,7 @@ export function AdminNavRail({ scrollTint, isMasterAdmin = false }: { scrollTint
 
   return <><div className="admin-rail-slot"><aside
     className={`admin-navigation-rail${open || accountOpen ? " is-open" : ""}${isDashboard ? " is-dashboard" : ""}`}
+    data-master-admin={isMasterAdmin ? "true" : undefined}
     onMouseEnter={() => setOpen(true)} onMouseLeave={() => { setOpen(false); closeAccountMenu(); }} onFocusCapture={() => setOpen(true)} onBlurCapture={handleBlur} style={railStyle} aria-label="Admin quick navigation"
   >
     <Link href={homePath} className="admin-rail-brand" onClick={() => setOpen(false)} aria-label={isMasterAdmin ? "In/Out user management" : "In/Out dashboard"}><span className="admin-rail-icon"><Heart size={24} strokeWidth={2} /></span><span className="admin-rail-link-label">In/Out</span></Link>
@@ -101,11 +107,18 @@ export function AdminNavRail({ scrollTint, isMasterAdmin = false }: { scrollTint
       })}
     </nav>
     <div className="admin-rail-account">
-      {accountOpen ? <section id="admin-account-menu" className="admin-account-menu" aria-label="Account menu">
-        {!isMasterAdmin ? <div className="admin-account-menu-links"><Link href="/admin/profile" onClick={closeAccountMenu}><UserCog size={16} aria-hidden="true" /> Manage profile</Link><Link href="/admin/users" className="admin-user-management-link" onClick={closeAccountMenu} aria-label={`Manage users${isUserManagementUnlocked ? `, unlocked for ${stepUpCountdown}` : ", locked"}`}><span className="admin-user-management-label"><UsersRound size={16} aria-hidden="true" /><span>Manage users</span></span><span className="admin-user-stepup-status" data-unlocked={isUserManagementUnlocked} aria-label={isUserManagementUnlocked ? `Unlocked, ${stepUpCountdown} remaining` : "Locked, sign-in required"}>{isUserManagementUnlocked ? <time>{stepUpCountdown}</time> : null}{isUserManagementUnlocked ? <LockKeyholeOpen size={15} aria-hidden="true" /> : <LockKeyhole size={15} aria-hidden="true" />}</span></Link></div> : null}
-        <button className="admin-account-signout" type="button" onClick={() => { setAccountOpen(false); setConfirmingLogout(true); }}><LogOut size={16} aria-hidden="true" /> Sign out</button>
-      </section> : null}
-      <button type="button" onClick={() => { setAccountOpen((current) => !current); setOpen(true); }} className="nav-rail-link admin-rail-profile admin-rail-account-trigger" aria-expanded={accountOpen} aria-controls="admin-account-menu" aria-label="Open account menu" title={open ? "" : "Account menu"}><span className="admin-rail-icon"><span className="admin-profile-avatar"><UserCog size={24} strokeWidth={2} /></span></span><span className="admin-rail-link-label">Account</span></button>
+      {isMasterAdmin ? <form action="/logout" method="post" className="admin-rail-signout-form">
+        <button type="submit" className="nav-rail-link admin-rail-profile admin-rail-account-trigger" aria-label="Sign out" title={open ? "" : "Sign out"}>
+          <span className="admin-rail-icon"><LogOut size={24} strokeWidth={1.75} aria-hidden="true" /></span>
+          <span className="admin-rail-link-label">Sign out</span>
+        </button>
+      </form> : <>
+        {accountOpen ? <section id="admin-account-menu" className="admin-account-menu" aria-label="Account menu">
+          <div className="admin-account-menu-links"><Link href="/admin/profile" onClick={closeAccountMenu}><UserCog size={16} aria-hidden="true" /> Manage profile</Link><Link href="/admin/users" className="admin-user-management-link" onClick={closeAccountMenu} aria-label={`Manage users${isUserManagementUnlocked ? `, unlocked for ${stepUpCountdown}` : ", locked"}`}><span className="admin-user-management-label"><UsersRound size={16} aria-hidden="true" /><span>Manage users</span></span><span className="admin-user-stepup-status" data-unlocked={isUserManagementUnlocked} aria-label={isUserManagementUnlocked ? `Unlocked, ${stepUpCountdown} remaining` : "Locked, sign-in required"}>{isUserManagementUnlocked ? <time>{stepUpCountdown}</time> : null}{isUserManagementUnlocked ? <LockKeyholeOpen size={15} aria-hidden="true" /> : <LockKeyhole size={15} aria-hidden="true" />}</span></Link></div>
+          <button className="admin-account-signout" type="button" onClick={() => { setAccountOpen(false); setConfirmingLogout(true); }}><LogOut size={16} aria-hidden="true" /> Sign out</button>
+        </section> : null}
+        <button type="button" onClick={() => { setAccountOpen((current) => !current); setOpen(true); }} className="nav-rail-link admin-rail-profile admin-rail-account-trigger" aria-expanded={accountOpen} aria-controls="admin-account-menu" aria-label="Open account menu" title={open ? "" : "Account menu"}><span className="admin-rail-icon"><span className="admin-profile-avatar"><UserCog size={24} strokeWidth={2} /></span></span><span className="admin-rail-link-label">Account</span></button>
+      </>}
     </div>
   </aside></div>
   {confirmingLogout ? <div className="admin-signout-overlay" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) setConfirmingLogout(false); }}>

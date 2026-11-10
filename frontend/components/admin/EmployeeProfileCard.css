@@ -8,6 +8,7 @@
 }
 
 .employee-profile-overlay .employee-profile-dialog {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   width: min(1840px, 100%);
@@ -25,16 +26,15 @@
 }
 
 .employee-profile-dialog .employee-profile-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "identity period tools"; align-items: center; gap: 20px; flex: 0 0 auto; padding: 12px 32px; border-bottom: 1px solid var(--profile-border); }
-.employee-profile-dialog .employee-profile-header > .employee-profile-history-error { grid-column: 1 / -1; margin: 0; }
 .employee-profile-dialog .employee-profile-main-header { grid-area: identity; display: flex; min-width: 0; align-items: center; }
 .employee-profile-dialog .employee-profile-identity { display: grid; min-width: 0; align-content: center; gap: 4px; }
 .employee-profile-dialog .employee-profile-identity h2 { flex: 0 1 auto; min-width: 0; margin: 0; color: var(--ui-text-primary); font-size: 25px; font-weight: 700; line-height: 1.15; letter-spacing: -.03em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.employee-profile-dialog .employee-profile-identity-meta, .employee-profile-dialog .employee-profile-identity-zones, .employee-profile-dialog .employee-profile-identity-barcode { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
-.employee-profile-dialog .employee-profile-identity-meta { min-width: 0; flex-wrap: wrap; gap: 4px 14px; }
+.employee-profile-dialog .employee-profile-identity-meta, .employee-profile-dialog .employee-profile-identity-checkpoints, .employee-profile-dialog .employee-profile-identity-barcode { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.employee-profile-dialog .employee-profile-identity-meta { min-width: 0; gap: 4px 14px; }
 .employee-profile-dialog .employee-profile-identity-barcode { min-width: 0; color: var(--ui-text-secondary); font-size: 14px; overflow-wrap: anywhere; }
-.employee-profile-dialog .employee-profile-identity-zones { min-width: 0; flex-wrap: wrap; gap: 4px 10px; color: var(--ui-text-secondary); font-size: 14px; }
-.employee-profile-dialog .employee-profile-identity-zones .facility-zone-tag { min-height: 0; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--ui-text-secondary); font-size: 14px; font-weight: 500; }
-.employee-profile-dialog .employee-profile-identity-zones .facility-zone-tag + .facility-zone-tag { padding-left: 10px; border-left: 1px solid var(--profile-border); }
+.employee-profile-dialog .employee-profile-identity-checkpoints { min-width: 0; gap: 5px 6px; color: var(--ui-text-secondary); font-size: 14px; }
+.employee-profile-dialog .employee-profile-identity-checkpoints-label { font-weight: 600; }
+.employee-profile-dialog .employee-profile-identity-checkpoints .checkpoint-tag { display: inline-flex; align-items: center; min-height: 24px; padding: 3px 8px; border: 1px solid var(--admin-border); border-radius: 999px; background: color-mix(in srgb, var(--admin-surface-strong) 58%, transparent); color: var(--ui-text-primary); font-size: 12px; font-weight: var(--weight-semibold); line-height: 1.2; white-space: nowrap; }
 
 .employee-profile-dialog .employee-profile-header-tools { grid-area: tools; display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 12px; }
 .employee-profile-dialog .employee-profile-enabled-toggle { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; min-height: 44px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--ui-text-primary); font-size: 14px; cursor: pointer; }
@@ -66,7 +66,7 @@
   min-width: 0;
   min-height: 0;
   padding: 24px 32px 32px;
-  overflow-x: hidden;
+  overflow-x: auto;
   overflow-y: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
@@ -111,7 +111,6 @@
 .employee-profile-dialog .employee-profile-section-title-row, .employee-profile-dialog .employee-profile-movement-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .employee-profile-dialog .employee-profile-section-title-row h3, .employee-profile-dialog .employee-profile-movement-header h3 { margin: 0; color: var(--ui-text-primary); font-size: 20px; font-weight: 650; line-height: 1.4; letter-spacing: -.015em; }
 .employee-profile-dialog .employee-profile-chart-period { display: block; margin-top: 3px; color: var(--ui-text-secondary); font-size: 14px; line-height: 1.4; }
-.employee-profile-dialog .employee-profile-movement-header h3 { font-size: 20px; }
 .employee-profile-dialog .employee-profile-record-count { color: var(--ui-text-secondary); font-size: 14px; line-height: 1.5; white-space: nowrap; }
 .employee-profile-dialog .employee-profile-hours-chart { position: relative; display: flex; flex: 1; width: 100%; height: auto; min-height: 0; }
 .employee-profile-dialog .employee-profile-chart-summary { position: static; inset: auto; z-index: auto; display: block; flex: 0 0 auto; }
@@ -119,10 +118,10 @@
 .employee-profile-dialog .employee-profile-summary-number { font-size: 36px; font-weight: 700; line-height: 1; letter-spacing: -.045em; font-variant-numeric: tabular-nums; }
 .employee-profile-dialog .employee-profile-summary-label { font-size: 14px; font-weight: 550; letter-spacing: .03em; line-height: 1.3; }
 .employee-profile-dialog .employee-profile-hours-chart-canvas { position: relative; flex: 1; min-width: 0; min-height: 0; }
-.employee-profile-dialog .employee-profile-work-pattern-scroll { flex: 1 1 auto; height: auto; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--profile-border) transparent; }
+.employee-profile-dialog .employee-profile-work-pattern-scroll { flex: 1 1 auto; height: auto; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: var(--profile-border) transparent; }
 .employee-profile-dialog .employee-profile-work-pattern { font-size: 15px; }
-.employee-profile-dialog .employee-profile-work-pattern-title { font-size: 20px; line-height: 1.4; letter-spacing: -.015em; }
-.employee-profile-dialog .employee-profile-work-pattern-axis { position: sticky; top: 0; z-index: 5; min-height: 28px; background: var(--admin-bg); }
+.employee-profile-dialog .employee-profile-work-pattern-title { font-size: 20px; letter-spacing: -.015em; }
+.employee-profile-dialog .employee-profile-work-pattern-axis { min-height: 28px; }
 .employee-profile-dialog .employee-profile-work-pattern-axis .employee-profile-hour-label { font-size: 14px !important; line-height: 22px !important; }
 .employee-profile-dialog .employee-profile-hour-label { visibility: visible; }
 
@@ -154,7 +153,7 @@
 .employee-profile-dialog .employee-profile-record-list > li:last-child { border-bottom: 0; }
 .employee-profile-dialog .employee-profile-record-heading { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 6px 12px; min-width: 0; }
 .employee-profile-dialog .employee-profile-record-heading > strong { min-width: 0; color: var(--ui-text-primary); font-size: 15px; font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
-.employee-profile-dialog .employee-profile-record-heading > span { justify-self: end; max-width: 100%; padding: 0; border: 0; border-radius: 0; color: var(--ui-text-secondary); font-size: 13px; font-weight: 650; line-height: 1.5; text-align: end; white-space: nowrap; }
+.employee-profile-dialog .employee-profile-record-heading > span { justify-self: end; max-width: 100%; padding: 0; border: 0; border-radius: 0; color: var(--ui-text-secondary); font-size: 13px; font-weight: 650; line-height: 1.5; text-align: end; }
 .employee-profile-dialog .employee-profile-record-heading > span[data-state="active"],
 .employee-profile-dialog .employee-profile-record-heading > span[data-state="confirmed"],
 .employee-profile-dialog .employee-profile-record-heading > span[data-state="warned"] { color: var(--ui-text-positive); }
@@ -174,35 +173,33 @@
   .employee-profile-dialog .employee-profile-hour-label:not([data-major="true"]) { visibility: hidden; }
 }
 
-@media (max-width: 1000px) {
+@media (max-width: 1199px) {
   .employee-profile-dialog .employee-profile-body { gap: 24px; padding: 20px 24px 28px; }
   .employee-profile-dialog .employee-profile-body .employee-profile-movement-section { padding-left: 20px; }
   .employee-profile-dialog .employee-profile-body .employee-profile-work-pattern-section { grid-column: 1 / span 8; }
-  .employee-profile-dialog .employee-profile-body .employee-profile-open-alerts-section { grid-column: 9 / -1; padding-left: 16px; }
-  .employee-profile-dialog .employee-profile-body .employee-profile-open-alerts-section { padding-top: 0; border-top: 0; }
+  .employee-profile-dialog .employee-profile-body .employee-profile-open-alerts-section { grid-column: 9 / -1; padding-left: 16px; padding-top: 0; border-top: 0; }
   .employee-profile-dialog .employee-profile-body .employee-profile-open-alerts-section > aside { border: 0; }
   .employee-profile-dialog .employee-profile-movement-table { min-width: 720px !important; }
   .employee-profile-dialog .employee-profile-header { grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "identity tools" "period period"; gap: 8px 16px; padding: 12px 24px; }
   .employee-profile-dialog .employee-profile-period { justify-self: center; }
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   .employee-profile-overlay { padding: 0; }
-  .employee-profile-overlay .employee-profile-dialog { width: 100%; height: 100dvh; max-width: none; max-height: 100dvh; border: 0; border-radius: 0; }
+  .employee-profile-overlay .employee-profile-dialog { width: 100%; height: 100dvh; max-width: none; max-height: 100dvh; border: 0; }
   .employee-profile-dialog .employee-profile-header { gap: 8px 12px; padding: 10px 16px; }
   .employee-profile-dialog .employee-profile-identity { flex-wrap: wrap; gap: 4px 10px; }
   .employee-profile-dialog .employee-profile-identity h2 { font-size: 22px; line-height: 1.25; white-space: normal; overflow-wrap: anywhere; }
-  .employee-profile-dialog .employee-profile-identity-meta { flex-wrap: wrap; gap: 4px 8px; }
-  .employee-profile-dialog .employee-profile-identity-zones { flex-wrap: wrap; gap: 4px 8px; white-space: normal; }
+  .employee-profile-dialog .employee-profile-identity-meta { gap: 4px 8px; }
+  .employee-profile-dialog .employee-profile-identity-checkpoints { gap: 4px 8px; white-space: normal; }
   .employee-profile-dialog .employee-profile-work-pattern-dates { width: 72px !important; padding-right: 6px !important; }
   .employee-profile-dialog .employee-profile-hour-label:not([data-major="true"]) { visibility: hidden; }
   .employee-profile-dialog .employee-profile-header-tools { gap: 4px; }
-  .employee-profile-dialog .employee-profile-enabled-toggle { gap: 4px; font-size: 14px; }
-  .employee-profile-dialog .employee-profile-enabled-toggle input { width: 18px; height: 18px; }
+  .employee-profile-dialog .employee-profile-enabled-toggle { gap: 4px; }
   .employee-profile-dialog .employee-profile-header-actions { gap: 0; }
   .employee-profile-dialog .employee-profile-rule-list { flex-wrap: wrap; gap: 6px 14px; }
   .employee-profile-dialog .employee-profile-rule { flex: 1 1 140px; }
-  .employee-profile-dialog .employee-profile-header-action, .employee-profile-dialog .employee-profile-header .employee-profile-close { flex-basis: 44px; width: 44px; min-width: 44px; height: 44px; min-height: 44px; }
+  .employee-profile-dialog .employee-profile-header-action { min-width: 44px; min-height: 44px; }
   .employee-profile-dialog .employee-profile-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: 260px 340px max-content minmax(440px, 55dvh) max-content; gap: 24px; padding: 20px 16px max(24px, env(safe-area-inset-bottom)); }
   .employee-profile-dialog .employee-profile-average-section { grid-column: 1; grid-row: 1; }
   .employee-profile-dialog .employee-profile-body .employee-profile-movement-section { grid-column: 1; grid-row: 2; padding: 20px 0 0; border-left: 0; border-top: 1px solid var(--profile-border); }
@@ -231,3 +228,8 @@
   .employee-profile-dialog .employee-profile-header-tools { align-self: center; gap: 8px; }
   .employee-profile-dialog .employee-profile-record-section-heading { align-items: flex-start; gap: 6px 12px; }
 }
+
+.employee-profile-dialog .employee-profile-period, .employee-profile-dialog .employee-profile-range-controls { min-width: 0; max-width: 100%; }
+.employee-profile-dialog .employee-profile-section-title-row, .employee-profile-dialog .employee-profile-movement-header, .employee-profile-dialog .employee-profile-record-section-heading, .employee-profile-dialog .employee-profile-movement-footer { flex-wrap: wrap; }
+.employee-profile-dialog .employee-profile-record-heading > span { min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+.employee-profile-dialog .employee-profile-summary-item dt, .employee-profile-dialog .employee-profile-summary-item dd, .employee-profile-dialog .employee-profile-record-section-heading h3, .employee-profile-dialog .employee-profile-history-error { overflow-wrap: anywhere; }

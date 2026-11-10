@@ -92,6 +92,7 @@ class TerminalCheckpointAssignment(Base):
     # Namespaces distinguish a verified Keycloak subject from a certificate CN.
     terminal_identity: str = Column(String, primary_key=True)
     checkpoint_id: str = Column(String, ForeignKey("checkpoints.id"), nullable=False)
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
@@ -106,12 +107,17 @@ class PresenceState(Base):
     last_scan_timestamp = Column(DateTime(timezone=True), nullable=True)
     # Continuous visit time survives repeated approved scans while still inside.
     entry_started_at = Column(DateTime(timezone=True), nullable=True)
-    # Legacy SQL column name retained; this now deduplicates employee and
-    # visitor continuous-presence alerts for each entry episode.
-    continuous_presence_alerted_entry_at = Column(
+    # Highest six-hour no-break interval already emitted for this visit.
+    no_break_alerted_interval = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    # Reuse the legacy SQL column so existing databases need no migration.
+    # It now stores the visitor permission expiry already alerted for this visit.
+    visitor_permission_overstay_alerted_valid_to = Column(
         "visitor_overstay_alerted_entry_at", DateTime(timezone=True), nullable=True
     )
-    visitor_overstay_alerted_entry_at = synonym("continuous_presence_alerted_entry_at")
+    # Compatibility aliases for code and stored schema created by the retired
+    # continuous-presence rule.
+    continuous_presence_alerted_entry_at = synonym("visitor_permission_overstay_alerted_valid_to")
+    visitor_overstay_alerted_entry_at = synonym("visitor_permission_overstay_alerted_valid_to")
     # One admitted visit, consumed by the matching exit. Never grants re-entry.
     entry_override = Column(JSONB, nullable=True)
     updated_at = Column(

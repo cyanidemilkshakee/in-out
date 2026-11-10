@@ -121,15 +121,22 @@ async def _deliver(kind: str, payload: dict):
     if kind == "workflow_start":
         from models import PermissionRequestModel
         from manual_review_policy import MANUAL_REVIEW_TIMEOUT_MINUTES
+        is_visitor = payload["workflow"] == "VisitorApprovalWorkflow"
         async with AsyncSessionLocal() as db:
             created = await db.scalar(select(PermissionRequestModel.created_at).where(
                 PermissionRequestModel.id == payload["args"][0]))
         if created is None:
-            return  # A removed request no longer has a deadline to maintain.
+            return  # Do not start an approval workflow for a removed request.
         if created.tzinfo is None:
             created = created.replace(tzinfo=timezone.utc)
-        minutes = 30 if payload["workflow"] == "VisitorApprovalWorkflow" else MANUAL_REVIEW_TIMEOUT_MINUTES
-        args = [payload["args"][0], (created + timedelta(minutes=minutes)).isoformat()]
+        if is_visitor:
+            # Visitor approval waits for an explicit administrator decision.
+            # The third argument distinguishes new unlimited waits from older
+            # workflow histories that used a 30-minute deadline.
+            args = [payload["args"][0], None, "unlimited"]
+        else:
+            args = [payload["args"][0], (created + timedelta(
+                minutes=MANUAL_REVIEW_TIMEOUT_MINUTES)).isoformat()]
         try:
             await client.start_workflow(payload["workflow"], args=args, id=payload["workflowId"],
                 task_queue=TASK_QUEUE, id_reuse_policy=WorkflowIDReusePolicy.REJECT_DUPLICATE,

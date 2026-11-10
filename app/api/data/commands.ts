@@ -30,12 +30,20 @@ export async function executeCommand(
   switch (action) {
     case "createEmployee": {
       const input = requireObject(body.input, "Employee input") as CreateEmployeeInput;
+      const { zoneAccessRequest, ...employeeData } = input;
       const result = await callPythonApi("/v1/registry/subjects", "POST", {
         barcode: input.barcode,
         kind: "employee",
-        data: input,
+        data: employeeData,
+        ...(zoneAccessRequest ? { zone_access_request: {
+          zone_id: zoneAccessRequest.zoneId,
+          reason: zoneAccessRequest.reason,
+        } } : {}),
       });
-      return send(normalizeSubjectZones({ id: result.id, barcode: result.barcode, type: "employee", ...result.data }));
+      return send({
+        employee: normalizeSubjectZones({ id: result.id, barcode: result.barcode, type: "employee", ...result.data }),
+        request: result.request ? normalizePermissionRequest(result.request) : undefined,
+      });
     }
     case "createVisitor": {
       const input = requireObject(body.input, "Visitor input") as CreateVisitorInput;
@@ -82,7 +90,7 @@ export async function executeCommand(
       return send(normalizeSubjectZones({ id: result.id, barcode: result.barcode, type: "hardware", ...result.data }));
     }
     case "acknowledgeAlert":
-      return send(await callPythonApi(`/v1/alerts/${recordPathSegment(body.alertId, "Alert id")}`, "PATCH", { status: "acknowledged" }));
+      return send(normalizeAlert(await callPythonApi(`/v1/alerts/${recordPathSegment(body.alertId, "Alert id")}`, "PATCH", { status: "acknowledged" })));
     case "reviewAlert": {
       const result = await callPythonApi(`/v1/alerts/${recordPathSegment(body.alertId, "Alert id")}/review`, "POST", {
         decision: body.decision, reason: body.reason ?? "",
@@ -132,7 +140,8 @@ export async function executeCommand(
         : input.operatorNote;
       return send(normalizePermissionRequest(await callPythonApi("/v1/permission-requests", "POST", {
         subject_id: requireString(input.subjectId, "Subject id"),
-        checkpoint_id: requireString(input.checkpointId, "Checkpoint id"),
+        checkpoint_id: input.targetZoneId ? "" : requireString(input.checkpointId, "Checkpoint id"),
+        target_zone_id: input.targetZoneId,
         request_type: requestType,
         reason: typeof input.purpose === "string" ? input.purpose.trim() : "",
         subject_name: input.subjectName,

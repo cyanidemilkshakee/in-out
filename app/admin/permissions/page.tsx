@@ -14,7 +14,7 @@ import { readPendingPermissions, readPermissionDirectory, type PendingPermission
 import { createRefreshScheduler } from "../../../lib/refreshScheduler";
 import type { AccessPermission, PermissionRequest } from "../../../lib/types";
 import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
-import { facilityZoneLabel, formatFacilityZones } from "../../../lib/facilityZones";
+import { checkpointDisplayName, facilityZoneLabel, formatFacilityZones } from "../../../lib/facilityZones";
 import { DEFAULT_MANUAL_REVIEW_MINUTES } from "../../../lib/manualReviewDuration";
 import { AccessDirectory } from "../../../frontend/components/admin/permissions/AccessDirectory";
 import { ManualReviewCard } from "../../../frontend/components/admin/permissions/ManualReviewCard";
@@ -71,7 +71,7 @@ export default function PermissionManagerPage() {
   }, [permissions]);
   const checkpointLabel = (checkpointId?: string) => {
     const checkpoint = checkpointId ? checkpointsById.get(checkpointId) : undefined;
-    return checkpoint ? `${facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone, organizationZones)} · ${checkpoint.name}` : checkpointId || "Not specified";
+    return checkpoint ? `${facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone, organizationZones)} · ${checkpointDisplayName(checkpoint, organizationZones)}` : checkpointId || "Not specified";
   };
   const requestedCheckpointLabel = (checkpointIds?: string[]) => checkpointIds?.map((id) => checkpointLabel(id)).join(", ") ?? "";
   const [tab, setTab] = useState<DirectoryTab>("people");
@@ -324,7 +324,7 @@ export default function PermissionManagerPage() {
       ) : null}
 
       <div className={requestStyles.managerLayout}>
-        <AccessDirectory rows={directoryRows} hardwareAssets={hardwareAssets} checkpoints={checkpoints} zoneLabels={organizationZones} tab={tab} onTabChange={value => { setTab(value); setDirectoryOffset(0); setDirectorySubject(undefined); }}
+        <AccessDirectory rows={directoryRows} hardwareAssets={hardwareAssets} checkpoints={checkpoints} tab={tab} onTabChange={value => { setTab(value); setDirectoryOffset(0); setDirectorySubject(undefined); }}
           search={search} onSearchChange={value => { setSearch(value); setDirectorySubject(undefined); }} stateFilter={stateFilter} onStateFilterChange={value => { setStateFilter(value); setDirectoryOffset(0); setDirectorySubject(undefined); }}
           highlightedSubjectId={highlightSubjectId} busy={busy} isLoading={isLoading} error={error} total={directory?.total ?? 0}
           pagination={pageControls("Access directory pages", directoryOffset, directory?.total ?? 0, setDirectoryOffset)}
@@ -353,7 +353,9 @@ export default function PermissionManagerPage() {
                 tabIndex={-1}
                 className={`${requestStyles.requestCard} ${selectedRequestId === request.id ? requestStyles.selected : ""}`}
                 request={request}
-                checkpointName={normalizeCheckpointLabel(request.checkpoint) || checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId}
+                checkpointName={request.checkpointId && checkpointsById.has(request.checkpointId)
+                  ? checkpointDisplayName(checkpointsById.get(request.checkpointId)!, organizationZones)
+                  : normalizeCheckpointLabel(request.checkpoint) || request.checkpointId}
                 decisionNote={decisionNotes[request.id] ?? ""}
                 noteInvalid={Boolean(invalidDecisionNotes[request.id])}
                 noteInputRef={(node) => { decisionNoteRefs.current[request.id] = node; }}
@@ -393,16 +395,28 @@ export default function PermissionManagerPage() {
                           <h3>{request.subjectName}</h3>
                           {request.barcode ? <span className={requestStyles.visitorBarcode}>{request.barcode}</span> : null}
                           <span className={requestStyles.visitorPendingState}><span aria-hidden="true" />Pending</span>
+                          <span className={requestStyles.visitorRequestType}>Visitor access</span>
                         </div>
-                        <span className={requestStyles.visitorRequestType}>Visitor · {requestedCheckpointLabel(request.requestedCheckpoints) || formatFacilityZones(request.requestedZones, organizationZones) || "No zones assigned"}</span>
                       </div>
                     </header>
-                    <p className={requestStyles.requestMeta}>{request.purpose} · Requested by {request.requester} · {formatRequestDate(request.createdAt)}</p>
+                    <p className={`${requestStyles.requestMeta} ${requestStyles.visitorRequestMeta}`}>
+                      <strong>{request.purpose}</strong>
+                      <span>Requested by <b>{request.requester}</b></span>
+                      <time dateTime={request.createdAt}><Clock3 size={13} aria-hidden="true" />{formatRequestDate(request.createdAt)}</time>
+                    </p>
                     <dl className={requestStyles.visitorRequestDetails}>
-                      <div><dt>{request.requestedCheckpoints?.length ? "Checkpoint access" : "Checkpoint"}</dt><dd>{requestedCheckpointLabel(request.requestedCheckpoints) || checkpointLabel(request.checkpointId)}</dd></div>
-                      {!request.requestedCheckpoints?.length && <div><dt>Requested zones</dt><dd>{formatFacilityZones(request.requestedZones, organizationZones) || "None"}</dd></div>}
-                      <div><dt>Access</dt><dd>{permissionWindowLabels(request.validFrom, request.validTo).start.replace(/^Starts /, "")}</dd></div>
-                      <div><dt>Expires</dt><dd>{permissionWindowLabels(request.validFrom, request.validTo).end.replace(/^Ends /, "")}</dd></div>
+                      <div className={requestStyles.visitorRequestScope}>
+                        <dt>Requested access</dt>
+                        {request.requestedCheckpoints?.length ? <dd><span>Checkpoints</span><strong>{requestedCheckpointLabel(request.requestedCheckpoints) || "None specified"}</strong></dd> : null}
+                        {!request.requestedCheckpoints?.length && request.checkpointId ? <dd><span>Checkpoint</span><strong>{checkpointLabel(request.checkpointId)}</strong></dd> : null}
+                        {!request.requestedCheckpoints?.length && request.requestedZones?.length ? <dd><span>Zones</span><strong>{formatFacilityZones(request.requestedZones, organizationZones)}</strong></dd> : null}
+                        {!request.requestedCheckpoints?.length && !request.checkpointId && !request.requestedZones?.length ? <dd><span>None specified</span></dd> : null}
+                      </div>
+                      <div className={requestStyles.visitorRequestWindow}>
+                        <dt>Access window</dt>
+                        <dd><span>Starts</span><strong>{permissionWindowLabels(request.validFrom, request.validTo).start.replace(/^Starts /, "")}</strong></dd>
+                        <dd><span>Expires</span><strong>{permissionWindowLabels(request.validFrom, request.validTo).end.replace(/^Ends /, "")}</strong></dd>
+                      </div>
                     </dl>
                   </>
                 ) : (
@@ -412,17 +426,26 @@ export default function PermissionManagerPage() {
                     <p className={requestStyles.requestMeta}>{request.purpose}<br />Requested by {request.requester} · {formatRequestDate(request.createdAt)}</p>
                     <dl>
                       <div><dt>Checkpoint</dt><dd>{checkpointLabel(request.checkpointId)}</dd></div>
-                      {request.type !== "hardware_custody" && <div><dt>Requested zones</dt><dd>{formatFacilityZones(request.requestedZones, organizationZones) || "None"}</dd></div>}
+                      {request.type !== "hardware_custody" && <div><dt>{request.requestedCheckpoints?.length ? "Requested checkpoints" : "Requested zones"}</dt><dd>{request.requestedCheckpoints?.length ? requestedCheckpointLabel(request.requestedCheckpoints) : formatFacilityZones(request.requestedZones, organizationZones) || "None"}</dd></div>}
                       {request.direction ? <div><dt>Movement</dt><dd>{request.direction === "entry" ? "Entry" : "Exit"}</dd></div> : null}
                       {request.eventId && <div><dt>Denied scan</dt><dd><a href={`/admin/logs?eventId=${encodeURIComponent(request.eventId)}`}>{request.eventId}</a></dd></div>}
                       {request.type !== "hardware_custody" && <div><dt>Requested window</dt><dd>{permissionWindowLabels(request.validFrom, request.validTo).start}<br />{permissionWindowLabels(request.validFrom, request.validTo).end}</dd></div>}
                     </dl>
                     {request.type === "hardware_custody" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Custodian change</strong><span>{hardwareAssets.find((asset) => asset.id === (request.hardwareId || request.subjectId))?.assignedEmployeeName || "Unassigned"} → {request.carrierName || request.carrierId || "No employee selected"}</span><span>Reassigns custody until the next reassignment. Zone access stays separate.</span></div>}
-                    {request.type === "zone_access" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Current → proposed access</strong><span>{formatFacilityZones(permissions.find((item) => item.subjectId === request.subjectId)?.zones ?? people.find((item) => item.id === request.subjectId)?.allowedZones ?? hardwareAssets.find((item) => item.id === request.subjectId)?.allowedZones ?? [], organizationZones) || "No current zones"} → {formatFacilityZones(request.requestedZones, organizationZones) || "None"}</span><span>Window when requested: {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).start} / {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).end}</span><span>Replaces the complete zone set and valid window.</span></div>}
+                    {request.type === "zone_access" && <div className={`${requestStyles.comparison} admin-surface`}><strong>Current → proposed access</strong><span>{(() => {
+                      const current = permissions.find((item) => item.subjectId === request.subjectId);
+                      const currentScope = current?.checkpoints?.length
+                        ? requestedCheckpointLabel(current.checkpoints)
+                        : formatFacilityZones(current?.zones ?? people.find((item) => item.id === request.subjectId)?.allowedZones ?? hardwareAssets.find((item) => item.id === request.subjectId)?.allowedZones ?? [], organizationZones) || "No current zones";
+                      const proposedScope = request.requestedCheckpoints?.length
+                        ? requestedCheckpointLabel(request.requestedCheckpoints)
+                        : formatFacilityZones(request.requestedZones, organizationZones) || "None";
+                      return `${currentScope} → ${proposedScope}`;
+                    })()}</span><span>Window when requested: {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).start} / {permissionWindowLabels(request.previousValidFrom, request.previousValidTo).end}</span><span>Replaces the complete checkpoint set and valid window.</span></div>}
                   </>
                 )}
                 {request.operatorNote ? <p className="permission-request-note">{request.operatorNote}</p> : null}
-                <>
+                <div className={requestStyles.decisionRow}>
                 <label className={`${request.type === "visitor" ? requestStyles.visitorRequestNote : ""} permission-decision-note`}>
                   <span>Operator note</span>
                   <textarea className="admin-surface"
@@ -447,7 +470,7 @@ export default function PermissionManagerPage() {
                     <button type="button" className="permission-deny-button" disabled={busy} onClick={() => void decide(request, "denied")}>Deny</button>
                   </div>
                 </div>
-                </>
+                </div>
               </article>
                 ))}
               </div>
@@ -457,7 +480,21 @@ export default function PermissionManagerPage() {
         </div>
       </div>
 
-      {requestContext && <RequestDialog mode="grant" context={requestContext} checkpoints={checkpoints} onClose={() => setRequestContext(null)} onReview={(requestId) => { setRequestContext(null); focusRequest(requestId); }} onRevokeAccess={revokePermission} onSubmitted={(request, group) => { setRequestContext(null); setFeedback(`${request.subjectName}: ${REQUEST_LABELS[request.type].toLowerCase()} granted.`); setHighlightSubjectId(request.subjectId); setDirectorySubject(request.subjectId); setDirectoryOffset(0); setTab(group ?? (request.type === "hardware_custody" || hardwareById.has(request.subjectId) ? "hardware" : "people")); setSearch(""); setStateFilter("all"); void refresh(); }} />}
+      {requestContext && <RequestDialog mode="grant" context={requestContext} checkpoints={checkpoints} onClose={() => setRequestContext(null)} onReview={(requestId) => { setRequestContext(null); focusRequest(requestId); }} onRevokeAccess={revokePermission} onSubmitted={(request, group) => {
+        setRequestContext(null);
+        const targetZone = request.targetZoneId ? facilityZoneLabel(request.targetZoneId, organizationZones) : "the other zone";
+        const grantedLabel = request.type === "zone_access" ? "checkpoint access" : REQUEST_LABELS[request.type].toLowerCase();
+        setFeedback(request.origin === "cross_zone_request"
+          ? `${request.subjectName}: access request sent to ${targetZone}'s zone administrator.`
+          : `${request.subjectName}: ${grantedLabel} granted.`);
+        setHighlightSubjectId(request.subjectId);
+        setDirectorySubject(request.subjectId);
+        setDirectoryOffset(0);
+        setTab(group ?? (request.type === "hardware_custody" || hardwareById.has(request.subjectId) ? "hardware" : "people"));
+        setSearch("");
+        setStateFilter("all");
+        void refresh();
+      }} />}
     </div>
   );
 }

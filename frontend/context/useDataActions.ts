@@ -55,12 +55,21 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
 
   const createEmployee = useCallback(
     async (input: CreateEmployeeInput) => {
-      const employee = await service.createEmployee(input);
-      setState((current) => ({ ...current, people: mergeById(current.people, [employee]) }));
+      const created = await service.createEmployee(input);
+      const employee = "employee" in created ? created.employee : created as Person;
+      const request = "employee" in created ? created.request : undefined;
+      setState((current) => ({ ...current,
+        people: mergeById(current.people, [employee]),
+        permissionRequests: request ? mergePermissionRequests(current.permissionRequests, [request]) : current.permissionRequests,
+      }));
       // Refresh this page's scoped snapshot. Other admin scopes are refreshed
       // by the backend live event or when their route is opened.
-      reconcile(current => current.people.some(person => person.id === employee.id) ? current
-        : { ...current, people: mergeById(current.people, [employee]) });
+      reconcile(current => ({
+        ...current,
+        people: current.people.some(person => person.id === employee.id)
+          ? current.people : mergeById(current.people, [employee]),
+        permissionRequests: request ? mergePermissionRequests(current.permissionRequests, [request]) : current.permissionRequests,
+      }));
       return employee;
     },
     [service, setState, reconcile]
@@ -107,6 +116,14 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
     refreshOpenAlertCount();
     reconcile();
     return result.alert;
+  }, [service, setState, reconcile]);
+
+  const acknowledgeAlert = useCallback(async (alertId: string) => {
+    const alert = await service.acknowledgeAlert(alertId);
+    setState(current => ({ ...current, alerts: mergeAlerts(current.alerts, [alert]) }));
+    refreshOpenAlertCount();
+    reconcile();
+    return alert;
   }, [service, setState, reconcile]);
 
   const resetAlertWarnings = useCallback(async (subjectId: string, reason: string) => {
@@ -297,6 +314,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       createHardwareAsset,
       updatePerson,
       updateHardwareAsset,
+      acknowledgeAlert,
       reviewAlert,
       resetAlertWarnings,
       setAlertRuleAssignments,
@@ -327,6 +345,7 @@ export function useDataActions({ service, setState, refresh }: DataActionDepende
       queryAuditEvents,
       recordScan,
       requestBarcodeManualReview,
+      acknowledgeAlert,
       refresh,
       submitPermissionRequest,
       grantPermission,

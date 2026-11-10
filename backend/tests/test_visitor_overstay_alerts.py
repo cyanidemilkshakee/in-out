@@ -28,26 +28,33 @@ class VisitorOverstayRuleTests(unittest.TestCase):
     def _visit(self, **changes):
         return {"subjectId": "visitor", "subjectType": "visitor", "state": "inside",
                 "subjectName": "Guest", "barcode": "VISITOR", "buildingId": "a",
-                "entryStartedAt": NOW - timedelta(hours=13), "alertedEntryAt": None, **changes}
+                "entryStartedAt": NOW - timedelta(hours=13),
+                "permissionValidTo": (NOW - timedelta(hours=1)).isoformat(),
+                "alertedPermissionValidTo": None, **changes}
 
-    def test_unknown_malformed_future_and_nonvisitor_starts_are_not_invented(self):
+    def test_missing_malformed_future_expiry_and_invalid_visits_are_ignored(self):
         for changes in ({"entryStartedAt": None}, {"entryStartedAt": "2026-10-09T09:00:00Z"},
                         {"entryStartedAt": 123}, {"entryStartedAt": (NOW - timedelta(hours=13)).replace(tzinfo=None)},
-                        {"entryStartedAt": NOW + timedelta(hours=1)}, {"subjectType": "employee"},
+                        {"entryStartedAt": NOW + timedelta(hours=1)}, {"permissionValidTo": None},
+                        {"permissionValidTo": "invalid"},
+                        {"permissionValidTo": (NOW + timedelta(hours=1)).isoformat()},
+                        {"subjectType": "employee"},
                         {"state": "outside"}, {"subjectId": ""}):
             with self.subTest(changes=changes):
                 self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(),
                     [self._visit(**changes)], now=NOW), [])
 
-    def test_offsets_identify_the_same_visit_and_marker_suppresses_it(self):
-        start = NOW - timedelta(hours=13)
-        local_start = start.astimezone(timezone(timedelta(hours=5, minutes=30)))
-        first = evaluate_visitor_overstay_rules(default_alert_rules(), [self._visit(entryStartedAt=start)], now=NOW)
-        local = evaluate_visitor_overstay_rules(default_alert_rules(), [self._visit(entryStartedAt=local_start)], now=NOW)
+    def test_offsets_identify_the_same_expiry_and_marker_suppresses_it(self):
+        expiry = NOW - timedelta(hours=1)
+        local_expiry = expiry.astimezone(timezone(timedelta(hours=5, minutes=30)))
+        first = evaluate_visitor_overstay_rules(default_alert_rules(),
+            [self._visit(permissionValidTo=expiry.isoformat())], now=NOW)
+        local = evaluate_visitor_overstay_rules(default_alert_rules(),
+            [self._visit(permissionValidTo=local_expiry.isoformat())], now=NOW)
         self.assertEqual(first[0]["id"], local[0]["id"])
-        self.assertEqual(first[0]["entryStartedAt"], start.isoformat())
+        self.assertEqual(first[0]["permissionValidTo"], expiry.isoformat())
         self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(),
-            [self._visit(entryStartedAt=local_start, alertedEntryAt=start)], now=NOW), [])
+            [self._visit(permissionValidTo=local_expiry.isoformat(), alertedPermissionValidTo=expiry)], now=NOW), [])
 
 
 @unittest.skipUnless(fixture.TEST_URL, "Set TEST_DATABASE_URL for isolated PostgreSQL integration tests")
@@ -56,11 +63,13 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
     asyncTearDown = fixture.DatabaseTests.asyncTearDown
 
     async def _visitor(self, subject_id="visitor", *, state="inside", building="a",
-                       started_at=None, status="pre_approved", metadata_inside=False):
+                       started_at=None, status="pre_approved", metadata_inside=False,
+                       valid_to=NOW - timedelta(hours=1)):
         async with self.sessions() as db:
             db.add(Subject(id=subject_id, kind="visitor", barcode=subject_id, person=Person(data={
                 "name": "Guest " + subject_id, "status": status, "allowedZones": ["a", "b"],
-                "inside": metadata_inside, "validTo": "2020-01-01T00:00:00Z" if status == "expired" else ""})))
+                "inside": metadata_inside,
+                "validTo": valid_to.isoformat() if isinstance(valid_to, datetime) else valid_to or ""})))
             await db.flush()
             db.add(PresenceState(subject_id=subject_id, state=state, entry_building_id=building,
                 last_scan_timestamp=started_at, entry_started_at=started_at))
@@ -73,8 +82,10 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
             return await run_alert_rule_evaluation()
 
     async def _record(self, at, *, direction, checkpoint="cp-main", subject_id="visitor"):
-        with patch("terminal_scans.datetime", wraps=datetime) as clock:
+        with patch("terminal_scans.datetime", wraps=datetime) as clock, \
+             patch("movement_logic.datetime", wraps=datetime) as movement_clock:
             clock.now.return_value = at
+            movement_clock.now.return_value = at
             async with self.sessions() as db:
                 result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(
                     barcode=subject_id, checkpointId=checkpoint, direction=direction), "browser:test-operator")
@@ -85,20 +96,22 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def _assert_unalerted(self, subject_id="visitor"):
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Alert)), 0)
-            self.assertIsNone((await db.get(PresenceState, subject_id)).visitor_overstay_alerted_entry_at)
+            self.assertIsNone((await db.get(PresenceState, subject_id)).visitor_permission_overstay_alerted_valid_to)
 
-    async def test_strict_twelve_hour_boundary_and_both_buildings(self):
-        started_at = NOW - timedelta(hours=12)
-        await self._visitor("main-visitor", started_at=started_at)
-        await self._visitor("secure-visitor", building="b", started_at=started_at)
-        self.assertEqual(await self._evaluate(), 0)
-        self.assertEqual(await self._evaluate(NOW + timedelta(microseconds=1)), 2)
+    async def test_permission_expiry_boundary_and_both_zones(self):
+        expiry = NOW
+        started_at = NOW - timedelta(hours=8)
+        await self._visitor("main-visitor", started_at=started_at, valid_to=expiry)
+        await self._visitor("secure-visitor", building="b", started_at=started_at, valid_to=expiry)
+        self.assertEqual(await self._evaluate(NOW - timedelta(microseconds=1)), 0)
+        self.assertEqual(await self._evaluate(NOW), 2)
         self.assertEqual(await self._evaluate(NOW + timedelta(hours=1)), 0)
         async with self.sessions() as db:
             alerts = (await db.scalars(select(Alert))).all()
             self.assertEqual({row.data["entryBuildingId"] for row in alerts},
                 {"a", "b"})
             self.assertEqual({row.data["checkpoint"] for row in alerts}, {"A", "B"})
+            self.assertEqual({row.data["permissionValidTo"] for row in alerts}, {expiry.isoformat()})
             self.assertTrue(all(row.data["subjectType"] == "visitor" for row in alerts))
             self.assertTrue(all(row.source_event_id is None for row in alerts))
 
@@ -116,9 +129,9 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             alerts = (await db.scalars(select(Alert))).all()
             self.assertEqual({row.data["subjectId"] for row in alerts}, {"expired", "inactive", "restricted"})
-            self.assertIsNone((await db.get(PresenceState, "actually-outside")).visitor_overstay_alerted_entry_at)
+            self.assertIsNone((await db.get(PresenceState, "actually-outside")).visitor_permission_overstay_alerted_valid_to)
 
-    async def test_old_live_visit_and_alert_retention_never_retrigger_same_visit(self):
+    async def test_expired_live_visit_and_alert_retention_never_retrigger_same_permission(self):
         started_at = NOW - timedelta(days=5)
         await self._visitor(started_at=started_at)
         self.assertEqual(await self._evaluate(), 1)
@@ -133,7 +146,8 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         self.assertEqual(await self._evaluate(NOW + timedelta(days=3)), 0)
         async with self.sessions() as db:
-            self.assertEqual((await db.get(PresenceState, "visitor")).visitor_overstay_alerted_entry_at, started_at)
+            self.assertEqual((await db.get(PresenceState, "visitor")).visitor_permission_overstay_alerted_valid_to,
+                NOW - timedelta(hours=1))
             self.assertEqual(await db.scalar(select(func.count()).select_from(Alert)), 0)
 
     async def test_actual_exit_and_reentry_reset_the_visit_and_allow_one_new_alert(self):
@@ -152,20 +166,25 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             presence = await db.get(PresenceState, "visitor")
             self.assertIsNone(presence.entry_started_at)
-            self.assertIsNone(presence.visitor_overstay_alerted_entry_at)
+            self.assertIsNone(presence.visitor_permission_overstay_alerted_valid_to)
         self.assertEqual(await self._evaluate(exit_at), 0)
         reentry = NOW + timedelta(minutes=2)
+        new_expiry = reentry + timedelta(hours=2)
+        async with self.sessions() as db:
+            person = await db.get(Person, "visitor")
+            person.data = {**person.data, "validTo": new_expiry.isoformat()}
+            await db.commit()
         await self._record(reentry, direction="entry", checkpoint="server-room")
-        self.assertEqual(await self._evaluate(reentry + timedelta(hours=12)), 0)
-        self.assertEqual(await self._evaluate(reentry + timedelta(hours=12, microseconds=1)), 1)
-        self.assertEqual(await self._evaluate(reentry + timedelta(hours=13)), 0)
+        self.assertEqual(await self._evaluate(new_expiry - timedelta(microseconds=1)), 0)
+        self.assertEqual(await self._evaluate(new_expiry), 1)
+        self.assertEqual(await self._evaluate(new_expiry + timedelta(hours=1)), 0)
         async with self.sessions() as db:
             alerts = (await db.scalars(select(Alert))).all()
             self.assertEqual(len({row.id for row in alerts}), 2)
             self.assertEqual({row.data["entryStartedAt"] for row in alerts}, {entry.isoformat(), reentry.isoformat()})
             presence = await db.get(PresenceState, "visitor")
             self.assertEqual(presence.entry_started_at, reentry)
-            self.assertEqual(presence.visitor_overstay_alerted_entry_at, reentry)
+            self.assertEqual(presence.visitor_permission_overstay_alerted_valid_to, new_expiry)
 
     async def test_disabled_stored_global_rule_suppresses_default_without_marking_visit(self):
         await self._visitor(started_at=NOW - timedelta(hours=13))
@@ -278,7 +297,7 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
         await self._assert_unalerted()
         self.assertEqual(await self._evaluate(), 1)
 
-    async def test_seed_registers_four_rules_and_preserves_disabled_policy(self):
+    async def test_seed_registers_all_rules_and_preserves_disabled_policy(self):
         rule = next(row for row in default_alert_rules() if row["conditionKey"] == "visitor_overstay")
         async with self.sessions() as db:
             db.add(AlertRule(id=rule["id"], data={**rule, "enabled": False}))
@@ -288,7 +307,7 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             rows = (await db.scalars(select(AlertRule))).all()
             expected = {rule["id"] for rule in default_alert_rules()}
-            self.assertEqual(len(expected), 4)
+            self.assertEqual(len(expected), 7)
             self.assertEqual({row.id for row in rows}, expected)
             self.assertFalse((await db.get(AlertRule, rule["id"])).data["enabled"])
 
@@ -309,7 +328,7 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(inside.entry_started_at, inside.last_scan_timestamp)
             for subject_id in ("unknown", "outside"):
                 self.assertIsNone((await db.get(PresenceState, subject_id)).entry_started_at)
-            self.assertTrue(all(row.visitor_overstay_alerted_entry_at is None
+            self.assertTrue(all(row.visitor_permission_overstay_alerted_valid_to is None
                 for row in (await db.scalars(select(PresenceState))).all()))
 
 

@@ -6,7 +6,8 @@ from fastapi import HTTPException
 from sqlalchemy import select, case
 from sqlalchemy.orm import selectinload
 
-from access_validation import require_registered_checkpoint, validate_permission_window, validate_zones
+from access_validation import (require_registered_checkpoint, validate_permission_window,
+    validate_registered_checkpoints, validate_zones)
 from models import Subject, Person, Checkpoint, PermissionRequestModel
 from permission_decisions import apply_permission_decision
 from schemas import SubjectCreate
@@ -72,6 +73,7 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
     metadata = subject.hardware if subject.kind == "hardware" else subject.person
     subject_data = (metadata.data if metadata else {}) or {}
     zones = []
+    requested_checkpoints = []
     valid_from, valid_to = "", ""
     carrier = None
     carrier_name = ""
@@ -87,10 +89,17 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
         if kind == "zone_access" and not payload.requested_zones:
             raise HTTPException(422, "Choose the complete resulting zone set")
         zones = validate_zones(payload.requested_zones or [checkpoint.zone_id], known_zone_ids=known_zone_ids)
-        if kind == "visitor" and payload.requested_checkpoints:
-            if payload.requested_checkpoints != [checkpoint.id]:
+        if payload.requested_checkpoints:
+            selected = await validate_registered_checkpoints(db, payload.requested_checkpoints)
+            requested_checkpoints = [item.id for item in selected]
+            if checkpoint.id not in requested_checkpoints:
+                raise HTTPException(422, "The primary checkpoint must be included in checkpoint access")
+            if kind == "visitor" and requested_checkpoints != [checkpoint.id]:
                 raise HTTPException(422, "Visitor access must target the selected checkpoint only")
-            if zones != [checkpoint.zone_id]:
+            checkpoint_zones = list(dict.fromkeys(item.zone_id for item in selected))
+            if set(zones) != set(checkpoint_zones):
+                raise HTTPException(422, "Zone scope must match the selected checkpoints")
+            if kind == "visitor" and zones != [checkpoint.zone_id]:
                 raise HTTPException(422, "Visitor checkpoint access must use the selected checkpoint's zone")
         valid_from = payload.valid_from or now.isoformat()
         valid_to = "" if permanent_access else payload.valid_to
@@ -111,11 +120,10 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
         "requestedZones": zones, "validFrom": valid_from, "validTo": valid_to,
         "status": "pending", "createdAt": (existing.data or {}).get("createdAt") if existing else now.isoformat(),
         "origin": "permission_manager"}
-    if kind == "visitor":
-        if payload.requested_checkpoints:
-            data["requestedCheckpoints"] = [checkpoint.id]
-        else:
-            data.pop("requestedCheckpoints", None)
+    if requested_checkpoints:
+        data["requestedCheckpoints"] = requested_checkpoints
+    elif kind in {"visitor", "zone_access"}:
+        data.pop("requestedCheckpoints", None)
     if permanent_access:
         data["permanentAccess"] = True
     if carrier:

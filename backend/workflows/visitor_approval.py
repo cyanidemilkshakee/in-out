@@ -1,5 +1,5 @@
 """
-VisitorApprovalWorkflow — Waits 30 minutes for admin to approve a new visitor.
+VisitorApprovalWorkflow — Waits for an administrator to approve or deny a visitor.
 """
 from __future__ import annotations
 
@@ -24,9 +24,12 @@ class VisitorApprovalWorkflow:
         self._status: str = "pending"
 
     @workflow.run
-    async def run(self, request_id: str, deadline_at: str | None = None) -> str:
+    async def run(self, request_id: str, deadline_at: str | None = None,
+                  deadline_mode: str = "timed") -> str:
         if not workflow.patched("database-authoritative-approval-signals-v1"):
             return await self._legacy_notification_sequence(request_id)
+        if deadline_mode == "unlimited":
+            return await self._wait_for_decision(request_id)
         deadline = (datetime.fromisoformat(deadline_at) if deadline_at is not None
                     else workflow.now() + timedelta(minutes=30))
         while True:
@@ -51,8 +54,24 @@ class VisitorApprovalWorkflow:
             if status in {"approved", "denied"}:
                 self._status = "auto_denied" if timed_out and status == "denied" else status
                 return self._status
+            if timed_out and persisted.get("_visitorDeadlineDisabled") is True:
+                return await self._wait_for_decision(request_id)
             if timed_out:
                 await workflow.sleep(timedelta(seconds=30))
+
+    async def _wait_for_decision(self, request_id: str) -> str:
+        """Wait without a timer; every signal is checked against persisted state."""
+        while True:
+            await workflow.wait_condition(lambda: self._decision is not None)
+            notification, self._decision = self._decision, None
+            persisted = await execute_approval_activity(
+                approve_visitor if notification.get("decision") == "approved" else deny_visitor,
+                args=[request_id, notification.get("reason", "")],
+                start_to_close_timeout=timedelta(seconds=30), retry_policy=_RETRY)
+            status = persisted.get("status")
+            if status in {"approved", "denied"}:
+                self._status = status
+                return self._status
 
     async def _legacy_notification_sequence(self, request_id: str) -> str:
         """Old history ordering; signal activities are now read-only observers."""
@@ -62,6 +81,9 @@ class VisitorApprovalWorkflow:
             persisted = await execute_approval_activity(auto_deny_visitor, request_id,
                 start_to_close_timeout=timedelta(seconds=30), retry_policy=_RETRY)
             status = persisted.get("status") if isinstance(persisted, dict) else "pending"
+            if (status == "pending" and isinstance(persisted, dict)
+                    and persisted.get("_visitorDeadlineDisabled") is True):
+                return await self._wait_for_decision(request_id)
             self._status = "auto_denied" if status == "denied" else status
             return self._status
         persisted = await execute_approval_activity(

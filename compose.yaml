@@ -329,6 +329,34 @@ services:
       temporal-namespace-init:
         condition: service_completed_successfully
 
+  # Destructive, opt-in local fixture loader. Never starts with the normal app.
+  demo-seed:
+    profiles: [demo]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    networks: [app-db, identity-db]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://inout_migrator:${MIGRATION_DB_PASSWORD:?Generate MIGRATION_DB_PASSWORD}@postgres-primary:1020/inout
+      - KEYCLOAK_ADMIN_BASE=http://keycloak:1022
+      - KEYCLOAK_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME in .env}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      - DEMO_CREDENTIALS_PATH=/output/full-demo-accounts.csv
+    volumes:
+      - ./.local-test-accounts:/output
+    command: ["python", "seed_full_demo.py", "--reset", "--provision-keycloak"]
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      backend-init:
+        condition: service_completed_successfully
+      keycloak:
+        condition: service_healthy
+
   python-api:
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
@@ -353,9 +381,22 @@ services:
       - KEYCLOAK_ISSUER=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:1022/realms/inout
       - KEYCLOAK_ADMIN_BASE=http://keycloak:1022
+      - KEYCLOAK_INVITE_CLIENT_ID=${KEYCLOAK_INVITE_CLIENT_ID:-inout-invitations}
+      - KEYCLOAK_INVITE_CLIENT_SECRET=${KEYCLOAK_INVITE_CLIENT_SECRET:-}
       - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
       - KEYCLOAK_JWKS_CACHE_TTL=${KEYCLOAK_JWKS_CACHE_TTL:-300}
       - KEYCLOAK_STEP_UP_SIGNING_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
+      - INVITE_APP_BASE_URL=${INOUT_APP_URL:-http://app.localhost:${APP_PORT:-1008}}
+      - INVITE_TTL_SECONDS=${INVITE_TTL_SECONDS:-900}
+      - INVITE_SMTP_HOST=${KEYCLOAK_SMTP_HOST:-}
+      - INVITE_SMTP_PORT=${KEYCLOAK_SMTP_PORT:-587}
+      - INVITE_SMTP_FROM=${KEYCLOAK_SMTP_FROM:-}
+      - INVITE_SMTP_DISPLAY_NAME=${KEYCLOAK_SMTP_FROM_DISPLAY_NAME:-InOut Management}
+      - INVITE_SMTP_AUTH=${KEYCLOAK_SMTP_AUTH:-true}
+      - INVITE_SMTP_USER=${KEYCLOAK_SMTP_USER:-}
+      - INVITE_SMTP_PASSWORD=${KEYCLOAK_SMTP_PASSWORD:-}
+      - INVITE_SMTP_STARTTLS=${KEYCLOAK_SMTP_STARTTLS:-true}
+      - INVITE_SMTP_SSL=${KEYCLOAK_SMTP_SSL:-false}
       - PUBLIC_PORT=${PYTHON_API_PORT:-1002}
       - MAX_REQUEST_BODY_BYTES=${MAX_REQUEST_BODY_BYTES:-262144}
       - DATA_BYTES_PER_MINUTE=${DATA_BYTES_PER_MINUTE:-67108864}
@@ -565,7 +606,7 @@ services:
     restart: unless-stopped
 
   prometheus:
-    networks: [monitoring]
+    networks: [edge, monitoring]
     image: prom/prometheus:${PROMETHEUS_VERSION:-v3.15.0}
     profiles: [observability]
     security_opt: [no-new-privileges:true]

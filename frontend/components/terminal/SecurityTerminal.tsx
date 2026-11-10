@@ -9,7 +9,7 @@ import type { Person, PermissionRequest, RecordScanInput, ScanDecision, Terminal
 import { DataServiceError } from "../../../services/httpDataService";
 import { useDateTimeNow } from "../../hooks/useDateTimeNow";
 import { formatRequestDate } from "../admin/permissions/requestPresentation";
-import { facilityZoneLabel } from "../../../lib/facilityZones";
+import { checkpointDisplayName, facilityZoneLabel } from "../../../lib/facilityZones";
 import {
   cacheTerminalConfig,
   enqueueTerminalScan,
@@ -272,6 +272,28 @@ export function SecurityTerminal({
     };
   }, []);
   useEffect(() => {
+    const checkpointId = checkpoint?.id;
+    if (!checkpointId || terminalAssignment?.operatorSubject !== operatorSubject
+        || terminalAssignment.checkpointId !== checkpointId) return;
+    const sendHeartbeat = () => {
+      if (!navigator.onLine) return;
+      void fetch("/api/terminal/heartbeat", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ checkpointId }),
+      }).catch(() => undefined);
+    };
+    sendHeartbeat();
+    const interval = window.setInterval(sendHeartbeat, 60_000);
+    window.addEventListener("online", sendHeartbeat);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("online", sendHeartbeat);
+    };
+  }, [checkpoint?.id, operatorSubject, terminalAssignment?.checkpointId, terminalAssignment?.operatorSubject]);
+  useEffect(() => {
     if (networkOnline && pendingQueueCount) void synchronizeQueuedScans();
   }, [networkOnline, pendingQueueCount, synchronizeQueuedScans]);
   useEffect(() => () => {
@@ -453,7 +475,7 @@ export function SecurityTerminal({
             <span>Assigned location</span>
             {checkpoint ? <div className={styles.assignedLocation}>
               <div><span>Zone</span><strong>{assignedZone}</strong></div>
-              <div><span>Checkpoint</span><strong>{checkpoint.name}</strong></div>
+              <div><span>Checkpoint</span><strong>{checkpointDisplayName(checkpoint)}</strong></div>
             </div> : <strong className={styles.assignedCheckpoint}>{isLoading ? "Loading assignment…" : "No checkpoint assigned"}</strong>}
             {!checkpoint && !isLoading && <small>
               No checkpoint is assigned to {accountName || accountEmail || "this account"}. Assignments are per signed-in account; ask an administrator to check this account in Manage users.
@@ -479,7 +501,7 @@ export function SecurityTerminal({
           {checkpoint && <section className={styles.visitorRoster} aria-labelledby="terminal-visitors-title">
             <header className={styles.visitorRosterHeader}>
               <h2 id="terminal-visitors-title">Expected visitors</h2>
-              <span>{assignedZone} · {checkpoint.name} · {visibleTerminalVisitors.length} registered</span>
+              <span>{assignedZone} · {checkpointDisplayName(checkpoint)} · {visibleTerminalVisitors.length} registered</span>
             </header>
             <ul className={`${styles.visitorRosterList} scrollable-content`}>
               {visibleTerminalVisitors.length ? visibleTerminalVisitors.map((visitor) => (

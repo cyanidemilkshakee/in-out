@@ -102,3 +102,33 @@ async def require_registered_checkpoint(db, value):
         if zone is None or getattr(zone, "active", True) is False:
             raise HTTPException(422, "Checkpoint is in an inactive organization zone")
     return checkpoint_id
+
+
+async def validate_registered_checkpoints(db, values):
+    """Validate a bounded checkpoint scope and keep its zones active through commit."""
+    if (not isinstance(values, list) or not values or len(values) > 16
+            or any(not isinstance(value, str) or not value.strip() for value in values)):
+        raise HTTPException(422, "Choose between one and 16 checkpoints")
+    checkpoint_ids = [canonical_checkpoint_id(value.strip()) for value in values]
+    if len(set(checkpoint_ids)) != len(checkpoint_ids) or any(
+        len(value) > 64 or not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", value)
+        for value in checkpoint_ids
+    ):
+        raise HTTPException(422, "Checkpoint access must contain unique registered checkpoint IDs")
+
+    result = await db.scalars(select(Checkpoint).where(
+        Checkpoint.id.in_(checkpoint_ids), Checkpoint.active.is_not(False)
+    ).order_by(Checkpoint.id))
+    checkpoints = {item.id: item for item in result.all()}
+    if len(checkpoints) != len(checkpoint_ids):
+        raise HTTPException(422, "One or more selected checkpoints are unavailable")
+
+    zone_ids = {item.zone_id for item in checkpoints.values() if item.zone_id}
+    if any(not item.zone_id for item in checkpoints.values()):
+        raise HTTPException(422, "Every selected checkpoint must belong to an active organization zone")
+    active_zones = await db.scalars(select(OrganizationZone.id).where(
+        OrganizationZone.id.in_(zone_ids), OrganizationZone.active.is_(True)
+    ).order_by(OrganizationZone.id).with_for_update(read=True))
+    if set(active_zones.all()) != zone_ids:
+        raise HTTPException(422, "One or more selected checkpoints are in an inactive organization zone")
+    return [checkpoints[checkpoint_id] for checkpoint_id in checkpoint_ids]

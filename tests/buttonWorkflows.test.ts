@@ -52,14 +52,15 @@ test("Automated rules displays visitor and cross-building alerts with automatic 
   const rule = { category: "presence_anomaly", severity: "medium", enabled: true, scope: "", recentTriggers: 0 } as const;
   const rules: AlertRule[] = [
     { ...rule, id: "rule-cross-building-scan", name: "Cross-building scan", description: "Scan while inside another building.", conditionKey: "cross_building_scan", eligibleSubjectTypes: ["employee", "visitor"] },
-    { ...rule, id: "rule-visitor-overstay", name: "Visitor overstay", description: "Inside for more than twelve hours.", conditionKey: "visitor_overstay", eligibleSubjectTypes: ["employee", "visitor"] },
+    { ...rule, id: "rule-visitor-overstay", name: "Visitor overstay", description: "Inside after approved access expires.", conditionKey: "visitor_overstay", eligibleSubjectTypes: ["visitor"] },
     { ...rule, id: "rule-no-break", name: "No break recorded", description: "Employee workday.", conditionKey: "no_break", eligibleSubjectTypes: ["employee"] },
   ];
   const html = renderToStaticMarkup(createElement(AutomatedRules, { rules }));
   assert.match(html, /3 enabled/);
   assert.match(html, /Visitor overstay/);
   assert.match(html, /Eligible: All employees and visitors/);
-  assert.equal(html.match(/Eligible: All employees and visitors/g)?.length, 2);
+  assert.equal(html.match(/Eligible: All employees and visitors/g)?.length, 1);
+  assert.match(html, /Eligible: Visitors · Evaluated while inside after access expiry/);
   assert.match(html, /Employees · Assigned per employee/);
 });
 

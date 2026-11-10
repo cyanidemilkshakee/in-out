@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowUpRight, LoaderCircle, RotateCcw, ShieldAlert } from "lucide-react";
 import type { Alert, AlertWarningSummary } from "../../../../lib/types";
 import type { AlertSubjectOption } from "./AlertSubjectPicker";
-import { formatAlertReviewDate } from "./alertPresentation";
+import { alertGroupDateRange, formatAlertReviewDate, groupAlertsBySubjectAndType } from "./alertPresentation";
 import styles from "./EmployeeAlertManagement.module.css";
 
 export function WarningSummary({ warnings, alerts, selectedSubject, onReset, onViewHistory, isLoading = false }: {
@@ -40,6 +40,7 @@ export function WarningSummary({ warnings, alerts, selectedSubject, onReset, onV
     })
     .sort((left, right) => new Date(right.review?.reviewedAt ?? 0).getTime() - new Date(left.review?.reviewedAt ?? 0).getTime())
     : [];
+  const groupedWarnings = groupAlertsBySubjectAndType(triggeredWarnings);
 
   useEffect(() => {
     setReason("");
@@ -68,12 +69,13 @@ export function WarningSummary({ warnings, alerts, selectedSubject, onReset, onV
           : <Link className={styles.historyLink} href={`/admin/registry?tab=alerts&subject=${encodeURIComponent(selectedSubject.subjectId)}`}>View history<ArrowUpRight size={17} aria-hidden="true" /></Link>}
         {hasEntryRestriction && <span className={styles.holdBadge}><ShieldAlert size={17} aria-hidden="true" />Entry blocked</span>}
       </div>
-      {triggeredWarnings.length ? <ul className={`${styles.warningList} scrollable-content`}>{triggeredWarnings.map((alert) => (
-        <li key={alert.id}>
-          <div><strong>{alert.title || alert.ruleId || "Confirmed alert"}</strong>{alert.severity !== "medium" && <span className={styles.severity} data-severity={alert.severity}>{alert.severity}</span>}</div>
-          {alert.review?.reviewedAt && <time dateTime={alert.review.reviewedAt}>{formatAlertReviewDate(alert.review.reviewedAt)}</time>}
+      {groupedWarnings.length ? <ul className={`${styles.warningList} scrollable-content`}>{groupedWarnings.map((group) => {
+        const alert = group.alerts[0];
+        return <li key={group.key}>
+          <div><strong>{alert.title || alert.ruleId || "Confirmed alert"}</strong>{group.alerts.length > 1 && <span className={styles.severity}>{group.alerts.length} occurrences</span>}{alert.severity !== "medium" && <span className={styles.severity} data-severity={alert.severity}>{alert.severity}</span>}</div>
+          <time>{alertGroupDateRange(group.alerts)}</time>
         </li>
-      ))}</ul> : <p className={styles.warningEmpty}>{warningCount ? "Warning details are available in alert history." : "No current warnings."}</p>}
+      })}</ul> : <p className={styles.warningEmpty}>{warningCount ? "Warning details are available in alert history." : "No current warnings."}</p>}
       {canReset && <div className={styles.resetPanel}>
         <div className={styles.resetControls}>
           <input ref={noteRef} type="text" maxLength={1000} value={reason} disabled={busy || isLoading} aria-label={`Reason to reset warnings for ${selectedSubject.subjectName}`} aria-invalid={invalidReason} placeholder="Reason for reset (required)" onChange={(event) => { setReason(event.target.value); if (event.target.value.trim()) setInvalidReason(false); }} />

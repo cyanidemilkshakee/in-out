@@ -17,10 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import has_admin_role, has_master_admin_role, verify_admin_request
 from database import get_db
 from event_outbox import enqueue_changed
-from models import AuditEvent, Checkpoint, PermissionRequestModel, TerminalCheckpointAssignment
+from models import AuditEvent, Checkpoint, OrganizationZone, PermissionRequestModel, TerminalCheckpointAssignment
 from user_management_locks import get_window_guard_db, require_unlocked_window
 from user_management_step_up import verified_user_management_window
 from zone_access import admin_zone_ids, require_checkpoint_scope, require_zone_scope
+from facility_zones import strip_zone_name_prefix
 
 router = APIRouter(prefix="/v1/checkpoints", tags=["checkpoints"])
 _bearer = HTTPBearer(auto_error=False)
@@ -72,8 +73,8 @@ async def _checkpoint_admin_context(
     return actor
 
 
-def _checkpoint_document(checkpoint: Checkpoint) -> dict[str, Any]:
-    return {
+def _checkpoint_document(checkpoint: Checkpoint, zone_name: str | None = None) -> dict[str, Any]:
+    document = {
         **(checkpoint.data or {}),
         "id": checkpoint.id,
         "zone": checkpoint.zone_id,
@@ -83,6 +84,13 @@ def _checkpoint_document(checkpoint: Checkpoint) -> dict[str, Any]:
         "required": checkpoint.required,
         "active": checkpoint.active,
     }
+    if zone_name:
+        for field in ("name", "gateLabel"):
+            value = document.get(field)
+            if isinstance(value, str):
+                document[field] = strip_zone_name_prefix(value, zone_name)
+        document["zoneName"] = zone_name
+    return document
 
 
 def _audit(checkpoint_id: str, name: str, zone_id: str, actor: dict[str, Any], action: str, now: datetime) -> AuditEvent:
@@ -112,11 +120,13 @@ async def list_checkpoints(
     zones = await admin_zone_ids(db, actor)
     if not zones:
         return []
-    rows = await db.scalars(
-        select(Checkpoint).where(Checkpoint.active.is_(True), Checkpoint.zone_id.in_(zones))
+    rows = await db.execute(
+        select(Checkpoint, OrganizationZone.name)
+        .join(OrganizationZone, OrganizationZone.id == Checkpoint.zone_id)
+        .where(Checkpoint.active.is_(True), Checkpoint.zone_id.in_(zones))
         .order_by(Checkpoint.zone_id, Checkpoint.number)
     )
-    return [_checkpoint_document(checkpoint) for checkpoint in rows]
+    return [_checkpoint_document(checkpoint, zone_name) for checkpoint, zone_name in rows]
 
 
 @router.post("", status_code=201)
@@ -150,11 +160,14 @@ async def create_checkpoint(
                 await db.flush()
                 await enqueue_changed(db)
                 await db.commit()
-                return _checkpoint_document(existing)
+                return _checkpoint_document(existing, zone.name)
         else:
             number = int(await db.scalar(select(func.max(Checkpoint.number)).where(
                 Checkpoint.zone_id == zone.id)) or 2) + 1
-            name, gate_type, label = payload.name, "custom", ""
+            name = strip_zone_name_prefix(payload.name, zone.name)
+            if not name or not any(character.isalnum() for character in name):
+                raise HTTPException(status_code=422, detail="Checkpoint name must not repeat its zone name")
+            gate_type, label = "custom", ""
             duplicate = await db.scalar(select(Checkpoint.id).where(
                 Checkpoint.zone_id == zone.id,
                 func.lower(Checkpoint.data["name"].astext) == name.casefold(),
@@ -188,7 +201,7 @@ async def create_checkpoint(
         await db.flush()
         await enqueue_changed(db)
         await db.commit()
-        return _checkpoint_document(checkpoint)
+        return _checkpoint_document(checkpoint, zone.name)
     except HTTPException:
         await db.rollback()
         raise
@@ -210,6 +223,10 @@ async def rename_checkpoint(
     """Rename a checkpoint while preserving its stable ID and assignments."""
     checkpoint = await require_checkpoint_scope(db, actor, checkpoint_id)
     try:
+        zone = await db.get(OrganizationZone, checkpoint.zone_id)
+        clean_name = strip_zone_name_prefix(payload.name, zone.name if zone else "")
+        if not clean_name or not any(character.isalnum() for character in clean_name):
+            raise HTTPException(status_code=422, detail="Checkpoint name must not repeat its zone name")
         await db.execute(select(func.pg_advisory_xact_lock(
             func.hashtextextended(f"checkpoint-registry:{checkpoint.zone_id}", 0)))
         )
@@ -219,21 +236,21 @@ async def rename_checkpoint(
             Checkpoint.zone_id == checkpoint.zone_id,
             Checkpoint.active.is_(True),
             Checkpoint.id != checkpoint_id,
-            func.lower(effective_name) == payload.name.casefold(),
+            func.lower(effective_name) == clean_name.casefold(),
         ).limit(1))
         if duplicate:
             raise HTTPException(status_code=409, detail="A checkpoint with this name already exists in the zone")
 
         checkpoint.data = {
             **(checkpoint.data or {}),
-            "name": payload.name,
-            "gateLabel": payload.name,
+            "name": clean_name,
+            "gateLabel": clean_name,
         }
         now = datetime.now(timezone.utc)
-        db.add(_audit(checkpoint.id, payload.name, checkpoint.zone_id, actor, "checkpoint_renamed", now))
+        db.add(_audit(checkpoint.id, clean_name, checkpoint.zone_id, actor, "checkpoint_renamed", now))
         await enqueue_changed(db)
         await db.commit()
-        return _checkpoint_document(checkpoint)
+        return _checkpoint_document(checkpoint, zone.name if zone else None)
     except HTTPException:
         await db.rollback()
         raise

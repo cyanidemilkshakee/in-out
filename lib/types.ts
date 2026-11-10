@@ -84,6 +84,7 @@ export type HardwareAsset = {
   assignedEmployeeName?: string;
   category: string;
   allowedZones: string[];
+  allowedCheckpoints?: string[];
   status: "active" | "restricted" | "maintenance";
   inside: boolean;
   createdAt?: string;
@@ -124,6 +125,11 @@ export type OrganizationZone = {
   name: string;
   active: boolean;
   checkpoints: Checkpoint[];
+};
+
+export type ZoneAccessRequestTarget = {
+  id: string;
+  name: string;
 };
 
 export type ScanAnalytics = {
@@ -189,12 +195,15 @@ export type Alert = {
     | "hardware_custody"
     | "operational";
   ruleId?: string;
+  conditionKey?: "no_break" | "irregularity" | "cross_building_scan" | "visitor_overstay";
   explanation?: string;
   sourceEventId?: string;
   createdAt?: string;
   subjectId?: string;
+  permissionValidTo?: string;
   review?: AlertReview;
   warningCount?: number;
+  warningNumber?: number;
   warningResetAt?: string;
   warningResetBy?: string;
   warningResetReason?: string;
@@ -302,6 +311,9 @@ export type PermissionRequest = {
   previousZones?: string[];
   previousValidFrom?: string;
   previousValidTo?: string;
+  origin?: string;
+  targetZoneId?: string;
+  permanentAccess?: boolean;
 };
 
 export type TerminalVisitorStatus = "pending" | "approved" | "denied" | "expired" | "restricted" | "inactive";
@@ -343,7 +355,10 @@ export type AlertRule = {
     | "no_break"
     | "irregularity"
     | "cross_building_scan"
-    | "visitor_overstay";
+    | "visitor_overstay"
+    | "scan_burst"
+    | "checkpoint_denial_rate"
+    | "checkpoint_offline";
   recentTriggers: number;
   eligibleSubjectTypes?: SubjectType[];
 };
@@ -417,6 +432,13 @@ export type CreateEmployeeInput = {
   status: Extract<Person["status"], "active" | "inactive">;
   allowedZone?: string;
   allowedZones?: string[];
+  allowedCheckpoints?: string[];
+  zoneAccessRequest?: { zoneId: string; reason: string };
+};
+
+export type CreateEmployeeResult = {
+  employee: Person;
+  request?: PermissionRequest;
 };
 
 export type CreateHardwareAssetInput = {
@@ -616,7 +638,7 @@ export interface DataService {
   queryAlerts(query: AlertQuery, signal?: AbortSignal): Promise<AlertPage>;
   queryAlertRuleAssignments(subjectId: string, signal?: AbortSignal): Promise<AlertRuleAssignmentDirectory>;
   queryAuditEvents(query: AuditEventQuery, signal?: AbortSignal): Promise<AuditEventPage>;
-  createEmployee(input: CreateEmployeeInput): Promise<Person>;
+  createEmployee(input: CreateEmployeeInput): Promise<CreateEmployeeResult>;
   createVisitor(input: CreateVisitorInput): Promise<CreateVisitorResult>;
   createHardwareAsset(input: CreateHardwareAssetInput): Promise<HardwareAsset>;
   updatePerson(personId: string, patch: Partial<Omit<Person, "id">>): Promise<Person>;
@@ -624,6 +646,7 @@ export interface DataService {
     assetId: string,
     patch: Partial<Omit<HardwareAsset, "id">>
   ): Promise<HardwareAsset>;
+  acknowledgeAlert(alertId: string): Promise<Alert>;
   reviewAlert(alertId: string, decision: AlertReview["decision"], reason?: string): Promise<{ alert: Alert }>;
   resetAlertWarnings(subjectId: string, reason: string): Promise<unknown>;
   setAlertRuleAssignments(subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision?: number): Promise<AlertRuleAssignment>;

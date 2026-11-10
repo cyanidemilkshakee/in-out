@@ -6,7 +6,7 @@ This guide covers a clean local deployment of InOut for one organization. The pr
 
 1. Install and start Docker Desktop.
 2. Copy `.env.example` to `.env` if `.env` does not exist.
-3. Generate unique values for all secrets in `.env`. Keep the file local and do not commit or share it. In particular, `KEYCLOAK_ADMIN_PASSWORD` is used only to create the initial Keycloak master administrator when the Keycloak database is empty. Changing it later does not change an existing account's password.
+3. Generate independent URL-safe values for missing or empty app-generated secret fields in `.env` with `npm run env:secrets:generate` for a clean installation. The script prints only the field names, preserves values already present, and does not generate provider-issued credentials such as SMTP passwords. To scope it to one feature, run `npm run env:secrets:generate -- invitations` (or `database`, `redis`, `gateway`, `auth`, or `keycloak`). Keep `.env` local; do not commit or share it. Do not generate database or Keycloak bootstrap secrets for a running installation unless you have confirmed they match the persisted services. `KEYCLOAK_ADMIN_PASSWORD` is used only to create the initial Keycloak master administrator when the Keycloak database is empty. Changing it later does not change an existing account's password.
 4. Confirm the configured host ports are available. The default app is `http://app.localhost:1008`; the public identity login is `http://auth.localhost:1005`.
 
 Read the Keycloak bootstrap password from `.env` locally when needed; do not paste it into chat or documentation. If any `.env` value has been shared or captured in a screenshot, replace it before the first launch.

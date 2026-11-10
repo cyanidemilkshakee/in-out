@@ -28,6 +28,167 @@ from manual_review_policy import manual_access_snapshot
 
 _MANUAL_REVIEW_PAGE_SIZE = 50
 _MAX_MANUAL_REVIEW_CANDIDATES = 500
+_SCAN_BURST_THRESHOLD = 10
+_SCAN_BURST_WINDOW = timedelta(seconds=60)
+_DENIAL_RATE_WINDOW = timedelta(minutes=15)
+_DENIAL_RATE_BASELINE_LOOKBACK = timedelta(days=7)
+_DENIAL_RATE_BASELINE_SAMPLE = 100
+_DENIAL_RATE_BASELINE_MINIMUM = 20
+_DENIAL_RATE_SCAN_MINIMUM = 10
+_DENIAL_RATE_ABSOLUTE_MINIMUM = 0.50
+_DENIAL_RATE_MULTIPLIER = 2.0
+
+
+async def _create_scan_burst_alert(db, *, checkpoint, event, now):
+    """Create one operational alert when a checkpoint reaches 10 scans/minute."""
+    window_start = now - _SCAN_BURST_WINDOW
+    count = int(await db.scalar(select(func.count(Movement.id)).where(
+        Movement.checkpoint_id == checkpoint.id,
+        Movement.occurred_at >= window_start,
+        Movement.occurred_at <= now,
+    )) or 0)
+    if count < _SCAN_BURST_THRESHOLD:
+        return
+
+    # A continuous burst produces at most one alert per checkpoint per minute.
+    existing_alert_id = await db.scalar(select(AlertModel.id).where(
+        AlertModel.created_at >= now - _SCAN_BURST_WINDOW,
+        AlertModel.data["conditionKey"].astext == "scan_burst",
+        AlertModel.data["checkpointId"].astext == checkpoint.id,
+    ).limit(1))
+    if existing_alert_id:
+        return
+
+    rule = next((item for item in await alert_rule_catalog(db)
+        if item.get("conditionKey") == "scan_burst" and item.get("enabled") is True), None)
+    if rule is None:
+        return
+
+    checkpoint_name = event.get("checkpoint") or checkpoint.data.get("gateLabel") or checkpoint.data.get("name") or checkpoint.id
+    alert_id = str(uuid.uuid4())
+    alert_data = {
+        "id": alert_id,
+        "severity": rule.get("severity", "high"),
+        "status": "open",
+        "title": rule.get("name", "High scan volume"),
+        "reason": f"{count} scan attempts were recorded at {checkpoint_name} within 60 seconds.",
+        "subjectName": "Checkpoint activity",
+        "barcode": "",
+        "checkpoint": checkpoint_name,
+        "checkpointId": checkpoint.id,
+        "zoneId": checkpoint.zone_id,
+        "scanCount": count,
+        "windowSeconds": 60,
+        "date": event.get("date", ""),
+        "time": event.get("time", ""),
+        "category": rule.get("category", "operational"),
+        "ruleId": rule["id"],
+        "conditionKey": "scan_burst",
+        "sourceEventId": event["id"],
+        "explanation": f"{count} scan attempts, including allowed and denied attempts, were recorded during the previous 60 seconds.",
+        "createdAt": now.isoformat(),
+    }
+    db.add(AlertModel(id=alert_id, source_event_id=event["id"], created_at=now, data=alert_data))
+    db.info["scan_alerts"] = [*db.info.get("scan_alerts", []), alert_data]
+
+
+async def _create_checkpoint_denial_rate_alert(db, *, checkpoint, event, now):
+    """Detect a sharp, sustained jump in this checkpoint's denied-scan rate.
+
+    The recent rate uses a 15-minute window. Its baseline is the most recent
+    100 scans before that window, limited to the previous seven days. Requiring
+    20 baseline scans avoids treating a handful of old events as normal.
+    """
+    recent_start = now - _DENIAL_RATE_WINDOW
+    baseline_start = recent_start - _DENIAL_RATE_BASELINE_LOOKBACK
+    recent_counts = (await db.execute(select(
+        func.count(Movement.id).label("attempts"),
+        func.count(Movement.id).filter(Movement.result == "denied").label("denials"),
+    ).where(Movement.checkpoint_id == checkpoint.id,
+        Movement.occurred_at >= recent_start, Movement.occurred_at <= now))).one()
+    recent_total = int(recent_counts.attempts or 0)
+    recent_denied = int(recent_counts.denials or 0)
+    if recent_total < _DENIAL_RATE_SCAN_MINIMUM:
+        return
+    recent_rate = recent_denied / recent_total
+    if recent_rate < _DENIAL_RATE_ABSOLUTE_MINIMUM:
+        return
+
+    baseline_results = (await db.scalars(select(Movement.result).where(
+        Movement.checkpoint_id == checkpoint.id,
+        Movement.occurred_at >= baseline_start,
+        Movement.occurred_at < recent_start,
+    ).order_by(Movement.occurred_at.desc(), Movement.id.desc())
+        .limit(_DENIAL_RATE_BASELINE_SAMPLE))).all()
+    baseline_total = len(baseline_results)
+    if baseline_total < _DENIAL_RATE_BASELINE_MINIMUM:
+        return
+
+    baseline_denied = sum(result == "denied" for result in baseline_results)
+    baseline_rate = baseline_denied / baseline_total
+    required_rate = max(_DENIAL_RATE_ABSOLUTE_MINIMUM, baseline_rate * _DENIAL_RATE_MULTIPLIER)
+    if recent_rate < required_rate:
+        return
+
+    # One alert per checkpoint per 15 minutes while the condition persists.
+    existing_alert_id = await db.scalar(select(AlertModel.id).where(
+        AlertModel.created_at >= recent_start,
+        AlertModel.data["conditionKey"].astext == "checkpoint_denial_rate",
+        AlertModel.data["checkpointId"].astext == checkpoint.id,
+    ).limit(1))
+    if existing_alert_id:
+        return
+
+    rule = next((item for item in await alert_rule_catalog(db)
+        if item.get("conditionKey") == "checkpoint_denial_rate" and item.get("enabled") is True), None)
+    if rule is None:
+        return
+
+    checkpoint_name = event.get("checkpoint") or checkpoint.data.get("gateLabel") or checkpoint.data.get("name") or checkpoint.id
+    alert_id = str(uuid.uuid4())
+    alert_data = {
+        "id": alert_id,
+        "severity": rule.get("severity", "high"),
+        "status": "open",
+        "title": rule.get("name", "Unusually high denial rate"),
+        "reason": (f"{recent_denied} of {recent_total} scans ({recent_rate:.0%}) were denied at "
+            f"{checkpoint_name} in the last 15 minutes, versus {baseline_denied} of "
+            f"{baseline_total} prior scans ({baseline_rate:.0%})."),
+        "subjectName": "Checkpoint activity",
+        "barcode": "",
+        "checkpoint": checkpoint_name,
+        "checkpointId": checkpoint.id,
+        "zoneId": checkpoint.zone_id,
+        "deniedCount": recent_denied,
+        "scanCount": recent_total,
+        "denialRate": recent_rate,
+        "baselineDeniedCount": baseline_denied,
+        "baselineScanCount": baseline_total,
+        "baselineDenialRate": baseline_rate,
+        "windowSeconds": int(_DENIAL_RATE_WINDOW.total_seconds()),
+        "date": event.get("date", ""),
+        "time": event.get("time", ""),
+        "category": rule.get("category", "operational"),
+        "ruleId": rule["id"],
+        "conditionKey": "checkpoint_denial_rate",
+        "sourceEventId": event["id"],
+        "explanation": (f"At least {_DENIAL_RATE_SCAN_MINIMUM} scans occurred in 15 minutes. "
+            f"The current denial rate ({recent_rate:.0%}) is at least "
+            f"{_DENIAL_RATE_MULTIPLIER:g}× the checkpoint baseline and no lower than "
+            f"{_DENIAL_RATE_ABSOLUTE_MINIMUM:.0%}. The baseline uses up to "
+            f"{_DENIAL_RATE_BASELINE_SAMPLE} scans from the preceding seven days."),
+        "createdAt": now.isoformat(),
+    }
+    db.add(AlertModel(id=alert_id, source_event_id=event["id"], created_at=now, data=alert_data))
+    db.info["scan_alerts"] = [*db.info.get("scan_alerts", []), alert_data]
+
+
+async def _maybe_create_checkpoint_scan_alerts(db, *, checkpoint, event, now):
+    """Serialize scan-based alerts for a checkpoint and evaluate both policies."""
+    await db.execute(select(func.pg_advisory_xact_lock(
+        func.hashtextextended(f"checkpoint-scan-alerts:{checkpoint.id}", 0))))
+    await _create_scan_burst_alert(db, checkpoint=checkpoint, event=event, now=now)
+    await _create_checkpoint_denial_rate_alert(db, checkpoint=checkpoint, event=event, now=now)
 
 
 def validate_queued_scan_age(payload, *, now=None):
@@ -271,6 +432,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
             denial_code="barcode_not_registered", scan_type="auto",
             subject_type="visitor", sync_state=event["syncState"], data=event))
         await db.flush()
+        await _maybe_create_checkpoint_scan_alerts(db, checkpoint=checkpoint, event=event, now=now)
         result = {"allowed": False, "reason": event["reason"], "subject_id": None,
             "decision": decision, "updatedPeople": [], "updatedHardwareAssets": [],
             "replayed": False, "authorizeMovement": False}
@@ -471,12 +633,15 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
             if event["direction"] == "entry":
                 if not was_inside:
                     states[sub.id].entry_started_at = now
-                    states[sub.id].continuous_presence_alerted_entry_at = None
+                    states[sub.id].visitor_permission_overstay_alerted_valid_to = None
+                    states[sub.id].no_break_alerted_interval = 0
                 elif states[sub.id].entry_started_at is None:
                     states[sub.id].entry_started_at = now
+                    states[sub.id].no_break_alerted_interval = 0
             else:
                 states[sub.id].entry_started_at = None
-                states[sub.id].continuous_presence_alerted_entry_at = None
+                states[sub.id].visitor_permission_overstay_alerted_valid_to = None
+                states[sub.id].no_break_alerted_interval = 0
             states[sub.id].state = "inside" if event["direction"] == "entry" else "outside"
             states[sub.id].entry_building_id = building_id if event["direction"] == "entry" else None
             states[sub.id].last_scan_timestamp = now
@@ -533,6 +698,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
         }
         db.add(AlertModel(id=alert_id, source_event_id=event["id"], created_at=now, data=alert_data))
         db.info["scan_alerts"] = [alert_data]
+    await _maybe_create_checkpoint_scan_alerts(db, checkpoint=checkpoint, event=event, now=now)
     result = {"allowed": event["result"] == "approved", "reason": event.get("reason"),
         "subject_id": subject.id, "decision": decision, "updatedPeople": updated["people"],
         "updatedHardwareAssets": updated["hardware"],

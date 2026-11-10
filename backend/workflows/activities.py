@@ -79,14 +79,23 @@ async def deny_visitor(request_id: str, reason: str) -> Any:
 
 @activity.defn
 async def auto_deny_visitor(request_id: str) -> Any:
-    return await _expire_request(request_id)
+    result = await _expire_request(request_id)
+    # Let workflows that were started under the old deadline policy recognize
+    # that the database no longer expires visitor approvals and wait for a signal
+    # instead of repeatedly polling the non-expiring request.
+    if isinstance(result, dict) and result.get("status") == "pending":
+        return {**result, "_visitorDeadlineDisabled": True}
+    return result
 
 
 @activity.defn
 async def run_alert_rule_evaluation() -> int:
     """Evaluate scheduled alert rules and persist any newly triggered alerts."""
-    from rule_engine import evaluate_scheduled_rules, evaluate_continuous_presence_rules, build_workday_statuses
-    from models import AlertRuleAssignment, Alert as AlertModel, Movement as MovementModel, OrganizationZone, Person, PresenceState, Subject
+    from rule_engine import (CHECKPOINT_HEARTBEAT_TIMEOUT_MINUTES, evaluate_scheduled_rules,
+        evaluate_continuous_presence_rules, build_workday_statuses)
+    from models import (AccessPermission, AlertRuleAssignment, Alert as AlertModel, Checkpoint,
+        Movement as MovementModel, OrganizationZone, Person, PresenceState, Subject,
+        TerminalCheckpointAssignment)
     from alert_rule_assignments import alert_rule_catalog
     from config import settings
     from fastapi import HTTPException
@@ -147,6 +156,118 @@ async def run_alert_rule_evaluation() -> int:
         rules = await alert_rule_catalog(db, maximum_rows=settings.ALERT_EVALUATION_MAX_RULES)
         if not rules:
             return 0
+
+        async def evaluate_checkpoint_offline_alerts():
+            """Open or resolve one offline alert for each assigned checkpoint."""
+            timeout = timedelta(minutes=CHECKPOINT_HEARTBEAT_TIMEOUT_MINUTES)
+            rule = next((item for item in rules
+                if item.get("conditionKey") == "checkpoint_offline" and item.get("enabled") is True), None)
+            if rule is None:
+                return [], 0
+
+            assignment_rows = require_complete((await db.execute(
+                select(TerminalCheckpointAssignment, Checkpoint)
+                .join(Checkpoint, Checkpoint.id == TerminalCheckpointAssignment.checkpoint_id)
+                .where(Checkpoint.active.is_(True))
+                .order_by(Checkpoint.id, TerminalCheckpointAssignment.terminal_identity)
+                .limit(settings.ALERT_EVALUATION_MAX_SUBJECTS + 1)
+                .with_for_update(of=TerminalCheckpointAssignment)
+            )).all(), "terminal_assignments", settings.ALERT_EVALUATION_MAX_SUBJECTS)
+
+            checkpoints = {}
+            for assignment, checkpoint in assignment_rows:
+                last_seen = assignment.last_heartbeat_at or assignment.updated_at
+                current = checkpoints.setdefault(checkpoint.id, {
+                    "checkpoint": checkpoint,
+                    "terminalCount": 0,
+                    "lastSeen": last_seen,
+                    "lastHeartbeatAt": assignment.last_heartbeat_at,
+                })
+                current["terminalCount"] += 1
+                if last_seen > current["lastSeen"]:
+                    current["lastSeen"] = last_seen
+                if (assignment.last_heartbeat_at is not None and
+                        (current["lastHeartbeatAt"] is None or
+                         assignment.last_heartbeat_at > current["lastHeartbeatAt"])):
+                    current["lastHeartbeatAt"] = assignment.last_heartbeat_at
+
+            unresolved_rows = require_complete((await db.scalars(select(AlertModel)
+                .where(AlertModel.data["conditionKey"].astext == "checkpoint_offline",
+                    AlertModel.data["status"].astext != "resolved")
+                .order_by(AlertModel.created_at, AlertModel.id)
+                .limit(settings.ALERT_EVALUATION_MAX_ALERTS + 1)
+                .with_for_update())).all(), "checkpoint_offline_alerts", settings.ALERT_EVALUATION_MAX_ALERTS)
+            unresolved_by_checkpoint = {}
+            for alert_row in unresolved_rows:
+                data = alert_row.data if isinstance(alert_row.data, dict) else {}
+                checkpoint_id = data.get("checkpointId")
+                if isinstance(checkpoint_id, str):
+                    unresolved_by_checkpoint.setdefault(checkpoint_id, []).append(alert_row)
+
+            cutoff = evaluation_now - timeout
+            changes, created = [], 0
+            from movement_logic import _current_date, _current_time
+
+            # An assignment removed or a terminal resumed heartbeat clears its
+            # alert. A later outage can then create a fresh alert for that zone.
+            for checkpoint_id, rows in unresolved_by_checkpoint.items():
+                checkpoint_state = checkpoints.get(checkpoint_id)
+                is_online = checkpoint_state is None or checkpoint_state["lastSeen"] >= cutoff
+                if not is_online:
+                    continue
+                for alert_row in rows:
+                    data = alert_row.data if isinstance(alert_row.data, dict) else {}
+                    resolved = {**data, "status": "resolved", "resolvedAt": evaluation_now.isoformat(),
+                        "resolvedBy": "System", "resolutionReason": (
+                            "A terminal heartbeat resumed." if checkpoint_state is not None
+                            else "No terminal is assigned to this checkpoint.")}
+                    alert_row.data = resolved
+                    changes.append(resolved)
+
+            for checkpoint_id, state in checkpoints.items():
+                if state["lastSeen"] >= cutoff or unresolved_by_checkpoint.get(checkpoint_id):
+                    continue
+                checkpoint = state["checkpoint"]
+                checkpoint_name = ((checkpoint.data or {}).get("gateLabel") or
+                    (checkpoint.data or {}).get("name") or checkpoint.id)
+                latest_heartbeat = state["lastHeartbeatAt"]
+                last_heartbeat_text = latest_heartbeat.isoformat() if latest_heartbeat else None
+                offline_since = (state["lastSeen"] + timeout).isoformat()
+                alert_id = f"AL-{uuid.uuid4().hex[:8].upper()}"
+                alert_data = {
+                    "id": alert_id,
+                    "severity": rule.get("severity", "high"),
+                    "status": "open",
+                    "title": rule.get("name", "Checkpoint terminal offline"),
+                    "reason": (f"No heartbeat has been received from any of the "
+                        f"{state['terminalCount']} assigned terminal(s) at {checkpoint_name} "
+                        "for at least 5 minutes."),
+                    "subjectName": "Checkpoint terminal",
+                    "barcode": "",
+                    "checkpoint": checkpoint_name,
+                    "checkpointId": checkpoint_id,
+                    "zoneId": checkpoint.zone_id,
+                    "terminalCount": state["terminalCount"],
+                    "lastHeartbeatAt": last_heartbeat_text,
+                    "offlineSince": offline_since,
+                    "timeoutSeconds": int(timeout.total_seconds()),
+                    "date": _current_date(evaluation_now),
+                    "time": _current_time(evaluation_now),
+                    "category": rule.get("category", "operational"),
+                    "ruleId": rule["id"],
+                    "conditionKey": "checkpoint_offline",
+                    "explanation": ("A checkpoint is considered online while at least one assigned terminal "
+                        "sends a heartbeat within the previous five minutes. Browser terminals send one "
+                        "every minute; certificate terminals can use the mTLS heartbeat endpoint."),
+                    "createdAt": evaluation_now.isoformat(),
+                }
+                db.add(AlertModel(id=alert_id, created_at=evaluation_now, data=alert_data))
+                changes.append(alert_data)
+                created += 1
+            return changes, created
+
+        checkpoint_alert_changes, checkpoint_alerts_created = await evaluate_checkpoint_offline_alerts()
+
         async def evaluate_subjects(subject_ids, *, scoped=False):
             """Read complete current inputs; the second pass refreshes ORM state."""
             assignments = (await db.scalars(select(AlertRuleAssignment)
@@ -156,8 +277,9 @@ async def run_alert_rule_evaluation() -> int:
                 for row in assignments if row.rules_customized}
             skip_dates = {row.subject_id: row.irregularity_skip_dates
                 if isinstance(row.irregularity_skip_dates, list) else [] for row in assignments}
-            # Attendance rules consume only these authoritative movement
-            # columns. Avoid loading every retained scan/asset JSON document.
+            # Daily irregularity checks need only these authoritative movement
+            # columns. No-break alerts use current continuous presence below.
+            # Avoid loading every retained scan/asset JSON document.
             movement_query = select(MovementModel.subject_id, MovementModel.result, MovementModel.direction,
                 MovementModel.subject_type, MovementModel.occurred_at).where(MovementModel.occurred_at >= since)
             if scoped:
@@ -188,29 +310,34 @@ async def run_alert_rule_evaluation() -> int:
             existing = require_complete(list((await db.scalars(existing_query
                 .limit(settings.ALERT_EVALUATION_MAX_ALERTS + 1)
                 .execution_options(populate_existing=True))).all()), "alerts", settings.ALERT_EVALUATION_MAX_ALERTS)
-            triggered = evaluate_scheduled_rules(rules, movements,
-                build_workday_statuses(movements, people, now=evaluation_now), existing,
+            triggered = evaluate_scheduled_rules(rules, movements, [], existing,
                 employees=people, now=evaluation_now, rule_assignments=rule_assignments,
                 irregularity_skip_dates=skip_dates)
-            # Continuous presence has no movement-history cutoff; evaluate
-            # employees and visitors from their authoritative current state.
-            continuous_presence_rows = require_complete((await db.execute(select(PresenceState, Subject, Person.data, OrganizationZone.name)
+            # Continuous-presence rules use authoritative current state,
+            # independent of retained scan history or workday summaries.
+            continuous_presence_rows = require_complete((await db.execute(select(PresenceState, Subject, Person.data,
+                AccessPermission.data, OrganizationZone.name)
                 .join(Subject, Subject.id == PresenceState.subject_id)
                 .outerjoin(Person, Person.subject_id == Subject.id)
+                .outerjoin(AccessPermission, AccessPermission.subject_id == Subject.id)
                 .outerjoin(OrganizationZone, OrganizationZone.id == PresenceState.entry_building_id)
                 .where(Subject.id.in_(subject_ids), Subject.kind.in_(("employee", "visitor")),
                        PresenceState.state == "inside", PresenceState.entry_started_at.is_not(None))
                 .limit(settings.ALERT_EVALUATION_MAX_SUBJECTS + 1)
                 .execution_options(populate_existing=True))).all(), "continuous_presence", settings.ALERT_EVALUATION_MAX_SUBJECTS)
-            presences = {presence.subject_id: presence for presence, _, _, _ in continuous_presence_rows}
+            presences = {presence.subject_id: presence for presence, _, _, _, _ in continuous_presence_rows}
             visits = [{"subjectId": subject.id, "subjectType": subject.kind,
                 "subjectName": (metadata if isinstance(metadata, dict) else {}).get("name") or subject.barcode,
                 "barcode": subject.barcode, "state": presence.state, "buildingId": presence.entry_building_id,
                 "buildingName": zone_name,
                 "entryStartedAt": presence.entry_started_at,
-                "alertedEntryAt": presence.continuous_presence_alerted_entry_at}
-                for presence, subject, metadata, zone_name in continuous_presence_rows]
-            continuous_alerts = evaluate_continuous_presence_rules(rules, visits, now=evaluation_now)
+                "permissionValidTo": ((permission_data or {}).get("validTo")
+                    or (metadata if isinstance(metadata, dict) else {}).get("validTo")),
+                "alertedPermissionValidTo": presence.visitor_permission_overstay_alerted_valid_to,
+                "noBreakAlertedInterval": presence.no_break_alerted_interval}
+                for presence, subject, metadata, permission_data, zone_name in continuous_presence_rows]
+            continuous_alerts = evaluate_continuous_presence_rules(
+                rules, visits, now=evaluation_now, rule_assignments=rule_assignments)
             return [*triggered, *continuous_alerts], continuous_alerts, presences
 
         # Build candidates without locking the entire roster or blocking scans.
@@ -219,7 +346,10 @@ async def run_alert_rule_evaluation() -> int:
         candidates, _, _ = await evaluate_subjects(subject_ids)
         candidate_ids = sorted({alert["subjectId"] for alert in candidates})
         if not candidate_ids:
-            return 0
+            if checkpoint_alert_changes:
+                await _enqueue_alert_batches(db, checkpoint_alert_changes)
+                await db.commit()
+            return checkpoint_alerts_created
         # The evaluator/assignment advisory lock remains held. Match scan/review
         # lock order for only the affected identities, then discard optimistic
         # results and recompute from fresh committed inputs under those locks.
@@ -235,10 +365,17 @@ async def run_alert_rule_evaluation() -> int:
         triggered, continuous_alerts, continuous_presences = await evaluate_subjects(locked_ids, scoped=True)
         for alert_data in continuous_alerts:
             presence = continuous_presences[alert_data["subjectId"]]
-            presence.continuous_presence_alerted_entry_at = presence.entry_started_at
+            if alert_data.get("conditionKey") == "visitor_overstay":
+                presence.visitor_permission_overstay_alerted_valid_to = datetime.fromisoformat(
+                    alert_data["permissionValidTo"].replace("Z", "+00:00"))
+            elif alert_data.get("conditionKey") == "no_break":
+                presence.no_break_alerted_interval = max(
+                    presence.no_break_alerted_interval or 0,
+                    alert_data["intervalIndex"],
+                )
         alert_rows = []
         for alert_data in triggered:
-            alert_id = (alert_data["id"] if alert_data.get("conditionKey") == "visitor_overstay"
+            alert_id = (alert_data["id"] if alert_data.get("conditionKey") in {"visitor_overstay", "no_break"}
                         else f"AL-{uuid.uuid4().hex[:8].upper()}")
             alert_data["id"] = alert_id
             created_at = datetime.now(timezone.utc)
@@ -250,7 +387,8 @@ async def run_alert_rule_evaluation() -> int:
         # serialize on the same subject rows, so no acknowledged-alert gap exists.
         restrictions = await activate_critical_entry_restrictions(db, alert_rows)
         triggered = [{**row.data, "entryRestriction": restrictions.get(row.data.get("subjectId"))} for row in alert_rows]
-        if triggered:
-            await _enqueue_alert_batches(db, triggered)
+        emitted_alerts = [*triggered, *checkpoint_alert_changes]
+        if emitted_alerts:
+            await _enqueue_alert_batches(db, emitted_alerts)
         await db.commit()
-        return len(triggered)
+        return len(triggered) + checkpoint_alerts_created

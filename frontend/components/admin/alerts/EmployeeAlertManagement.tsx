@@ -1,7 +1,7 @@
 "use client";
 
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
-import type { AccessPermission, Alert, AlertPage, AlertRule, AlertRuleAssignment, AlertWarningSummary, MovementEvent, Person } from "../../../../lib/types";
+import type { AccessPermission, Alert, AlertPage, AlertRule, AlertRuleAssignment, AlertWarningSummary, Checkpoint, MovementEvent, Person } from "../../../../lib/types";
 import { useDataActions } from "../../../context/DataContext";
 import { AlertSubjectPicker, type AlertSubjectOption } from "./AlertSubjectPicker";
 import { RuleAssignments } from "./RuleAssignments";
@@ -12,7 +12,7 @@ const EmployeeProfileCard = lazy(() =>
   import("../EmployeeProfileCard").then((module) => ({ default: module.EmployeeProfileCard }))
 );
 
-export function EmployeeAlertManagement({ assignments, warnings, alerts, rules, people, permissions, movements, onReset, onSave, onReload, isLoading = false }: {
+export function EmployeeAlertManagement({ assignments, warnings, alerts, rules, people, permissions, movements, checkpoints, onReset, onSave, onReload, isLoading = false }: {
   assignments: AlertRuleAssignment[];
   warnings: AlertWarningSummary[];
   alerts: Alert[];
@@ -20,6 +20,7 @@ export function EmployeeAlertManagement({ assignments, warnings, alerts, rules, 
   people: Person[];
   permissions: AccessPermission[];
   movements: MovementEvent[];
+  checkpoints: Checkpoint[];
   onReset: (subjectId: string, reason: string) => Promise<void>;
   onSave: (subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision: number) => Promise<AlertRuleAssignment>;
   onReload: () => Promise<void>;
@@ -92,7 +93,7 @@ export function EmployeeAlertManagement({ assignments, warnings, alerts, rules, 
       <h2 id="alert-subject-rules-title">Warnings &amp; rules</h2>
     </header>
     <div className={styles.selector}>
-      <AlertSubjectPicker subjects={subjects} selectedId={selectedSubjectId} search={search} onSearch={setSearch} total={directory?.total} isSearching={searching} onSelect={(id) => { setSelectedSubjectId(id); setSelectedOption(subjects.find((subject) => subject.subjectId === id) ?? null); setProfilePerson(null); }} disabled={isLoading} />
+      <AlertSubjectPicker subjects={subjects} selectedId={selectedSubjectId} search={search} onSearch={setSearch} isSearching={searching} onSelect={(id) => { setSelectedSubjectId(id); setSelectedOption(subjects.find((subject) => subject.subjectId === id) ?? null); setProfilePerson(null); }} disabled={isLoading} />
       {readError && <p className={styles.error} role="status">{readError}</p>}
     </div>
     {selectedSubject ? <div className={`${styles.sections} scrollable-content`}>
@@ -108,6 +109,7 @@ export function EmployeeAlertManagement({ assignments, warnings, alerts, rules, 
     {profilePerson ? <Suspense fallback={null}>
       <EmployeeProfileCard
         person={profilePerson}
+        checkpoints={checkpoints}
         sessions={[]}
         permissions={permissions}
         alerts={alerts}

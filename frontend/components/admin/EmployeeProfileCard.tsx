@@ -4,11 +4,11 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { ArrowUpRight, Download, ShieldCheck, X } from "lucide-react";
-import type { AccessPermission, Alert, EmployeeActivity, MovementEvent, OrganizationZone, Person } from "../../../lib/types";
+import type { AccessPermission, Alert, Checkpoint, EmployeeActivity, MovementEvent, Person } from "../../../lib/types";
 import { readExport } from "../../../lib/exportRead";
 import { formatCsvBlob } from "../../../lib/csv";
 import type { DayPattern } from "../../../lib/analyticsUtils";
-import { facilityZoneLabel, normalizeFacilityZones } from "../../../lib/facilityZones";
+import { normalizeFacilityZones } from "../../../lib/facilityZones";
 import { averageWorkedHoursPerDay, employeeActivityPatterns, employeeActivityRangeDays, employeeHoursSeries } from "../../../lib/analyticsQueries";
 import { eventTimestamp } from "../../../lib/dateRanges";
 import { createReadRefreshGate, createRefreshScheduler } from "../../../lib/refreshScheduler";
@@ -29,6 +29,7 @@ import {
 } from "chart.js";
 import type { ChartOptions } from "chart.js";
 import { useAdminTheme } from "../../hooks/useAdminTheme";
+import { alertGroupDateRange, groupAlertsBySubjectAndType } from "./alerts/alertPresentation";
 import "./EmployeeProfileCard.css";
 
 function alertTimestamp(alert: Alert) {
@@ -59,21 +60,13 @@ const PROFILE_MOVEMENT_LIMIT = 7;
 async function exportMovementCsv(person: Person, movements: MovementEvent[], signal: AbortSignal) {
   if (!movements.length) return;
   const columns: Array<[string, (movement: MovementEvent) => unknown]> = [
-    ["eventId", (movement) => movement.id],
-    ["occurredAt", (movement) => movement.createdAt || `${movement.date} ${movement.time}`],
-    ["subject", (movement) => movement.subjectName],
-    ["subjectType", (movement) => movement.subjectType],
-    ["barcode", (movement) => movement.barcode],
-    ["direction", (movement) => movement.direction],
-    ["checkpoint", (movement) => movement.checkpoint],
-    ["result", (movement) => movement.result],
-    ["reason", (movement) => movement.reason || movement.denialCode || ""],
-    ["scanType", (movement) => movement.scanType],
-    ["captureMethod", (movement) => movement.captureMethod],
-    ["manualReviewedAt", (movement) => movement.manualReviewedAt],
-    ["syncState", (movement) => movement.syncState],
-    ["source", (movement) => movement.source],
-    ["paperReference", (movement) => movement.paperReference],
+    ["Occurred at", (movement) => movement.createdAt || `${movement.date} ${movement.time}`],
+    ["Employee", (movement) => movement.subjectName],
+    ["Barcode", (movement) => movement.barcode],
+    ["Direction", (movement) => movement.direction],
+    ["Checkpoint", (movement) => movement.checkpoint],
+    ["Result", (movement) => movement.result],
+    ["Reason", (movement) => movement.reason || movement.denialCode || ""],
   ];
   const blob = await formatCsvBlob(columns.map(([name]) => name), movements,
     movement => columns.map(([, value]) => value(movement)), { signal, bom: true });
@@ -100,14 +93,14 @@ ChartJS.register(
 
 export function EmployeeProfileCard({
   person,
-  zoneLabels = [],
+  checkpoints = [],
   permissions,
   alerts,
   movements,
   onClose,
 }: {
   person: Person;
-  zoneLabels?: readonly Pick<OrganizationZone, "id" | "name">[];
+  checkpoints?: Checkpoint[];
   permissions: AccessPermission[];
   sessions: DayPattern[];
   alerts: Alert[];
@@ -126,6 +119,9 @@ export function EmployeeProfileCard({
     .filter((movement) => movement.subjectId === person.id || (!movement.subjectId && movement.barcode.toLowerCase() === person.barcode.toLowerCase()))
     .sort((left, right) => eventTimestamp(right) - eventTimestamp(left)), [movements, person.barcode, person.id]);
   const [profileAlerts, setProfileAlerts] = useState<Alert[]>(() => initialAlerts);
+  const profileAlertGroups = useMemo(() => groupAlertsBySubjectAndType(profileAlerts), [profileAlerts]);
+  const visibleProfileAlertGroups = profileAlertGroups.slice(0, PROFILE_ALERT_LIMIT);
+  const visibleProfileAlertCount = visibleProfileAlertGroups.reduce((total, group) => total + group.alerts.length, 0);
   const [alertTriggerCount, setAlertTriggerCount] = useState(initialAlerts.length);
   const [movementLogs, setMovementLogs] = useState<MovementEvent[]>(() => initialMovements);
   const [movementLogCount, setMovementLogCount] = useState(initialMovements.length);
@@ -151,6 +147,28 @@ export function EmployeeProfileCard({
   const [employeeStatusError, setEmployeeStatusError] = useState("");
   const darkTheme = useAdminTheme() === "dark";
   const assignedZones = normalizeFacilityZones(person.allowedZones);
+  const allowsEveryZone = assignedZones.some((zone) => zone.trim().toLowerCase() === "all zones");
+  const checkpointById = useMemo(() => new Map(checkpoints.map((checkpoint) => [checkpoint.id, checkpoint])), [checkpoints]);
+  const checkpointLabel = useCallback((checkpointId: string) => {
+    const checkpoint = checkpointById.get(checkpointId);
+    return checkpoint?.gateLabel || checkpoint?.name || checkpointId;
+  }, [checkpointById]);
+  const assignedCheckpointLabels = useMemo(() => {
+    const explicitIds = person.allowedCheckpoints?.length ? new Set(person.allowedCheckpoints) : null;
+    if (explicitIds) return [...explicitIds].map(checkpointLabel);
+    return checkpoints
+      .filter((checkpoint) => checkpoint.active !== false && (allowsEveryZone || assignedZones.includes(checkpoint.zoneId ?? checkpoint.zone)))
+      .map((checkpoint) => checkpoint.gateLabel || checkpoint.name);
+  }, [allowsEveryZone, assignedZones, checkpoints, checkpointLabel, person.allowedCheckpoints]);
+  const permissionCheckpointLabels = useCallback((permission: AccessPermission) => {
+    if (permission.checkpoints) return permission.checkpoints.map(checkpointLabel);
+    const permissionZones = normalizeFacilityZones(permission.zones);
+    const allowsAll = permissionZones.some((zone) => zone.trim().toLowerCase() === "all zones");
+    if (!permissionZones.length && !allowsAll) return [];
+    return checkpoints
+      .filter((checkpoint) => checkpoint.active !== false && (allowsAll || permissionZones.includes(checkpoint.zoneId ?? checkpoint.zone)))
+      .map((checkpoint) => checkpoint.gateLabel || checkpoint.name);
+  }, [checkpoints, checkpointLabel]);
   const updateAlertHistory = useCallback((items: Alert[], total: number) => {
     setProfileAlerts(items);
     setAlertTriggerCount(total);
@@ -426,10 +444,11 @@ export function EmployeeProfileCard({
               <h2 id="employee-profile-identity-title">{person.name}</h2>
               <div className="employee-profile-identity-meta">
                 <span className="employee-profile-identity-barcode">Barcode: {person.barcode}</span>
-                <span className="employee-profile-identity-zones" aria-label="Assigned zones">
-                  {assignedZones.length
-                    ? assignedZones.map((zone) => <span className="facility-zone-tag" key={zone}>{facilityZoneLabel(zone, zoneLabels)}</span>)
-                    : "No zones assigned"}
+                <span className="employee-profile-identity-checkpoints" aria-label="Assigned checkpoints">
+                  <span className="employee-profile-identity-checkpoints-label">Checkpoints:</span>
+                  {assignedCheckpointLabels.length
+                    ? assignedCheckpointLabels.map((checkpoint) => <span className="checkpoint-tag" key={checkpoint}>{checkpoint}</span>)
+                    : "No checkpoints assigned"}
                 </span>
               </div>
             </div>
@@ -549,11 +568,19 @@ export function EmployeeProfileCard({
                     </Link>
                   </div>
                   {profilePermissions.length ? <ul className="employee-profile-record-list">
-                    {profilePermissions.slice(0, 3).map((permission) => <li key={permission.id}>
-                      <div className="employee-profile-record-heading"><strong>{permission.zones.length ? normalizeFacilityZones(permission.zones).map((zone) => facilityZoneLabel(zone, zoneLabels)).join(" · ") : permission.assignment}</strong><span data-state={permission.state}>{permission.state.replaceAll("_", " ")}</span></div>
-                      <small>{formatProfileDate(permission.validFrom)} – {permission.validTo ? formatProfileDate(permission.validTo) : "No expiry"}</small>
-                      {permission.reason ? <p>{permission.reason}</p> : null}
-                    </li>)}
+                    {profilePermissions.slice(0, 3).map((permission) => {
+                      const labels = permissionCheckpointLabels(permission);
+                      const scope = labels.length
+                        ? `Checkpoints: ${labels.join(" · ")}`
+                        : permission.checkpoints !== undefined || permission.zones.length
+                          ? "No checkpoints assigned"
+                          : permission.assignment;
+                      return <li key={permission.id}>
+                        <div className="employee-profile-record-heading"><strong>{scope}</strong><span data-state={permission.state}>{permission.state.replaceAll("_", " ")}</span></div>
+                        <small>{formatProfileDate(permission.validFrom)} – {permission.validTo ? formatProfileDate(permission.validTo) : "No expiry"}</small>
+                        {permission.reason ? <p>{permission.reason}</p> : null}
+                      </li>;
+                    })}
                   </ul> : <p className="employee-profile-empty">{permissionsLoading ? "Loading permissions…" : "No individual permission records."}</p>}
                   {profilePermissions.length > 3 ? <p className="employee-profile-more-count">+{profilePermissions.length - 3} more</p> : null}
                 </section>
@@ -565,13 +592,18 @@ export function EmployeeProfileCard({
                       View alerts<ArrowUpRight size={15} aria-hidden="true" />
                     </Link>
                   </div>
-                  {profileAlerts.length ? <ul className="employee-profile-record-list">
-                    {profileAlerts.slice(0, PROFILE_ALERT_LIMIT).map((alert) => <li key={alert.id}>
-                      <div className="employee-profile-record-heading"><strong>{alert.title}</strong><span data-state={alert.review?.decision ?? alert.status}>{alertReviewLabel(alert)}</span></div>
-                      <small>{formatProfileDate(alert.createdAt || `${alert.date} ${alert.time}`)}{alert.severity !== "medium" ? ` · ${alert.severity}` : ""}</small>
-                    </li>)}
+                  {profileAlertGroups.length ? <ul className="employee-profile-record-list">
+                    {visibleProfileAlertGroups.map((group) => {
+                      const alert = group.alerts[0];
+                      const reviewLabels = [...new Set(group.alerts.map(alertReviewLabel))];
+                      const state = reviewLabels.length === 1 ? alert.review?.decision ?? alert.status : "mixed";
+                      return <li key={group.key}>
+                        <div className="employee-profile-record-heading"><strong>{alert.title}</strong><span data-state={state}>{group.alerts.length > 1 ? `${group.alerts.length} occurrences` : alertReviewLabel(alert)}</span></div>
+                        <small>{group.alerts.length > 1 ? alertGroupDateRange(group.alerts) : formatProfileDate(alert.createdAt || `${alert.date} ${alert.time}`)}{alert.severity !== "medium" ? ` · ${alert.severity}` : ""}</small>
+                      </li>;
+                    })}
                   </ul> : <p className="employee-profile-empty">{historyLoading ? "Loading alert history…" : "No alert triggers recorded."}</p>}
-                  {Math.max(alertTriggerCount, profileAlerts.length) > PROFILE_ALERT_LIMIT ? <p className="employee-profile-more-count">+{Math.max(alertTriggerCount, profileAlerts.length) - PROFILE_ALERT_LIMIT} more</p> : null}
+                  {Math.max(alertTriggerCount, profileAlerts.length) > visibleProfileAlertCount ? <p className="employee-profile-more-count">+{Math.max(alertTriggerCount, profileAlerts.length) - visibleProfileAlertCount} more alert occurrences</p> : null}
                 </section>
               </div>
             </section>

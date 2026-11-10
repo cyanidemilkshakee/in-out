@@ -20,7 +20,7 @@ import type {
   TerminalVisitorPage,
 } from "./types";
 import type { DataScope } from "./types";
-import { canonicalCheckpointId, normalizeFacilityCheckpoints, normalizeFacilityZones, normalizeSubjectZones } from "./facilityZones";
+import { canonicalCheckpointId, normalizeFacilityCheckpoints, normalizeFacilityZones, normalizeSubjectZones, stripZoneNamePrefix } from "./facilityZones";
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -30,7 +30,10 @@ export function normalizeCheckpointLabel(value: unknown): string {
   if (typeof value === "string") return value;
   if (!value || typeof value !== "object" || Array.isArray(value)) return "";
   const checkpoint = value as Record<string, unknown>;
-  if (typeof checkpoint.name === "string") return checkpoint.name;
+  if (typeof checkpoint.name === "string") {
+    const zoneName = typeof checkpoint.zoneName === "string" ? checkpoint.zoneName : "";
+    return stripZoneNamePrefix(checkpoint.name, zoneName ? [zoneName] : []);
+  }
   if (typeof checkpoint.zone === "string") return checkpoint.zone;
   return typeof checkpoint.id === "string" ? checkpoint.id : "";
 }
@@ -94,12 +97,14 @@ export function normalizeAlert(raw: unknown): Alert {
     ruleId:        a.ruleId as string | undefined,
     explanation:   a.explanation as string | undefined,
     subjectId: typeof a.subjectId === "string" ? a.subjectId : undefined,
+    permissionValidTo: typeof a.permissionValidTo === "string" ? a.permissionValidTo : undefined,
     review: review && (review.decision === "confirmed" || review.decision === "excused") ? {
       decision: review.decision, reason: typeof review.reason === "string" ? review.reason : "",
       reviewedAt: typeof review.reviewedAt === "string" ? review.reviewedAt : "",
       reviewedBy: typeof review.reviewedBy === "string" ? review.reviewedBy : "",
     } : undefined,
     warningCount: typeof a.warningCount === "number" && Number.isSafeInteger(a.warningCount) && a.warningCount >= 0 ? a.warningCount : 0,
+    warningNumber: typeof a.warningNumber === "number" && Number.isSafeInteger(a.warningNumber) && a.warningNumber > 0 ? a.warningNumber : undefined,
     warningResetAt: typeof a.warningResetAt === "string" ? a.warningResetAt : undefined,
     warningResetBy: typeof a.warningResetBy === "string" ? a.warningResetBy : undefined,
     warningResetReason: typeof a.warningResetReason === "string" ? a.warningResetReason : undefined,
@@ -215,6 +220,9 @@ export function normalizePermissionRequest(raw: unknown): PermissionRequest {
     previousZones: Array.isArray(request.previousZones) ? normalizeFacilityZones(request.previousZones) : undefined,
     previousValidFrom: typeof request.previousValidFrom === "string" ? request.previousValidFrom : undefined,
     previousValidTo: typeof request.previousValidTo === "string" ? request.previousValidTo : undefined,
+    origin: typeof request.origin === "string" ? request.origin : undefined,
+    targetZoneId: typeof request.targetZoneId === "string" ? request.targetZoneId : undefined,
+    permanentAccess: typeof request.permanentAccess === "boolean" ? request.permanentAccess : undefined,
   };
 }
 

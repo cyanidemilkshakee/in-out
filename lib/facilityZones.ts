@@ -55,6 +55,43 @@ export function facilityZoneLabel(
     ?? `Zone ${id.toUpperCase()}`;
 }
 
+/** Remove a zone label accidentally included at the start of a checkpoint or account name. */
+export function stripZoneNamePrefix(value: string, zoneNames: readonly string[]): string {
+  const name = value.trim();
+  const prefixes = [...new Set(zoneNames.map((zone) => zone.trim()).filter(Boolean))]
+    .sort((left, right) => right.length - left.length);
+  for (const zone of prefixes) {
+    if (name.slice(0, zone.length).toLocaleLowerCase() !== zone.toLocaleLowerCase()) continue;
+    const remainder = name.slice(zone.length);
+    if (!remainder || !/^[\s·•:|/–—-]/u.test(remainder)) continue;
+    const cleaned = remainder.replace(/^[\s·•:|/–—-]+/u, "").trim();
+    if (cleaned) return cleaned;
+  }
+  return name;
+}
+
+export function checkpointDisplayName(
+  checkpoint: Pick<Checkpoint, "id" | "name" | "zone" | "zoneId" | "zoneName" | "gateLabel">,
+  zoneLabels: readonly { id: string; name: string }[] = [],
+): string {
+  const zoneId = checkpoint.zoneId ?? checkpoint.zone;
+  const zoneName = checkpoint.zoneName ?? (zoneId ? facilityZoneLabel(zoneId, zoneLabels) : "");
+  const name = checkpoint.gateLabel?.trim() || checkpoint.name.trim() || checkpoint.id;
+  return stripZoneNamePrefix(name, zoneName ? [zoneName] : []);
+}
+
+export function stripZoneNameFromPersonName(
+  firstName: string,
+  lastName: string,
+  zoneNames: readonly string[],
+): { firstName: string; lastName: string } {
+  const fullName = [firstName, lastName].filter(Boolean).join(" ").trim();
+  const cleanName = stripZoneNamePrefix(fullName, zoneNames);
+  if (!fullName || cleanName === fullName) return { firstName, lastName };
+  const [cleanFirstName = "", ...lastNameParts] = cleanName.split(/\s+/u);
+  return { firstName: cleanFirstName, lastName: lastNameParts.join(" ") };
+}
+
 export function formatFacilityZones(
   value: readonly string[],
   zoneLabels: readonly { id: string; name: string }[] = [],
@@ -76,17 +113,18 @@ export function normalizeFacilityCheckpoints(value: unknown): Checkpoint[] {
     const id = zoneId(record.id);
     const zone = zoneId(record.zoneId ?? record.zone);
     if (!id || !zone || typeof record.name !== "string" || !record.name.trim()) return [];
+    const zoneName = typeof record.zoneName === "string" ? record.zoneName : "";
     const mode = ["auto", "manual", "entry", "exit"].includes(record.mode ?? "") ? record.mode! : "auto";
     return [{
       ...record,
       id,
-      name: record.name.trim(),
+      name: stripZoneNamePrefix(record.name, zoneName ? [zoneName] : []),
       zone,
       zoneId: zone,
       ...(typeof record.zoneName === "string" ? { zoneName: record.zoneName } : {}),
       number: typeof record.number === "number" ? record.number : undefined,
       gateType: record.gateType ?? "custom",
-      gateLabel: record.gateLabel ?? "",
+      gateLabel: stripZoneNamePrefix(record.gateLabel ?? "", zoneName ? [zoneName] : []),
       required: record.required === true,
       active: record.active !== false,
       mode,
@@ -95,6 +133,12 @@ export function normalizeFacilityCheckpoints(value: unknown): Checkpoint[] {
   });
 }
 
-export function normalizeSubjectZones<T extends { allowedZones?: unknown }>(subject: T): T {
-  return { ...subject, allowedZones: normalizeFacilityZones(subject.allowedZones) };
+export function normalizeSubjectZones<T extends { allowedZones?: unknown; allowedCheckpoints?: unknown }>(subject: T): T {
+  return {
+    ...subject,
+    allowedZones: normalizeFacilityZones(subject.allowedZones),
+    ...(Array.isArray(subject.allowedCheckpoints)
+      ? { allowedCheckpoints: subject.allowedCheckpoints.filter((item): item is string => typeof item === "string").map(canonicalCheckpointId) }
+      : {}),
+  };
 }

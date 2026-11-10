@@ -171,6 +171,7 @@ async def enrich_alert_documents(db, alerts, *, focused=False, subject_ids=None,
             data.pop(field, None)
         data["entryRestriction"] = None
         data["warningCount"] = 0
+        data.pop("warningNumber", None)
         if subject:
             summary = summaries[subject.id]
             data.update(subjectId=subject.id, subjectName=summary["subjectName"],
@@ -182,6 +183,10 @@ async def enrich_alert_documents(db, alerts, *, focused=False, subject_ids=None,
                     "resetAt": reset.reset_at.isoformat(), "resetBy": reset.reset_by, "reason": reset.reason}
                 data.update(warningReset=reset_data, warningResetAt=reset_data["resetAt"],
                     warningResetBy=reset_data["resetBy"], warningResetReason=reset_data["reason"])
+        if review and review.decision == "confirmed":
+            warning_number = (review.alert_data or {}).get("warningNumber")
+            if isinstance(warning_number, int) and not isinstance(warning_number, bool) and warning_number > 0:
+                data["warningNumber"] = warning_number
         if review:
             data["review"] = review_document(review)
         else:
@@ -311,6 +316,10 @@ async def review_alert(db, alert_id, decision, actor, reason=None):
     now = datetime.now(timezone.utc)
     snapshot = {**(alert.data or {}), "id": alert.id}
     snapshot["createdAt"] = alert.created_at.isoformat()
+    if decision == "confirmed" and subject:
+        snapshot["warningNumber"] = warning_count + 1
+    else:
+        snapshot.pop("warningNumber", None)
     if subject:
         snapshot.update(subjectId=subject.id, barcode=subject.barcode)
     review = AlertReview(alert_id=alert_id, subject_id=subject.id if subject else None,

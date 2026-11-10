@@ -1,4 +1,4 @@
-"""Narrow attendance reads preserve current workday, identity and deduplication rules."""
+"""Narrow attendance reads preserve irregularity identity and deduplication rules."""
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -47,9 +47,9 @@ class AlertEvaluationProjectionTests(unittest.IsolatedAsyncioTestCase):
         counts = {"subjects": 5, "people": 4, "movements": len(specs), "alerts": len(existing)}
         capacity = SimpleNamespace(mappings=lambda: SimpleNamespace(one=lambda: counts))
         db = SimpleNamespace(scalar=AsyncMock(return_value=True),
-            execute=AsyncMock(side_effect=[capacity, rows(projected),
+            execute=AsyncMock(side_effect=[capacity, rows([]), rows(projected),
                 rows([(Person(data=person), Subject(id=person["id"], barcode=person["barcode"], kind="employee")) for person in people]), rows([])]),
-            scalars=AsyncMock(side_effect=[rows(["alice", "bob", "carol", "visitor", "asset"]), rows([]), rows(existing)]),
+            scalars=AsyncMock(side_effect=[rows([]), rows(["alice", "bob", "carol", "visitor", "asset"]), rows([]), rows(existing)]),
             commit=AsyncMock(), add=Mock())
         captured = []
 
@@ -68,20 +68,20 @@ class AlertEvaluationProjectionTests(unittest.IsolatedAsyncioTestCase):
             clock.now.return_value = NOW
             self.assertEqual(await activities.run_alert_rule_evaluation(), 0)
         self.assertEqual(captured, expected)
-        movement_query = db.execute.await_args_list[1].args[0]
+        movement_query = db.execute.await_args_list[2].args[0]
         self.assertEqual({column.name for column in movement_query.selected_columns},
             {"subject_id", "result", "direction", "subject_type", "occurred_at"})
         self.assertIsNotNone(movement_query._limit_clause)
-        history_query = db.scalars.await_args_list[2].args[0]
+        history_query = db.scalars.await_args_list[3].args[0]
         self.assertEqual([column.name for column in history_query.selected_columns], ["data"])
         db.commit.assert_not_awaited()
         db.add.assert_not_called()
         return captured
 
-    async def test_projected_columns_match_rich_scan_documents_for_both_attendance_rules(self):
+    async def test_projected_movement_columns_drive_irregularity_without_workday_no_breaks(self):
         alerts = await self.evaluate([])
         self.assertEqual({(alert["subjectId"], alert["conditionKey"]) for alert in alerts},
-            {("alice", "no_break"), ("bob", "irregularity")})
+            {("bob", "irregularity")})
 
     async def test_json_only_alert_history_keeps_legacy_identity_deduplication(self):
         rules = {rule["conditionKey"]: rule["id"] for rule in default_alert_rules()}

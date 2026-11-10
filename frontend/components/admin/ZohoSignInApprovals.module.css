@@ -1,0 +1,116 @@
+.page {
+  --review-surface: color-mix(in srgb, var(--admin-surface) 80%, var(--admin-bg));
+  --review-inset: color-mix(in srgb, var(--admin-surface-strong) 52%, transparent);
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  width: min(1440px, 100%);
+  min-width: 0;
+  margin: 0 auto;
+  padding: 32px clamp(16px, 3vw, 40px) 64px;
+  color: var(--ui-text-primary);
+}
+
+.header, .directoryHeading, .userRow, .reviewHeader, .accountDetails span, .zoneOption > span, .formActions, .securityNote, .loading, .loadMore, .refreshButton, .reviewButton, .approveButton, .cancelButton { display: flex; align-items: center; }
+.header { justify-content: space-between; gap: 20px; }
+.header > div { min-width: 0; }
+.eyebrow { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; color: var(--ui-text-info); font-size: 12px; font-weight: 750; letter-spacing: .07em; text-transform: uppercase; }
+.header h1 { margin: 0; font-size: clamp(29px, 3vw, 40px); font-weight: 780; line-height: 1.1; letter-spacing: -.045em; }
+.header > div > p { max-width: 780px; margin: 10px 0 0; color: var(--ui-text-secondary); font-size: 15px; line-height: 1.55; }
+.refreshButton, .reviewButton, .loadMore, .approveButton, .cancelButton { justify-content: center; gap: 8px; min-height: 40px; padding: 8px 12px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--review-surface); color: var(--ui-text-primary); font: inherit; font-size: 13px; font-weight: 680; cursor: pointer; transition: background 140ms ease, border-color 140ms ease, opacity 140ms ease; }
+.refreshButton:hover:not(:disabled), .reviewButton:hover:not(:disabled), .loadMore:hover:not(:disabled), .cancelButton:hover:not(:disabled) { border-color: var(--ui-border-hover); background: var(--review-inset); }
+.refreshButton:disabled, .reviewButton:disabled, .loadMore:disabled, .approveButton:disabled, .cancelButton:disabled { cursor: not-allowed; opacity: .58; }
+.workspace { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr); align-items: start; gap: 18px; }
+.directory, .reviewPanel { min-width: 0; overflow: hidden; border: 1px solid var(--admin-line); border-radius: 16px; background: var(--review-surface); box-shadow: 0 12px 34px rgba(16, 25, 24, .05); }
+.directoryHeader { display: grid; gap: 15px; padding: 20px; border-bottom: 1px solid var(--admin-line); }
+.directoryHeading { justify-content: space-between; gap: 12px; }
+.directoryHeading h2 { margin: 0; font-size: 19px; font-weight: 740; letter-spacing: -.025em; }
+.directoryHeading p { margin: 4px 0 0; color: var(--ui-text-secondary); font-size: 13px; line-height: 1.4; }
+.count { display: grid; place-items: center; min-width: 32px; height: 30px; padding: 0 8px; border: 1px solid var(--admin-line); border-radius: 9px; background: var(--review-inset); color: var(--ui-text-secondary); font-size: 13px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.search { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 4px 5px 4px 12px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--admin-bg); color: var(--ui-text-secondary); }
+.search:focus-within { outline: 2px solid color-mix(in srgb, var(--ui-text-info) 45%, transparent); outline-offset: 2px; }
+.search input { width: 100%; min-width: 0; min-height: 34px; border: 0; outline: 0; background: transparent; color: var(--ui-text-primary); font: inherit; font-size: 14px; }
+.search > button { display: grid; place-items: center; flex: 0 0 34px; width: 34px; height: 34px; border: 0; border-radius: 7px; background: var(--review-inset); color: var(--ui-text-secondary); cursor: pointer; }
+.userList { min-height: 170px; }
+.userRow { gap: 12px; min-width: 0; padding: 15px 18px; border-bottom: 1px solid var(--admin-line); }
+.userRow:last-child { border-bottom: 0; }
+.userRow[data-selected="true"] { background: color-mix(in srgb, var(--ui-text-info) 6%, transparent); }
+.avatar { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; border: 1px solid var(--admin-line); border-radius: 13px; background: var(--review-inset); color: var(--ui-text-primary); font-size: 13px; font-weight: 760; }
+.identity { flex: 1 1 auto; min-width: 0; }
+.identity h3 { margin: 0; overflow-wrap: anywhere; font-size: 15px; font-weight: 720; line-height: 1.35; }
+.identity > p { margin: 3px 0 0; color: var(--ui-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.identity .email { display: flex; align-items: center; gap: 5px; }
+.identity .missingEmail { color: var(--ui-text-warning); }
+.badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 8px; }
+.providerBadge, .verificationBadge, .disabledBadge { display: inline-flex; align-items: center; min-height: 22px; padding: 3px 7px; border: 1px solid var(--admin-line); border-radius: 7px; background: var(--admin-bg); color: var(--ui-text-secondary); font-size: 10px; font-weight: 680; line-height: 1.2; }
+.providerBadge { color: var(--ui-text-info); }
+.verificationBadge[data-verified="true"] { color: var(--ui-text-positive); }
+.verificationBadge[data-verified="false"], .disabledBadge { color: var(--ui-text-warning); }
+.reviewButton { flex: 0 0 auto; min-height: 36px; padding-inline: 10px; }
+.empty, .reviewEmpty { display: grid; justify-items: center; gap: 8px; padding: 36px 22px; text-align: center; }
+.empty > span, .reviewEmpty > span { display: grid; place-items: center; width: 48px; height: 48px; border: 1px solid var(--admin-line); border-radius: 15px; background: var(--review-inset); color: var(--ui-text-positive); }
+.empty h3, .reviewEmpty h2 { margin: 4px 0 0; font-size: 17px; font-weight: 730; }
+.empty p, .reviewEmpty p { max-width: 420px; margin: 0; color: var(--ui-text-secondary); font-size: 13px; line-height: 1.5; }
+.loading { justify-content: center; gap: 9px; margin: 0; padding: 25px; color: var(--ui-text-secondary); font-size: 14px; }
+.spinner { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.loadMore { width: calc(100% - 32px); margin: 12px 16px 16px; }
+.reviewPanel { position: sticky; top: 16px; }
+.reviewHeader { gap: 12px; padding: 19px 20px; border-bottom: 1px solid var(--admin-line); }
+.reviewIcon { display: grid; place-items: center; flex: 0 0 42px; width: 42px; height: 42px; border: 1px solid var(--admin-line); border-radius: 13px; background: var(--review-inset); color: var(--ui-text-info); }
+.reviewHeader .eyebrow { margin: 0 0 3px; font-size: 10px; }
+.reviewHeader > div { min-width: 0; }
+.reviewHeader h2 { margin: 0; overflow-wrap: anywhere; font-size: 18px; font-weight: 740; line-height: 1.3; }
+.reviewHeader p { margin: 3px 0 0; color: var(--ui-text-secondary); font-size: 12px; }
+.accountDetails { display: grid; gap: 8px; padding: 15px 20px; border-bottom: 1px solid var(--admin-line); }
+.accountDetails span { gap: 8px; min-width: 0; color: var(--ui-text-secondary); font-size: 12px; overflow-wrap: anywhere; }
+.accountDetails svg { flex: 0 0 auto; }
+.disabledNotice { margin: 14px 20px 0; padding: 10px 11px; border: 1px solid color-mix(in srgb, var(--ui-text-warning) 30%, var(--admin-line)); border-radius: 9px; background: color-mix(in srgb, var(--ui-text-warning) 6%, transparent); color: var(--ui-text-warning); font-size: 12px; line-height: 1.45; }
+.approvalForm { display: grid; gap: 16px; padding: 18px 20px 20px; }
+.field { display: grid; min-width: 0; gap: 7px; color: var(--ui-text-primary); font-size: 13px; font-weight: 700; }
+.field select { width: 100%; min-width: 0; min-height: 42px; padding: 8px 10px; border: 1px solid var(--admin-line); border-radius: 9px; background: var(--admin-bg); color: var(--ui-text-primary); font: inherit; font-size: 14px; }
+.field small { color: var(--ui-text-secondary); font-size: 11px; font-weight: 450; line-height: 1.4; }
+.zoneFieldset { display: grid; gap: 9px; min-width: 0; margin: 0; padding: 0; border: 0; }
+.zoneFieldset legend { margin-bottom: 5px; color: var(--ui-text-primary); font-size: 13px; font-weight: 720; }
+.zoneFieldset > p { margin: -1px 0 2px; color: var(--ui-text-secondary); font-size: 12px; line-height: 1.4; }
+.zoneOption { display: flex; align-items: center; min-width: 0; padding: 10px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--admin-bg); cursor: pointer; }
+.zoneOption:has(input:checked) { border-color: color-mix(in srgb, var(--ui-text-info) 48%, var(--admin-line)); background: color-mix(in srgb, var(--ui-text-info) 6%, var(--admin-bg)); }
+.zoneOption input { flex: 0 0 auto; width: 17px; height: 17px; margin: 0 10px 0 0; accent-color: var(--ui-text-info); }
+.zoneOption > span { flex-wrap: wrap; gap: 6px; min-width: 0; color: var(--ui-text-primary); }
+.zoneOption strong { overflow-wrap: anywhere; font-size: 13px; }
+.zoneOption small { margin-left: auto; color: var(--ui-text-secondary); font-size: 11px; }
+.noZones, .referenceLoading { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--ui-text-warning); font-size: 12px; line-height: 1.45; }
+.referenceLoading { color: var(--ui-text-secondary); }
+.securityNote { align-items: flex-start; gap: 8px; padding: 10px; border: 1px solid color-mix(in srgb, var(--ui-text-info) 24%, var(--admin-line)); border-radius: 10px; background: color-mix(in srgb, var(--ui-text-info) 5%, transparent); color: var(--ui-text-secondary); font-size: 11px; line-height: 1.45; }
+.securityNote svg { flex: 0 0 auto; color: var(--ui-text-info); }
+.formActions { justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.approveButton { border-color: var(--ui-text-info); background: var(--ui-text-info); color: white; }
+.approveButton:hover:not(:disabled) { filter: brightness(.96); }
+.cancelButton { background: transparent; }
+.success, .error { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 11px 14px; border: 1px solid var(--admin-line); border-radius: 10px; font-size: 13px; line-height: 1.45; }
+.success { color: var(--ui-text-positive); background: color-mix(in srgb, var(--ui-text-positive) 6%, transparent); }
+.error { color: var(--ui-text-danger); background: color-mix(in srgb, var(--ui-text-danger) 6%, transparent); }
+.success svg, .error svg { flex: 0 0 auto; }
+
+@media (max-width: 1199px) {
+  .workspace { grid-template-columns: minmax(0, 1fr); }
+  .reviewPanel { position: static; }
+}
+
+@media (max-width: 767px) {
+  .page { gap: 16px; padding: 22px 12px calc(32px + var(--mobile-admin-nav-height, 0px)); }
+  .header { align-items: flex-start; }
+  .header h1 { font-size: 29px; }
+  .header > div > p { font-size: 13px; }
+  .refreshButton { flex: 0 0 auto; width: 44px; padding: 0; overflow: hidden; font-size: 0; }
+  .directoryHeader { padding: 16px; }
+  .userRow { align-items: flex-start; flex-wrap: wrap; padding: 13px; }
+  .identity { flex-basis: calc(100% - 56px); }
+  .reviewButton { margin-left: 54px; }
+  .approvalForm, .reviewHeader, .accountDetails { padding-inline: 15px; }
+  .formActions > button { flex: 1 1 0; }
+  .refreshButton, .reviewButton, .loadMore, .approveButton, .cancelButton, .field select { min-height: 44px; }
+  .search input { min-height: 40px; font-size: 16px; }
+  .field select { font-size: 16px; }
+  .search > button { flex-basis: 40px; width: 40px; height: 40px; }
+}

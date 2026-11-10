@@ -1,12 +1,11 @@
 import { Fragment, Suspense, lazy, useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, ArrowUpDown, Eye } from 'lucide-react';
 import { ActivityBar } from './ActivityBar';
-import type { AccessPermission, Alert, MovementEvent, Person, RegistrySortKey, SortDirection } from '../../../../lib/types';
+import type { AccessPermission, Alert, Checkpoint, MovementEvent, Person, RegistrySortKey, SortDirection } from '../../../../lib/types';
 import type { PersonSessionIndex } from '../../../../lib/analyticsUtils';
 import type { TimeRange } from '../../../../lib/dateRanges';
 import { eventTimestamp } from '../../../../lib/dateRanges';
-import { facilityZoneLabel, normalizeFacilityZones } from '../../../../lib/facilityZones';
-import { useOrganizationZones } from '../../../hooks/useOrganizationZones';
+import { normalizeFacilityZones } from '../../../../lib/facilityZones';
 import { PersonStatusLabel } from '../PersonStatusLabel';
 
 // Lazy-load the chart-heavy profile card — keeps chart.js out of the initial bundle
@@ -18,6 +17,7 @@ type EmployeeSortKey = "name" | "createdAt" | "barcode" | "status" | "latestScan
 
 export function EmployeeTable({
   people: rows,
+  checkpoints,
   movements,
   sessionsByPerson,
   timeRange,
@@ -28,6 +28,7 @@ export function EmployeeTable({
   sort,
 }: {
   people: Person[];
+  checkpoints: Checkpoint[];
   movements: MovementEvent[];
   sessionsByPerson: PersonSessionIndex;
   timeRange: TimeRange;
@@ -37,7 +38,6 @@ export function EmployeeTable({
   alerts: Alert[];
   sort?: { key: RegistrySortKey; direction: SortDirection; onChange: (key: RegistrySortKey) => void };
 }) {
-  const { zones: organizationZones } = useOrganizationZones();
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [localSortKey, setSortKey] = useState<EmployeeSortKey>("name");
   const [localSortDirection, setSortDirection] = useState<"asc" | "desc">("asc");
@@ -111,7 +111,7 @@ export function EmployeeTable({
               {sortHeader("status", "Status")}
               {sortHeader("createdAt", "Created At")}
               {sortHeader("barcode", "Barcode")}
-              <th className="column-zones">Zones</th>
+              <th className="column-checkpoints">Checkpoints</th>
               {sortHeader("latestScan", "Latest Scan", "latest-scan")}
               {sortHeader("inside", "Type", "type")}
               <th className="column-activity">Activity</th>
@@ -122,6 +122,15 @@ export function EmployeeTable({
           <tbody>
             {sortedRows.map(({ person, latestScan, averageHours }) => {
               const assignedZones = normalizeFacilityZones(person.allowedZones);
+              const allowsEveryZone = person.allowedZones.some((zone) => zone.trim().toLowerCase() === "all zones");
+              const explicitCheckpointIds = person.allowedCheckpoints?.length
+                ? new Set(person.allowedCheckpoints)
+                : null;
+              const assignedCheckpoints = checkpoints.filter((checkpoint) => checkpoint.active !== false && (
+                explicitCheckpointIds
+                  ? explicitCheckpointIds.has(checkpoint.id)
+                  : allowsEveryZone || assignedZones.includes(checkpoint.zoneId ?? checkpoint.zone)
+              ));
               return (
                 <tr key={person.id}>
                   <td className="column-name" data-label="Name">{person.name}</td>
@@ -134,11 +143,11 @@ export function EmployeeTable({
                       : "Not recorded"}
                   </td>
                   <td className="column-barcode" data-label="Barcode">{person.barcode}</td>
-                  <td className="column-zones" data-label="Zones">
+                  <td className="column-checkpoints" data-label="Checkpoints">
                     <div className="facility-zone-list">
-                      {assignedZones.length
-                        ? assignedZones.map((zone) => <span className="facility-zone-tag" key={zone}>{facilityZoneLabel(zone, organizationZones)}</span>)
-                        : "No zones assigned"}
+                      {assignedCheckpoints.length
+                        ? assignedCheckpoints.map((checkpoint) => <span className="checkpoint-tag" key={checkpoint.id}>{checkpoint.gateLabel || checkpoint.name}</span>)
+                        : "No checkpoints assigned"}
                     </div>
                   </td>
                   <td className="column-latest-scan mono" data-label="Latest scan">
@@ -182,7 +191,7 @@ export function EmployeeTable({
         <Suspense fallback={null}>
           <EmployeeProfileCard
             person={selectedPerson}
-            zoneLabels={organizationZones}
+            checkpoints={checkpoints}
             sessions={sessionsByPerson.get(selectedPerson.id) ?? []}
             permissions={permissions}
             alerts={alerts}

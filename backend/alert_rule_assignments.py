@@ -14,7 +14,7 @@ from sqlalchemy import func, select
 
 from models import AlertRule, AlertRuleAssignment, AuditEvent, HardwareAsset, Person, Subject
 from data_limits import bounded_rows
-from rule_engine import eligible_alert_subject_types, with_default_alert_rules
+from rule_engine import eligible_alert_subject_types, is_system_alert_rule, with_default_alert_rules
 
 RuleId = Annotated[str, Field(strict=True, min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_-]+$")]
 _RESERVED_IDS = frozenset({"__proto__", "constructor", "prototype"})
@@ -77,10 +77,11 @@ async def alert_rule_catalog(db, *, maximum_rows=None):
         rule = {**row.data, "id": row.id}
         rule.pop("ruleId", None)  # Serialized evidence must not override the rule row's identity.
         if (row.id not in _RESERVED_IDS and re.fullmatch(r"[A-Za-z0-9_-]{1,128}", row.id)
-                and eligible_alert_subject_types(rule)):
+                and (eligible_alert_subject_types(rule) or is_system_alert_rule(rule))):
             rules.append(rule)
     return [{**rule, "eligibleSubjectTypes": list(eligible_alert_subject_types(rule))}
-            for rule in with_default_alert_rules(rules) if eligible_alert_subject_types(rule)]
+            for rule in with_default_alert_rules(rules)
+            if eligible_alert_subject_types(rule) or is_system_alert_rule(rule)]
 
 
 async def assignment_rule_catalog(db, *, maximum_rows=None):

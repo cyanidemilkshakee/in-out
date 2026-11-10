@@ -34,7 +34,13 @@ ConditionKey = Literal[
     "cross_building_scan",
     # Kept as a stable persisted key while the rule now covers all people.
     "visitor_overstay",
+    "scan_burst",
+    "checkpoint_denial_rate",
+    "checkpoint_offline",
 ]
+
+SYSTEM_ALERT_CONDITIONS = frozenset({"scan_burst", "checkpoint_denial_rate", "checkpoint_offline"})
+CHECKPOINT_HEARTBEAT_TIMEOUT_MINUTES = 5
 
 RETIRED_ALERT_RULE_IDS = frozenset({
     "rule-exit-balance",
@@ -53,11 +59,11 @@ DEFAULT_ALERT_RULES: list[dict[str, object]] = [
     {
         "id": "rule-no-break",
         "name": "No break recorded",
-        "description": "Alert when an employee works six hours without a break.",
+        "description": "Alert every six hours an employee remains inside without an approved exit.",
         "category": "operational",
         "severity": "medium",
         "enabled": True,
-        "scope": "Employee workdays",
+        "scope": "Employees currently inside",
         "conditionKey": "no_break",
         "recentTriggers": 0,
     },
@@ -85,13 +91,46 @@ DEFAULT_ALERT_RULES: list[dict[str, object]] = [
     },
     {
         "id": "rule-visitor-overstay",
-        "name": "Continuous presence over 12 hours",
-        "description": "Alert once per visit when an employee or visitor remains inside a zone for more than 12 continuous hours.",
+        "name": "Visitor permission overstay",
+        "description": "Alert once per visit when a visitor remains inside after their approved access window ends.",
         "category": "presence_anomaly",
         "severity": "medium",
         "enabled": True,
-        "scope": "Employees and visitors",
+        "scope": "Visitors",
         "conditionKey": "visitor_overstay",
+        "recentTriggers": 0,
+    },
+    {
+        "id": "rule-scan-burst",
+        "name": "High scan volume",
+        "description": "Alert when 10 or more scan attempts are recorded at one checkpoint within 60 seconds.",
+        "category": "operational",
+        "severity": "high",
+        "enabled": True,
+        "scope": "All checkpoints",
+        "conditionKey": "scan_burst",
+        "recentTriggers": 0,
+    },
+    {
+        "id": "rule-checkpoint-denial-rate",
+        "name": "Unusually high denial rate",
+        "description": "Alert when at least 10 scan attempts in 15 minutes have a denial rate of at least 50% and twice the checkpoint's prior rate. The baseline needs 20 or more of up to 100 prior scans from the last 7 days.",
+        "category": "operational",
+        "severity": "high",
+        "enabled": True,
+        "scope": "All checkpoints",
+        "conditionKey": "checkpoint_denial_rate",
+        "recentTriggers": 0,
+    },
+    {
+        "id": "rule-checkpoint-offline",
+        "name": "Checkpoint terminal offline",
+        "description": f"Alert when no terminal assigned to a checkpoint has sent a heartbeat for {CHECKPOINT_HEARTBEAT_TIMEOUT_MINUTES} minutes. Resolve the alert automatically when a terminal reconnects.",
+        "category": "operational",
+        "severity": "high",
+        "enabled": True,
+        "scope": "Assigned checkpoints",
+        "conditionKey": "checkpoint_offline",
         "recentTriggers": 0,
     },
 ]
@@ -129,8 +168,13 @@ def eligible_alert_subject_types(rule: dict[str, Any]) -> tuple[str, ...]:
     if rule.get("conditionKey") == "cross_building_scan":
         return ("employee", "visitor")
     if rule.get("conditionKey") == "visitor_overstay":
-        return ("employee", "visitor")
+        return ("visitor",)
     return ()
+
+
+def is_system_alert_rule(rule: dict[str, Any]) -> bool:
+    """True for global rules evaluated from application events, not subjects."""
+    return rule.get("conditionKey") in SYSTEM_ALERT_CONDITIONS
 
 
 def with_default_alert_rules(rules: list[AlertRule]) -> list[AlertRule]:
@@ -145,14 +189,19 @@ def with_default_alert_rules(rules: list[AlertRule]) -> list[AlertRule]:
         and rule.get("id") not in {"rule-manual-review", "rule-unknown-barcode"}
         and not is_retired_alert(rule)
     ]
-    # This persisted condition key predates employee coverage. Canonicalize
-    # its display copy so existing databases show the expanded rule scope.
-    continuous_presence = next(rule for rule in DEFAULT_ALERT_RULES
-        if rule.get("conditionKey") == "visitor_overstay")
+    current_rule_display = {
+        rule["conditionKey"]: rule
+        for rule in DEFAULT_ALERT_RULES
+        if rule.get("conditionKey") in {"no_break", "visitor_overstay"}
+    }
+    # Keep this persisted condition key and rule ID stable for existing
+    # databases, while canonicalizing the copy shown in the UI to the current
+    # visitor-permission-expiry behavior.
     for rule in result:
-        if rule.get("conditionKey") == "visitor_overstay":
+        display_rule = current_rule_display.get(rule.get("conditionKey"))
+        if display_rule:
             for field in ("name", "description", "scope"):
-                rule[field] = continuous_presence[field]
+                rule[field] = display_rule[field]
     existing_conditions = {rule.get("conditionKey") for rule in result}
     result.extend(
         dict(rule)
@@ -220,6 +269,8 @@ class Alert(TypedDict, total=False):
     entryBuildingId: str | None
     conditionKey: ConditionKey
     createdAt: str
+    permissionValidTo: str
+    intervalIndex: int
 
 
 class AlertRule(TypedDict, total=False):
@@ -320,10 +371,24 @@ def _local_time(dt: datetime) -> str:
     return f"{hour}:{local.minute:02d}:{local.second:02d} {suffix}"
 
 
-def evaluate_continuous_presence_rules(
+def _permission_expiry(value: Any) -> datetime | None:
+    """Parse a visitor permission's expiry, treating naive values as facility time."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        expiry = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=_IST)
+    return expiry.astimezone(timezone.utc)
+
+
+def evaluate_visitor_permission_overstay_rules(
     rules: list[AlertRule], visits: list[dict[str, Any]], now: datetime | None = None,
+    rule_assignments: dict[str, list[str]] | None = None,
 ) -> list[Alert]:
-    """Alert once when an employee or visitor remains inside for over 12 hours."""
+    """Alert once per visit when a visitor remains inside after permission expiry."""
     rule = _find_enabled_rule(rules, "visitor_overstay")
     if rule is None:
         return []
@@ -332,28 +397,38 @@ def evaluate_continuous_presence_rules(
     for visit in visits:
         started_at = visit.get("entryStartedAt")
         subject_type = visit.get("subjectType")
-        if (subject_type not in {"employee", "visitor"} or visit.get("state") != "inside"
+        valid_to = _permission_expiry(visit.get("permissionValidTo"))
+        alerted_valid_to = visit.get("alertedPermissionValidTo")
+        if isinstance(alerted_valid_to, datetime):
+            if alerted_valid_to.tzinfo is None:
+                alerted_valid_to = alerted_valid_to.replace(tzinfo=_IST)
+            alerted_valid_to = alerted_valid_to.astimezone(timezone.utc)
+        if (subject_type != "visitor" or visit.get("state") != "inside"
                 or not visit.get("subjectId") or not isinstance(started_at, datetime)
-                or started_at.tzinfo is None
-                or evaluation_now - started_at <= timedelta(hours=12)
-                or visit.get("alertedEntryAt") == started_at):
+                or started_at.tzinfo is None or evaluation_now < started_at.astimezone(timezone.utc)
+                or valid_to is None or evaluation_now < valid_to
+                or alerted_valid_to == valid_to):
             continue
         start_utc = started_at.astimezone(timezone.utc).isoformat()
-        identity_scope = "visitor-overstay" if subject_type == "visitor" else "employee-overstay"
-        identity = uuid.uuid5(uuid.NAMESPACE_URL, f"in-out:{identity_scope}:{visit['subjectId']}:{start_utc}")
+        valid_to_utc = valid_to.isoformat()
+        identity = uuid.uuid5(uuid.NAMESPACE_URL,
+            f"in-out:visitor-permission-overstay:{visit['subjectId']}:{start_utc}:{valid_to_utc}")
         building = visit.get("buildingName") or visit.get("buildingId") or "an unrecorded zone"
         name = visit.get("subjectName") or visit.get("barcode") or visit["subjectId"]
         generated.append(Alert(
             id=f"AL-{identity.hex.upper()}", severity=rule.get("severity", "medium"),
-            status="open", title="Continuous presence over 12 hours",
-            reason=f"{name} has remained inside {building} for more than 12 continuous hours.",
+            status="open", title="Visitor permission overstay",
+            reason=f"{name} remained inside {building} after their approved access expired at "
+                f"{_local_date(valid_to)} {_local_time(valid_to)}.",
             subjectName=name, subjectId=visit["subjectId"], subjectType=subject_type,
             barcode=visit.get("barcode") or visit["subjectId"], checkpoint=building,
             date=_local_date(evaluation_now), time=_local_time(evaluation_now),
             category=rule.get("category", "presence_anomaly"), ruleId=rule.get("id"),
             conditionKey="visitor_overstay", entryStartedAt=start_utc,
+            permissionValidTo=valid_to_utc,
             entryBuildingId=visit.get("buildingId"),
-            explanation=f"The current visit began at {start_utc}; no approved exit has ended it. Repeated scans do not restart the visit clock.",
+            explanation=f"The visitor's approved access window ended at {valid_to_utc}; "
+                f"the current visit began at {start_utc} and has no approved exit.",
         ))
     return generated
 
@@ -361,10 +436,73 @@ def evaluate_continuous_presence_rules(
 def evaluate_visitor_overstay_rules(
     rules: list[AlertRule], visits: list[dict[str, Any]], now: datetime | None = None,
 ) -> list[Alert]:
-    """Compatibility wrapper for callers that specifically evaluate visitors."""
-    return evaluate_continuous_presence_rules(
-        rules, [visit for visit in visits if visit.get("subjectType") == "visitor"], now=now,
+    """Compatibility name for the visitor-permission-expiry evaluator."""
+    return evaluate_visitor_permission_overstay_rules(
+        rules, visits, now=now,
     )
+
+
+def evaluate_no_break_rules(
+    rules: list[AlertRule], visits: list[dict[str, Any]], now: datetime | None = None,
+    rule_assignments: dict[str, list[str]] | None = None,
+) -> list[Alert]:
+    """Raise a warning at each six-hour boundary of an employee's current visit."""
+    evaluation_now = now or datetime.now(timezone.utc)
+    generated: list[Alert] = []
+    for visit in visits:
+        started_at = visit.get("entryStartedAt")
+        subject_id = visit.get("subjectId")
+        if (visit.get("subjectType") != "employee" or visit.get("state") != "inside"
+                or not subject_id or not isinstance(started_at, datetime) or started_at.tzinfo is None):
+            continue
+        rule = _find_enabled_rule(rules, "no_break", subject_id, rule_assignments)
+        if rule is None:
+            continue
+        elapsed_seconds = (evaluation_now - started_at.astimezone(timezone.utc)).total_seconds()
+        due_interval = int(elapsed_seconds // (6 * 60 * 60)) if elapsed_seconds >= 0 else 0
+        try:
+            last_alerted_interval = max(0, int(visit.get("noBreakAlertedInterval") or 0))
+        except (TypeError, ValueError):
+            last_alerted_interval = 0
+        if due_interval <= last_alerted_interval:
+            continue
+
+        # Catch up for a bounded period after evaluator downtime, emitting each
+        # elapsed six-hour boundary instead of collapsing missed warnings.
+        first_interval = max(last_alerted_interval + 1, due_interval - 7)
+        start_utc = started_at.astimezone(timezone.utc).isoformat()
+        building = visit.get("buildingName") or visit.get("buildingId") or "an unrecorded zone"
+        name = visit.get("subjectName") or visit.get("barcode") or subject_id
+        for interval_index in range(first_interval, due_interval + 1):
+            threshold_at = started_at + timedelta(hours=6 * interval_index)
+            identity = uuid.uuid5(uuid.NAMESPACE_URL,
+                f"in-out:no-break:{subject_id}:{start_utc}:{interval_index}")
+            generated.append(Alert(
+                id=f"AL-{identity.hex.upper()}", severity=rule.get("severity", "medium"),
+                status="open", title="No break recorded",
+                reason=(f"{name} has remained inside {building} without an approved exit for "
+                        f"at least {6 * interval_index} hours."),
+                subjectName=name, subjectId=subject_id, subjectType="employee",
+                barcode=visit.get("barcode") or subject_id, checkpoint=building,
+                date=_local_date(threshold_at), time=_local_time(threshold_at),
+                category=rule.get("category", "operational"), ruleId=rule.get("id"),
+                conditionKey="no_break", entryStartedAt=start_utc,
+                entryBuildingId=visit.get("buildingId"), intervalIndex=interval_index,
+                explanation=("This alert tracks uninterrupted presence since the last approved entry. "
+                    "An approved exit resets the six-hour interval; workdays and calendar dates do not."),
+            ))
+    return generated
+
+
+def evaluate_continuous_presence_rules(
+    rules: list[AlertRule], visits: list[dict[str, Any]], now: datetime | None = None,
+    rule_assignments: dict[str, list[str]] | None = None,
+) -> list[Alert]:
+    """Evaluate employee no-break intervals and visitor access-window overstays."""
+    return [
+        *evaluate_no_break_rules(rules, visits, now=now, rule_assignments=rule_assignments),
+        *evaluate_visitor_permission_overstay_rules(rules, visits, now=now, rule_assignments=rule_assignments),
+    ]
 
 
 # ---------------------------------------------------------------------------
@@ -480,8 +618,10 @@ def evaluate_scheduled_rules(
 
     Rules evaluated
     ---------------
-    no_break              : employee worked >= 6 hours without any break
     irregularity          : active employee has no approved entry by 6 PM (Asia/Kolkata)
+
+    The workdays argument is retained for compatibility, but no-break alerts
+    are evaluated from uninterrupted current presence, independent of dates.
 
     Missing assignment entries inherit all eligible rules. A present empty
     list disables all rules for that subject without affecting other subjects.
@@ -525,15 +665,6 @@ def evaluate_scheduled_rules(
         (alert.get("ruleId"), alert.get("barcode"), alert.get("date"))
         for alert in existing_alerts
     }
-    no_break_subject_keys = {
-        (alert.get("ruleId"), alert.get("subjectId"), alert.get("date"))
-        for alert in existing_alerts if alert.get("subjectId")
-    }
-    no_break_legacy_keys = {
-        (alert.get("ruleId"), alert.get("barcode"), alert.get("date"))
-        for alert in existing_alerts if not alert.get("subjectId")
-    }
-
     evaluation_now = now or datetime.now(timezone.utc)
     # ------------------------------------------------------------------
     # irregularity rule
@@ -593,58 +724,5 @@ def evaluate_scheduled_rules(
                 )
             )
             irregularity_keys.add(duplicate_key)
-
-    # ------------------------------------------------------------------
-    # no_break rule
-    # ------------------------------------------------------------------
-    break_rule = selected_rule("no_break")
-    if break_rule:
-        employee_by_id = {employee.get("id"): employee for employee in employees or []}
-        for workday in workdays:
-            workday_rule = selected_rule("no_break", workday["employeeId"])
-            if workday_rule is None:
-                continue
-            employee_barcode = employee_by_id.get(workday["employeeId"], {}).get("barcode") or workday["employeeId"]
-            rule_id = workday_rule.get("id")
-            employee_id = workday["employeeId"]
-            workday_date = workday["date"]
-            already_raised = (
-                (rule_id, employee_id, workday_date) in no_break_subject_keys
-                or (rule_id, employee_barcode, workday_date) in no_break_legacy_keys
-                or (rule_id, employee_id, workday_date) in no_break_legacy_keys
-            )
-            if (
-                workday["breakMinutes"] > 0
-                or workday["minutesInside"] < 360
-                or already_raised
-            ):
-                continue
-            hours_worked = round(workday["minutesInside"] / 60)
-            generated.append(
-                Alert(
-                    id=next_alert_id(),
-                    severity=workday_rule.get("severity", "medium"),
-                    status="open",
-                    title="No break recorded",
-                    reason=(
-                        f"{workday['employeeName']} completed {hours_worked} "
-                        f"hours without a recorded break."
-                    ),
-                    subjectName=workday["employeeName"],
-                    barcode=employee_barcode,
-                    checkpoint="Attendance policy",
-                    date=workday["date"],
-                    time=(
-                        _local_time(evaluation_now)
-                        if workday["date"] == _local_date(evaluation_now)
-                        else "6:00:00 PM"
-                    ),
-                    category=workday_rule.get("category", "operational"),
-                    ruleId=workday_rule.get("id"),
-                    conditionKey="no_break",
-                    subjectId=workday["employeeId"],
-                    explanation="At least six hours of approved work were recorded without a qualifying break.",
-                )
-            )
 
     return generated

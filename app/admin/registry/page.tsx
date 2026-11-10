@@ -158,15 +158,27 @@ function RegistryWorkspace() {
         sortKey, sortDirection }, controller.signal);
       const records: Array<Person | HardwareAsset> = kind === "hardware" ? result.hardwareAssets : result.people;
       const averages = result.averages;
+      const checkpointSummary = (record: Person | HardwareAsset) => {
+        const explicitCheckpointIds = record.allowedCheckpoints?.length
+          ? new Set(record.allowedCheckpoints)
+          : null;
+        const allowsEveryZone = record.allowedZones.some(zone => zone.trim().toLowerCase() === "all zones");
+        return result.checkpoints
+          .filter(checkpoint => checkpoint.active !== false && (explicitCheckpointIds
+            ? explicitCheckpointIds.has(checkpoint.id)
+            : allowsEveryZone || record.allowedZones.includes(checkpoint.zoneId ?? checkpoint.zone)))
+          .map(checkpoint => checkpoint.gateLabel || checkpoint.name)
+          .join("; ");
+      };
       const rowForRecord = (record: Person | HardwareAsset): Record<string, unknown> => kind === "employee" ? {
-        name: record.name, barcode: record.barcode, allowedZones: record.allowedZones.join("; "), status: record.status, inside: record.inside,
-        [`avgWorkHoursPerDay_${timeRange}`]: averages[record.id] ?? "", createdAt: record.createdAt,
+        "Name": record.name, "Barcode": record.barcode, "Checkpoints": checkpointSummary(record), "Status": record.status, "Inside": record.inside,
+        [`Average work hours/day (${timeRange})`]: averages[record.id] ?? "", "Created at": record.createdAt ?? "",
       } : kind === "visitor" ? {
-        name: record.name, barcode: record.barcode, company: "company" in record ? record.company : "", host: "host" in record ? record.host : "",
-        purpose: "purpose" in record ? record.purpose : "", validFrom: "validFrom" in record ? record.validFrom : "", validTo: "validTo" in record ? record.validTo : "",
-        status: record.status, inside: record.inside,
-      } : { name: record.name, barcode: record.barcode, owner: "owner" in record ? record.owner : "", category: "category" in record ? record.category : "",
-        allowedZones: record.allowedZones.join("; "), status: record.status, inside: record.inside, createdAt: record.createdAt };
+        "Name": record.name, "Barcode": record.barcode, "Company": "company" in record ? record.company ?? "" : "", "Host": "host" in record ? record.host ?? "" : "",
+        "Purpose": "purpose" in record ? record.purpose ?? "" : "", "Valid from": "validFrom" in record ? record.validFrom ?? "" : "", "Valid until": "validTo" in record ? record.validTo ?? "" : "",
+        "Status": record.status, "Inside": record.inside,
+      } : { "Name": record.name, "Barcode": record.barcode, "Owner": "owner" in record ? record.owner : "", "Category": "category" in record ? record.category : "",
+        "Checkpoints": checkpointSummary(record), "Status": record.status, "Inside": record.inside, "Created at": record.createdAt ?? "" };
       const columns = records.length ? Object.keys(rowForRecord(records[0])) : [];
       await downloadCsv(`inout-${tab.tab}-${new Date().toISOString().slice(0, 10)}.csv`, columns, records, record => {
         const row = rowForRecord(record);
@@ -200,7 +212,7 @@ function RegistryWorkspace() {
           <input type="search" maxLength={200} placeholder={`Search ${tab.label.toLowerCase()}...`} value={search} onChange={event => setSearch(event.target.value)} /></label>
       </div>
       {error ? <p className="inline-note" role="alert">{error} <button type="button" onClick={reload}>Retry</button></p> : null}
-      {kind === "employee" ? <EmployeeTable people={visible?.people ?? []} movements={visible?.movements ?? []} sessionsByPerson={sessionsByPerson}
+      {kind === "employee" ? <EmployeeTable people={visible?.people ?? []} checkpoints={visible?.checkpoints ?? []} movements={visible?.movements ?? []} sessionsByPerson={sessionsByPerson}
         timeRange={timeRange} averageHoursByPerson={visible?.averages ?? null} averageHoursLoading={loading} permissions={[]} alerts={[]} sort={sort} />
         : kind === "visitor" ? <PeopleTable title="Visitors" people={visible?.people ?? []} sort={sort} /> : <HardwareTable assets={visible?.hardwareAssets ?? []} sort={sort} />}
       <div className="pagination"><button type="button" disabled={page === 1 || loading} onClick={() => setPage(value => Math.max(1, value - 1))}>Previous</button>

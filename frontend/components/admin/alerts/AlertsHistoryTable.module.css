@@ -5,7 +5,17 @@
 .subjectType { text-transform: capitalize; }
 .reviewCell { min-width: 0; }
 .table .reviewState { display: inline-flex; width: fit-content; max-width: 100%; min-height: 26px; align-items: center; margin: 0; }
+.table .reviewState { white-space: normal; overflow-wrap: anywhere; }
 .table .reviewReason { display: block; max-width: 100%; margin-top: 8px; color: var(--ui-text-secondary); font-size: var(--type-15); line-height: 1.4; overflow-wrap: anywhere; }
+.groupRow > td { background: var(--admin-surface-strong); font-weight: 500; }
+.groupRow td > strong, .groupRow td > small { display: block; }
+.groupRow td > small { margin-top: 4px; color: var(--ui-text-secondary); }
+.groupToggle { display: inline-flex; min-height: 36px; align-items: center; gap: 8px; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; cursor: pointer; }
+.groupToggle svg { flex: 0 0 auto; color: var(--ui-text-secondary); transition: transform 160ms ease; }
+.groupToggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.groupToggle:focus-visible { outline: 3px solid var(--ui-border-hover); outline-offset: 2px; }
+.groupDetailRow > td { background: var(--admin-surface); }
+.groupDetailRow > td:first-child { padding-left: 30px; }
 .scope { color: var(--ui-text-secondary); }
 .scope a { text-decoration: underline; }
 .error { color: var(--ui-text-danger); }

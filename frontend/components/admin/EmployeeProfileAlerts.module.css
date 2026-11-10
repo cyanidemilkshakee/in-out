@@ -179,7 +179,7 @@
   outline-color: var(--ui-text-danger);
 }
 
-@media (max-width: 760px) {
+@media (max-width: 767px) {
   :global(.employee-profile-dialog) .panel {
     overflow: visible;
     border-left: 0;
@@ -187,7 +187,7 @@
   }
 }
 
-@media (min-width: 761px) and (max-width: 1100px) {
+@media (min-width: 768px) and (max-width: 1199px) {
   :global(.employee-profile-dialog) .panel { padding-inline: 12px; }
 }
 
@@ -200,3 +200,7 @@
   :global(.employee-profile-dialog) .panel .activity :global(.alert-activity-marker) { grid-column: 2; grid-row: 3; justify-content: flex-start; }
   :global(.employee-profile-dialog) .panel .activity :global(.alert-review-controls) { grid-row: 4; }
 }
+
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-list article) { min-width: 0; }
+:global(.employee-profile-dialog) .panel .activity :global(.alert-activity-actions button) { white-space: normal; overflow-wrap: anywhere; }
+:global(.employee-profile-dialog) .panel :global(.pagination) { flex-wrap: wrap; gap: 8px; }

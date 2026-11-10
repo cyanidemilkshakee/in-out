@@ -25,6 +25,19 @@ def canonical_checkpoint_id(value):
     return value
 
 
+def strip_zone_name_prefix(value, zone_name):
+    """Keep a branch label out of the checkpoint's own editable name."""
+    name = value.strip() if isinstance(value, str) else ""
+    prefix = zone_name.strip() if isinstance(zone_name, str) else ""
+    if not name or not prefix or name[:len(prefix)].casefold() != prefix.casefold():
+        return name
+    remainder = name[len(prefix):]
+    if not remainder or remainder[0] not in " \t·•:|/–—-":
+        return name
+    cleaned = remainder.lstrip(" \t·•:|/–—-").strip()
+    return cleaned or name
+
+
 def normalize_zones(values, *, strict=True, known_zones=None):
     available = tuple(known_zones) if known_zones is not None else FACILITY_ZONES
     result = []
@@ -48,10 +61,11 @@ def normalize_zones(values, *, strict=True, known_zones=None):
     return canonical
 
 
-def normalize_facility_document(value, *, strict_zones=False):
+def normalize_facility_document(value, *, strict_zones=False, known_zones=None):
     """Normalize typed branch/checkpoint references without rewriting free text."""
     if isinstance(value, list):
-        return [normalize_facility_document(item, strict_zones=strict_zones) for item in value]
+        return [normalize_facility_document(item, strict_zones=strict_zones, known_zones=known_zones)
+                for item in value]
     if not isinstance(value, dict):
         return value
     result = {}
@@ -59,11 +73,12 @@ def normalize_facility_document(value, *, strict_zones=False):
         if key in _CHECKPOINT_FIELDS:
             result[key] = canonical_checkpoint_id(item)
         elif key in _ZONE_FIELDS and isinstance(item, list):
-            result[key] = normalize_zones(item, strict=strict_zones)
+            result[key] = normalize_zones(item, strict=strict_zones, known_zones=known_zones)
         elif key in {"zone", "zoneId", "allowedZone", "buildingId"} and isinstance(item, str):
             result[key] = item.strip().casefold() if _ZONE_ID.fullmatch(item.strip().casefold()) else item
         else:
-            result[key] = normalize_facility_document(item, strict_zones=strict_zones)
+            result[key] = normalize_facility_document(item, strict_zones=strict_zones,
+                known_zones=known_zones)
     return result
 
 

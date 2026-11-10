@@ -105,8 +105,9 @@ function Handler:access(conf)
   end
 
   local method = kong.request.get_method()
-  if method == "OPTIONS" or ((method == "GET" or method == "HEAD") and
-                            public_get[kong.request.get_path()]) then return end
+  local path = kong.request.get_path()
+  if method == "OPTIONS" or ((method == "GET" or method == "HEAD") and public_get[path]) or
+     (method == "POST" and path == "/v1/invitations/accept") then return end
   -- Inspect every header: duplicate/late Authorization must never select a
   -- different identity here and in FastAPI's independent token verification.
   local authorization = ngx.req.get_headers(0)["authorization"]

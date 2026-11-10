@@ -43,6 +43,18 @@ async function identityRequest(request: NextRequest) {
     }
 
     if (request.method === "GET") {
+      const pendingSso = request.nextUrl.searchParams.get("pendingSso");
+      if (pendingSso !== null) {
+        if (pendingSso !== "zoho") return NextResponse.json({ error: "SSO provider filter is invalid." }, { status: 400 });
+        if (!masterAdmin) return NextResponse.json({ error: "Only a master-admin can review first-time Zoho sign-ins." }, { status: 403 });
+        const search = request.nextUrl.searchParams.get("search") ?? "";
+        const first = request.nextUrl.searchParams.get("first") ?? "0";
+        const max = request.nextUrl.searchParams.get("max") ?? "25";
+        return NextResponse.json({ data: await callPythonApi(
+          `/v1/keycloak/users/pending-sso?search=${encodeURIComponent(search)}&first=${encodeURIComponent(first)}&max=${encodeURIComponent(max)}`,
+          "GET",
+        ) });
+      }
       const userId = request.nextUrl.searchParams.get("userId");
       if (userId) return NextResponse.json({ data: await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}`, "GET") });
       const search = request.nextUrl.searchParams.get("search") ?? "";
@@ -54,14 +66,13 @@ async function identityRequest(request: NextRequest) {
     const body = requireObject(await readJsonBody(request), "Identity command");
     const action = body.action;
     if (typeof action !== "string") return NextResponse.json({ error: "Identity action is required." }, { status: 400 });
-    if (["setRoles", "resetPassword", "endSessions", "deleteUser"].includes(action) && !masterAdmin) {
-      return NextResponse.json({ error: "Only a master-admin may change roles, reset passwords, end sessions, or delete accounts." }, { status: 403 });
+    if (["setRoles", "resetPassword", "endSessions", "deleteUser", "approveSsoUser"].includes(action) && !masterAdmin) {
+      return NextResponse.json({ error: "Only a master-admin may approve first-time SSO users, change roles, reset passwords, end sessions, or delete accounts." }, { status: 403 });
     }
     const userId = typeof body.userId === "string" ? body.userId : "";
     const options = { timeoutMs: identityCommandTimeoutMs(action) };
     let result: unknown;
-    if (action === "createUser") result = await callPythonApi("/v1/keycloak/users", "POST", body.input, undefined, options);
-    else if (action === "updateUser" && userId) result = await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}`, "PATCH", body.input, undefined, options);
+    if (action === "updateUser" && userId) result = await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}`, "PATCH", body.input, undefined, options);
     else if (action === "setRoles" && userId) result = await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}/roles`, "PUT", body.input, undefined, options);
     else if (action === "resetPassword" && userId) result = await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}/password`, "PUT", body.input);
     else if (action === "endSessions" && userId) result = await callPythonApi(`/v1/keycloak/users/${encodeURIComponent(userId)}/logout`, "POST");

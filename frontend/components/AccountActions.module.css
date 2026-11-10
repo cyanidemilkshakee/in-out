@@ -1,5 +1,6 @@
 .actions {
   display: flex;
+  min-width: 0;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
@@ -8,6 +9,7 @@
 
 .actions a, .actions button {
   display: inline-block;
+  max-width: 100%;
   padding: 8px 12px;
   border: 1px solid #cbd5e1;
   border-radius: var(--radius);
@@ -17,6 +19,7 @@
   font-size: var(--type-15);
   text-decoration: none;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .actions button:disabled { opacity: .6; cursor: wait; }

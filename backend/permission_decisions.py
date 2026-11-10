@@ -13,7 +13,7 @@ from models import (Subject, Person, HardwareAsset, AccessPermission, PresenceSt
                     PermissionRequestModel, Movement, Checkpoint, AuditEvent)
 from movement_logic import _current_date, _current_time
 from access_validation import (parse_validity, require_registered_checkpoint,
-    validate_permission_window, validate_registered_zones)
+    validate_permission_window, validate_registered_checkpoints, validate_registered_zones)
 from facility_zones import canonical_checkpoint_id, normalize_facility_document
 from schemas import manual_approval_minutes
 from manual_review_policy import MANUAL_REVIEW_TIMEOUT_MINUTES, manual_access_snapshot, revised_access_data
@@ -332,11 +332,14 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
     status = data.get("status")
     # Workflow signals are notifications, not administrative authority. Only
     # an authenticated HTTP decision may complete a pending approval. A worker
-    # can deny an unanswered request once its server-recorded deadline passes.
+    # may expire a manual review at its server-recorded deadline; visitor
+    # approvals stay pending until an administrator responds.
     if from_activity and status == "pending":
         if not expire_only:
             return {"request": data, "movement": None}
-        timeout = {"manual_override": MANUAL_REVIEW_TIMEOUT_MINUTES, "visitor": 30}.get(kind)
+        # Visitor approvals remain pending until an administrator decides;
+        # manual override reviews retain their bounded response window.
+        timeout = MANUAL_REVIEW_TIMEOUT_MINUTES if kind == "manual_override" else None
         created_at = req.created_at
         if created_at is not None and created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=timezone.utc)
@@ -460,26 +463,26 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
                 "state": state, "reason": reason, "updatedAt": now.isoformat(), "updatedBy": actor,
                 "assignment": perm.data.get("assignment", subject.kind.title()), "source": "request", "requestId": req.id}
             if decision == "approved":
-                permanent_access = data.get("permanentAccess") is True and data.get("origin") == "permission_manager"
+                permanent_access = data.get("permanentAccess") is True and data.get("origin") in {"permission_manager", "cross_zone_request"}
                 validate_permission_window(data.get("validFrom"), data.get("validTo"), now=now,
                     allow_past_start=True, permanent=permanent_access)
                 zones = await validate_registered_zones(db, data.get("requestedZones") or [])
                 req.data = {**req.data, "requestedZones": zones}
                 permission.update(zones=zones, validFrom=data.get("validFrom", ""), validTo=data.get("validTo", ""))
-                if kind == "visitor":
-                    requested_checkpoints = data.get("requestedCheckpoints")
-                    if requested_checkpoints is not None:
-                        if not isinstance(requested_checkpoints, list) or len(requested_checkpoints) != 1:
-                            raise HTTPException(422, "Visitor access must target exactly one checkpoint")
-                        checkpoint_id = await require_registered_checkpoint(db, requested_checkpoints[0])
-                        checkpoint = await db.get(Checkpoint, checkpoint_id)
-                        if checkpoint is None or checkpoint.zone_id not in zones:
-                            raise HTTPException(422, "The selected checkpoint must belong to an allowed zone")
-                        requested_checkpoints = [checkpoint.id]
-                        req.data = {**req.data, "requestedCheckpoints": requested_checkpoints}
-                        permission["checkpoints"] = requested_checkpoints
-                    else:
-                        permission.pop("checkpoints", None)
+                requested_checkpoints = data.get("requestedCheckpoints")
+                if requested_checkpoints is not None:
+                    if kind == "visitor" and (not isinstance(requested_checkpoints, list) or len(requested_checkpoints) != 1):
+                        raise HTTPException(422, "Visitor access must target exactly one checkpoint")
+                    selected = await validate_registered_checkpoints(db, requested_checkpoints)
+                    normalized_checkpoints = [item.id for item in selected]
+                    if any(item.zone_id not in zones for item in selected):
+                        raise HTTPException(422, "Every selected checkpoint must belong to an allowed zone")
+                    if data.get("checkpointId") not in normalized_checkpoints:
+                        raise HTTPException(422, "The primary checkpoint must be included in checkpoint access")
+                    req.data = {**req.data, "requestedCheckpoints": normalized_checkpoints}
+                    permission["checkpoints"] = normalized_checkpoints
+                elif kind in {"visitor", "zone_access"}:
+                    permission.pop("checkpoints", None)
             if not superseded:
                 permission = revised_access_data(perm.data, permission, permission=True, force=True)
                 perm.data = permission
@@ -488,11 +491,10 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
                     "status": "pre_approved" if subject.kind == "visitor" and decision == "approved" else state}
                 if decision == "approved":
                     updated_metadata.update(allowedZones=permission["zones"], validFrom=permission["validFrom"], validTo=permission["validTo"])
-                    if subject.kind == "visitor":
-                        if permission.get("checkpoints"):
-                            updated_metadata["allowedCheckpoints"] = permission["checkpoints"]
-                        else:
-                            updated_metadata.pop("allowedCheckpoints", None)
+                    if permission.get("checkpoints"):
+                        updated_metadata["allowedCheckpoints"] = permission["checkpoints"]
+                    elif kind in {"visitor", "zone_access"}:
+                        updated_metadata.pop("allowedCheckpoints", None)
                 metadata.data = revised_access_data(metadata.data, updated_metadata, force=True)
     req.data = {**req.data, "id": req.id, "status": decision, "decidedAt": data.get("decidedAt") or now.isoformat(),
                 "decidedBy": data.get("decidedBy") or actor, "decisionReason": reason, "appliedAt": now.isoformat()}

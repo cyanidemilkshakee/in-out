@@ -169,10 +169,11 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
                     self.assertEqual((await db.get(AccessPermission, "visitor-permission")).data, newer)
                     self.assertEqual((await db.get(Person, "v1")).data, metadata)
 
-    async def test_newer_zone_approval_survives_older_visitor_timeout(self):
+    async def test_newer_zone_approval_survives_older_pending_visitor_request(self):
         await self.add_visitor()
         visitor = await self.request()
-        zone = await self.request(request_type="zone_access", requested_zones=["b"])
+        zone = await self.request(request_type="zone_access", checkpoint_id="server-room",
+            requested_zones=["b"], requested_checkpoints=["server-room"])
         self.assertEqual(visitor.status_code, 200, visitor.text)
         self.assertEqual(zone.status_code, 200, zone.text)
         async with self.sessions() as db:
@@ -185,11 +186,11 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
             timed_out = await apply_permission_decision(db, visitor.json()["id"], "denied", "system", "No response", from_activity=True, expire_only=True)
             await db.commit()
             self.assertEqual(approved["request"]["status"], "approved")
-            self.assertEqual(timed_out["request"]["status"], "denied")
+            self.assertEqual(timed_out["request"]["status"], "pending")
             self.assertEqual((await db.get(AccessPermission, "visitor-permission")).data, granted)
             self.assertEqual((await db.get(Person, "v1")).data["allowedZones"], ["b"])
 
-    async def test_legacy_visitor_timeout_cannot_revoke_existing_grant(self):
+    async def test_legacy_pending_visitor_request_does_not_expire_or_revoke_grant(self):
         original = await self.add_visitor(active=True)
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
@@ -200,7 +201,7 @@ class WorkflowEdgeTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             result = await apply_permission_decision(db, "legacy", "denied", "system", "Timed out", from_activity=True, expire_only=True)
             await db.commit()
-            self.assertEqual(result["request"]["status"], "denied")
+            self.assertEqual(result["request"]["status"], "pending")
             self.assertEqual((await db.get(AccessPermission, "visitor-permission")).data, original)
 
     async def test_legacy_pending_registration_remains_approvable(self):

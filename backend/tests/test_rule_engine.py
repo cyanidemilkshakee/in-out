@@ -9,6 +9,7 @@ from rule_engine import (  # noqa: E402
     build_workday_statuses,
     default_alert_rules,
     eligible_alert_subject_types,
+    evaluate_continuous_presence_rules,
     evaluate_scheduled_rules,
     evaluate_visitor_overstay_rules,
     with_default_alert_rules,
@@ -19,7 +20,7 @@ class RuleEngineTests(unittest.TestCase):
     def test_assignment_eligibility_never_offers_hardware_or_retired_conditions(self):
         for rule in default_alert_rules():
             expected = {"cross_building_scan": ("employee", "visitor"),
-                        "visitor_overstay": ("employee", "visitor")}.get(
+                        "visitor_overstay": ("visitor",)}.get(
                 rule["conditionKey"], ("employee",))
             self.assertEqual(eligible_alert_subject_types(rule), expected)
             self.assertEqual(eligible_alert_subject_types({**rule, "enabled": False}), expected)
@@ -38,8 +39,14 @@ class RuleEngineTests(unittest.TestCase):
         workdays = [{"employeeId": employee["id"], "employeeName": employee["name"], "date": "Oct 6, 2026",
                      "breakMinutes": 0, "minutesInside": 420, "shiftEnded": True} for employee in employees]
         assignments = {"none": [], "break-only": ["rule-no-break"], "attendance-only": ["rule-irregularity"]}
-        generated = evaluate_scheduled_rules(default_alert_rules(), [], workdays, [],
+        scheduled = evaluate_scheduled_rules(default_alert_rules(), [], workdays, [],
             employees=employees, now=now, rule_assignments=assignments)
+        visits = [{"subjectId": employee["id"], "subjectType": "employee",
+            "subjectName": employee["name"], "barcode": employee["barcode"], "state": "inside",
+            "entryStartedAt": now - timedelta(hours=7), "noBreakAlertedInterval": 0}
+            for employee in employees]
+        generated = [*scheduled, *evaluate_continuous_presence_rules(default_alert_rules(), visits,
+            now=now, rule_assignments=assignments)]
         self.assertEqual({(alert["subjectId"], alert["ruleId"]) for alert in generated}, {
             ("default", "rule-no-break"), ("default", "rule-irregularity"),
             ("break-only", "rule-no-break"), ("attendance-only", "rule-irregularity"),
@@ -83,27 +90,30 @@ class RuleEngineTests(unittest.TestCase):
         self.assertEqual({rule["conditionKey"] for rule in normalized}, {
             "no_break", "irregularity", "cross_building_scan", "visitor_overstay"})
 
-    def test_visitor_threshold_is_strict_continuous_and_independent_of_calendar_days(self):
+    def test_visitor_overstay_follows_access_expiry_not_visit_duration(self):
         now = datetime(2026, 10, 12, 9, tzinfo=timezone.utc)
         visit = {"subjectId": "visitor", "subjectType": "visitor", "subjectName": "Guest",
             "barcode": "VIS-1", "state": "inside", "buildingId": "zone-b", "buildingName": "Branch B",
-            "entryStartedAt": now - timedelta(hours=12)}
-        self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=now), [])
-        first = evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=now + timedelta(microseconds=1))
+            "entryStartedAt": now - timedelta(minutes=5), "validTo": (now + timedelta(hours=2)).isoformat()}
+        expiry = now + timedelta(hours=2)
+        self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=expiry - timedelta(microseconds=1)), [])
+        first = evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=expiry)
         self.assertEqual(len(first), 1)
         self.assertEqual((first[0]["subjectId"], first[0]["checkpoint"], first[0]["severity"]),
             ("visitor", "Branch B", "medium"))
         self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(),
-            [{**visit, "alertedEntryAt": visit["entryStartedAt"]}], now=now + timedelta(days=1)), [])
+            [{**visit, "alertedEntryAt": visit["entryStartedAt"]}], now=expiry + timedelta(days=1)), [])
         later = evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=now + timedelta(days=1))
         self.assertEqual(first[0]["id"], later[0]["id"])
 
     def test_visitor_rule_rejects_unknown_visit_times_and_nonvisitor_or_outside_presence(self):
         now = datetime(2026, 10, 12, 9, tzinfo=timezone.utc)
         visit = {"subjectId": "visitor", "subjectType": "visitor", "state": "inside",
-            "entryStartedAt": now - timedelta(hours=13)}
+            "entryStartedAt": now - timedelta(hours=13), "validTo": (now - timedelta(hours=1)).isoformat()}
         for changes in ({"entryStartedAt": None}, {"entryStartedAt": now + timedelta(days=1)},
                         {"entryStartedAt": (now - timedelta(hours=13)).replace(tzinfo=None)},
+                        {"validTo": None}, {"validTo": "not-a-date"},
+                        {"validTo": (now + timedelta(hours=1)).isoformat()},
                         {"subjectType": "employee"}, {"state": "outside"}):
             with self.subTest(changes=changes):
                 self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(), [{**visit, **changes}], now=now), [])
@@ -159,7 +169,7 @@ class RuleEngineTests(unittest.TestCase):
         self.assertEqual(len(first), 1)
         self.assertEqual(second, [])
 
-    def test_open_shift_is_counted_for_workday_and_no_break_alert(self):
+    def test_no_break_uses_continuous_presence_not_workday_summary(self):
         now = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)  # 5:30 PM (Asia/Kolkata)
         employee = {
             "id": "p1",
@@ -183,14 +193,14 @@ class RuleEngineTests(unittest.TestCase):
         self.assertEqual(workdays[0]["minutesInside"], 420)
         self.assertFalse(workdays[0]["shiftEnded"])
 
-        generated = evaluate_scheduled_rules(
-            [{"id": "rule-no-break", "conditionKey": "no_break", "enabled": True}],
-            movements,
-            workdays,
-            [],
-            employees=[employee],
-            now=now,
-        )
+        rule = {"id": "rule-no-break", "conditionKey": "no_break", "enabled": True}
+        self.assertEqual(evaluate_scheduled_rules([rule], movements, workdays, [],
+            employees=[employee], now=now), [])
+        generated = evaluate_continuous_presence_rules([rule], [{
+            "subjectId": "p1", "subjectType": "employee", "subjectName": "Alice",
+            "barcode": "EMP-1", "state": "inside", "entryStartedAt": now - timedelta(hours=7),
+            "noBreakAlertedInterval": 0,
+        }], now=now)
         self.assertEqual(len(generated), 1)
         self.assertEqual(generated[0]["conditionKey"], "no_break")
         self.assertEqual(generated[0]["subjectId"], "p1")
@@ -199,13 +209,20 @@ class RuleEngineTests(unittest.TestCase):
         now = datetime(2026, 10, 6, 13, 0, tzinfo=timezone.utc)
         rule = {"id": "rule-no-break", "conditionKey": "no_break", "enabled": True, "severity": "critical"}
         employee = {"id": "p2", "barcode": "EMP-2", "name": "Same name", "type": "employee"}
-        workday = {"employeeId": "p2", "employeeName": "Same name", "breakMinutes": 0,
-            "minutesInside": 420, "date": "Oct 6, 2026"}
-        existing = {"ruleId": "rule-no-break", "subjectId": "p1", "subjectName": "Same name", "date": workday["date"]}
-        generated = evaluate_scheduled_rules([rule], [], [workday], [existing], employees=[employee], now=now)
+        visit = {"subjectId": "p2", "subjectType": "employee", "subjectName": employee["name"],
+            "barcode": employee["barcode"], "state": "inside", "entryStartedAt": now - timedelta(hours=7),
+            "noBreakAlertedInterval": 0}
+        generated = evaluate_continuous_presence_rules([rule], [visit], now=now)
         self.assertEqual(len(generated), 1)
         self.assertEqual((generated[0]["subjectId"], generated[0]["barcode"], generated[0]["severity"]), ("p2", "EMP-2", "critical"))
-        self.assertEqual(evaluate_scheduled_rules([rule], [], [workday], generated, employees=[employee], now=now), [])
+        repeated = evaluate_continuous_presence_rules([rule], [visit], now=now)
+        self.assertEqual(repeated[0]["id"], generated[0]["id"])
+        second = evaluate_continuous_presence_rules([rule],
+            [{**visit, "noBreakAlertedInterval": 1}], now=now + timedelta(hours=6))
+        self.assertEqual(second[0]["intervalIndex"], 2)
+        self.assertIn("at least 12 hours", second[0]["reason"])
+        self.assertEqual(evaluate_continuous_presence_rules([rule],
+            [{**visit, "noBreakAlertedInterval": 2}], now=now + timedelta(hours=6)), [])
 
 if __name__ == "__main__":
     unittest.main()

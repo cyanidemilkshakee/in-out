@@ -10,7 +10,7 @@ export const REQUEST_LABELS: Record<PermissionRequest["type"], string> = {
 export function requestApprovalLabel(request: PermissionRequest) {
   if (request.type === "hardware_custody") return "Approve reassignment";
   if (request.type === "manual_override") return "Approve movement";
-  if (request.type === "zone_access") return "Replace access";
+  if (request.type === "zone_access") return request.origin === "cross_zone_request" ? "Approve zone access" : "Replace access";
   return "Approve access";
 }
 

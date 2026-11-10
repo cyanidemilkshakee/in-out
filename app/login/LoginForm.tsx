@@ -2,6 +2,7 @@
 
 import { useRef, useState, type FormEvent } from "react"
 import { getCsrfToken, signIn } from "next-auth/react"
+import Link from "next/link"
 import { StepUpDurationSelect } from "../../frontend/components/admin/StepUpDurationSelect"
 import { DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES, type StepUpDurationMinutes } from "../../lib/userManagementStepUp"
 import { PASSWORD_MIN_LENGTH, PASSWORD_MAX_LENGTH } from "../../lib/passwordLimits"
@@ -355,6 +356,7 @@ export default function LoginForm({ redirectTo, stepUpLogin, initialError, passw
         <button type="submit" className={styles.button} disabled={submitting}>
           {submitting ? "Signing in…" : stepUpLogin ? "Re-authenticate" : "Sign in"}
         </button>
+        {stepUpLogin ? <Link className={styles.returnButton} href="/admin/dashboard">Return to dashboard</Link> : null}
       </form>
       {!stepUpLogin && !passwordSetupSignoutRequired && (
         <div className={styles.ssoSection}>

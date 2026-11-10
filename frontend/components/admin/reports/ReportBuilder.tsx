@@ -29,13 +29,11 @@ const RESTRICTED_DENIAL_CODES = new Set([
 type ReportSource = "movements" | "alerts" | "permissions";
 
 type ReportRow = {
-  source: string;
   date: string;
   time: string;
   subject: string;
   outcome: string;
   details: string;
-  reference: string;
 };
 
 const SOURCE_LABELS: Record<ReportSource, string> = {
@@ -132,13 +130,11 @@ export function ReportBuilder({
             : RESTRICTED_DENIAL_CODES.has(movement.denialCode ?? ""))
         )) continue;
         reportRows.push({
-          source: "Movement",
           date: movement.date,
           time: movement.time,
           subject: movement.subjectName,
           outcome: movement.result,
-          details: `${movement.direction} / ${movement.checkpoint}${movement.carrierName ? ` / Carried by ${movement.carrierName}` : ""}${movement.sourceEventId ? ` / Scan ${movement.sourceEventId}` : ""}${movement.reason && movement.reason !== "-" ? ` / ${movement.reason}` : ""}`,
-          reference: movement.id,
+          details: `${movement.direction} / ${movement.checkpoint}${movement.carrierName ? ` / Carried by ${movement.carrierName}` : ""}${movement.reason && movement.reason !== "-" ? ` / ${movement.reason}` : ""}`,
           timestamp: parseReportDate(movement.date, movement.time, movement.createdAt),
         });
       }
@@ -151,13 +147,11 @@ export function ReportBuilder({
           : alert.status !== alertStatus)) continue;
         if (alertSeverity !== "all" && alert.severity !== alertSeverity) continue;
         reportRows.push({
-          source: "Alert",
           date: alert.date,
           time: alert.time,
           subject: alert.subjectName,
           outcome: `${alert.severity} / ${alert.status}`,
           details: `${alert.title} / ${alert.reason}`,
-          reference: alert.id,
           timestamp: parseReportDate(alert.date, alert.time, alert.createdAt),
         });
       }
@@ -168,13 +162,11 @@ export function ReportBuilder({
         if (audit.category !== "permission" || !audit.decision) continue;
         if (permissionDecision !== "all" && audit.decision !== permissionDecision) continue;
         reportRows.push({
-          source: "Manual permission",
           date: audit.date,
           time: audit.time,
           subject: audit.subjectName,
           outcome: audit.decision,
           details: `${audit.action} / ${audit.reason} / ${audit.actor}`,
-          reference: audit.id,
           timestamp: parseReportDate(audit.date, audit.time, audit.createdAt),
         });
       }
@@ -296,10 +288,10 @@ export function ReportBuilder({
     const controller = new AbortController();
     exportController.current = controller;
     const timer = setTimeout(() => controller.abort(), 30_000);
-    const header = ["Source", "Date", "Time", "Subject", "Outcome", "Details", "Reference"];
+    const header = ["Date", "Time", "Subject", "Outcome", "Details"];
     try {
       const blob = await formatCsvBlob(header, rows,
-        row => [row.source, row.date, row.time, row.subject, row.outcome, row.details, row.reference],
+        row => [row.date, row.time, row.subject, row.outcome, row.details],
         { signal: controller.signal, newline: "\n" });
       controller.signal.throwIfAborted();
       const url = URL.createObjectURL(blob);

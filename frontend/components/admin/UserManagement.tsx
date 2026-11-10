@@ -1,11 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { Check, ChevronRight, KeyRound, LoaderCircle, LockKeyhole, MapPin, Pencil, Plus, ScanLine, Search, ShieldCheck, Trash2, UserRound, UsersRound, X } from "lucide-react";
-import { createManagedUser, deleteManagedUser, endManagedUserSessions, getManagedUser, listManagedUserPage, resetManagedUserPassword, updateManagedUser, type ManagedUser } from "../../../services/keycloakUserService";
+import { Ban, Check, ChevronRight, KeyRound, LoaderCircle, LockKeyhole, Mail, MapPin, Pencil, Plus, RotateCw, ScanLine, Search, ShieldCheck, Trash2, UserRound, UsersRound, X } from "lucide-react";
+import { createManagedUser, deleteManagedUser, endManagedUserSessions, getManagedUser, listManagedUsers, resetManagedUserPassword, resendManagedUserInvite, revokeManagedUserInvite, updateManagedUser, type ManagedUser } from "../../../services/keycloakUserService";
 import { createCheckpoint as createCheckpointRecord, deleteCheckpoint as deleteCheckpointRecord, listCheckpoints, updateCheckpointName } from "../../../services/checkpointService";
 import { createZone, deleteZone, listZones, updateZoneName } from "../../../services/zoneService";
 import type { Checkpoint, OrganizationZone } from "../../../lib/types";
+import { checkpointDisplayName, stripZoneNameFromPersonName, stripZoneNamePrefix } from "../../../lib/facilityZones";
 import { DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES, USER_MANAGEMENT_STEP_UP_DURATIONS, formatStepUpCountdown, isStepUpDurationMinutes } from "../../../lib/userManagementStepUp";
 import { CreateUserForm, UserDetailsForm, type ManagedUserFormValue } from "./ManagedUserForm";
 import { StepUpDurationSelect } from "./StepUpDurationSelect";
@@ -18,16 +19,16 @@ const emptyForm: ManagedUserFormValue = {
 };
 type CreateContext = { role: "zone-admin" | "operator"; zoneId?: string; checkpointId?: string };
 type NameEdit = { kind: "zone"; id: string; value: string } | { kind: "checkpoint"; id: string; zoneId: string; value: string };
-type Operation = "load" | "details" | "create" | "save" | "password" | "sessions" | "delete" | "checkpoint" | "zone";
+type Operation = "load" | "details" | "create" | "save" | "password" | "sessions" | "delete" | "invite" | "checkpoint" | "zone";
 type Message = { text: string; kind: "success" | "error" } | null;
 
-function userName(user: ManagedUser) {
-  return [user.firstName, user.lastName].filter(Boolean).join(" ") || user.username;
+function userName(user: ManagedUser, zoneNames: readonly string[] = []) {
+  return stripZoneNamePrefix([user.firstName, user.lastName].filter(Boolean).join(" "), zoneNames) || user.username;
 }
 
-function userInitials(user: ManagedUser) {
-  const names = [user.firstName, user.lastName].filter(Boolean);
-  return (names.length ? names.map((name) => name[0]).join("") : user.username.slice(0, 2)).toUpperCase();
+function userInitials(user: ManagedUser, zoneNames: readonly string[] = []) {
+  const name = userName(user, zoneNames);
+  return (name !== user.username ? name.split(/\s+/u).slice(0, 2).map((part) => part[0]).join("") : user.username.slice(0, 2)).toUpperCase();
 }
 
 function canDeleteAccount(user: ManagedUser) {
@@ -36,9 +37,20 @@ function canDeleteAccount(user: ManagedUser) {
     roles.every((role) => role === "zone-admin" || role === "operator");
 }
 
-function formForUser(user: ManagedUser): ManagedUserFormValue {
+function needsInvitationAction(user: ManagedUser) {
+  return user.inviteStatus === "pending" || user.inviteStatus === "expired" || user.inviteStatus === "revoked";
+}
+
+function invitationExpiry(expiresAt?: number | null) {
+  if (!expiresAt) return "Expiry unavailable";
+  return new Intl.DateTimeFormat("en-IN", { dateStyle: "medium", timeStyle: "short", timeZone: "Asia/Kolkata" })
+    .format(new Date(expiresAt * 1000));
+}
+
+function formForUser(user: ManagedUser, zoneNames: readonly string[] = []): ManagedUserFormValue {
+  const profile = stripZoneNameFromPersonName(user.firstName, user.lastName, zoneNames);
   return {
-    username: user.username, firstName: user.firstName, lastName: user.lastName,
+    username: user.username, ...profile,
     email: user.email, password: "", temporaryPassword: true, enabled: user.enabled,
     roles: (user.roles ?? []).filter((role): role is "zone-admin" | "operator" => role === "zone-admin" || role === "operator"), checkpointId: user.checkpointId ?? null,
     zoneIds: user.zoneIds ?? [],
@@ -96,8 +108,6 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
   const [message, setMessage] = useState<Message>(null);
   const [loadError, setLoadError] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const [hasMore, setHasMore] = useState(false);
-  const [nextFirst, setNextFirst] = useState(0);
   const directoryController = useRef<AbortController | null>(null);
   useEffect(() => () => directoryController.current?.abort(), []);
   const [operation, setOperation] = useState<Operation | null>(null);
@@ -108,6 +118,17 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
   const editorHeadingRef = useRef<HTMLHeadingElement>(null);
   const busy = operation !== null || securityAction !== null;
   const [durationMinutes, setDurationMinutes] = useState<(typeof USER_MANAGEMENT_STEP_UP_DURATIONS)[number]>(() => isStepUpDurationMinutes(stepUpDurationMinutes) ? stepUpDurationMinutes : DEFAULT_USER_MANAGEMENT_STEP_UP_MINUTES);
+
+  function zoneNamesForUser(user: ManagedUser): string[] {
+    const zoneIds = user.roles?.includes("operator") && user.checkpointId
+      ? checkpoints.filter((checkpoint) => checkpoint.id === user.checkpointId).map((checkpoint) => checkpoint.zoneId ?? checkpoint.zone)
+      : user.zoneIds ?? [];
+    return zones.filter((zone) => zoneIds.includes(zone.id)).map((zone) => zone.name);
+  }
+  function displayUserName(user: ManagedUser): string { return userName(user, zoneNamesForUser(user)); }
+  function displayUserInitials(user: ManagedUser): string { return userInitials(user, zoneNamesForUser(user)); }
+  function userForm(user: ManagedUser): ManagedUserFormValue { return formForUser(user, zoneNamesForUser(user)); }
+
   useEffect(() => {
     if (!selected) return;
     editorHeadingRef.current?.focus({ preventScroll: true });
@@ -128,7 +149,7 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
     setOperation(null);
   }
 
-  async function load(query = search, append = false) {
+  async function load(query = search) {
     if (!beginOperation("load")) return;
     setLoadError("");
     setMessage(null);
@@ -139,18 +160,13 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
       // component's locally updated catalog briefly, then revalidate it.
       const reloadReferences = Date.now() - referenceDataLoadedAt.current >= 30_000;
       const [result, checkpointList, zoneList] = await Promise.all([
-        listManagedUserPage(query, append ? nextFirst : 0, controller.signal),
+        listManagedUsers(query, controller.signal),
         reloadReferences ? listCheckpoints() : Promise.resolve(checkpoints),
         reloadReferences ? listZones() : Promise.resolve(zones),
       ]);
       controller.signal.throwIfAborted();
-      const mergePage = (current: ManagedUser[]) => append
-        ? [...new Map([...current, ...result.items].map(user => [user.id, user])).values()]
-        : result.items;
-      setUsers(mergePage);
-      setAssignmentUsers(mergePage);
-      setHasMore(result.hasMore);
-      setNextFirst(result.nextFirst ?? 0);
+      setUsers(result.items);
+      setAssignmentUsers(result.items);
       if (reloadReferences) {
         setCheckpoints(checkpointList);
         setZones(zoneList);
@@ -193,12 +209,13 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
   }
 
   async function removeCheckpoint(checkpoint: Checkpoint) {
-    if (checkpoint.required || !window.confirm(`Retire checkpoint ${checkpoint.name}? Historical movement records will remain.`) || !beginOperation("checkpoint")) return;
+    const checkpointLabel = checkpoint.gateLabel || checkpoint.name;
+    if (checkpoint.required || !window.confirm(`Retire checkpoint ${checkpointLabel}? Historical movement records will remain.`) || !beginOperation("checkpoint")) return;
     setCheckpointMessage(null);
     try {
       await deleteCheckpointRecord(checkpoint.id);
       setCheckpoints((current) => current.filter((item) => item.id !== checkpoint.id));
-      setCheckpointMessage({ kind: "success", text: `Checkpoint ${checkpoint.name} retired.` });
+      setCheckpointMessage({ kind: "success", text: `Checkpoint ${checkpointLabel} retired.` });
     } catch (error) {
       setCheckpointMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to retire checkpoint." });
     } finally { finishOperation(); }
@@ -250,7 +267,7 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
     if (busy) return;
     setCheckpointMessage(null);
     setCheckpointZone(checkpoint.zoneId ?? checkpoint.zone);
-    setNameEdit({ kind: "checkpoint", id: checkpoint.id, zoneId: checkpoint.zoneId ?? checkpoint.zone, value: checkpoint.gateLabel || checkpoint.name });
+    setNameEdit({ kind: "checkpoint", id: checkpoint.id, zoneId: checkpoint.zoneId ?? checkpoint.zone, value: checkpointDisplayName(checkpoint, zones) });
   }
 
   function cancelNameEdit() {
@@ -272,7 +289,7 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
       } else {
         const updated = await updateCheckpointName(target.id, name);
         setCheckpoints((current) => current.map((checkpoint) => checkpoint.id === updated.id ? updated : checkpoint));
-        setCheckpointMessage({ kind: "success", text: `Checkpoint renamed to ${updated.gateLabel || updated.name}.` });
+        setCheckpointMessage({ kind: "success", text: `Checkpoint renamed to ${checkpointDisplayName(updated, zones)}.` });
       }
       setNameEdit(null);
     } catch (error) {
@@ -293,8 +310,8 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
         <button className={styles.nameEditAction} type="submit" aria-label="Save checkpoint name" title="Save name" disabled={busy || !nameEdit.value.trim()}>{operation === "checkpoint" ? <LoaderCircle className={styles.loadingIcon} size={16} aria-hidden="true" /> : <Check size={16} aria-hidden="true" />}</button>
         <button className={styles.nameEditAction} type="button" aria-label="Cancel checkpoint rename" title="Cancel" disabled={busy} onClick={cancelNameEdit}><X size={16} aria-hidden="true" /></button>
       </form> : <>
-        <strong>{checkpoint.gateLabel || checkpoint.name}</strong>
-        <button className={styles.renameButton} type="button" aria-label={`Edit checkpoint name ${checkpoint.gateLabel || checkpoint.name}`} title="Edit checkpoint name" disabled={busy} onClick={() => editCheckpointName(checkpoint)}><Pencil size={15} aria-hidden="true" /></button>
+        <strong>{checkpointDisplayName(checkpoint, zones)}</strong>
+        <button className={styles.renameButton} type="button" aria-label={`Edit checkpoint name ${checkpointDisplayName(checkpoint, zones)}`} title="Edit checkpoint name" disabled={busy} onClick={() => editCheckpointName(checkpoint)}><Pencil size={15} aria-hidden="true" /></button>
       </>}
     </div>;
   }
@@ -303,7 +320,7 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
     setShowCreate(false);
     setCreateContext(null);
     setSelected(user);
-    setEditForm(formForUser(user));
+    setEditForm(userForm(user));
     setNewPassword("");
     setTemporaryPassword(true);
     setMessage(null);
@@ -312,6 +329,11 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
   async function choose(user: ManagedUser) {
     if (!beginOperation("details")) return;
     setMessage(null);
+    if (!user.canManage) {
+      showUser(user);
+      finishOperation();
+      return;
+    }
     try {
       const details = await getManagedUser(user.id);
       showUser(details);
@@ -327,27 +349,86 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
   async function create(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!isMasterAdmin && (createForm.roles.length !== 1 || createForm.roles[0] !== "operator" || createForm.zoneIds.length > 0)) return;
+    if (createForm.roles.length !== 1) {
+      setMessage({ kind: "error", text: "Choose one role before sending the invitation." });
+      return;
+    }
     if (!event.currentTarget.reportValidity() || !beginOperation("create")) return;
     setMessage(null);
     try {
-      const created = await createManagedUser(createForm);
+      const assignedCheckpoint = checkpoints.find((checkpoint) => checkpoint.id === createForm.checkpointId);
+      const zoneNames = createForm.roles.includes("operator") && createForm.checkpointId
+        ? zones.filter((zone) => zone.id === (assignedCheckpoint?.zoneId ?? assignedCheckpoint?.zone)).map((zone) => zone.name)
+        : zones.filter((zone) => createForm.zoneIds.includes(zone.id)).map((zone) => zone.name);
+      const cleanProfile = stripZoneNameFromPersonName(createForm.firstName, createForm.lastName, zoneNames);
+      const created = await createManagedUser({ ...createForm, ...cleanProfile });
       setUsers((current) => [created, ...current.filter((user) => user.id !== created.id)]);
       setAssignmentUsers((current) => [created, ...current.filter((user) => user.id !== created.id)]);
       setCreateForm(emptyForm);
       showUser(created);
       setEditForm(formForUser(created));
-      setMessage({ kind: "success", text: isMasterAdmin ? "Application account created." : "Operator account created." });
+      setMessage({ kind: "success", text: `Invitation sent to ${created.email}. The account remains disabled until it is accepted.` });
     } catch (error) {
       const failure = error instanceof Error ? error.message : "Unable to create user.";
       try {
-        const refreshed = await listManagedUserPage(appliedSearch);
+        const refreshed = await listManagedUsers(appliedSearch);
         setUsers(refreshed.items);
         setAssignmentUsers(refreshed.items);
-        setHasMore(refreshed.hasMore);
-        setNextFirst(refreshed.nextFirst ?? 0);
       }
       catch { setLoadError("Reload the directory to check the current account state."); }
       setMessage({ kind: "error", text: failure });
+    } finally {
+      finishOperation();
+    }
+  }
+
+  async function resendInvite() {
+    const target = selected;
+    if (!target?.canManage || !needsInvitationAction(target) || !beginOperation("invite")) return;
+    setMessage(null);
+    try {
+      const updated = await resendManagedUserInvite(target.id);
+      setSelected(updated);
+      setEditForm(formForUser(updated));
+      setUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
+      setAssignmentUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
+      setMessage({ kind: "success", text: `A new invitation was sent to ${updated.email}.` });
+    } catch (error) {
+      try {
+        const actual = await getManagedUser(target.id);
+        setSelected(actual);
+        setEditForm(formForUser(actual));
+        setUsers((current) => current.map((user) => user.id === actual.id ? actual : user));
+        setAssignmentUsers((current) => current.map((user) => user.id === actual.id ? actual : user));
+      } catch { /* The original message remains actionable; reload the directory later. */ }
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to resend invitation." });
+    } finally {
+      finishOperation();
+    }
+  }
+
+  async function revokeInvite() {
+    const target = selected;
+    if (!target?.canManage || !needsInvitationAction(target) ||
+        !window.confirm(`Revoke the pending invitation for ${target.email}?`) || !beginOperation("invite")) return;
+    setMessage(null);
+    try {
+      await revokeManagedUserInvite(target.id);
+      const updated = await getManagedUser(target.id);
+      setSelected(updated);
+      setEditForm(formForUser(updated));
+      setUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
+      setAssignmentUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
+      setMessage({ kind: "success", text: `The invitation for ${updated.email} was revoked.` });
+    } catch (error) {
+      try {
+        const actual = await getManagedUser(target.id);
+        setSelected(actual);
+        setEditForm(formForUser(actual));
+        setUsers((current) => current.map((user) => user.id === actual.id ? actual : user));
+        setAssignmentUsers((current) => current.map((user) => user.id === actual.id ? actual : user));
+      } catch { /* The original message remains actionable; reload the directory later. */ }
+      setMessage({ kind: "error", text: error instanceof Error ? error.message : "Unable to revoke invitation." });
     } finally {
       finishOperation();
     }
@@ -358,15 +439,20 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
     if (!selected?.canManage || !event.currentTarget.reportValidity() || !beginOperation("save")) return;
     setMessage(null);
     try {
+      const assignedCheckpoint = checkpoints.find((checkpoint) => checkpoint.id === editForm.checkpointId);
+      const targetZoneNames = editForm.roles.includes("operator") && editForm.checkpointId
+        ? zones.filter((zone) => zone.id === (assignedCheckpoint?.zoneId ?? assignedCheckpoint?.zone)).map((zone) => zone.name)
+        : zones.filter((zone) => editForm.zoneIds.includes(zone.id)).map((zone) => zone.name);
+      const cleanProfile = stripZoneNameFromPersonName(editForm.firstName, editForm.lastName, targetZoneNames);
       const updated = await updateManagedUser(selected.id, isMasterAdmin ? {
-        firstName: editForm.firstName, lastName: editForm.lastName, email: editForm.email,
+        ...cleanProfile, email: editForm.email,
         enabled: editForm.enabled, checkpointId: editForm.checkpointId ?? null, roles: editForm.roles,
         zoneIds: editForm.zoneIds,
       } : { enabled: editForm.enabled, checkpointId: editForm.checkpointId ?? null });
       setUsers((current) => current.map((user) => user.id === selected.id ? updated : user));
       setAssignmentUsers((current) => current.map((user) => user.id === selected.id ? updated : user));
       setSelected(updated);
-      setEditForm(formForUser(updated));
+      setEditForm(userForm(updated));
       setMessage({ kind: "success", text: isMasterAdmin ? "Account changes saved." : "Operator access updated." });
     } catch (error) {
       const failure = error instanceof Error ? error.message : "Unable to save user.";
@@ -375,7 +461,7 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
         // change persisted. Always display its actual state before another edit.
         const actual = await getManagedUser(selected.id);
         setSelected(actual);
-        setEditForm(formForUser(actual));
+        setEditForm(userForm(actual));
         setUsers((current) => current.map((user) => user.id === actual.id ? actual : user));
         setAssignmentUsers((current) => current.map((user) => user.id === actual.id ? actual : user));
         setMessage({ kind: "error", text: failure });
@@ -419,7 +505,7 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
   async function deleteAccount() {
     const target = selected;
     if (!isMasterAdmin || !target || !canDeleteAccount(target) ||
-        !window.confirm(`Permanently delete ${userName(target)} (@${target.username})? Their zone/checkpoint assignments will be removed. Historical scans will remain.`) ||
+        !window.confirm(`Permanently delete ${displayUserName(target)} (@${target.username})? Their zone/checkpoint assignments will be removed. Historical scans will remain.`) ||
         !beginOperation("delete")) return;
     setMessage(null);
     try {
@@ -542,10 +628,10 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
     return assignmentUsers.filter((user) => {
       if (stateFilter !== "all" && user.enabled !== (stateFilter === "active")) return false;
       if (!needle) return true;
-      return [user.username, user.firstName, user.lastName, user.email, userName(user)]
+      return [user.username, user.firstName, user.lastName, user.email, displayUserName(user)]
         .some((value) => value.toLocaleLowerCase().includes(needle));
     });
-  }, [assignmentUsers, appliedSearch, stateFilter]);
+  }, [assignmentUsers, appliedSearch, stateFilter, zones, checkpoints]);
   const checkpointOperators = useMemo(() => {
     const grouped = new Map<string, ManagedUser[]>();
     for (const user of isMasterAdmin ? visibleUsers : assignmentVisibleUsers) {
@@ -554,13 +640,13 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
       operators.push(user);
       grouped.set(user.checkpointId, operators);
     }
-    for (const operators of grouped.values()) operators.sort((left, right) => userName(left).localeCompare(userName(right)));
+    for (const operators of grouped.values()) operators.sort((left, right) => displayUserName(left).localeCompare(displayUserName(right)));
     return grouped;
-  }, [isMasterAdmin, visibleUsers, assignmentVisibleUsers]);
+  }, [isMasterAdmin, visibleUsers, assignmentVisibleUsers, zones, checkpoints]);
   const zoneMemberIds = new Set(zoneGroups.flatMap((group) => [...group.zoneAdmins, ...group.operators].map((user) => user.id)));
   const globalAccounts = visibleUsers.filter((user) => !zoneMemberIds.has(user.id));
   const hasAccountFilters = Boolean(appliedSearch || stateFilter !== "all");
-  const selectedName = selected ? userName(selected) : "";
+  const selectedName = selected ? displayUserName(selected) : "";
   const hasChanges = selected?.canManage ? (
     editForm.firstName !== selected.firstName || editForm.lastName !== selected.lastName ||
     editForm.email !== selected.email || editForm.enabled !== selected.enabled ||
@@ -575,16 +661,16 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
     if (!isOpen) return null;
     const label = role === "zone-admin" ? "zone admin" : "operator";
     const location = context.checkpointId
-      ? checkpoints.find((checkpoint) => checkpoint.id === context.checkpointId)?.gateLabel || checkpoints.find((checkpoint) => checkpoint.id === context.checkpointId)?.name
+      ? (() => { const checkpoint = checkpoints.find((item) => item.id === context.checkpointId); return checkpoint ? checkpointDisplayName(checkpoint, zones) : null; })()
       : context.zoneId ? zones.find((zone) => zone.id === context.zoneId)?.name : null;
     const Icon = role === "zone-admin" ? ShieldCheck : UserRound;
-    return <section className={styles.inlineCreateBox} aria-label={`Create ${label}`}>
+    return <section className={styles.inlineCreateBox} aria-label={`Invite ${label}`}>
       <header className={styles.inlineCreateHeader}>
-        <div><span className={styles.creationFormIcon}><Icon size={19} aria-hidden="true" /></span><div><h5>Create {label}</h5><p>{location ? `For ${location}` : "Add an account to this list"}</p></div></div>
-        <button className={styles.closeButton} type="button" aria-label={`Cancel creating ${label}`} title="Cancel" disabled={busy} onClick={closeCreate}><X size={18} aria-hidden="true" /></button>
+        <div><span className={styles.creationFormIcon}><Icon size={19} aria-hidden="true" /></span><div><h5>Invite {label}</h5><p>{location ? `For ${location}` : "Send a one-time Zoho sign-in invitation"}</p></div></div>
+        <button className={styles.closeButton} type="button" aria-label={`Cancel inviting ${label}`} title="Cancel" disabled={busy} onClick={closeCreate}><X size={18} aria-hidden="true" /></button>
       </header>
       {message ? <p className={styles.statusMessage} data-kind={message.kind} role={message.kind === "error" ? "alert" : "status"}>{message.kind === "success" ? <Check size={18} aria-hidden="true" /> : null}{message.text}</p> : null}
-      <CreateUserForm form={createForm} onChange={setCreateForm} busy={busy} onSubmit={create} onCancel={closeCreate} checkpoints={checkpoints} zones={zones} restrictedToOperator={!isMasterAdmin} submitLabel={role === "zone-admin" ? "Create zone admin" : "Create operator"} />
+      <CreateUserForm form={createForm} onChange={setCreateForm} busy={busy} onSubmit={create} onCancel={closeCreate} checkpoints={checkpoints} zones={zones} restrictedToOperator={!isMasterAdmin} submitLabel="Send invitation" />
     </section>;
   }
 
@@ -592,14 +678,16 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
     const roles = (user.roles ?? []).filter((role) => role !== "zone-admin" || !user.roles?.includes("master-admin"))
       .map((role) => role === "master-admin" ? "Master admin" : role === "zone-admin" ? "Zone admin" : "Operator").join(", ") || "No role";
     return <button className={styles.zoneAccount} key={`${group}-${user.id}`} type="button"
-      aria-label={`${user.canManage ? "Manage" : "View"} ${group.toLowerCase()} ${userName(user)}`}
+      aria-label={`${user.canManage ? "Manage" : "View"} ${group.toLowerCase()} ${displayUserName(user)}`}
       aria-pressed={selected?.id === user.id} data-selected={selected?.id === user.id} disabled={busy} onClick={() => void choose(user)}>
-      <span className={styles.accountAvatar} data-enabled={user.enabled} aria-hidden="true">{userInitials(user)}</span>
+      <span className={styles.accountAvatar} data-enabled={user.enabled} aria-hidden="true">{displayUserInitials(user)}</span>
       <span className={styles.zoneAccountIdentity}>
-        <strong>{userName(user)}</strong>
+        <strong>{displayUserName(user)}</strong>
         <small>@{user.username}{group === "Global account" ? ` · ${roles}` : ""}</small>
       </span>
-      <span className={styles.statusBadge} data-enabled={user.enabled}>{user.enabled ? "Active" : "Disabled"}</span>
+      <span className={styles.statusBadge} data-enabled={user.enabled} data-invite={user.inviteStatus ?? undefined}>
+        {user.inviteStatus === "pending" ? "Invite pending" : user.inviteStatus === "expired" ? "Invite expired" : user.inviteStatus === "revoked" ? "Invite revoked" : user.enabled ? "Active" : "Disabled"}
+      </span>
       <ChevronRight className={styles.accountChevron} size={17} aria-hidden="true" />
     </button>;
   }
@@ -622,13 +710,13 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
   function renderCheckpointOperators(checkpoint: Checkpoint) {
     const operators = checkpointOperators.get(checkpoint.id) ?? [];
     const zoneId = checkpoint.zoneId ?? checkpoint.zone;
-    return <section className={styles.checkpointOperators} aria-label={`Operators assigned to ${checkpoint.name}`}>
+    return <section className={styles.checkpointOperators} aria-label={`Operators assigned to ${checkpoint.gateLabel || checkpoint.name}`}>
       <header className={styles.accountListHeader}>
         <div className={styles.accountListHeading}>
           <h4>Operators<span className={styles.accountCount}>{operators.length}</span></h4>
           {operators.length === 0 ? <span className={styles.requiredSetupBadge}>Required</span> : null}
         </div>
-        <button className={styles.listAddAction} type="button" aria-label={`Add operator to ${checkpoint.gateLabel || checkpoint.name}`} title="Add operator" aria-expanded={showCreate && createContext?.role === "operator" && createContext.checkpointId === checkpoint.id} disabled={busy} onClick={() => openCreate("operator", { zoneId, checkpointId: checkpoint.id })}><Plus size={19} aria-hidden="true" /></button>
+        <button className={styles.listAddAction} type="button" aria-label={`Add operator to ${checkpointName}`} title="Add operator" aria-expanded={showCreate && createContext?.role === "operator" && createContext.checkpointId === checkpoint.id} disabled={busy} onClick={() => openCreate("operator", { zoneId, checkpointId: checkpoint.id })}><Plus size={19} aria-hidden="true" /></button>
       </header>
       {renderUserCreateBox("operator", { zoneId, checkpointId: checkpoint.id })}
       {operators.length ? <ul className={styles.checkpointOperatorList}>
@@ -658,23 +746,39 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
       <button className={styles.primaryButton} type="submit" disabled={busy || !checkpointZone || (checkpointPreset === "custom" && checkpointName.trim().length < 2)}>{operation === "checkpoint" ? <LoaderCircle className={styles.loadingIcon} size={17} aria-hidden="true" /> : <Plus size={17} aria-hidden="true" />}Create checkpoint</button>
     </div>
   </form>;
-  const checkpointPanel = <section className={`${styles.panel} ${styles.checkpointPanel}`} aria-labelledby="checkpoint-management-title" aria-busy={operation === "checkpoint"}>
+  const checkpointPanel = <section className={`${styles.panel} ${styles.checkpointPanel}`} aria-labelledby="checkpoint-management-title" aria-busy={operation === "checkpoint" || operation === "load"}>
     <div className={styles.checkpointHeader}>
-      <div><h2 id="checkpoint-management-title">Your checkpoints</h2></div>
+      <div><h2 id="checkpoint-management-title">Assigned checkpoints</h2></div>
       <button className={styles.listAddAction} type="button" aria-label="Add checkpoint" title="Add checkpoint" aria-expanded={showCheckpointForm} disabled={busy || zones.length === 0} onClick={() => toggleCheckpointForm()}><Plus size={19} aria-hidden="true" /></button>
+    </div>
+    <div className={styles.directoryToolbar}>
+      <form className={styles.search} role="search" onSubmit={(event) => { event.preventDefault(); void load(); }}>
+        <input aria-label="Search operators" maxLength={100} value={search} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder="Search operators by name or username" />
+        {search || appliedSearch ? <button className={styles.clearButton} type="button" aria-label="Clear search" disabled={busy} onClick={clearSearch}><X size={17} aria-hidden="true" /></button> : null}
+        <button className={styles.searchButton} type="submit" aria-label="Search operators" title="Search" disabled={busy}><Search size={17} aria-hidden="true" /></button>
+      </form>
+      <div className={styles.filterRow}>
+        <div className={styles.stateFilter} role="group" aria-label="Filter operator status">
+          {(["all", "active", "disabled"] as const).map((filter) => <button key={filter} type="button" aria-pressed={stateFilter === filter} disabled={busy} onClick={() => setStateFilter(filter)}>
+            {filter === "all" ? "All" : filter === "active" ? "Active" : "Disabled"}<span>{loaded ? accountCounts[filter] : "—"}</span>
+          </button>)}
+        </div>
+      </div>
     </div>
     {showCheckpointForm ? checkpointCreateForm() : null}
     {checkpointMessage ? <p className={styles.statusMessage} data-kind={checkpointMessage.kind} role={checkpointMessage.kind === "error" ? "alert" : "status"}>{checkpointMessage.kind === "success" ? <Check size={18} aria-hidden="true" /> : null}{checkpointMessage.text}</p> : null}
-    <ul className={styles.checkpointList}>
+    {loadError ? <div className={styles.emptyState} role="alert"><h3>Unable to load your operators</h3><p>{loadError}</p><button className={styles.secondaryButton} disabled={busy} type="button" onClick={() => void load()}>Try again</button></div> : null}
+    {operation === "load" && !loaded ? <div className={styles.emptyState} role="status"><LoaderCircle className={styles.loadingIcon} size={28} aria-hidden="true" /><h3>Loading operators…</h3></div> : null}
+    {operation === "load" && loaded ? <p className={styles.statusMessage} role="status"><LoaderCircle className={styles.loadingIcon} size={18} aria-hidden="true" /> Updating operators…</p> : null}
+    {checkpoints.length ? <ul className={styles.checkpointList}>
       {checkpoints.map((checkpoint) => <li className={styles.checkpointCard} key={checkpoint.id}>
         <div className={styles.checkpointCardInfo}>
           {renderCheckpointName(checkpoint, true)}
           <span className={styles.checkpointMeta}>Checkpoint {checkpoint.number ?? "—"} · {checkpoint.required ? "Required" : "Optional"}</span>
-          {!checkpoint.required ? <button className={styles.dangerButton} type="button" disabled={busy} aria-label={`Retire checkpoint ${checkpoint.name}`} onClick={() => void removeCheckpoint(checkpoint)}><Trash2 size={16} aria-hidden="true" />Retire</button> : null}
+          {!checkpoint.required ? <button className={styles.dangerButton} type="button" disabled={busy} aria-label={`Retire checkpoint ${checkpoint.gateLabel || checkpoint.name}`} onClick={() => void removeCheckpoint(checkpoint)}><Trash2 size={16} aria-hidden="true" />Retire</button> : null}
         </div>
-        {renderCheckpointOperators(checkpoint)}
       </li>)}
-    </ul>
+    </ul> : loaded && !loadError ? <div className={styles.emptyState}><span className={styles.emptyIcon}><ScanLine size={26} aria-hidden="true" /></span><h3>No checkpoints assigned</h3><p>Use + to create a checkpoint, then assign operators to it.</p></div> : null}
   </section>;
 
   return (
@@ -692,10 +796,10 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
         <div className={styles.accessControls}>
           <StepUpDurationSelect value={durationMinutes} onChange={setDurationMinutes} disabled={busy} label="Duration" />
           <button className={styles.secondaryButton} type="button" aria-label="Re-authenticate to extend access" title={securityAction === "extend" ? "Opening sign-in…" : "Re-authenticate to extend access"} disabled={busy} onClick={() => void extend()}>
-            {securityAction === "extend" ? <LoaderCircle className={styles.loadingIcon} size={18} aria-hidden="true" /> : <KeyRound size={18} aria-hidden="true" />}Extend
+            {securityAction === "extend" ? <LoaderCircle className={styles.loadingIcon} size={18} aria-hidden="true" /> : <KeyRound size={18} aria-hidden="true" />}
           </button>
           <button className={styles.secondaryButton} type="button" aria-label="Lock user management now" title={securityAction === "lock" ? "Locking…" : "Lock user management now"} disabled={busy} onClick={() => void lock()}>
-            {securityAction === "lock" ? <LoaderCircle className={styles.loadingIcon} size={18} aria-hidden="true" /> : <LockKeyhole size={18} aria-hidden="true" />}Lock
+            {securityAction === "lock" ? <LoaderCircle className={styles.loadingIcon} size={18} aria-hidden="true" /> : <LockKeyhole size={18} aria-hidden="true" />}
           </button>
         </div>
       </section> : null}
@@ -706,32 +810,30 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
         </p>
       ) : null}
 
-      <div className={styles.workspace} data-selected={Boolean(selected)}>
-        <section className={styles.panel} aria-labelledby="directory-title" aria-busy={operation === "load" || operation === "details"}>
+      <div className={styles.workspace} data-selected={Boolean(selected)} data-master-admin={isMasterAdmin}>
+        {isMasterAdmin ? <section className={styles.panel} aria-labelledby="directory-title" aria-busy={operation === "load" || operation === "details"}>
           <div className={styles.directoryHeader}>
                 <div className={styles.titleRow}>
               <div>
                 <span className={styles.sectionIcon}><UsersRound size={22} aria-hidden="true" /></span>
-                <div><h2 id="directory-title">{isMasterAdmin ? "Accounts by zone" : "Operator accounts"}<span className={styles.directoryCount}>{loaded ? visibleUsers.length : "—"}</span></h2></div>
+                <div><h2 id="directory-title">Accounts by zone<span className={styles.directoryCount}>{loaded ? visibleUsers.length : "—"}</span></h2></div>
               </div>
-                  {!isMasterAdmin ? <button className={styles.listAddAction} type="button" aria-label="Add operator" title={checkpoints.length === 0 ? "A checkpoint in your assigned zones is required" : "Add operator"} aria-expanded={showCreate && createContext?.role === "operator"} disabled={busy || checkpoints.length === 0} onClick={() => openCreate("operator")}><Plus size={19} aria-hidden="true" /></button> : null}
             </div>
-                {!isMasterAdmin ? renderUserCreateBox("operator") : null}
             <div className={styles.directoryToolbar}>
             <form className={styles.search} role="search" onSubmit={(event) => { event.preventDefault(); void load(); }}>
-              <input aria-label={isMasterAdmin ? "Search accounts" : "Search operators"} maxLength={100} value={search} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder={isMasterAdmin ? "Name, username or email" : "Search operators"} />
+              <input aria-label="Search accounts" maxLength={100} value={search} disabled={busy} onChange={(event) => setSearch(event.target.value)} placeholder="Name, username or email" />
               {search || appliedSearch ? (
                 <button className={styles.clearButton} type="button" aria-label="Clear search" disabled={busy} onClick={clearSearch}>
                   <X size={17} aria-hidden="true" />
                 </button>
               ) : null}
-              <button className={styles.searchButton} type="submit" aria-label={isMasterAdmin ? "Search accounts" : "Search operators"} title="Search" disabled={busy}><Search size={17} aria-hidden="true" /></button>
+              <button className={styles.searchButton} type="submit" aria-label="Search accounts" title="Search" disabled={busy}><Search size={17} aria-hidden="true" /></button>
             </form>
             <div className={styles.filterRow}>
-              <div className={styles.stateFilter} role="group" aria-label={isMasterAdmin ? "Filter account status" : "Filter operator status"}>
+              <div className={styles.stateFilter} role="group" aria-label="Filter account status">
                 {(["all", "active", "disabled"] as const).map((filter) => (
                   <button key={filter} type="button" aria-pressed={stateFilter === filter} disabled={busy} onClick={() => setStateFilter(filter)}>
-                    {filter === "all" ? "All" : filter === "active" ? "Active" : "Disabled"}<span>{loaded ? `${accountCounts[filter]}${hasMore ? "+" : ""}` : "—"}</span>
+                    {filter === "all" ? "All" : filter === "active" ? "Active" : "Disabled"}<span>{loaded ? accountCounts[filter] : "—"}</span>
                   </button>
                 ))}
               </div>
@@ -764,7 +866,6 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
             </p>
           ) : null}
 
-          {loaded && hasMore ? <p className={styles.statusMessage} role="status">{users.length} accounts loaded. More accounts are available.</p> : null}
           <div className={`${styles.directoryGrid} ${isMasterAdmin ? styles.zoneDirectory : ""} scrollable-content`}>
             {isMasterAdmin ? <>
               <section className={styles.zoneListSection} aria-labelledby="zone-list-title">
@@ -803,7 +904,7 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
                       {zoneCheckpoints.length ? zoneCheckpoints.map((checkpoint) => <div className={styles.checkpointCard} key={checkpoint.id}>
                         <div className={styles.checkpointCardInfo}>
                           {renderCheckpointName(checkpoint)}
-                          {!checkpoint.required ? <button className={`${styles.dangerButton} ${styles.retireButton}`} type="button" disabled={busy} aria-label={`Retire checkpoint ${checkpoint.name}`} title={`Retire ${checkpoint.name}`} onClick={() => void removeCheckpoint(checkpoint)}><Trash2 size={16} aria-hidden="true" /></button> : null}
+                          {!checkpoint.required ? <button className={`${styles.dangerButton} ${styles.retireButton}`} type="button" disabled={busy} aria-label={`Retire checkpoint ${checkpoint.gateLabel || checkpoint.name}`} title={`Retire ${checkpoint.gateLabel || checkpoint.name}`} onClick={() => void removeCheckpoint(checkpoint)}><Trash2 size={16} aria-hidden="true" /></button> : null}
                         </div>
                         {renderCheckpointOperators(checkpoint)}
                       </div>) : <span className={styles.zoneEmpty}>No checkpoints</span>}
@@ -842,9 +943,11 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
                       </span>
                     </span>
                     <span className={styles.cardAccessSummary}>
-                      <span className={styles.statusBadge} data-enabled={user.enabled}>{user.enabled ? "Active" : "Disabled"}</span>
+                      <span className={styles.statusBadge} data-enabled={user.enabled} data-invite={user.inviteStatus ?? undefined}>
+                        {user.inviteStatus === "pending" ? "Invite pending" : user.inviteStatus === "expired" ? "Invite expired" : user.inviteStatus === "revoked" ? "Invite revoked" : user.enabled ? "Active" : "Disabled"}
+                      </span>
                       <span className={styles.checkpointLine}>
-                        <MapPin size={16} aria-hidden="true" /><span>{checkpoint ? `${zones.find((zone) => zone.id === checkpoint.zoneId)?.name ?? `Zone ${checkpoint.zone.toUpperCase()}`} · ${checkpoint.name}` : user.zoneIds?.length ? user.zoneIds.map((id) => zones.find((zone) => zone.id === id)?.name ?? id).join(", ") : "Unassigned"}</span>
+                        <MapPin size={16} aria-hidden="true" /><span>{checkpoint ? checkpoint.gateLabel || checkpoint.name : "No checkpoint assigned"}</span>
                       </span>
                     </span>
                   </span>
@@ -853,32 +956,33 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
             })}
           </div>
 
-          {loaded && hasMore ? <button className={styles.secondaryButton} disabled={busy} type="button" onClick={() => void load(appliedSearch, true)}>{operation === "load" ? "Loading…" : "Load more accounts"}</button> : null}
-          {loaded && operation !== "load" && !loadError && !visibleUsers.length && !hasMore ? (
+          {loaded && operation !== "load" && !loadError && !visibleUsers.length ? (
             <div className={styles.emptyState}>
               <span className={styles.emptyIcon}><Search size={26} aria-hidden="true" /></span>
-              <h3>{appliedSearch || stateFilter !== "all" ? isMasterAdmin ? "No matching accounts" : "No matching operators" : isMasterAdmin ? "No application accounts yet" : "No operators in your zones yet"}</h3>
+              <h3>{appliedSearch || stateFilter !== "all" ? "No matching accounts" : "No application accounts yet"}</h3>
               {appliedSearch || stateFilter !== "all" ? <button className={styles.secondaryButton} type="button" aria-label="Clear filters" title="Clear filters" disabled={busy} onClick={clearSearch}><X size={18} aria-hidden="true" /></button> : null}
             </div>
           ) : null}
-        </section>
+        </section> : checkpointPanel}
 
         {selected ? (
           <section className={`${styles.panel} ${styles.editor} scrollable-content`} aria-labelledby="edit-user-title">
             <div className={styles.editorHeader}>
               <div className={styles.selectedIdentity}>
-                <span className={styles.avatar} data-enabled={selected.enabled}>{userInitials(selected)}</span>
+                <span className={styles.avatar} data-enabled={selected.enabled}>{displayUserInitials(selected)}</span>
                 <div className={styles.identityDetails}>
                   <h2 id="edit-user-title" ref={editorHeadingRef} className={styles.editorHeading} tabIndex={-1}>{selectedName}</h2>
                   <div className={styles.identityMeta}>
                     <p>@{selected.username}</p>
                     {!isMasterAdmin ? <span className={styles.roleBadge} data-role="operator">Operator</span> : null}
                     {!isMasterAdmin && selected.email ? <p>{selected.email}</p> : null}
-                    <span className={styles.statusBadge} data-enabled={editForm.enabled}>{editForm.enabled ? "Active" : "Disabled"}</span>
+                    <span className={styles.statusBadge} data-enabled={editForm.enabled} data-invite={selected.inviteStatus ?? undefined}>
+                      {selected.inviteStatus === "pending" ? "Invite pending" : selected.inviteStatus === "expired" ? "Invite expired" : selected.inviteStatus === "revoked" ? "Invite revoked" : editForm.enabled ? "Active" : "Disabled"}
+                    </span>
                     {hasChanges ? <span className={styles.draftBadge} title="Unsaved changes">Unsaved</span> : null}
                   </div>
                 </div>
-                {isMasterAdmin && selected.canManage ? <label className={styles.enabledToggle}>
+                {isMasterAdmin && selected.canManage && !needsInvitationAction(selected) ? <label className={styles.enabledToggle}>
                   <input type="checkbox" checked={editForm.enabled} disabled={busy} onChange={(event) => setEditForm((current) => ({ ...current, enabled: event.target.checked }))} />
                   <span>Enabled</span>
                 </label> : null}
@@ -890,8 +994,27 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
               </button>
             </div>
             <div className={styles.editorBody}>
-              {selected.canManage ? <UserDetailsForm form={editForm} onChange={setEditForm} busy={busy} onSubmit={saveUser} accessOnly={!isMasterAdmin} checkpoints={checkpoints} zones={zones} /> : <p className={styles.statusMessage} role="status">{isMasterAdmin ? "This account is protected and cannot be edited here." : "This account is view-only here. Only a master admin can manage administrator accounts."}</p>}
-              {isMasterAdmin && selected.canManage ? <section className={styles.securityPanel} aria-label="Security settings">
+              {selected.canManage && needsInvitationAction(selected) ? <section className={styles.securityPanel} aria-label="Invitation status">
+                <div className={styles.securityHeader}><h3><Mail size={18} aria-hidden="true" />Zoho invitation</h3></div>
+                <p className={styles.statusMessage} role="status">
+                  {selected.inviteStatus === "pending" ? `This account is disabled until the recipient accepts the invitation. Link expires ${invitationExpiry(selected.inviteExpiresAt)}.`
+                    : selected.inviteStatus === "expired" ? "This invitation has expired. Send a fresh one to let the recipient activate the account."
+                      : "This invitation was revoked. Send a fresh one if the person should receive access."}
+                </p>
+                <div className={styles.securityActionRow}>
+                  <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void resendInvite()}>
+                    {operation === "invite" ? <LoaderCircle className={styles.loadingIcon} size={16} aria-hidden="true" /> : <RotateCw size={16} aria-hidden="true" />}Resend invitation
+                  </button>
+                  {selected.inviteStatus !== "revoked" ? <button className={styles.dangerButton} type="button" disabled={busy} onClick={() => void revokeInvite()}>
+                    {operation === "invite" ? <LoaderCircle className={styles.loadingIcon} size={16} aria-hidden="true" /> : <Ban size={16} aria-hidden="true" />}Revoke invitation
+                  </button> : null}
+                </div>
+              </section> : selected.canManage ? <UserDetailsForm form={editForm} onChange={setEditForm} busy={busy} onSubmit={saveUser} accessOnly={!isMasterAdmin} checkpoints={checkpoints} zones={zones} /> : <p className={styles.statusMessage} role="status">{isMasterAdmin
+                ? selected.roles?.length === 0
+                  ? "This identity has no InOut application role. Use the add button for the intended zone or checkpoint to send its invitation."
+                  : "This account is protected and cannot be edited here."
+                : "This account is view-only here. Only a master admin can manage administrator accounts."}</p>}
+              {isMasterAdmin && selected.canManage && !needsInvitationAction(selected) ? <section className={styles.securityPanel} aria-label="Security settings">
                 <div className={styles.securityHeader}>
                   <h3><KeyRound size={18} aria-hidden="true" />Security</h3>
                   <div className={styles.securityActionRow}>
@@ -922,9 +1045,9 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
             </div>
           </section>
         ) : null}
-      </div>
 
-      {!isMasterAdmin ? checkpointPanel : null}
+        {!isMasterAdmin ? checkpointPanel : null}
+      </div>
     </main>
   );
 }

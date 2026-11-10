@@ -7,11 +7,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { LogOut, Moon, Sun } from "lucide-react";
-import Link from "next/link";
+import { Moon, Sun } from "lucide-react";
 import { AppChrome } from "../../frontend/components/AppChrome";
 import { AdminNavRail } from "../../frontend/components/admin/AdminNavRail";
 import { AdminLiveProvider } from "../../frontend/components/admin/AdminLiveProvider";
+import { AdminRoleProvider } from "../../frontend/context/AdminRoleContext";
 import "./admin.css";
 
 export default function AdminLayoutClient({ children, isMasterAdmin }: { children: ReactNode; isMasterAdmin: boolean }) {
@@ -106,21 +106,22 @@ export default function AdminLayoutClient({ children, isMasterAdmin }: { childre
     window.localStorage.setItem("inout-admin-theme", nextTheme);
   }
 
+  const scrollSurface = (
+    <div
+      id="admin-scroll-container"
+      ref={scrollRef}
+      className={`admin-scroll-surface scrollable-content ${scrolled ? "scrolled-main-content" : "top-main-content"}`}
+      tabIndex={0}
+      aria-label="Admin content"
+    >
+      {children}
+    </div>
+  );
+
   const content = (
-      <main className="admin-console admin-shell-layout" data-master-admin={isMasterAdmin ? "true" : undefined}>
-        {isMasterAdmin ? <header className="master-admin-topbar">
-          <Link className="master-admin-brand" href="/admin/users" aria-label="In / Out user management">IN / OUT <span>Organization administration</span></Link>
-          <form action="/logout" method="post"><button className="master-admin-signout" type="submit"><LogOut size={17} aria-hidden="true" />Sign out</button></form>
-        </header> : <AdminNavRail scrollTint={scrollTint} isMasterAdmin={isMasterAdmin} />}
-        <div
-          id="admin-scroll-container"
-          ref={scrollRef}
-          className={`admin-scroll-surface scrollable-content ${scrolled ? "scrolled-main-content" : "top-main-content"}`}
-          tabIndex={0}
-          aria-label="Admin content"
-        >
-          {children}
-        </div>
+      <main className="admin-console admin-shell-layout">
+        <AdminNavRail scrollTint={scrollTint} isMasterAdmin={isMasterAdmin} />
+        {scrollSurface}
         <button
           type="button"
           className="admin-theme-toggle"
@@ -138,8 +139,10 @@ export default function AdminLayoutClient({ children, isMasterAdmin }: { childre
   );
 
   return (
-    <AppChrome role="admin">
-      {isMasterAdmin ? content : <AdminLiveProvider>{content}</AdminLiveProvider>}
-    </AppChrome>
+    <AdminRoleProvider isMasterAdmin={isMasterAdmin}>
+      <AppChrome role="admin">
+        {isMasterAdmin ? content : <AdminLiveProvider>{content}</AdminLiveProvider>}
+      </AppChrome>
+    </AdminRoleProvider>
   );
 }

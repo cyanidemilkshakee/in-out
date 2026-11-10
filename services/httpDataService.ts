@@ -10,6 +10,7 @@ import type {
   BarcodeManualReviewInput,
   AppDataSnapshot,
   CreateEmployeeInput,
+  CreateEmployeeResult,
   CreateHardwareAssetInput,
   CreateVisitorInput,
   CreateVisitorResult,
@@ -40,6 +41,7 @@ type Command =
   | { action: "createHardwareAsset"; input: CreateHardwareAssetInput }
   | { action: "updatePerson"; personId: string; patch: Partial<Omit<Person, "id">> }
   | { action: "updateHardwareAsset"; assetId: string; patch: Partial<Omit<HardwareAsset, "id">> }
+  | { action: "acknowledgeAlert"; alertId: string }
   | { action: "reviewAlert"; alertId: string; decision: "confirmed" | "excused"; reason?: string }
   | { action: "resetAlertWarnings"; subjectId: string; reason: string }
   | { action: "setAlertRuleAssignments"; subjectId: string; ruleIds: string[]; irregularitySkipDates: string[]; expectedRevision?: number }
@@ -205,7 +207,7 @@ export class HttpDataService implements DataService {
   }
 
   createEmployee(input: CreateEmployeeInput) {
-    return this.command<Person>({ action: "createEmployee", input });
+    return this.command<CreateEmployeeResult>({ action: "createEmployee", input });
   }
 
   createVisitor(input: CreateVisitorInput) {
@@ -222,6 +224,10 @@ export class HttpDataService implements DataService {
 
   updateHardwareAsset(assetId: string, patch: Partial<Omit<HardwareAsset, "id">>) {
     return this.command<HardwareAsset>({ action: "updateHardwareAsset", assetId, patch });
+  }
+
+  acknowledgeAlert(alertId: string) {
+    return this.command<Alert>({ action: "acknowledgeAlert", alertId });
   }
 
   reviewAlert(alertId: string, decision: "confirmed" | "excused", reason = "") {

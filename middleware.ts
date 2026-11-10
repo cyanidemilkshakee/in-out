@@ -2,6 +2,13 @@ import { auth } from "./auth"
 import { NextResponse } from "next/server"
 import { hasAdminAccess, hasMasterAdminAccess } from "./lib/applicationRoles"
 
+const MASTER_ADMIN_PAGES = new Set([
+  "/admin",
+  "/admin/users",
+  "/admin/employee-zone-access",
+  "/admin/zone-assignments",
+])
+
 export default auth((req) => {
   const session = req.auth as { access_token?: string; roles?: unknown } | null
   const isLoggedIn = !!session?.access_token
@@ -10,13 +17,13 @@ export default auth((req) => {
   const isMasterAdmin = hasMasterAdminAccess(roles)
   const isOperator = roles.includes("operator")
   const canUseTerminal = isAdmin || isOperator
+  const isAccessPendingPage = req.nextUrl.pathname === "/access-pending"
   const isAuthPage = req.nextUrl.pathname.startsWith('/login')
   const isUserManagementStepUpLogin =
     req.nextUrl.searchParams.get('stepUp') === '1' &&
     req.nextUrl.searchParams.get('from') === '/admin/users'
   const isAdminPage = req.nextUrl.pathname.startsWith('/admin')
   const isTerminalPage = req.nextUrl.pathname.startsWith('/terminal')
-  const isUserManagementPage = req.nextUrl.pathname === '/admin/users' || req.nextUrl.pathname.startsWith('/admin/users/')
   const home = isMasterAdmin ? '/admin/users' : isAdmin ? '/admin/dashboard' : '/terminal'
 
   if (isAuthPage) {
@@ -39,22 +46,29 @@ export default auth((req) => {
     )
   }
 
-  if (isMasterAdmin && ((isAdminPage && !isUserManagementPage) || isTerminalPage)) {
-    return NextResponse.redirect(new URL('/admin/users', req.url))
-  }
-
   if (req.nextUrl.pathname === '/') {
     return NextResponse.redirect(new URL(isLoggedIn ? home : '/login', req.url))
+  }
+
+  if (isAccessPendingPage) {
+    if (!isLoggedIn) return NextResponse.redirect(new URL('/login?from=%2Faccess-pending', req.url))
+    if (canUseTerminal) return NextResponse.redirect(new URL(home, req.url))
+    return null
   }
 
   if (isAdminPage && !isAdmin) {
     return isOperator
       ? NextResponse.redirect(new URL('/terminal', req.url))
-      : new NextResponse('Forbidden', { status: 403 })
+      : NextResponse.redirect(new URL('/access-denied?area=admin', req.url))
+  }
+
+  const adminPath = req.nextUrl.pathname.replace(/\/+$/, "") || "/admin"
+  if (isAdminPage && isMasterAdmin && !MASTER_ADMIN_PAGES.has(adminPath)) {
+    return NextResponse.redirect(new URL('/admin/users', req.url))
   }
 
   if (isTerminalPage && !canUseTerminal) {
-    return new NextResponse('Forbidden', { status: 403 })
+    return NextResponse.redirect(new URL('/access-denied?area=terminal', req.url))
   }
 
   return null

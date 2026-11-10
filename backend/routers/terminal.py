@@ -14,7 +14,7 @@ from auth import verify_terminal_access_request
 from database import get_db
 from data_limits import bounded_rows, precharge_mutation_response
 from config import settings
-from schemas import BrowserScanPayload, ManualReviewPayload
+from schemas import BrowserScanPayload, ManualReviewPayload, TerminalHeartbeatPayload
 from terminal_scans import record_scan
 from terminal_response import project_terminal_scan_response
 from event_outbox import enqueue_presence, enqueue_workflow_start
@@ -25,13 +25,27 @@ from models import AccessPermission, AdminAccount, Checkpoint, HardwareAsset, Su
 from permission_decisions import review_source, require_recent_review_source, pending_manual_review
 from access_validation import validate_registered_zones
 from facility_zones import normalize_facility_document
-from terminal_assignments import assigned_checkpoint, browser_identity, require_checkpoint
+from terminal_assignments import assigned_checkpoint, browser_identity, record_terminal_heartbeat, require_checkpoint
 from critical_entry_restrictions import entry_restrictions_for_subjects
 from terminal_visitors import terminal_visitors_page
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/v1/terminal", tags=["terminal"])
+
+
+@router.post("/heartbeat")
+async def terminal_heartbeat(
+    payload: TerminalHeartbeatPayload,
+    db: AsyncSession = Depends(get_db),
+    operator: dict = Depends(verify_terminal_access_request),
+) -> dict[str, Any]:
+    """Record a live heartbeat for the authenticated browser terminal."""
+    now = datetime.now(timezone.utc)
+    checkpoint_id = await record_terminal_heartbeat(db, browser_identity(operator), now=now,
+        expected_checkpoint_id=payload.checkpoint_id)
+    await db.commit()
+    return {"checkpointId": checkpoint_id, "lastHeartbeatAt": now.isoformat()}
 
 
 @router.post("/scans")

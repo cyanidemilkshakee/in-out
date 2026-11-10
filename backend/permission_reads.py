@@ -1,5 +1,5 @@
 """Bounded Permission Manager views; the legacy snapshot remains available."""
-from sqlalchemy import String, Text, case, cast, func, literal, or_, select
+from sqlalchemy import String, Text, and_, case, cast, func, literal, not_, or_, select
 from sqlalchemy.dialects.postgresql import JSONB, array
 
 from critical_entry_restrictions import entry_restrictions_for_subjects
@@ -108,10 +108,15 @@ async def pending_permission_page(db, zone_ids, *, limit, offset, search=None, s
                                   request_id=None, type_group=None):
     visible_subjects = select(Subject.id).where(subject_zone_condition(zone_ids)).correlate(None)
     status = PermissionRequestModel.data["status"].astext
-    filters = [func.coalesce(status, "pending").not_in(("approved", "denied")), or_(
+    in_scope = or_(
         PermissionRequestModel.data["requestedZones"].has_any(array(list(zone_ids), type_=String)),
         PermissionRequestModel.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
-        PermissionRequestModel.subject_id.in_(visible_subjects))]
+        PermissionRequestModel.subject_id.in_(visible_subjects))
+    cross_zone_request = func.coalesce(PermissionRequestModel.data["origin"].astext, "") == "cross_zone_request"
+    routed_to_zone = PermissionRequestModel.data["targetZoneId"].astext.in_(zone_ids)
+    filters = [func.coalesce(status, "pending").not_in(("approved", "denied")), or_(
+        and_(cross_zone_request, routed_to_zone),
+        and_(not_(cross_zone_request), in_scope))]
     if subject_id:
         filters.append(PermissionRequestModel.subject_id == subject_id)
     if request_id:

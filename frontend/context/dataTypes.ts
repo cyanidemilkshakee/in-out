@@ -60,6 +60,7 @@ export type DataActions = {
     assetId: string,
     patch: Partial<Omit<HardwareAsset, "id">>
   ) => Promise<HardwareAsset>;
+  acknowledgeAlert: (alertId: string) => Promise<Alert>;
   reviewAlert: (alertId: string, decision: "confirmed" | "excused", reason?: string) => Promise<Alert>;
   resetAlertWarnings: (subjectId: string, reason: string) => Promise<void>;
   setAlertRuleAssignments: (subjectId: string, ruleIds: string[], irregularitySkipDates: string[], expectedRevision?: number) => Promise<AlertRuleAssignment>;

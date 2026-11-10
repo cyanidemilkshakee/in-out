@@ -36,6 +36,9 @@
     "test:keycloak:interactions": "node tests/keycloak-interactions.test.mjs",
     "keycloak:password-updates:check": "node scripts/configure-keycloak-password-updates.mjs --check",
     "keycloak:password-updates:apply": "node scripts/configure-keycloak-password-updates.mjs --apply",
+    "keycloak:invitations:check": "node scripts/configure-keycloak-invitations.mjs --check",
+    "keycloak:invitations:apply": "node scripts/configure-keycloak-invitations.mjs --apply",
+    "env:secrets:generate": "node scripts/configure-new-install.mjs",
     "test:auth:password-updates": "node scripts/run-with-timeout.mjs 180 node scripts/test-password-updates-http.mjs"
   },
   "dependencies": {

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Loader2, X } from "lucide-react";
 import { useEffect, useId, useRef, useState, type ChangeEvent, type FormEvent } from "react";
 import type { Checkpoint, CreateVisitorInput, CreateVisitorResult, Person, TerminalVisitorStatus } from "../../../lib/types";
+import { checkpointDisplayName, facilityZoneLabel } from "../../../lib/facilityZones";
 import { DataServiceError } from "../../../services/httpDataService";
 import { facilityDateInput, facilityDateIso } from "../admin/permissions/requestPresentation";
 import { accessDateTimeLimits, accessWindowBounds, validateAccessWindow } from "../../../lib/dateTimeValidation";
@@ -190,7 +191,7 @@ export function VisitorRegistrationDialog({ open, onClose, onCreate, onCreated, 
           <label className={styles.field} htmlFor={`${id}-barcode`}><span>Visitor barcode <em>Required</em></span><input {...fieldProps("barcode")} required maxLength={64} autoComplete="off" autoCapitalize="none" spellCheck={false} />{fieldError("barcode")}</label>
           <label className={styles.field} htmlFor={`${id}-host`}><span>Host <em>Required</em></span><input {...fieldProps("host")} required maxLength={100} />{fieldError("host")}</label>
           <label className={styles.field} htmlFor={`${id}-company`}><span>Company</span><input {...fieldProps("company")} maxLength={120} autoComplete="organization" /></label>
-          <label className={styles.field} htmlFor={`${id}-checkpointId`}><span>Checkpoint <em>Required</em></span><select {...fieldProps("checkpointId")} required><option value="">Choose a checkpoint</option>{checkpoints.map((checkpoint) => <option key={checkpoint.id} value={checkpoint.id}>{checkpoint.name}</option>)}</select>{fieldError("checkpointId")}</label>
+          <label className={styles.field} htmlFor={`${id}-checkpointId`}><span>Checkpoint <em>Required</em></span><select {...fieldProps("checkpointId")} required><option value="">Choose a checkpoint</option>{checkpoints.map((checkpoint) => <option key={checkpoint.id} value={checkpoint.id}>{facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone)} · {checkpointDisplayName(checkpoint)}</option>)}</select>{fieldError("checkpointId")}</label>
           <label className={styles.field} htmlFor={`${id}-validFrom`}><span>Valid from <em>Required</em></span><input {...fieldProps("validFrom")} type="datetime-local" required step={60} {...dateLimits.start} />{fieldError("validFrom")}</label>
           <label className={styles.field} htmlFor={`${id}-validTo`}><span>Valid to <em>Required</em></span><input {...fieldProps("validTo")} type="datetime-local" required step={60} {...dateLimits.end} />{fieldError("validTo")}</label>
           <small className={styles.timezone}>Facility time: Asia/Kolkata (UTC+05:30). Choose a window within the next 6 calendar months.</small>

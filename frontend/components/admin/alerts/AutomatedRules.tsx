@@ -4,8 +4,11 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { AlertRule } from "../../../../lib/types";
 
 function ruleEligibility(rule: AlertRule) {
+  if (rule.conditionKey === "scan_burst") return "Applies: All checkpoints · Evaluated on each fresh scan";
+  if (rule.conditionKey === "checkpoint_denial_rate") return "Applies: All checkpoints · Uses 20–100 prior scans from the last 7 days";
+  if (rule.conditionKey === "checkpoint_offline") return "Applies: Assigned checkpoints · Alert after 5 minutes without a heartbeat";
   if (rule.conditionKey === "cross_building_scan") return "Eligible: All employees and visitors";
-  if (rule.conditionKey === "visitor_overstay") return "Eligible: All employees and visitors";
+  if (rule.conditionKey === "visitor_overstay") return "Eligible: Visitors · Evaluated while inside after access expiry";
   const names = { employee: "Employees", visitor: "Visitors", hardware: "Hardware" };
   const assignment = rule.conditionKey === "no_break" || rule.conditionKey === "irregularity" ? " · Assigned per employee" : "";
   return `Eligible: ${(rule.eligibleSubjectTypes ?? ["employee"]).map((kind) => names[kind]).join(", ")}${assignment}`;

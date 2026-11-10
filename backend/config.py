@@ -28,10 +28,25 @@ class Settings(BaseSettings):
     # Internal Keycloak origin for the Admin REST API. This is only used with
     # the current administrator's validated bearer token.
     KEYCLOAK_ADMIN_BASE: str = ""
+    # Server-only client used by the public invite-accept endpoint. It is
+    # deliberately separate from the browser OIDC client.
+    KEYCLOAK_INVITE_CLIENT_ID: str = "inout-invitations"
+    KEYCLOAK_INVITE_CLIENT_SECRET: str = ""
     KEYCLOAK_AUDIENCE: str = "inout-frontend"
     KEYCLOAK_JWKS_CACHE_TTL: int = Field(default=300, ge=30)
     # Shared only with the BFF, which signs the selected verification window.
     KEYCLOAK_STEP_UP_SIGNING_SECRET: str = ""
+    INVITE_APP_BASE_URL: str = ""
+    INVITE_TTL_SECONDS: int = Field(default=900, ge=60, le=86_400)
+    INVITE_SMTP_HOST: str = ""
+    INVITE_SMTP_PORT: int = Field(default=587, ge=1, le=65_535)
+    INVITE_SMTP_FROM: str = ""
+    INVITE_SMTP_DISPLAY_NAME: str = "InOut Management"
+    INVITE_SMTP_AUTH: bool = True
+    INVITE_SMTP_USER: str = ""
+    INVITE_SMTP_PASSWORD: str = ""
+    INVITE_SMTP_STARTTLS: bool = True
+    INVITE_SMTP_SSL: bool = False
     KONG_TERMINAL_SECRET: str = ""
     KONG_IDENTITY_SECRET: str = ""
     MAX_REQUEST_BODY_BYTES: int = Field(default=262_144, ge=1_024, le=10_485_760)

@@ -46,7 +46,7 @@ export async function fetchPythonApi(path: string, method: string, body?: unknow
   const protectedFacilityMutation = (method === "POST" || method === "PATCH" || method === "DELETE") &&
     /^\/v1\/(?:checkpoints|zones)(?:\/[^/?]+)?(?:\?.*)?$/.test(path);
   if (!hasMasterAdminAccess(session.roles) &&
-      (/^\/v1\/keycloak\/users(?:\/|\?|$)/.test(path) || /^\/v1\/user-management\/(?:window|lock)$/.test(path) ||
+      (/^\/v1\/keycloak\/(?:users|invitations)(?:\/|\?|$)/.test(path) || /^\/v1\/invitations(?:\/|\?|$)/.test(path) || /^\/v1\/user-management\/(?:window|lock)$/.test(path) ||
       protectedFacilityMutation)) {
     if (!isActiveUserManagementStepUp(session)) throw new PythonApiError(
       protectedFacilityMutation

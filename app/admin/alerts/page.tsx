@@ -12,8 +12,8 @@ import { useDataActions, useDataState } from "../../../frontend/context/DataCont
 import styles from "./AlertsPage.module.css";
 
 export default function AlertsPage() {
-  const { alerts, alertRules, alertWarnings, alertRuleAssignments, alertSummary, people, permissions, movements, isLoading, error } = useDataState();
-  const { reviewAlert, resetAlertWarnings, setAlertRuleAssignments, evaluateAlertRules, refresh, queryAlerts } = useDataActions();
+  const { alerts, alertRules, alertWarnings, alertRuleAssignments, alertSummary, people, permissions, movements, checkpoints, isLoading, error } = useDataState();
+  const { reviewAlert, acknowledgeAlert, resetAlertWarnings, setAlertRuleAssignments, evaluateAlertRules, refresh, queryAlerts } = useDataActions();
   const [isEvaluating, setIsEvaluating] = useState(false);
   const [evaluationMessage, setEvaluationMessage] = useState("");
   const evaluationPending = useRef(false);
@@ -103,6 +103,7 @@ export default function AlertsPage() {
             alerts={openAlerts}
             people={page?.people ?? people}
             onReview={reviewAlert}
+            onAcknowledge={acknowledgeAlert}
             filter="needs_review"
             isLoading={isLoading || pageLoading}
             totalCount={openCount}
@@ -120,6 +121,7 @@ export default function AlertsPage() {
               people={people}
               permissions={permissions}
               movements={movements}
+              checkpoints={checkpoints}
               rules={alertRules}
               onReset={resetAlertWarnings}
               onSave={setAlertRuleAssignments}

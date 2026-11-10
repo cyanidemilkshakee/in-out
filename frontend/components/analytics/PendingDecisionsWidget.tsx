@@ -6,6 +6,7 @@ import { useMemo, useRef, useState } from "react";
 import { useDataActions, useDataState } from "../../context/DataContext";
 import type { PermissionRequest } from "../../../lib/types";
 import { normalizeCheckpointLabel } from "../../../lib/normalizeDashboard";
+import { checkpointDisplayName } from "../../../lib/facilityZones";
 import { DEFAULT_MANUAL_REVIEW_MINUTES, MANUAL_REVIEW_DURATIONS } from "../../../lib/manualReviewDuration";
 
 export function PendingDecisionsWidget({
@@ -102,7 +103,8 @@ export function PendingDecisionsWidget({
         <ul className="alert-list-container pending-decision-list scrollable-content">
           {pendingRequests.map((request) => {
             const busy = workingId === request.id;
-            const checkpointName = normalizeCheckpointLabel(request.checkpoint) || checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId)?.name || request.checkpointId;
+            const linkedCheckpoint = checkpoints.find((checkpoint) => checkpoint.id === request.checkpointId);
+            const checkpointName = linkedCheckpoint ? checkpointDisplayName(linkedCheckpoint) : normalizeCheckpointLabel(request.checkpoint) || request.checkpointId;
             const isManualReview = request.type === "manual_override";
             return (
               <li key={request.id}>
@@ -152,8 +154,7 @@ export function PendingDecisionsWidget({
                           disabled={Boolean(workingId)}
                           onClick={() => void decide(request, "approved")}
                         >
-                          <Check size={16} strokeWidth={2.2} />
-                          <span>Approve</span>
+                          <Check size={16} strokeWidth={2.2} aria-hidden="true" />
                         </button>
                         <button
                           type="button"
@@ -163,8 +164,7 @@ export function PendingDecisionsWidget({
                           disabled={Boolean(workingId)}
                           onClick={() => void decide(request, "denied")}
                         >
-                          <X size={16} strokeWidth={2.2} />
-                          <span>Deny</span>
+                          <X size={16} strokeWidth={2.2} aria-hidden="true" />
                         </button>
                       </span>
                     </div>

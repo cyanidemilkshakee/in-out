@@ -16,14 +16,14 @@ from data_limits import bounded_rows, precharge_mutation_response
 from event_outbox import enqueue_presence, enqueue_workflow_start, enqueue_workflow_signal
 from models import (
     Subject, PermissionRequestModel, Checkpoint,
-    AccessPermission, Person, HardwareAsset, AuditEvent,
+    AccessPermission, Person, HardwareAsset, AuditEvent, OrganizationZone, ZoneAdminAssignment,
 )
 from schemas import PermissionRequestCreate, PermissionGrantCreate, PermissionDecision
 from permission_decisions import (review_source, require_recent_review_source, pending_manual_review,
                                   enqueue_decision, permission_version, zone_permission_version,
                                   custody_version, has_unexpired_permission)
 from access_validation import (validate_window, validate_permission_window, validate_zones,
-    require_registered_checkpoint, validate_registered_zones)
+    require_registered_checkpoint, validate_registered_checkpoints, validate_registered_zones)
 from subject_metadata import current_subject_metadata
 from registry_validation import is_barcode_conflict
 from zone_access import (admin_zone_ids, require_checkpoint_scope,
@@ -49,6 +49,104 @@ async def _include_entry_restrictions(db, result):
     return result
 
 
+async def _create_cross_zone_access_request(payload: PermissionRequestCreate, db: AsyncSession, actor: dict):
+    if not has_admin_role(actor):
+        raise HTTPException(403, "Administrator access is required to request another zone for an employee")
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(422, "A reason is required for a zone access request")
+
+    target_zone_id = payload.target_zone_id
+    if not target_zone_id:
+        raise HTTPException(422, "Choose the zone that should review this request")
+
+    await require_subject_scope(db, actor, payload.subject_id)
+    subject = await db.scalar(select(Subject).where(Subject.id == payload.subject_id)
+        .options(selectinload(Subject.person)).with_for_update())
+    if subject is None or subject.kind != "employee" or subject.person is None:
+        raise HTTPException(422, "Cross-zone access requests require a registered employee")
+    person_data = dict(subject.person.data or {})
+    if person_data.get("status", "active") != "active":
+        raise HTTPException(422, "Zone access can only be requested for an active employee")
+
+    target_zone = await db.scalar(select(OrganizationZone).where(
+        OrganizationZone.id == target_zone_id, OrganizationZone.active.is_(True)
+    ).with_for_update(read=True))
+    if target_zone is None:
+        raise HTTPException(422, "Choose an active organization zone")
+    actor_zones = await admin_zone_ids(db, actor)
+    if not has_master_admin_role(actor) and target_zone_id in actor_zones:
+        raise HTTPException(422, "Choose a different zone so its assigned administrator can review the request")
+
+    target_admin = await db.scalar(select(ZoneAdminAssignment.admin_subject).where(
+        ZoneAdminAssignment.zone_id == target_zone_id
+    ).limit(1).with_for_update(read=True))
+    if not target_admin:
+        raise HTTPException(422, "That zone has no assigned zone admin to receive the request")
+    target_checkpoint = await db.scalar(select(Checkpoint).where(
+        Checkpoint.zone_id == target_zone_id,
+        Checkpoint.active.is_(True),
+        Checkpoint.required.is_(True),
+    ).order_by(Checkpoint.number).limit(1).with_for_update(read=True))
+    if target_checkpoint is None:
+        raise HTTPException(422, "That zone has no active required checkpoint for permission review")
+
+    permission = await db.scalar(select(AccessPermission).where(
+        AccessPermission.subject_id == subject.id
+    ).with_for_update())
+    current_data = dict((permission.data if permission else {}) or person_data)
+    previous_zones = await validate_registered_zones(
+        db, current_data.get("zones") or current_data.get("allowedZones") or []
+    )
+    if target_zone_id in previous_zones:
+        raise HTTPException(422, "The employee already has access to that zone")
+
+    existing = await db.scalar(select(PermissionRequestModel).where(
+        PermissionRequestModel.subject_id == subject.id,
+        PermissionRequestModel.data["status"].astext == "pending",
+        PermissionRequestModel.data["type"].astext == "zone_access",
+        PermissionRequestModel.data["origin"].astext == "cross_zone_request",
+        PermissionRequestModel.data["targetZoneId"].astext == target_zone_id,
+    ).order_by(PermissionRequestModel.created_at).limit(1))
+    if existing:
+        raise HTTPException(409, "A request for this employee and zone is already awaiting review")
+
+    now = datetime.now(timezone.utc)
+    valid_from = current_data.get("validFrom") or now.isoformat()
+    valid_to = current_data.get("validTo") or ""
+    validate_permission_window(valid_from, valid_to, now=now, allow_past_start=True, permanent=True)
+    requested_zones = list(dict.fromkeys([*previous_zones, target_zone_id]))
+    request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+    request_data = {
+        "id": request_id,
+        "subjectId": subject.id,
+        "subjectName": person_data.get("name") or subject.barcode,
+        "subjectType": "employee",
+        "barcode": subject.barcode,
+        "type": "zone_access",
+        "purpose": reason,
+        "checkpointId": target_checkpoint.id,
+        "checkpoint": (target_checkpoint.data or {}).get("name", target_checkpoint.id),
+        "requester": actor.get("sub") or "Administrator",
+        "requestedZones": requested_zones,
+        "previousZones": previous_zones,
+        "validFrom": valid_from,
+        "validTo": valid_to,
+        "previousValidFrom": current_data.get("validFrom") or "",
+        "previousValidTo": current_data.get("validTo") or "",
+        "permanentAccess": True,
+        "origin": "cross_zone_request",
+        "targetZoneId": target_zone_id,
+        "permissionVersion": zone_permission_version(permission, person_data),
+        "status": "pending",
+        "createdAt": now.isoformat(),
+    }
+    db.add(PermissionRequestModel(id=request_id, subject_id=subject.id, data=request_data, created_at=now))
+    await enqueue_decision(db, {"request": request_data})
+    await db.commit()
+    return request_data
+
+
 @router.post("/v1/permissions/grant", status_code=201)
 async def grant_permission(
     payload: PermissionGrantCreate,
@@ -59,8 +157,24 @@ async def grant_permission(
     allowed_zones = await admin_zone_ids(db, admin)
     checkpoint_id = await require_registered_checkpoint(db, payload.checkpoint_id)
     await require_checkpoint_scope(db, admin, checkpoint_id)
-    if payload.requested_checkpoints and (payload.request_type != "visitor" or payload.requested_checkpoints != [checkpoint_id]):
-        raise HTTPException(422, "Checkpoint-scoped access must target the selected visitor checkpoint")
+    if payload.requested_checkpoints:
+        if payload.request_type not in {"visitor", "zone_access"}:
+            raise HTTPException(422, "Checkpoint-scoped access is available only for access permissions")
+        if payload.request_type == "visitor" and payload.requested_checkpoints != [checkpoint_id]:
+            raise HTTPException(422, "Visitor access must target the selected checkpoint only")
+        if payload.request_type == "zone_access":
+            selected = await validate_registered_checkpoints(db, payload.requested_checkpoints)
+            selected_ids = [item.id for item in selected]
+            if checkpoint_id not in selected_ids:
+                raise HTTPException(422, "The primary checkpoint must be included in checkpoint access")
+            checkpoint_zones = list(dict.fromkeys(item.zone_id for item in selected))
+            if payload.requested_zones:
+                supplied_zones = await validate_registered_zones(db, payload.requested_zones)
+                if set(supplied_zones) != set(checkpoint_zones):
+                    raise HTTPException(422, "Zone scope must match the selected checkpoints")
+            payload.requested_zones = checkpoint_zones
+    elif payload.request_type == "zone_access" and not has_master_admin_role(admin):
+        raise HTTPException(422, "Zone administrators must choose explicit checkpoints")
     if payload.subject_id:
         await require_subject_scope(db, admin, payload.subject_id)
     if payload.request_type == "hardware_custody" and payload.carrier_id:
@@ -69,6 +183,7 @@ async def grant_permission(
     if payload.requested_zones:
         requested_zones = await validate_registered_zones(db, payload.requested_zones)
         validate_zone_subset(requested_zones, allowed_zones)
+        payload.requested_zones = requested_zones
     try:
         result, signal_visitor = await apply_direct_permission(db, payload, admin.get("sub", "unknown"),
             known_zone_ids=allowed_zones)
@@ -103,6 +218,11 @@ async def create_permission_request(
     db: AsyncSession = Depends(get_db),
     actor: dict = Depends(verify_admin_or_operator_request),
 ):
+    if payload.target_zone_id:
+        if payload.request_type != "zone_access":
+            raise HTTPException(422, "A target zone is only valid for an employee zone access request")
+        return await _create_cross_zone_access_request(payload, db, actor)
+
     checkpoint_id = await require_registered_checkpoint(db, payload.checkpoint_id)
     if not has_admin_role(actor):
         checkpoint_id = await require_checkpoint(db, browser_identity(actor), checkpoint_id)
@@ -159,20 +279,39 @@ async def create_permission_request(
             raise HTTPException(404, "Subject not found")
     valid_from = payload.valid_from or now.isoformat()
     valid_to = payload.valid_to or (now + timedelta(hours=1)).isoformat()
-    if payload.request_type == "zone_access" and not payload.requested_zones:
+    checkpoint_scoped_zone_access = has_admin_role(actor) and not has_master_admin_role(actor) and payload.request_type == "zone_access"
+    if payload.request_type == "zone_access" and not payload.requested_zones and not checkpoint_scoped_zone_access:
         raise HTTPException(422, "Choose the complete requested zone set")
-    if payload.requested_checkpoints:
-        if payload.request_type != "visitor" or payload.requested_checkpoints != [checkpoint.id]:
-            raise HTTPException(422, "Checkpoint-scoped access must target the selected visitor checkpoint")
+    requested_checkpoints = []
     requested_zones = payload.requested_zones or [checkpoint_zone]
+    if payload.requested_checkpoints:
+        if payload.request_type == "visitor":
+            if payload.requested_checkpoints != [checkpoint.id]:
+                raise HTTPException(422, "Visitor access must target the selected checkpoint only")
+            requested_checkpoints = [checkpoint.id]
+        elif payload.request_type == "zone_access" and has_admin_role(actor):
+            selected = await validate_registered_checkpoints(db, payload.requested_checkpoints)
+            requested_checkpoints = [item.id for item in selected]
+            if checkpoint.id not in requested_checkpoints:
+                raise HTTPException(422, "The primary checkpoint must be included in checkpoint access")
+            checkpoint_zones = list(dict.fromkeys(item.zone_id for item in selected))
+            if payload.requested_zones:
+                supplied_zones = await validate_registered_zones(db, payload.requested_zones)
+                if set(supplied_zones) != set(checkpoint_zones):
+                    raise HTTPException(422, "Zone scope must match the selected checkpoints")
+            requested_zones = checkpoint_zones
+        else:
+            raise HTTPException(422, "Checkpoint-scoped access is available only for administrator permissions")
+    elif checkpoint_scoped_zone_access:
+        raise HTTPException(422, "Zone administrators must choose explicit checkpoints")
     if has_admin_role(actor) and payload.request_type != "hardware_custody":
         actor_zones = await admin_zone_ids(db, actor)
         requested_zones = await validate_registered_zones(db, requested_zones)
         validate_zone_subset(requested_zones, actor_zones)
         if payload.request_type == "visitor" and requested_zones != [checkpoint.zone_id]:
             raise HTTPException(422, "Visitor access must use the selected checkpoint's zone")
-        if not has_master_admin_role(actor) and payload.request_type == "zone_access" and any(zone not in actor_zones for zone in requested_zones):
-            raise HTTPException(403, "Requested zone is outside your assigned scope")
+        if checkpoint_scoped_zone_access and any(zone not in actor_zones for zone in requested_zones):
+            raise HTTPException(403, "Requested checkpoint is outside your assigned scope")
     elif payload.request_type != "hardware_custody":
         requested_zones = validate_zones(requested_zones, known_zone_ids=[checkpoint.zone_id])
     if payload.request_type == "hardware_custody":
@@ -236,8 +375,8 @@ async def create_permission_request(
         "status": "pending",
         "createdAt": now.isoformat()
     }
-    if payload.request_type == "visitor" and payload.requested_checkpoints:
-        data["requestedCheckpoints"] = [checkpoint.id]
+    if requested_checkpoints:
+        data["requestedCheckpoints"] = requested_checkpoints
     if payload.hardware_id:
         data["hardwareId"] = payload.hardware_id
     if payload.request_type == "visitor":
@@ -294,7 +433,24 @@ async def decide_permission_request(
         raise HTTPException(404, "Request not found")
     request_data = existing_request.data or {}
     checkpoint_id = request_data.get("checkpointId")
-    if isinstance(checkpoint_id, str) and checkpoint_id:
+    if request_data.get("origin") == "cross_zone_request":
+        if request_data.get("type") != "zone_access":
+            raise HTTPException(422, "Cross-zone requests must use the zone-access permission type")
+        target_zone_id = request_data.get("targetZoneId")
+        if not isinstance(target_zone_id, str) or not target_zone_id:
+            raise HTTPException(422, "The requested zone is missing")
+        requested_zones = await validate_registered_zones(db, request_data.get("requestedZones") or [])
+        previous_zones = await validate_registered_zones(db, request_data.get("previousZones") or [])
+        if not set(previous_zones).issubset(requested_zones) or set(requested_zones) - set(previous_zones) != {target_zone_id}:
+            raise HTTPException(422, "The request must add only its selected zone to existing access")
+        administrator_zones = await admin_zone_ids(db, admin)
+        if target_zone_id not in administrator_zones and not has_master_admin_role(admin):
+            raise HTTPException(403, "This zone is outside your assigned administrator scope")
+        checkpoint = await db.get(Checkpoint, checkpoint_id) if isinstance(checkpoint_id, str) else None
+        if checkpoint is None or checkpoint.zone_id != target_zone_id or not checkpoint.active or not checkpoint.required:
+            raise HTTPException(422, "The request must reference the active required checkpoint for its target zone")
+        await require_checkpoint_scope(db, admin, checkpoint_id)
+    elif isinstance(checkpoint_id, str) and checkpoint_id:
         await require_checkpoint_scope(db, admin, checkpoint_id)
     else:
         requested_zones = await validate_registered_zones(db, request_data.get("requestedZones") or [])

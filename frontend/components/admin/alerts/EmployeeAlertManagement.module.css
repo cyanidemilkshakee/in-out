@@ -44,7 +44,7 @@
 .employeeControlsGrid { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); align-items: stretch; gap: 24px; margin-top: 12px; }
 .employeeControlsSingle { grid-template-columns: minmax(0, 1fr); }
 .employeeControlsGrid > .warnings { padding-block: 0; }
-.sectionHeading { min-height: 44px; justify-content: space-between; gap: 12px; }
+.sectionHeading { min-height: 44px; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
 .sectionHeading h3 { margin: 0; font-size: 17px; font-weight: 700; line-height: 1.4; }
 .ruleList { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .rule { display: flex; min-width: 0; min-height: 58px; align-items: center; gap: 12px; padding: 14px 16px; border: 1px solid transparent; border-radius: 10px; background: transparent; cursor: pointer; transition: background-color 150ms ease, border-color 150ms ease; }
@@ -61,7 +61,8 @@
 .skipDateFooter { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: auto; }
 .profileButton { color: var(--ui-text-secondary); }
 .profileButton:hover:not(:disabled) { color: var(--ui-text-primary); }
-.dateField input { box-sizing: border-box; min-height: 44px; padding: 9px 12px; border: 1px solid var(--admin-border); border-radius: 9px; background: var(--admin-bg); color: var(--ui-text-primary); font: inherit; font-size: 15px; }
+.dateField { flex: 1 1 160px; min-width: 0; max-width: 100%; }
+.dateField input { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; min-height: 44px; padding: 9px 12px; border: 1px solid var(--admin-border); border-radius: 9px; background: var(--admin-bg); color: var(--ui-text-primary); font: inherit; font-size: 15px; }
 .dateField input:hover { border-color: var(--ui-border-hover); }
 .skipDateList { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; padding: 0; list-style: none; }
 .skipDateList li { display: inline-flex; align-items: center; gap: 7px; min-height: 34px; padding: 3px 5px 3px 10px; border: 1px solid transparent; border-radius: 8px; color: var(--ui-text-primary); font-size: 14px; font-weight: 550; }
@@ -126,6 +127,8 @@
 .panel :is(input, select, button, a):focus-visible { outline: 2px solid var(--ui-text-info); outline-offset: 3px; }
 .resetControls input[aria-invalid="true"]:focus-visible { outline-color: var(--ui-text-danger); }
 .panel :is(input, select, button):disabled, .rule[data-disabled="true"] { opacity: .55; cursor: not-allowed; }
+.header h2, .sectionHeading h3, .holdBadge, .skipDates p, .lastReset, .warningEmpty { min-width: 0; overflow-wrap: anywhere; }
+.button { min-width: 0; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .loadingIcon { animation: rotate 1s linear infinite; }
 @keyframes rotate { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .loadingIcon { animation: none; } }
@@ -145,4 +148,8 @@
   .skipScheduleList li { grid-template-columns: minmax(0, 1fr); gap: 6px; }
   .warningCount strong { font-size: 38px; }
   .empty { padding: 20px 16px; }
+}
+@media (max-width: 767px), (pointer: coarse) {
+  .dateField input { font-size: 16px; }
+  .skipDateList button { width: 44px; height: 44px; }
 }

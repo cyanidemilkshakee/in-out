@@ -67,6 +67,58 @@ services:
           fault_tolerant: false
           redis: *gateway-redis
 
+  # Invitation acceptance is public and uses a bearer link token; keep failed
+  # guesses tightly rate-limited before they reach the app.
+  - name: inout-invitation-acceptance
+    id: 4d18a55e-1b82-4da4-951f-2e4d932e5c34
+    url: http://app:1018
+    retries: 0
+    read_timeout: 60000
+    routes:
+      - name: invitation-acceptance
+        expression: >-
+          http.headers.inoutlistener == "1012" && http.method == "POST" &&
+          http.path == "/api/invitations/accept"
+        priority: 260
+        strip_path: false
+        preserve_host: true
+    plugins:
+      - name: rate-limiting
+        config:
+          second: 2
+          minute: 10
+          limit_by: ip
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
+
+  # Sending mail-bearing invites has a separate budget from ordinary admin
+  # requests, in addition to the authenticated app checks.
+  - name: inout-invitation-management
+    id: 4e29b66f-2c93-4e5f-a62f-3f5e4d6f7a81
+    url: http://app:1018
+    retries: 0
+    read_timeout: 60000
+    routes:
+      - name: invitation-management
+        expression: >-
+          http.headers.inoutlistener == "1012" && http.method == "POST" &&
+          http.path == "/api/invitations"
+        priority: 255
+        strip_path: false
+        preserve_host: true
+    plugins:
+      - name: rate-limiting
+        config:
+          second: 3
+          minute: 30
+          limit_by: ip
+          policy: redis
+          sync_rate: -1
+          fault_tolerant: false
+          redis: *gateway-redis
+
   - name: inout-api
     id: 49fa490b-bd8a-48d2-9655-5b2bf09cbe20
     url: http://python-api:1019
@@ -79,6 +131,16 @@ services:
         strip_path: false
         preserve_host: true
         response_buffering: false
+      # This endpoint authenticates a single-use invitation token instead of
+      # a user session; the custom identity plugin explicitly allows this POST.
+      - name: api-invitation-acceptance
+        id: 338632e6-b2e6-4db3-9414-55d09f65be42
+        expression: >-
+          http.headers.inoutlistener == "1013" && http.method == "POST" &&
+          http.path == "/v1/invitations/accept"
+        priority: 220
+        strip_path: false
+        preserve_host: true
       # Public health/docs and CORS preflight requests don't have a verified
       # account credential, so give this route its own IP-based stock limit.
       - name: api-public
@@ -100,7 +162,10 @@ services:
         strip_path: false
         preserve_host: true
       - name: terminal-mtls
-        expression: http.headers.inoutlistener == "1016" && (http.path == "/v1/scans" || http.path == "/v1/scans/")
+        expression: >-
+          http.headers.inoutlistener == "1016" &&
+          (http.path == "/v1/scans" || http.path == "/v1/scans/" ||
+           http.path == "/v1/terminal/heartbeat/mtls")
         protocols: [https]
         priority: 120
         strip_path: false
@@ -286,6 +351,23 @@ plugins:
            http.path == "/openapi.json")))
     config:
       minute: 6000
+      limit_by: ip
+      policy: redis
+      sync_rate: -1
+      fault_tolerant: false
+      redis: *gateway-redis
+  # Invitation acceptance carries a high-entropy link token rather than a
+  # verified bearer, so also budget the API transport independently.
+  - name: rate-limiting
+    id: 05ac4731-f8cb-4614-9420-cb7dfd93c40f
+    route:
+      id: 338632e6-b2e6-4db3-9414-55d09f65be42
+      protocols: [http]
+      expression: >-
+        http.headers.inoutlistener == "1013" && http.method == "POST" &&
+        http.path == "/v1/invitations/accept"
+    config:
+      minute: 100
       limit_by: ip
       policy: redis
       sync_rate: -1

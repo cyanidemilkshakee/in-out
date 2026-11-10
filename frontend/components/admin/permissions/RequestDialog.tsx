@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { ArrowRight, Boxes, Loader2, MapPin, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { useDataActions, useDataState } from "../../../context/DataContext";
+import { useAdminRole } from "../../../context/AdminRoleContext";
 import type { AccessPermission, Checkpoint, HardwareAsset, Person, PermissionRequest, PermissionRequestInput, SubjectProfile } from "../../../../lib/types";
-import { facilityZoneLabel, formatFacilityZones, normalizeFacilityZones } from "../../../../lib/facilityZones";
+import { checkpointDisplayName, facilityZoneLabel, formatFacilityZones, normalizeFacilityZones } from "../../../../lib/facilityZones";
 import { accessDateTimeLimits, accessWindowBounds, parseFacilityDateTime, validateAccessWindow, type DateRangeErrors } from "../../../../lib/dateTimeValidation";
 import { useDateTimeNow } from "../../../hooks/useDateTimeNow";
 import { useOrganizationZones } from "../../../hooks/useOrganizationZones";
@@ -44,6 +45,8 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
 }) {
   const { people: initialPeople, hardwareAssets: initialHardware, checkpoints: contextCheckpoints, permissions: initialPermissions, permissionRequests } = useDataState();
   const { submitPermissionRequest, createVisitor, grantPermission, releaseEntryRestriction, querySubjectProfile } = useDataActions();
+  const { isMasterAdmin } = useAdminRole();
+  const isZoneAdmin = !isMasterAdmin;
   const checkpoints = suppliedCheckpoints ?? contextCheckpoints;
   const [profile, setProfile] = useState<SubjectProfile | null>(null);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -59,7 +62,9 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
   const now = useDateTimeNow();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const [type, setType] = useState<FormPermissionType>(() => contextType(context));
+  const [employeeAccessTab, setEmployeeAccessTab] = useState<"checkpoint" | "zone">("checkpoint");
   const [subjectId, setSubjectId] = useState(() => context.type === "visitor" && !context.subjectId ? "" : context.subjectId ?? "");
+  const [targetZoneId, setTargetZoneId] = useState("");
   const [checkpointId, setCheckpointId] = useState(() => {
     const current = people.find((person) => person.id === context.subjectId);
     const currentScope = permissions.find((permission) => permission.subjectId === context.subjectId)?.checkpoints
@@ -67,6 +72,14 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
     return checkpoints.find((item) => item.active !== false && currentScope?.includes(item.id))?.id
       ?? checkpoints.find((item) => item.active !== false)?.id
       ?? "";
+  });
+  const [checkpointIds, setCheckpointIds] = useState<string[]>(() => {
+    const currentPermission = permissions.find((permission) => permission.subjectId === context.subjectId);
+    const selectedSubject = [...people, ...hardwareAssets].find((item) => item.id === context.subjectId);
+    const explicit = currentPermission?.checkpoints ?? selectedSubject?.allowedCheckpoints;
+    if (explicit?.length) return [...explicit];
+    const currentZones = currentPermission?.zones ?? selectedSubject?.allowedZones ?? [];
+    return isZoneAdmin ? checkpoints.filter((item) => item.active !== false && currentZones.includes(item.zoneId ?? item.zone)).map((item) => item.id) : [];
   });
   const [carrierId, setCarrierId] = useState("");
   const [reason, setReason] = useState("");
@@ -99,24 +112,41 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
   const isVisitorAccess = type === "zone_access" && isVisitorSubject;
   const isVisitorType = isVisitorAccess || isNewVisitor;
   const requestType = backendType(type, isVisitorAccess);
-  const permanentZoneAccess = isGrant && type === "zone_access" && !isVisitorAccess && permanentAccess;
+  const checkpointScopedZoneAccess = isZoneAdmin && type === "zone_access" && !isVisitorAccess;
+  const checkpointScopedNewVisitor = isZoneAdmin && isNewVisitor;
   const validSubject = Boolean(subject && (profile?.person?.id === subjectId || profile?.hardwareAsset?.id === subjectId) && (type !== "hardware_custody" || asset));
   const employee = selectedCarrier?.id === carrierId ? selectedCarrier : people.find((person) => person.id === carrierId && person.type === "employee");
   const checkpoint = checkpoints.find((item) => item.id === checkpointId && item.active !== false);
+  const activeCheckpoints = checkpoints.filter((item) => item.active !== false);
+  const selectedCheckpoints = activeCheckpoints.filter((item) => checkpointIds.includes(item.id));
   const currentPermission = permissions.find((item) => item.subjectId === subjectId);
+  const currentZones = currentPermission?.zones ?? subject?.allowedZones ?? [];
+  const isEmployeeSubject = Boolean(subject && "type" in subject && subject.type === "employee");
+  const canRequestAnotherZone = isGrant && type === "zone_access" && isEmployeeSubject;
+  const isCrossZoneRequest = canRequestAnotherZone && employeeAccessTab === "zone";
+  const crossZoneOptions = zoneChoices.filter((zone) => zone.active !== false && !currentZones.includes(zone.id));
+  const selectedTargetZoneId = crossZoneOptions.some((zone) => zone.id === targetZoneId)
+    ? targetZoneId
+    : crossZoneOptions[0]?.id ?? "";
+  const permanentZoneAccess = isGrant && type === "zone_access" && !isVisitorAccess && !isCrossZoneRequest && permanentAccess;
   const canRevokeAccess = isGrant && currentPermission
     && currentPermission.state !== "pending_approval"
     && currentPermission.state !== "restricted"
     && currentPermission.state !== "revoked";
   const entryRestriction = currentPermission?.entryRestriction ?? subject?.entryRestriction;
   const dateLimits = accessDateTimeLimits(validFrom, validTo, now);
-  const needsZones = !isVisitorAccess && (type === "zone_access" || isVisitorType);
+  const selectedCheckpointZones = normalizeFacilityZones(selectedCheckpoints.map((item) => item.zoneId ?? item.zone));
+  const selectedVisitorZone = checkpointScopedNewVisitor && checkpoint
+    ? normalizeFacilityZones([checkpoint.zoneId ?? checkpoint.zone]) : [];
+  const requestedAccessZones = checkpointScopedZoneAccess ? selectedCheckpointZones
+    : checkpointScopedNewVisitor ? selectedVisitorZone : normalizeFacilityZones(zones);
+  const needsZones = !isVisitorAccess && !checkpointScopedZoneAccess && !checkpointScopedNewVisitor && (type === "zone_access" || isVisitorType);
   const needsDateWindow = isVisitorType || type === "zone_access";
-  const needsCheckpointField = isVisitorAccess || (!isGrant && !isVisitorType);
+  const needsCheckpointField = isVisitorAccess || checkpointScopedNewVisitor || (!isGrant && !isVisitorType);
   const selectedZoneIds = normalizeFacilityZones(zones);
   const visitorCheckpoint = checkpoints.find((item) => (item.zoneId ?? item.zone) === selectedZoneIds[0] && (item.required || item.number === 1))
     ?? checkpoints.find((item) => (item.zoneId ?? item.zone) === selectedZoneIds[0]);
-  const permissionCheckpointId = isVisitorAccess ? checkpointId : isVisitorType ? visitorCheckpoint?.id ?? "" : checkpointId;
+  const permissionCheckpointId = isVisitorAccess || checkpointScopedNewVisitor ? checkpointId : isVisitorType ? visitorCheckpoint?.id ?? "" : checkpointId;
   const visitorBarcode = visitorDraft.barcode.trim();
   const visitorBarcodeValid = Boolean(visitorBarcode && visitorBarcode.length <= 64 && /^[A-Za-z0-9._:/-]+$/.test(visitorBarcode));
   const visitorRequest = permissionRequests.find((request) =>
@@ -125,7 +155,11 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
   const invalidDateErrors = needsDateWindow
     ? validateAccessWindow(validFrom, validTo, now, permanentZoneAccess)
     : {};
-  const currentZones = currentPermission?.zones ?? subject?.allowedZones ?? [];
+  const subjectCheckpoints = subject && "allowedCheckpoints" in subject ? subject.allowedCheckpoints : undefined;
+  const savedCheckpointScope = currentPermission?.checkpoints ?? subjectCheckpoints;
+  const currentCheckpointScope = !savedCheckpointScope?.length
+    ? activeCheckpoints.filter((item) => currentZones.includes(item.zoneId ?? item.zone)).map((item) => item.id)
+    : savedCheckpointScope;
   const subjectStart = subject && "validFrom" in subject ? subject.validFrom : undefined;
   const subjectEnd = subject && "validTo" in subject ? subject.validTo : undefined;
   const currentWindow = permissionWindowLabels(currentPermission?.validFrom ?? subjectStart, currentPermission?.validTo ?? subjectEnd);
@@ -147,12 +181,26 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
       const saved = result.permissions.find(item => item.subjectId === subjectId);
       const record = result.person ?? result.hardwareAsset;
       setZones(normalizeFacilityZones(saved?.zones ?? record?.allowedZones ?? []));
-      const allowed = saved?.checkpoints ?? result.person?.allowedCheckpoints;
-      if (allowed?.length) setCheckpointId(allowed[0]);
     }).catch(cause => { if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Unable to load current access."); })
       .finally(() => { if (!controller.signal.aborted) setProfileLoading(false); });
     return () => controller.abort();
   }, [subjectId, querySubjectProfile]);
+
+  useEffect(() => {
+    if (!isZoneAdmin || !profile || (profile.person?.id ?? profile.hardwareAsset?.id) !== subjectId) return;
+    const saved = profile.permissions.find((item) => item.subjectId === subjectId);
+    const record = profile.person ?? profile.hardwareAsset;
+    const allowed = saved?.checkpoints ?? record?.allowedCheckpoints;
+    if (allowed?.length) {
+      setCheckpointIds([...allowed]);
+      setCheckpointId(allowed[0]);
+      return;
+    }
+    const currentZones = saved?.zones ?? record?.allowedZones ?? [];
+    const legacyZoneCheckpoints = checkpoints.filter((item) => item.active !== false && currentZones.includes(item.zoneId ?? item.zone)).map((item) => item.id);
+    setCheckpointIds(legacyZoneCheckpoints);
+    if (legacyZoneCheckpoints.length) setCheckpointId(legacyZoneCheckpoints[0]);
+  }, [checkpoints, isZoneAdmin, profile, subjectId]);
 
   useEffect(() => {
     if ((!checkpointId || !checkpoints.some((item) => item.id === checkpointId && item.active !== false)) && checkpoints.length) {
@@ -161,10 +209,10 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
   }, [checkpointId, checkpoints]);
 
   useEffect(() => {
-    if (!zones.length && zoneChoices.length && (isNewVisitor || (context.type === "visitor" && isGrant))) {
+    if (!isZoneAdmin && !zones.length && zoneChoices.length && (isNewVisitor || (context.type === "visitor" && isGrant))) {
       setZones([zoneChoices[0].id]);
     }
-  }, [zones, zoneChoices, isNewVisitor, context.type, isGrant]);
+  }, [isZoneAdmin, zones, zoneChoices, isNewVisitor, context.type, isGrant]);
 
   useEffect(() => {
     const bounds = accessWindowBounds(now);
@@ -178,6 +226,7 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
 
   function changeType(next: FormPermissionType) {
     setType(next);
+    setEmployeeAccessTab("checkpoint");
     setError("");
     setAttemptedSubmit(false);
     setDateErrors({});
@@ -192,9 +241,19 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
       setSubjectId("");
     }
 
-    if (next === "new_visitor" && !zones.length) {
+    if (!isZoneAdmin && next === "new_visitor" && !zones.length) {
       if (zoneChoices.length) setZones([zoneChoices[0].id]);
     }
+  }
+
+  function handleEmployeeAccessKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextTab = event.key === "Home" ? "checkpoint"
+      : event.key === "End" ? "zone"
+      : employeeAccessTab === "checkpoint" ? "zone" : "checkpoint";
+    setEmployeeAccessTab(nextTab);
+    document.getElementById(nextTab === "checkpoint" ? "permission-checkpoint-tab" : "permission-zone-tab")?.focus();
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -212,9 +271,11 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
     const carrierMissing = type === "hardware_custody" && !employee;
     const duplicateCustodian = type === "hardware_custody" && Boolean(currentCustodianId && currentCustodianId === carrierId);
     const zonesMissing = needsZones && !normalizeFacilityZones(zones).length;
-    const checkpointMissing = needsCheckpointField ? !checkpoint : isVisitorType && !permissionCheckpointId;
+    const checkpointMissing = needsCheckpointField ? !checkpoint
+      : checkpointScopedZoneAccess ? selectedCheckpoints.length === 0
+        : isVisitorType && !permissionCheckpointId;
 
-    if (checkpointMissing) { setError("Choose a checkpoint."); return; }
+    if (checkpointMissing) { setError(checkpointScopedZoneAccess ? "Choose at least one checkpoint." : "Choose a checkpoint."); return; }
     if (nextDateErrors.start || nextDateErrors.end) { setError(nextDateErrors.start ?? nextDateErrors.end ?? "Choose a valid access window."); return; }
     if (visitorNameMissing || visitorHostMissing || visitorBarcodeMissing) {
       setError(!visitorDraft.name.trim() ? "Add the visitor name." : !visitorDraft.host.trim() ? "Add the visitor host." : "Enter a valid visitor barcode using letters, numbers, dots, underscores, colons, slashes, or hyphens.");
@@ -225,13 +286,47 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
     if (duplicateCustodian) { setError("This employee already has custody of this asset."); return; }
     if (zonesMissing) { setError("Choose at least one zone."); return; }
 
+    if (isCrossZoneRequest) {
+      if (!isEmployeeSubject || !subject) { setError("Choose an employee for a zone access request."); return; }
+      if (!selectedTargetZoneId) { setError("Choose an active zone the employee cannot currently access."); return; }
+      if (!reason.trim()) { setError("Add a reason for requesting access to another zone."); return; }
+      const duplicate = permissionRequests.find((request) =>
+        request.status === "pending" && request.type === "zone_access" && request.origin === "cross_zone_request" &&
+        request.subjectId === subjectId && request.targetZoneId === selectedTargetZoneId
+      );
+      if (duplicate) { setError("A request for this employee and zone is already awaiting review."); return; }
+
+      setBusy(true);
+      try {
+        const request = await submitPermissionRequest({
+          type: "zone_access",
+          subjectId,
+          subjectName: subject.name,
+          barcode: subject.barcode,
+          requester: "Administrator",
+          purpose: reason.trim(),
+          requestedZones: [],
+          validFrom: "",
+          validTo: "",
+          targetZoneId: selectedTargetZoneId,
+        });
+        onSubmitted(request, "people");
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Unable to submit the zone access request. Your entries have been kept.");
+      } finally {
+        setBusy(false);
+      }
+      return;
+    }
+
     if (isNewVisitor) {
       setBusy(true);
       try {
         if (isGrant) {
           const request = await grantPermission({
             type: "visitor", subjectId: "", subjectName: visitorDraft.name.trim(), barcode: visitorBarcode,
-            requester: "Administrator", purpose: reason.trim(), requestedZones: normalizeFacilityZones(zones), checkpointId: permissionCheckpointId,
+            requester: "Administrator", purpose: reason.trim(), requestedZones: requestedAccessZones, checkpointId: permissionCheckpointId,
+            ...(checkpointScopedNewVisitor ? { requestedCheckpoints: [permissionCheckpointId] } : {}),
             validFrom: facilityDateIso(validFrom), validTo: facilityDateIso(validTo),
             newVisitor: { name: visitorDraft.name.trim(), host: visitorDraft.host.trim(), ...(visitorDraft.company.trim() ? { company: visitorDraft.company.trim() } : {}) },
           });
@@ -245,7 +340,7 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
           validFrom: facilityDateIso(validFrom),
           validTo: facilityDateIso(validTo),
           checkpointId: permissionCheckpointId,
-          allowedZones: normalizeFacilityZones(zones),
+          allowedZones: requestedAccessZones,
           ...(reason.trim() ? { purpose: reason.trim() } : {}),
           ...(visitorDraft.company.trim() ? { company: visitorDraft.company.trim() } : {}),
         });
@@ -260,11 +355,16 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
 
     if (!subject || !validSubject) return;
     if (type === "hardware_custody" && !asset) { setError("Choose registered hardware."); return; }
+    const checkpointGrant = isGrant && type === "zone_access" && !isVisitorAccess;
     const requestedZones = type === "hardware_custody"
       ? []
+      : checkpointGrant
+        ? normalizeFacilityZones([checkpoint?.zoneId ?? checkpoint?.zone ?? ""])
       : isVisitorAccess
         ? normalizeFacilityZones([checkpoint?.zoneId ?? checkpoint?.zone ?? ""])
-        : normalizeFacilityZones(type === "zone_access" || isVisitorType ? zones : [checkpoint?.zone ?? ""]);
+        : checkpointScopedZoneAccess || checkpointScopedNewVisitor
+          ? requestedAccessZones
+          : normalizeFacilityZones(type === "zone_access" || isVisitorType ? zones : [checkpoint?.zone ?? ""]);
     const pending = permissionRequests.find((request) =>
       request.status === "pending" && request.type === requestType && request.subjectId === subjectId &&
       (requestType !== "hardware_custody" || request.carrierId === carrierId)
@@ -281,7 +381,8 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
         requester: "Administrator",
         purpose: reason.trim(),
         requestedZones,
-        ...(isVisitorAccess ? { requestedCheckpoints: [permissionCheckpointId] } : {}),
+        ...(isVisitorAccess || checkpointScopedNewVisitor ? { requestedCheckpoints: [permissionCheckpointId] } : {}),
+        ...(checkpointScopedZoneAccess ? { requestedCheckpoints: selectedCheckpoints.map((item) => item.id) } : {}),
         checkpointId: permissionCheckpointId,
         validFrom: needsDateWindow ? facilityDateIso(validFrom) : "",
         validTo: needsDateWindow && !permanentZoneAccess ? facilityDateIso(validTo) : "",
@@ -318,6 +419,7 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
 
   const invalidSubject = attemptedSubmit && !isNewVisitor && !validSubject;
   const invalidCheckpoint = attemptedSubmit && needsCheckpointField && !checkpoint;
+  const invalidCheckpoints = attemptedSubmit && checkpointScopedZoneAccess && selectedCheckpoints.length === 0;
   const invalidCarrier = attemptedSubmit && type === "hardware_custody" && !employee;
   const invalidZones = attemptedSubmit && needsZones && !normalizeFacilityZones(zones).length;
   const visitorBarcodeError = attemptedSubmit && isNewVisitor && !visitorBarcodeValid;
@@ -355,15 +457,23 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
     }
   }
 
+  const checkpointAccessDialog = isVisitorAccess || checkpointScopedZoneAccess || checkpointScopedNewVisitor;
+  const dialogTitle = isGrant ? checkpointAccessDialog ? "Checkpoint access" : "New permission" : "New request";
+  const dialogDescription = isGrant
+    ? checkpointScopedZoneAccess ? "Choose the checkpoints this person or asset can use and set its access window."
+      : checkpointScopedNewVisitor ? "Choose one checkpoint for this visitor and set the access window."
+        : isVisitorAccess ? "Choose one checkpoint and set this visitor’s access window." : "Grant access or reassign custody directly."
+    : "Choose the approval you need.";
+
   return <dialog ref={dialogRef} className={`${styles.dialog} scrollable-content`} aria-labelledby="new-request-title" onCancel={(event) => { event.preventDefault(); if (!saving) onClose(); }}>
     <form onSubmit={submit} noValidate className={styles.form}>
-      <header className={styles.header}><div><h2 id="new-request-title">{isGrant ? isVisitorAccess ? "Checkpoint access" : "New permission" : "New request"}</h2><p>{isGrant ? isVisitorAccess ? "Choose one checkpoint and set this visitor’s access window." : "Grant access or reassign custody directly." : "Choose the approval you need."}</p></div><button type="button" className={styles.close} aria-label={isGrant ? isVisitorAccess ? "Close checkpoint access" : "Close new permission" : "Close new request"} disabled={saving} onClick={onClose}><X size={19} /></button></header>
+      <header className={styles.header}><div><h2 id="new-request-title">{dialogTitle}</h2><p>{dialogDescription}</p></div><button type="button" className={styles.close} aria-label={isGrant ? checkpointAccessDialog ? "Close checkpoint access" : "Close new permission" : "Close new request"} disabled={saving} onClick={onClose}><X size={19} /></button></header>
 
       <fieldset className={styles.typeSelector} disabled={busy}>
         <legend>{isGrant ? "Permission type" : "Request type"}</legend>
         <div className={styles.typeChoices}>{NEW_REQUEST_TYPES.map((item) => {
           const Icon = item.icon;
-          const label = isVisitorAccess && item.value === "zone_access" ? "Checkpoint access" : item.label;
+          const label = item.value === "zone_access" && (isVisitorAccess || isZoneAdmin) ? "Checkpoint access" : item.label;
           return <label key={item.value} className={styles.typeChoice} data-selected={type === item.value}>
             <input type="radio" name="permissionType" value={item.value} checked={type === item.value} onChange={() => changeType(item.value)} />
             <Icon size={19} strokeWidth={1.7} aria-hidden="true" /><span>{label}</span>
@@ -380,13 +490,21 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
           onChange={(selectedSubject) => {
           setSelectedOption(selectedSubject);
           setSubjectId(selectedSubject?.id ?? "");
+          setEmployeeAccessTab("checkpoint");
+          setTargetZoneId("");
           setCarrierId("");
           setSelectedCarrier(undefined);
           setZones([]);
+          setCheckpointIds([]);
           if (selectedSubject && "type" in selectedSubject && selectedSubject.type === "visitor") setPermanentAccess(false);
           setError("");
         }} />
       </label>}
+
+      {canRequestAnotherZone && <div className={styles.employeeAccessTabs} role="tablist" aria-label="Employee access action" onKeyDown={handleEmployeeAccessKeyDown}>
+        <button id="permission-checkpoint-tab" type="button" role="tab" tabIndex={employeeAccessTab === "checkpoint" ? 0 : -1} aria-selected={employeeAccessTab === "checkpoint"} aria-controls="permission-checkpoint-panel" data-selected={employeeAccessTab === "checkpoint"} className={styles.employeeAccessTab} disabled={busy} onClick={() => { setEmployeeAccessTab("checkpoint"); setError(""); }}>Checkpoint access</button>
+        <button id="permission-zone-tab" type="button" role="tab" tabIndex={employeeAccessTab === "zone" ? 0 : -1} aria-selected={employeeAccessTab === "zone"} aria-controls="permission-zone-panel" data-selected={employeeAccessTab === "zone"} className={styles.employeeAccessTab} disabled={busy} onClick={() => { setEmployeeAccessTab("zone"); setError(""); }}>Request another zone</button>
+      </div>}
 
       {isGrant && entryRestriction?.active && <div className={`${styles.notice} ${styles.restriction}`}>
         <strong>Entry restriction remains active</strong>
@@ -411,6 +529,26 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
       </div>}
 
       {needsCheckpointField && <label className={styles.field}><span>Checkpoint</span><select className="admin-surface" aria-invalid={invalidCheckpoint || undefined} required disabled={busy} value={checkpointId} onChange={(event) => setCheckpointId(event.target.value)}><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((item) => <option key={item.id} value={item.id}>{facilityZoneLabel(item.zoneId ?? item.zone, organizationZones)} · {item.gateLabel && item.gateLabel.trim().toLowerCase() !== item.name.trim().toLowerCase() ? `${item.name} · ${item.gateLabel}` : item.gateLabel || item.name}</option>)}</select></label>}
+      {needsCheckpointField && !activeCheckpoints.length && <p role="status">No active checkpoints are available in your assigned zones.</p>}
+
+      {checkpointScopedZoneAccess && <fieldset className={`${styles.scopeSelection} admin-surface`} disabled={busy} aria-invalid={invalidCheckpoints || undefined}>
+        <legend>Checkpoint access</legend>
+        <p>Select up to 16 checkpoints this person or asset can use. Access will be limited to these checkpoints across your assigned zones.</p>
+        <div className={styles.scopeChoices}>
+          {activeCheckpoints.map((item) => <label key={item.id} className={styles.scopeChoice}>
+            <input type="checkbox" checked={checkpointIds.includes(item.id)} disabled={!checkpointIds.includes(item.id) && checkpointIds.length >= 16} onChange={(event) => {
+              const next = event.target.checked
+                ? [...new Set([...checkpointIds, item.id])]
+                : checkpointIds.filter((id) => id !== item.id);
+              setCheckpointIds(next);
+              if (next.length && !next.includes(checkpointId)) setCheckpointId(next[0]);
+              setError("");
+            }} />
+            <span><strong>{facilityZoneLabel(item.zoneId ?? item.zone, organizationZones)}</strong><small>{item.gateLabel && item.gateLabel.trim().toLowerCase() !== item.name.trim().toLowerCase() ? `${item.name} · ${item.gateLabel}` : item.gateLabel || item.name}</small></span>
+          </label>)}
+          {!activeCheckpoints.length && <p role="status">No active checkpoints are available in your assigned zones.</p>}
+        </div>
+      </fieldset>}
 
       {type === "hardware_custody" && <label className={styles.field}><span>{isGrant ? "New custodian" : "Requested custodian"}</span><RegistrySubjectPicker value={carrierId} selected={employee} kind="employee" label="Employee" disabled={busy} invalid={invalidCarrier} onChange={record => { setSelectedCarrier(record as Person | undefined); setCarrierId(record?.id ?? ""); }} /></label>}
 
@@ -437,15 +575,19 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
           ? <p>Choose a person or asset to view its current access.</p>
           : <>
               {type === "hardware_custody" && <p><strong>Current custodian:</strong> {asset?.assignedEmployeeName || "Unassigned"}</p>}
-              {isVisitorAccess
+              {type === "zone_access"
                 ? <p><strong>Checkpoint access:</strong> {(() => {
                   const subjectCheckpoints = subject && "allowedCheckpoints" in subject ? subject.allowedCheckpoints : undefined;
-                  const allowedCheckpoints: string[] | undefined = currentPermission?.checkpoints ?? subjectCheckpoints;
+                  const allowedCheckpoints = isZoneAdmin
+                    ? currentCheckpointScope
+                    : currentPermission?.checkpoints?.length ? currentPermission.checkpoints : subjectCheckpoints;
                   if (allowedCheckpoints?.length) return allowedCheckpoints.map((id) => {
                     const item = checkpoints.find((candidate) => candidate.id === id);
-                    return item ? `${facilityZoneLabel(item.zoneId ?? item.zone, organizationZones)} · ${item.name}` : id;
+                    return item ? `${facilityZoneLabel(item.zoneId ?? item.zone, organizationZones)} · ${checkpointDisplayName(item, organizationZones)}` : id;
                   }).join(", ");
-                  return `All checkpoints in ${formatFacilityZones(currentZones, organizationZones) || "no zones assigned"} (existing zone-wide access)`;
+                  return !isZoneAdmin && currentZones.length
+                    ? `All checkpoints in ${formatFacilityZones(currentZones, organizationZones)} (current zone-wide access)`
+                    : "No checkpoint access assigned";
                 })()}</p>
                 : <p><strong>Zones:</strong> {formatFacilityZones(currentZones, organizationZones) || "No zones assigned"}</p>}
               {type !== "hardware_custody" && <p className={styles.currentAccessWindow}><span>{currentWindow.start}</span><span>{currentWindow.end}</span></p>}
@@ -455,7 +597,7 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
 
       </div>
 
-      <footer className={styles.footer}><button type="button" className={styles.cancelButton} disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className={styles.submitButton} disabled={busy || (type === "hardware_custody" && currentCustodianId === carrierId) || Boolean(!isGrant && visitorRequest)}>{busy ? <><Loader2 size={16} className={styles.spinner} />{isGrant ? "Granting…" : "Submitting…"}</> : <>{isGrant ? isVisitorAccess ? "Grant checkpoint access" : "Grant permission" : isNewVisitor ? "Register & request approval" : "Submit request"}<ArrowRight size={16} aria-hidden="true" /></>}</button></footer>
+      <footer className={styles.footer}><button type="button" className={styles.cancelButton} disabled={busy} onClick={onClose}>Cancel</button><button type="submit" className={styles.submitButton} disabled={busy || (type === "hardware_custody" && currentCustodianId === carrierId) || Boolean(!isGrant && visitorRequest)}>{busy ? <><Loader2 size={16} className={styles.spinner} />{isGrant ? "Granting…" : "Submitting…"}</> : <>{isGrant ? checkpointAccessDialog ? "Grant checkpoint access" : "Grant permission" : isNewVisitor ? "Register & request approval" : "Submit request"}<ArrowRight size={16} aria-hidden="true" /></>}</button></footer>
     </form>
   </dialog>;
 }

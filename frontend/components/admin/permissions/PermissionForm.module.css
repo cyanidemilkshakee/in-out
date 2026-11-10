@@ -1,4 +1,5 @@
 .dialog {
+  box-sizing: border-box;
   width: min(800px, calc(100vw - 40px));
   max-height: calc(100dvh - 48px);
   margin: auto;
@@ -12,13 +13,13 @@
 }
 
 .dialog::backdrop { background: #07171380; backdrop-filter: blur(5px); }
-.form { display: flex; flex-direction: column; max-height: calc(100dvh - 48px); min-height: 0; }
+.form { display: flex; flex-direction: column; max-height: calc(100dvh - 50px); min-width: 0; min-height: 0; }
 .header { display: flex; align-items: center; gap: 14px; padding: 26px 28px 20px; }
 .header > div { flex: 1; min-width: 0; }
 .headerIcon { display: grid; place-items: center; flex-shrink: 0; width: 48px; height: 48px; border: 1px solid var(--admin-line); border-radius: 15px; background: var(--admin-surface-strong); }
 .header h2 { margin: 0; font-size: 24px; font-weight: var(--weight-bold); letter-spacing: -.045em; line-height: 1.2; }
 .header p { margin: 6px 0 0; color: var(--ui-text-secondary); font-size: 15px; font-weight: var(--weight-medium); line-height: 1.4; }
-.close { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; border: 1px solid transparent; border-radius: 50%; background: transparent; color: var(--ui-text-secondary); cursor: pointer; }
+.close { display: grid; place-items: center; flex-shrink: 0; width: 44px; height: 44px; border: 1px solid transparent; border-radius: 50%; background: transparent; color: var(--ui-text-secondary); cursor: pointer; }
 .close:hover:not(:disabled) { border-color: var(--admin-line); background: var(--admin-surface-strong); color: var(--ui-text-primary); }
 
 .typeSelector { min-width: 0; margin: 0; padding: 0 28px 22px; border: 0; border-bottom: 1px solid var(--admin-line); }
@@ -32,7 +33,7 @@
 .typeChoice:has(input:focus-visible) { outline: 2px solid var(--ui-text-accent); outline-offset: 3px; }
 .typeSelector:disabled .typeChoice { cursor: wait; opacity: .6; }
 
-.body { font-size: 15px; font-weight: var(--weight-medium); display: grid; gap: 19px; min-height: 0; padding: 24px 28px; overflow-y: auto; overscroll-behavior: contain; }
+.body { font-size: 15px; font-weight: var(--weight-medium); display: grid; flex: 1 1 auto; gap: 19px; min-width: 0; min-height: 0; padding: 24px 28px; overflow-y: auto; overscroll-behavior: contain; }
 .body > fieldset { font-size: inherit; }
 .field { display: grid; align-content: start; min-width: 0; gap: 7px; color: var(--ui-text-primary); font-size: 15px; }
 .field > span, .endDateField > label:first-child { font-weight: var(--weight-bold); }
@@ -43,8 +44,37 @@
 .field :is(input, select, textarea)[aria-invalid="true"] { border-color: var(--ui-text-danger); box-shadow: 0 0 0 1px var(--ui-text-danger); }
 .field :is(input, select, textarea):disabled { opacity: .5; cursor: not-allowed; }
 .field select option { background: var(--admin-bg); color: var(--ui-text-primary); }
+.scopeSelection { display: grid; gap: 10px; margin: 0; padding: 14px; border: 1px solid var(--admin-line); border-radius: 12px; background: var(--admin-surface); color: var(--ui-text-primary); }
+.scopeSelection legend { padding: 0 5px; font-weight: var(--weight-bold); }
+.scopeSelection > p { margin: 0; color: var(--ui-text-secondary); line-height: 1.45; }
+.scopeSelection[aria-invalid="true"] { border-color: var(--ui-text-danger); box-shadow: 0 0 0 1px var(--ui-text-danger); }
+.scopeChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.scopeChoice { display: flex; align-items: flex-start; gap: 10px; min-width: 0; padding: 11px 12px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--admin-bg); cursor: pointer; }
+.scopeChoice input { flex: 0 0 auto; width: 17px; height: 17px; margin: 2px 0 0; accent-color: var(--admin-text); }
+.scopeChoice span { display: grid; gap: 3px; min-width: 0; }
+.scopeChoice strong { font-weight: var(--weight-semibold); }
+.scopeChoice small { color: var(--ui-text-secondary); line-height: 1.35; overflow-wrap: anywhere; }
+.scopeChoice:has(input:checked) { border-color: var(--admin-text); background: var(--admin-surface-strong); }
+.scopeSelection:disabled .scopeChoice { cursor: wait; opacity: .6; }
+.scopeSelection:disabled .scopeChoice input { cursor: wait; }
+.scopeChoices > p { grid-column: 1 / -1; margin: 0; color: var(--ui-text-secondary); }
 .dates, .visitorFields, .creationFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
 .creationFieldSpan { grid-column: 1 / -1; }
+.employeeAccessTabs { display: flex; gap: 6px; margin: 2px 0 14px; padding: 4px; border: 1px solid var(--admin-line); border-radius: 12px; background: var(--admin-surface-strong); }
+.employeeAccessTab { flex: 1; min-height: 38px; padding: 8px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--ui-text-secondary); font: inherit; font-size: 14px; font-weight: var(--weight-semibold); cursor: pointer; }
+.employeeAccessTab[data-selected="true"] { border-color: var(--admin-line); background: var(--admin-bg); color: var(--ui-text-primary); box-shadow: 0 1px 2px #07171312; }
+.accessTabHint { margin: 0; color: var(--ui-text-secondary); font-size: 14px; line-height: 1.45; }
+.checkpointChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.checkpointChoices[hidden], .zoneRequestFields[hidden] { display: none; }
+.checkpointChoices > .accessTabHint { grid-column: 1 / -1; }
+.checkpointChoice { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 58px; padding: 9px 11px; border: 1px solid var(--admin-line); border-radius: 11px; background: var(--admin-surface); color: var(--ui-text-primary); cursor: pointer; }
+.checkpointChoice:has(input:checked) { border-color: color-mix(in srgb, var(--admin-text) 38%, var(--admin-line)); background: var(--admin-surface-strong); }
+.checkpointChoice input { width: 17px; height: 17px; flex: 0 0 auto; margin: 0; accent-color: var(--admin-text); }
+.checkpointChoice span { display: grid; gap: 2px; min-width: 0; }
+.checkpointChoice strong { overflow: hidden; font-size: 14px; font-weight: var(--weight-semibold); text-overflow: ellipsis; white-space: nowrap; }
+.checkpointChoice small { overflow: hidden; color: var(--ui-text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.zoneRequestFields { display: grid; gap: 14px; }
+.zoneRequestFields > .accessTabHint { padding: 11px 12px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--admin-surface-strong); }
 .trigger { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 0 19px; border: 1px solid var(--admin-text); border-radius: 11px; background: var(--admin-text); color: var(--admin-bg); font-size: 15px; font-weight: var(--weight-bold); white-space: nowrap; cursor: pointer; transition: opacity 150ms ease; }
 .trigger:hover { opacity: .85; }
 .permanentToggle { display: inline-flex; align-items: center; gap: 8px; width: fit-content; min-height: 24px; margin-top: 2px; color: var(--ui-text-secondary); font-size: 15px; font-weight: var(--weight-semibold); cursor: pointer; }
@@ -79,9 +109,9 @@
 .spinner { animation: spin 1s linear infinite; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 600px) {
+@media (max-width: 767px) {
   .dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 17px; }
-  .form { max-height: calc(100dvh - 24px); }
+  .form { max-height: calc(100dvh - 26px); }
   .header { gap: 10px; padding: 20px 18px 18px; }
   .headerIcon { width: 42px; height: 42px; border-radius: 13px; }
   .header h2 { font-size: 22px; }
@@ -91,9 +121,21 @@
   .typeChoice svg { flex: 0 0 auto; }
   .body { padding: 20px 18px; gap: 17px; }
   .dates, .visitorFields, .creationFields { grid-template-columns: minmax(0, 1fr); }
+  .scopeChoices { grid-template-columns: minmax(0, 1fr); }
+  .field :is(input:not([type="checkbox"]), select, textarea) { font-size: 16px; }
+  .permanentToggle, .revokeAction, .reviewAction { min-height: 44px; }
   .creationFieldSpan { grid-column: 1; }
-  .footer { gap: 8px; padding: 15px 18px; }
+  .footer { flex-wrap: wrap; gap: 8px; padding: 15px 18px; }
+  .cancelButton, .submitButton { min-width: 0; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
   .submitButton { flex: 1; }
+}
+.header :is(h2, p), .typeChoice span, .scopeChoice strong, .scopeSelection legend, .field > span { overflow-wrap: anywhere; }
+.scopeSelection, .scopeChoices, .dates, .visitorFields, .creationFields { min-width: 0; }
+.permanentToggle { max-width: 100%; }
+@media (max-height: 600px) {
+  .form { overflow-y: auto; overscroll-behavior: contain; }
+  .header, .typeSelector { flex-shrink: 0; }
+  .body { flex: 0 0 auto; overflow-y: visible; }
 }
 @media (max-width: 767px) { .trigger { width: 100%; } }
 @media (max-width: 360px) { .headerIcon { display: none; }.typeChoice { gap: 6px; padding: 9px 7px; } }

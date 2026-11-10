@@ -2,6 +2,7 @@
 .dialog::backdrop { background: rgb(9 15 13 / 52%); backdrop-filter: blur(3px); }
 .form { display: grid; gap: 20px; padding: 22px; }
 .header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.header > div { min-width: 0; overflow-wrap: anywhere; }
 .header h2 { margin: 0; font-size: var(--type-20); font-weight: var(--weight-extrabold); letter-spacing: -.6px; }
 .header p { margin: 5px 0 0; color: var(--ui-text-secondary); font-size: var(--type-15); line-height: 1.5; }
 .closeButton { display: grid; flex: 0 0 auto; width: 32px; height: 32px; place-items: center; border: 0; border-radius: var(--radius); background: transparent; color: inherit; cursor: pointer; }
@@ -15,17 +16,23 @@
 .field input:focus, .field textarea:focus, .field select:focus { border-color: var(--admin-text, #152a24); }
 .field input[aria-invalid="true"] { border-color: #d92d20; }
 .error, .fieldError { margin: 0; color: var(--ui-text-danger); font-size: var(--type-15); font-weight: var(--weight-semibold); line-height: 1.5; overflow-wrap: anywhere; }
-.timezone { grid-column: 1 / -1; margin-top: -7px; color: var(--ui-text-secondary); font-size: var(--type-15); }
+.timezone { grid-column: 1 / -1; margin-top: -7px; color: var(--ui-text-secondary); font-size: var(--type-15); overflow-wrap: anywhere; }
 .actions { display: flex; justify-content: flex-end; gap: 9px; padding-top: 4px; }
-.submitButton, .cancelButton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 42px; border: 1px solid var(--admin-line-strong, #d6dfdc); border-radius: var(--radius); padding: 0 15px; background: transparent; color: var(--ui-text-primary); font: inherit; font-size: var(--type-15); font-weight: var(--weight-bold); cursor: pointer; }
+.submitButton, .cancelButton { display: inline-flex; align-items: center; justify-content: center; gap: 8px; max-width: 100%; min-height: 42px; border: 1px solid var(--admin-line-strong, #d6dfdc); border-radius: var(--radius); padding: 8px 15px; background: transparent; color: var(--ui-text-primary); font: inherit; font-size: var(--type-15); font-weight: var(--weight-bold); overflow-wrap: anywhere; cursor: pointer; }
 .submitButton { border-color: var(--admin-text, #152a24); background: var(--admin-text, #152a24); color: var(--ui-text-inverse); }
 .submitButton svg { width: 16px; height: 16px; }
 .dialog button:disabled, .field input:disabled, .field textarea:disabled { opacity: .6; cursor: wait; }
 .dialog button:focus-visible, .field input:focus-visible, .field textarea:focus-visible, .field select:focus-visible, .notice a:focus-visible { outline: 2px solid var(--admin-text, #152a24); outline-offset: 3px; }
-.notice { display: grid; gap: 4px; padding: 12px 14px; border: 1px solid var(--admin-line, #d6dfdc); border-radius: var(--radius); color: var(--ui-text-primary); font-size: var(--type-15); line-height: 1.5; }
+.notice { display: grid; min-width: 0; gap: 4px; padding: 12px 14px; border: 1px solid var(--admin-line, #d6dfdc); border-radius: var(--radius); color: var(--ui-text-primary); font-size: var(--type-15); line-height: 1.5; overflow-wrap: anywhere; }
 .notice span { color: var(--ui-text-secondary); }
 .notice a { justify-self: start; color: inherit; font-weight: var(--weight-bold); text-underline-offset: 3px; }
 .spin { animation: rotate 1s linear infinite; }
 @keyframes rotate { to { transform: rotate(360deg); } }
-@media (max-width: 520px) { .form { gap: 17px; padding: 18px; } .fields { grid-template-columns: minmax(0, 1fr); gap: 12px; } .wide { grid-column: auto; } .actions { flex-wrap: wrap; } }
+@media (max-width: 767px) {
+  .form { gap: 17px; padding: 18px; }
+  .fields { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+  .wide { grid-column: auto; }
+  .field input, .field textarea, .field select { font-size: 16px; }
+  .actions { flex-wrap: wrap; }
+}
 @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }

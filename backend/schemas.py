@@ -46,6 +46,10 @@ class BrowserScanPayload(APIModel):
     queue_captured_at: Optional[datetime] = Field(None, alias="queueCapturedAt")
 
 
+class TerminalHeartbeatPayload(APIModel):
+    checkpoint_id: str = Field(alias="checkpointId", min_length=1, max_length=128)
+
+
 class ManualReviewPayload(APIModel):
     barcode: str = Field(min_length=1, max_length=64, pattern=BARCODE_PATTERN)
     checkpoint_id: str = Field(alias="checkpointId", min_length=1, max_length=128)
@@ -75,10 +79,24 @@ class PresenceEntry(BaseModel):
 
 # ── Phase 3 schemas ────────────────────────────────────────────────────────────
 
+class ZoneAccessRequestCreate(APIModel):
+    zone_id: str = Field(..., min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
+    reason: str = Field(..., min_length=1, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def required_reason(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("A reason is required for a zone access request")
+        return value
+
+
 class SubjectCreate(APIModel):
     barcode: str = Field(..., min_length=1, max_length=64, pattern=BARCODE_PATTERN)
     kind: str = Field(..., pattern="^(employee|visitor|hardware)$")
     data: dict = Field(..., description="JSON metadata for the person or hardware")
+    zone_access_request: Optional[ZoneAccessRequestCreate] = None
 
 
 class SubjectUpdate(APIModel):
@@ -103,6 +121,7 @@ class SubjectListResponse(BaseModel):
 class PermissionRequestCreate(APIModel):
     subject_id: str
     checkpoint_id: str
+    target_zone_id: Optional[str] = Field(None, min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     request_type: str = Field(..., pattern="^(visitor|hardware_custody|manual_override|zone_access)$")
     reason: str = Field(default="", max_length=1000)
     subject_name: Optional[str] = None

@@ -21,7 +21,9 @@ async function zonesRequest(request: NextRequest) {
     if (!hasAdminAccess(session.roles)) return NextResponse.json({ error: "Administrator access is required." }, { status: 403 });
 
     if (request.method === "GET") {
-      return NextResponse.json({ data: await callPythonApi("/v1/zones", "GET") }, {
+      const view = request.nextUrl.searchParams.get("view");
+      const path = view === "access-request-targets" ? "/v1/zones/access-request-targets" : "/v1/zones";
+      return NextResponse.json({ data: await callPythonApi(path, "GET") }, {
         headers: { "Cache-Control": "no-store" },
       });
     }

@@ -3,6 +3,7 @@ import asyncio
 import uuid
 import secrets
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from fastapi import FastAPI, Depends, Header, HTTPException, Request
@@ -20,11 +21,12 @@ from keycloak_http import close_keycloak_admin_client
 from schemas import ScanPayload, ScanResponse
 from terminal_scans import record_scan
 from event_outbox import enqueue_presence
-from terminal_assignments import require_checkpoint
+from terminal_assignments import record_terminal_heartbeat, require_checkpoint
 from redis_client import get_redis_pool, close_redis_pool
 from routers import presence, movements, registry, permissions
 from routers import dashboard, alerts, audit, checkpoints, terminal, admin_profile, keycloak_admin, zones
 from routers import user_management_auth, exports, password_updates
+from routers import invitations
 from temporal_worker import get_temporal_client, close_temporal_client
 
 logger = logging.getLogger(__name__)
@@ -101,6 +103,7 @@ app.include_router(audit.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(checkpoints.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(zones.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(keycloak_admin.router)
+app.include_router(invitations.router)
 app.include_router(terminal.router, dependencies=[Depends(verify_terminal_access_request)])
 app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(exports.router)
@@ -178,6 +181,22 @@ async def process_scan(
             raise database_timeout_error() from None
         logger.error("Unhandled error during scan processing", extra=context)
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@app.post("/v1/terminal/heartbeat/mtls")
+async def process_mtls_terminal_heartbeat(
+    db: AsyncSession = Depends(get_db),
+    terminal_dn: str = Depends(verify_mtls_terminal),
+) -> dict:
+    """Record a live heartbeat from a terminal authenticated by its certificate."""
+    cert_terminal_id = next(
+        (part.split("=", 1)[1] for part in terminal_dn.split(",") if part.strip().startswith("CN=")),
+        terminal_dn,
+    )
+    now = datetime.now(timezone.utc)
+    checkpoint_id = await record_terminal_heartbeat(db, "mtls:" + cert_terminal_id, now=now)
+    await db.commit()
+    return {"checkpointId": checkpoint_id, "lastHeartbeatAt": now.isoformat()}
 
 
 @app.get("/health/live", include_in_schema=False)

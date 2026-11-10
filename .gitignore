@@ -50,3 +50,6 @@ build/
 # Postman collections
 postman/collections/
 /tmp/
+/.local-test-accounts/
+/.codex/
+/.codex-main-import-backup-20261109/

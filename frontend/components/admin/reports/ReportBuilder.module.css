@@ -7,7 +7,7 @@
 .headerIcon { display: grid; flex: 0 0 auto; place-items: center; width: 48px; height: 48px; border: 1px solid var(--admin-line); border-radius: 15px; background: var(--admin-surface-strong); }
 .headerCopy { min-width: 0; flex: 1; }
 .header h2 { margin: 0; font-size: 25px; font-weight: var(--weight-bold); letter-spacing: -.045em; line-height: 1.2; }
-.header p { display: flex; gap: 8px; margin: 6px 0 0; color: var(--ui-text-secondary); font-size: 15px; font-weight: var(--weight-medium); }
+.header p { display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 0; overflow-wrap: anywhere; color: var(--ui-text-secondary); font-size: 15px; font-weight: var(--weight-medium); }
 .close { display: grid; flex: 0 0 auto; place-items: center; width: 44px; height: 44px; padding: 0; border: 1px solid transparent; border-radius: 12px; background: transparent; color: var(--ui-text-secondary); cursor: pointer; }
 .close:hover:not(:disabled) { border-color: var(--admin-line); background: var(--admin-surface-strong); color: var(--ui-text-primary); }
 .body { display: grid; gap: 26px; min-height: 0; padding: 24px 28px 28px; overflow-y: auto; overscroll-behavior: contain; }
@@ -43,11 +43,11 @@
 .readyIcon { display: grid; place-items: center; flex: 0 0 auto; width: 38px; height: 38px; border-radius: 12px; background: color-mix(in srgb, var(--ui-text-positive) 13%, transparent); color: var(--ui-text-positive); }
 .readyCopy { display: grid; gap: 4px; min-width: 0; }
 .readyCopy strong { font-size: 16px; font-weight: var(--weight-bold); }
-.readyCopy span { font-size: 14px; color: var(--ui-text-secondary); line-height: 1.4; }
+.readyCopy span { overflow-wrap: anywhere; font-size: 14px; color: var(--ui-text-secondary); line-height: 1.4; }
 .readyCount { display: grid; justify-items: end; flex: 0 0 auto; margin-left: auto; color: var(--ui-text-positive); font-variant-numeric: tabular-nums; }
 .readyCount strong { font-size: 28px; font-weight: var(--weight-bold); line-height: 1.1; letter-spacing: -.04em; }
 .readyCount small { margin-top: 3px; color: var(--ui-text-secondary); font-size: 12px; }
-.footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; gap: 10px; padding: 18px 28px; border-top: 1px solid var(--admin-line); background: var(--admin-bg); }
+.footer { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding: 18px 28px; border-top: 1px solid var(--admin-line); background: var(--admin-bg); }
 .cancel, .primary { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 10px 17px; border: 1px solid var(--admin-line); border-radius: 10px; font: inherit; font-size: 15px; font-weight: var(--weight-bold); line-height: 1.3; cursor: pointer; }
 .cancel { background: transparent; color: var(--ui-text-primary); }
 .cancel:hover:not(:disabled) { background: var(--admin-surface-strong); border-color: var(--ui-border-hover); }
@@ -55,7 +55,10 @@
 .primary:hover:not(:disabled) { background: color-mix(in srgb, var(--admin-text) 87%, var(--admin-bg)); }
 .spinner { animation: spin 900ms linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
-@media (max-width: 600px) {
+@media (max-width: 1199px) {
+  .filterGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 767px) {
   .dialog { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); border-radius: 17px; }
   .form { max-height: calc(100dvh - 24px); }
   .header { gap: 10px; padding: 20px 18px; }
@@ -63,15 +66,15 @@
   .header h2 { font-size: 22px; }
   .header p { font-size: 14px; }
   .body { padding: 20px 18px; gap: 22px; }
-  .filterGrid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 12px; }
+  .filterGrid, .filterGrid:has(> :nth-child(2):last-child), .datePicker :global(.calendar-date-fields) { grid-template-columns: minmax(0, 1fr); gap: 16px 12px; }
   .quickRanges { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-  .quickRanges button { flex: 1 0 auto; min-height: 40px; padding-inline: 10px; }
+  .quickRanges button { flex: 1 0 auto; min-height: 44px; padding-inline: 10px; }
+  .filterField select, .datePicker :global(.calendar-date-fields input) { font-size: 16px; }
   .footer { padding: 15px 18px; }
   .primary { flex: 1; }
-  .ready { padding: 13px; gap: 10px; }
+  .ready { flex-wrap: wrap; padding: 13px; gap: 10px; }
 }
 @media (max-width: 380px) {
   .headerIcon { display: none; }
-  .filterGrid, .filterGrid:has(> :nth-child(2):last-child), .datePicker :global(.calendar-date-fields) { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .spinner { animation: none; } }

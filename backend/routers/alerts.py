@@ -176,12 +176,19 @@ async def list_alerts(
     if view == "command" or reviewState == "needs_review":
         # Acknowledgement does not create a final review. Keep those unreviewed
         # records actionable while excluding every immutable ledger decision.
-        unreviewed = AlertReview.alert_id.is_(None) & or_(
-            records.c.data["status"].astext.in_(("open", "acknowledged")),
+        # High scan volume is an operational event; acknowledging it completes
+        # that action without creating a person warning or an AlertReview row.
+        acknowledged_scan_burst = and_(records.c.data["conditionKey"].astext.is_not_distinct_from("scan_burst"),
+            records.c.data["status"].astext.is_not_distinct_from("acknowledged"))
+        actionable_status = or_(records.c.data["status"].astext.in_(("open", "acknowledged")),
             records.c.data["status"].astext.is_(None))
+        unreviewed = AlertReview.alert_id.is_(None) & actionable_status & ~acknowledged_scan_burst
         alerts_q, count_q = alerts_q.where(unreviewed), count_q.where(unreviewed)
     elif reviewState == "reviewed":
-        reviewed = or_(AlertReview.alert_id.is_not(None), records.c.data["status"].astext.in_(("warned", "resolved")))
+        acknowledged_scan_burst = and_(records.c.data["conditionKey"].astext.is_not_distinct_from("scan_burst"),
+            records.c.data["status"].astext.is_not_distinct_from("acknowledged"))
+        reviewed = or_(AlertReview.alert_id.is_not(None), records.c.data["status"].astext.in_(("warned", "resolved")),
+            acknowledged_scan_burst)
         alerts_q, count_q = alerts_q.where(reviewed), count_q.where(reviewed)
 
     if subjectId:

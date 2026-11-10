@@ -1,5 +1,6 @@
 """Critical holds use actual PostgreSQL transactions and routed scan/release calls."""
 import asyncio
+import copy
 import os
 import sys
 import uuid
@@ -194,13 +195,15 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
         body = {"barcode": "p1", "checkpointId": "cp-main", "selectedHardwareIds": ["h1"]}
         admitted = await self.scan(body, key=key)
         self.assertTrue(admitted.json()["allowed"], admitted.text)
+        async with self.sessions() as db:
+            original_receipt = copy.deepcopy((await db.get(ScanRequest, key)).response_body)
         await self.trigger(subject_id="h1")
         replay = await self.scan(body, key=key)
         self.assertEqual(replay.status_code, 403, replay.text)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 1)
             self.assertEqual(await db.scalar(select(func.count()).select_from(ScanRequest)), 1)
-            self.assertEqual((await db.get(ScanRequest, key)).response_body, admitted.json())
+            self.assertEqual((await db.get(ScanRequest, key)).response_body, original_receipt)
             self.assertEqual((await db.get(PresenceState, "p1")).state, "inside")
         exit_key = uuid.uuid4()
         exit_body = body

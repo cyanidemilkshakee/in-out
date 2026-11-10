@@ -195,11 +195,19 @@
 }
 
 :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) {
-  justify-self: stretch;
-  width: 100%;
-  gap: 10px;
+  display: flex;
+  justify-self: start;
+  align-items: center;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  gap: 8px;
 }
 :global(.role-admin) .stack :global(.alert-activity-actions) button{
+  width: auto;
+  min-width: 112px;
+  max-width: 100%;
+  flex: 0 1 auto;
   min-height: 44px;
   padding: 10px 14px;
   font-size: 15px;
@@ -249,14 +257,36 @@
 }
 
 @container open-alerts (max-width: 420px) {
+  :global(.role-admin) .stack :global(.alert-activity-list) article {
+    grid-template-columns: 12px minmax(0, 1fr);
+    grid-template-areas:
+      "dot time"
+      "dot warning"
+      "dot copy"
+      "dot controls";
+  }
+
+  :global(.role-admin) .stack :global(.alert-activity-marker) {
+    justify-content: flex-start;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
   :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    display: flex;
+    justify-self: start;
+    align-items: center;
+    flex-wrap: wrap;
+    width: fit-content;
+    max-width: 100%;
   }
 
   :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) button {
     width: 100%;
     min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -268,7 +298,6 @@
 
 @media (max-width: 767px) {
   :global(.role-admin) :global(.admin-page-frame):has(.stack) {
-    min-height: 100%;
     gap: 22px;
     padding-top: 20px;
     padding-bottom: calc(64px + var(--mobile-admin-nav-height));
@@ -302,15 +331,36 @@
   }
 
   :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) {
-    align-items: stretch;
+    justify-self: start;
+    align-items: center;
+    width: fit-content;
+    max-width: 100%;
+  }
+
+  :global(.role-admin) .stack :global(.alert-review-controls) input {
+    font-size: 16px;
   }
 
   :global(.role-admin) .stack :global(.alert-review-controls) :global(.alert-activity-actions) button {
-    width: 100%;
-    flex-basis: auto;
+    width: auto;
+    min-width: min(112px, 100%);
+    flex: 0 1 auto;
   }
 
   :global(.role-admin) :global(.admin-page-frame):has(.stack) :global(.admin-hero-copy) h1 {
     font-size: 30px;
   }
+}
+
+:global(.role-admin) .stack :is(:global(.permission-section-heading), :global(.alert-page-error)) {
+  flex-wrap: wrap;
+}
+
+:global(.role-admin) .stack :is(:global(.alert-rule-card), :global(.alert-rule-card) header) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+:global(.role-admin) .stack :global(.alert-rule-card) header {
+  flex-wrap: wrap;
 }

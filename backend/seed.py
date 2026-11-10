@@ -14,38 +14,38 @@ DATABASE_URL = os.getenv(
     "DATABASE_URL", "postgresql+asyncpg://inout:inout@localhost:1020/inout"
 )
 
+async def seed_reference_rows(conn) -> None:
+    """Insert the base two zones, their required gates, and default alert rules."""
+    await conn.execute(text("""
+        INSERT INTO organization_zones (id, name) VALUES ('a', 'A'), ('b', 'B')
+        ON CONFLICT (id) DO NOTHING
+    """))
+    for checkpoint in CHECKPOINTS:
+        await conn.execute(text("""
+            INSERT INTO checkpoints (id, data, zone_id, number, gate_type, required, active)
+            VALUES (:id, CAST(:data AS jsonb), :zone_id, :number, :gate_type, :required, true)
+            ON CONFLICT DO NOTHING
+        """), {"id": checkpoint["id"], "data": json.dumps({**checkpoint, "online": True}),
+            "zone_id": checkpoint["zone"], "number": checkpoint["number"],
+            "gate_type": checkpoint["gateType"], "required": checkpoint["required"]})
+    await conn.execute(text("""
+        INSERT INTO alert_rules (id, data)
+        SELECT :id, CAST(:data AS jsonb)
+        WHERE NOT :automatic OR NOT EXISTS (
+            SELECT 1 FROM alert_rules WHERE data->>'conditionKey' = :condition
+        )
+        ON CONFLICT (id) DO NOTHING
+    """), [{"id": rule["id"], "data": json.dumps(rule), "condition": rule["conditionKey"],
+            "automatic": rule["conditionKey"] in {"cross_building_scan", "visitor_overstay", "scan_burst",
+                "checkpoint_denial_rate", "checkpoint_offline"}}
+           for rule in default_alert_rules()])
+
 
 async def seed_reference_data(engine) -> None:
     """Production-safe reference data required for the app to operate."""
     print("→ Seeding reference data...")
     async with engine.begin() as conn:
-        await conn.execute(text("""
-            INSERT INTO organization_zones (id, name) VALUES ('a', 'A'), ('b', 'B')
-            ON CONFLICT (id) DO NOTHING
-        """))
-        for checkpoint in CHECKPOINTS:
-            await conn.execute(text("""
-                INSERT INTO checkpoints (id, data, zone_id, number, gate_type, required, active)
-                VALUES (:id, CAST(:data AS jsonb), :zone_id, :number, :gate_type, :required, true)
-                ON CONFLICT DO NOTHING
-            """), {"id": checkpoint["id"], "data": json.dumps({**checkpoint, "online": True}),
-                "zone_id": checkpoint["zone"], "number": checkpoint["number"],
-                "gate_type": checkpoint["gateType"], "required": checkpoint["required"]})
-        await conn.execute(
-            text(
-                """
-                INSERT INTO alert_rules (id, data)
-                SELECT :id, CAST(:data AS jsonb)
-                WHERE NOT :automatic OR NOT EXISTS (
-                    SELECT 1 FROM alert_rules WHERE data->>'conditionKey' = :condition
-                )
-                ON CONFLICT (id) DO NOTHING
-                """
-            ),
-            [{"id": rule["id"], "data": json.dumps(rule), "condition": rule["conditionKey"],
-              "automatic": rule["conditionKey"] in {"cross_building_scan", "visitor_overstay"}}
-             for rule in default_alert_rules()],
-        )
+        await seed_reference_rows(conn)
 
 
 async def seed_demo_data(engine) -> None:
@@ -67,6 +67,9 @@ async def _seed_registered_subject(
     barcode: str,
     data: dict,
     permission_id: str,
+    permission_state: str = "active",
+    permission_checkpoints: list[str] | None = None,
+    known_zones: tuple[str, ...] | None = None,
 ) -> str:
     """Insert one registry subject and its supporting rows without duplicates."""
     existing = (
@@ -98,12 +101,27 @@ async def _seed_registered_subject(
         actual_barcode = barcode
 
     subject_data = {
-        **current_subject_metadata(kind, normalize_facility_document(data, strict_zones=True)),
+        **current_subject_metadata(kind, normalize_facility_document(data, strict_zones=True,
+            known_zones=known_zones)),
         "id": actual_id,
         "barcode": actual_barcode,
         "type": kind,
     }
     metadata_table = "people" if kind in {"employee", "visitor"} else "hardware_assets"
+    permission_data = {
+        "id": permission_id,
+        "subjectId": actual_id,
+        "subjectName": subject_data.get("name") or actual_barcode,
+        "subjectType": kind,
+        "assignment": "Temporary visitor" if kind == "visitor" else kind.title(),
+        "state": permission_state,
+        "zones": normalize_zones(subject_data.get("allowedZones") or [], known_zones=known_zones),
+        "validFrom": subject_data.get("validFrom") or "",
+        "validTo": subject_data.get("validTo") or "",
+        "source": "seed",
+    }
+    if permission_checkpoints is not None:
+        permission_data["checkpoints"] = permission_checkpoints
     await conn.execute(
         text(
             f"INSERT INTO {metadata_table} (subject_id, data) "
@@ -131,20 +149,7 @@ async def _seed_registered_subject(
         {
             "id": permission_id,
             "subject_id": actual_id,
-            "data": json.dumps(
-                {
-                    "id": permission_id,
-                    "subjectId": actual_id,
-                    "subjectName": subject_data.get("name") or actual_barcode,
-                    "subjectType": kind,
-                    "assignment": kind.title(),
-                    "state": "active",
-                    "zones": normalize_zones(subject_data.get("allowedZones") or []),
-                    "validFrom": subject_data.get("validFrom") or "",
-                    "validTo": subject_data.get("validTo") or "",
-                    "source": "seed",
-                }
-            ),
+            "data": json.dumps(permission_data),
         },
     )
     return actual_id

@@ -1,4 +1,5 @@
 .card {
+  container: manual-review / inline-size;
   --review-surface: color-mix(in srgb, var(--admin-bg, #edf2f0) 56%, #fff);
   display: grid;
   min-width: 0;
@@ -42,6 +43,7 @@
 
 .heading {
   display: grid;
+  flex: 1 1 auto;
   min-width: 0;
   gap: 5px;
   padding-top: 1px;
@@ -49,6 +51,7 @@
 
 .titleRow {
   display: flex;
+  flex-wrap: wrap;
   min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
@@ -106,7 +109,7 @@
 
 .checkpoint {
   display: inline-flex;
-  flex: 0 0 auto;
+  flex: 0 1 auto;
   align-items: center;
   gap: 5px;
   max-width: 100%;
@@ -189,6 +192,7 @@
 
 .duration {
   display: grid;
+  min-width: 0;
   gap: 6px;
   color: var(--ui-text-secondary, #6d7a77);
   font-size: 12px;
@@ -197,7 +201,8 @@
 
 .duration select {
   box-sizing: border-box;
-  min-width: 140px;
+  width: 100%;
+  min-width: min(140px, 100%);
   max-width: 100%;
   height: 44px;
   padding: 0 10px;
@@ -292,7 +297,7 @@
   box-shadow: none;
 }
 
-@media (max-width: 600px) {
+@media (max-width: 767px) {
   .card {
     gap: 14px;
     padding: 16px;
@@ -302,6 +307,8 @@
   .title {
     font-size: 21px;
   }
+
+  .note input, .duration select { font-size: 16px; }
 
   .controls {
     gap: 14px;
@@ -317,8 +324,13 @@
 
   .actions button {
     flex: 1;
-    min-height: 44px;
   }
+}
+
+@container manual-review (max-width: 420px) {
+  .controls { gap: 14px; }
+  .duration, .actions { width: 100%; }
+  .actions button { flex: 1 1 0; min-width: 0; padding-inline: 10px; white-space: normal; overflow-wrap: anywhere; }
 }
 
 @media (prefers-reduced-motion: reduce) {

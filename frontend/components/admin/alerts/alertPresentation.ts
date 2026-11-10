@@ -1,8 +1,41 @@
 import type { Alert } from "../../../../lib/types";
 
-export type AlertReviewFilter = "needs_review" | "confirmed" | "excused" | "all";
+export type AlertReviewFilter = "needs_review" | "confirmed" | "excused" | "acknowledged" | "all";
+export type AlertGroup = { key: string; alerts: Alert[] };
+
+export function groupAlertsBySubjectAndType(alerts: readonly Alert[]): AlertGroup[] {
+  const groups = new Map<string, AlertGroup>();
+  for (const alert of alerts) {
+    const subject = alert.subjectId
+      ? `id:${alert.subjectId}`
+      : alert.barcode
+        ? `barcode:${alert.barcode.toLocaleLowerCase()}`
+        : `checkpoint:${(alert.checkpoint || alert.subjectName || "unknown").toLocaleLowerCase()}`;
+    const type = alert.conditionKey || alert.title.trim().toLocaleLowerCase() || alert.ruleId || "unknown";
+    const key = JSON.stringify([subject, type]);
+    const group = groups.get(key);
+    if (group) group.alerts.push(alert);
+    else groups.set(key, { key, alerts: [alert] });
+  }
+  return [...groups.values()];
+}
+
+export function alertGroupDateRange(alerts: readonly Alert[]): string {
+  if (!alerts.length) return "";
+  const oldest = alerts.reduce((a, b) => alertTimestamp(a) <= alertTimestamp(b) ? a : b);
+  const newest = alerts.reduce((a, b) => alertTimestamp(a) >= alertTimestamp(b) ? a : b);
+  const format = (alert: Alert) => `${alert.date} · ${alert.time}`;
+  return oldest.id === newest.id ? format(oldest) : `${format(oldest)} – ${format(newest)}`;
+}
+
+export function getAlertWarningLevel(severity: Alert["severity"]): 1 | 2 | 3 {
+  if (severity === "critical") return 3;
+  if (severity === "high") return 2;
+  return 1;
+}
 
 export function getAlertReviewState(alert: Alert): Exclude<AlertReviewFilter, "all"> {
+  if (alert.ruleId === "rule-scan-burst" && alert.status === "acknowledged") return "acknowledged";
   if (alert.review) return alert.review.decision;
   if (alert.status === "warned") return "confirmed";
   if (alert.status === "resolved") return "excused";
@@ -40,21 +73,4 @@ export function formatAlertExplanation(alert: Pick<Alert, "explanation" | "reaso
     return `${lead} on ${date} at ${time} IST`;
   });
   return readableExplanation.replace("6:00 PM IST attendance cutoff", "6:00 PM attendance cutoff");
-}
-
-export function getAlertWarningLevel(severity: Alert["severity"]): 1 | 2 | 3 {
-  switch (severity) {
-    case "critical":
-      return 3;
-    case "high":
-      return 2;
-    default:
-      return 1;
-  }
-}
-
-export function getOpenAlertWarningNumber(alert: Alert): number {
-  const warningCount = alert.warningCount ?? 0;
-  const confirmedCount = Number.isSafeInteger(warningCount) && warningCount > 0 ? warningCount : 0;
-  return confirmedCount + 1;
 }

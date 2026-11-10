@@ -101,6 +101,16 @@ async def require_subject_scope(db, actor: dict, subject_id: str) -> Subject:
     from fastapi import HTTPException
     from sqlalchemy.orm import selectinload
 
+    if has_master_admin_role(actor):
+        subject = await db.scalar(
+            select(Subject)
+            .where(Subject.id == subject_id)
+            .options(selectinload(Subject.person), selectinload(Subject.hardware))
+        )
+        if subject is None:
+            raise HTTPException(status_code=404, detail="Subject not found")
+        return subject
+
     zones = await admin_zone_ids(db, actor)
     subject = await db.scalar(
         select(Subject)

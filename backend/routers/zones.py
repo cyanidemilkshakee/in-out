@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,6 +107,31 @@ async def list_zones(
         })
     return [{"id": zone.id, "name": zone.name, "active": zone.active,
         "checkpoints": by_zone[zone.id]} for zone in zones]
+
+
+@router.get("/access-request-targets")
+async def list_zone_access_request_targets(
+    db: AsyncSession = Depends(get_db),
+    actor: dict[str, Any] = Depends(verify_admin_request),
+) -> list[dict[str, str]]:
+    """Expose only branches with an assigned zone admin as request targets."""
+    actor_zones = await admin_zone_ids(db, actor)
+    if not has_master_admin_role(actor) and not actor_zones:
+        return []
+    assigned_admin = exists(select(ZoneAdminAssignment.admin_subject).where(
+        ZoneAdminAssignment.zone_id == OrganizationZone.id))
+    query = (select(OrganizationZone, Checkpoint)
+        .join(Checkpoint, Checkpoint.zone_id == OrganizationZone.id)
+        .where(OrganizationZone.active.is_(True), Checkpoint.active.is_(True),
+            Checkpoint.required.is_(True), assigned_admin)
+        .order_by(OrganizationZone.name, Checkpoint.number))
+    if not has_master_admin_role(actor):
+        query = query.where(OrganizationZone.id.not_in(actor_zones))
+    rows = (await db.execute(query)).all()
+    targets: dict[str, dict[str, str]] = {}
+    for zone, checkpoint in rows:
+        targets.setdefault(zone.id, {"id": zone.id, "name": zone.name})
+    return list(targets.values())
 
 
 @router.post("", status_code=201)

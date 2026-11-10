@@ -12,13 +12,12 @@ export type AlertSubjectOption = {
   status?: Person["status"];
 };
 
-export function AlertSubjectPicker({ subjects, selectedId, onSelect, search, onSearch, total, isSearching = false, disabled = false }: {
+export function AlertSubjectPicker({ subjects, selectedId, onSelect, search, onSearch, isSearching = false, disabled = false }: {
   subjects: AlertSubjectOption[];
   selectedId: string;
   onSelect: (id: string) => void;
   search?: string;
   onSearch?: (value: string) => void;
-  total?: number;
   isSearching?: boolean;
   disabled?: boolean;
 }) {
@@ -30,6 +29,6 @@ export function AlertSubjectPicker({ subjects, selectedId, onSelect, search, onS
       <option value="">Select a person</option>
       {subjects.map((subject) => <option key={subject.subjectId} value={subject.subjectId}>{subject.subjectName}{subject.subjectType === "visitor" ? " · Visitor" : ""} · {subject.barcode}{subject.status ? ` · ${subject.status === "active" ? "Active" : "Inactive"}` : ""}</option>)}
     </select>
-    {onSearch && <small role="status">{isSearching ? "Searching…" : total !== undefined && total > 25 ? `Showing up to 25 of ${total} people. Refine your search.` : ""}</small>}
+    {onSearch && isSearching && <small role="status">Searching…</small>}
   </div>;
 }

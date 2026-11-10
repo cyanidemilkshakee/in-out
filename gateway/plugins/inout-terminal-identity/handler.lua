@@ -186,7 +186,10 @@ function Handler:access()
   end
 
   local path = kong.request.get_path()
-  if path ~= "/v1/scans" and path ~= "/v1/scans/" then return end
+  local method = kong.request.get_method()
+  if method ~= "POST" or
+     (path ~= "/v1/scans" and path ~= "/v1/scans/" and
+      path ~= "/v1/terminal/heartbeat/mtls") then return end
   if ngx.var.server_port ~= "1016" or ngx.var.ssl_client_verify ~= "SUCCESS" then
     return kong.response.exit(401, { message = "A verified terminal client certificate is required" })
   end

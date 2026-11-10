@@ -6,7 +6,7 @@ import uuid
 import logging
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from access_validation import require_registered_checkpoint
@@ -38,12 +38,27 @@ async def assigned_checkpoint(db, identity):
 
 
 async def require_checkpoint(db, identity, requested):
-    checkpoint_id = await assigned_checkpoint(db, identity)
-    if not checkpoint_id:
-        raise HTTPException(403, "No checkpoint assigned. Ask an administrator to assign a checkpoint before scanning.")
     requested_checkpoint_id = await require_registered_checkpoint(db, requested)
-    if requested_checkpoint_id != checkpoint_id:
-        raise HTTPException(403, "Checkpoint does not match this account or terminal's assigned checkpoint")
+    return await record_terminal_heartbeat(db, identity, expected_checkpoint_id=requested_checkpoint_id)
+
+
+async def record_terminal_heartbeat(db, identity, *, now=None, expected_checkpoint_id=None):
+    """Record an authenticated terminal heartbeat against its current assignment."""
+    now = now or datetime.now(timezone.utc)
+    statement = update(TerminalCheckpointAssignment).where(
+        TerminalCheckpointAssignment.terminal_identity == identity)
+    if expected_checkpoint_id is not None:
+        statement = statement.where(TerminalCheckpointAssignment.checkpoint_id == expected_checkpoint_id)
+    result = await db.execute(statement
+        .values(last_heartbeat_at=now, updated_at=TerminalCheckpointAssignment.updated_at)
+        .returning(TerminalCheckpointAssignment.checkpoint_id))
+    checkpoint_id = result.scalar_one_or_none()
+    if checkpoint_id is None:
+        assigned = await db.scalar(select(TerminalCheckpointAssignment.checkpoint_id)
+            .where(TerminalCheckpointAssignment.terminal_identity == identity))
+        if assigned is not None and expected_checkpoint_id is not None:
+            raise HTTPException(403, "Checkpoint does not match this account or terminal's assigned checkpoint")
+        raise HTTPException(403, "No checkpoint assigned. Ask an administrator to assign a checkpoint before starting the terminal.")
     return checkpoint_id
 
 
@@ -55,7 +70,8 @@ async def set_checkpoint_assignment(db, identity, checkpoint_id, actor):
         await db.execute(insert(TerminalCheckpointAssignment).values(
             terminal_identity=identity, checkpoint_id=checkpoint_id).on_conflict_do_update(
                 index_elements=["terminal_identity"],
-                set_={"checkpoint_id": checkpoint_id, "updated_at": datetime.now(timezone.utc)}))
+                set_={"checkpoint_id": checkpoint_id, "last_heartbeat_at": None,
+                    "updated_at": datetime.now(timezone.utc)}))
     else:
         assignment = await db.get(TerminalCheckpointAssignment, identity, with_for_update=True)
         if assignment:

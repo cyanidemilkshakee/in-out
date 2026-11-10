@@ -1,15 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { Package, UserRound, UsersRound } from "lucide-react";
-import type { Checkpoint, CreateEmployeeInput, CreateHardwareAssetInput, CreateVisitorInput, Person } from "../../../../lib/types";
-import { facilityZoneLabel } from "../../../../lib/facilityZones";
+import type { Checkpoint, CreateEmployeeInput, CreateHardwareAssetInput, CreateVisitorInput, Person, ZoneAccessRequestTarget } from "../../../../lib/types";
+import { checkpointDisplayName, facilityZoneLabel } from "../../../../lib/facilityZones";
 import { accessWindowBounds, parseFacilityDateTime } from "../../../../lib/dateTimeValidation";
 import { facilityDateInput } from "../permissions/requestPresentation";
-import { FacilityZoneSelection } from "../permissions/FacilityZoneSelection";
 import { CreationDialog } from "./CreationDialog";
 import { RegistryEmployeePicker } from "./RegistryEmployeePicker";
 import { useOrganizationZones } from "../../../hooks/useOrganizationZones";
+import { listZoneAccessRequestTargets } from "../../../../services/zoneService";
 import styles from "../permissions/PermissionForm.module.css";
 
 export type RegistryCreateKind = "employee" | "visitor" | "hardware";
@@ -19,6 +19,7 @@ const initialEmployee: CreateEmployeeInput = {
   barcode: "",
   status: "active",
   allowedZones: [],
+  allowedCheckpoints: [],
 };
 
 const initialHardware: CreateHardwareAssetInput = {
@@ -85,12 +86,43 @@ export function RegistryCreateDialog({
   const { zones, loaded: zonesLoaded } = useOrganizationZones();
   const [error, setError] = useState("");
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [employeeTab, setEmployeeTab] = useState<"checkpoints" | "request-zone">("checkpoints");
+  const [checkpointsTouched, setCheckpointsTouched] = useState(false);
+  const [requestTargets, setRequestTargets] = useState<ZoneAccessRequestTarget[]>([]);
+  const [targetsLoading, setTargetsLoading] = useState(false);
+  const [targetsLoaded, setTargetsLoaded] = useState(false);
+  const [targetZoneId, setTargetZoneId] = useState("");
+  const [zoneRequestReason, setZoneRequestReason] = useState("");
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    const activeCheckpointIds = checkpoints.filter((checkpoint) => checkpoint.active !== false).map((checkpoint) => checkpoint.id);
+    setEmployeeForm((current) => ({
+      ...current,
+      allowedCheckpoints: checkpointsTouched
+        ? (current.allowedCheckpoints ?? []).filter((id) => activeCheckpointIds.includes(id))
+        : activeCheckpointIds,
+    }));
+  }, [checkpoints, checkpointsTouched, dialogOpen]);
+
+  useEffect(() => {
+    if (!dialogOpen || kind !== "employee" || employeeTab !== "request-zone" || targetsLoaded) return;
+    const controller = new AbortController();
+    setTargetsLoading(true);
+    void listZoneAccessRequestTargets(controller.signal).then((targets) => {
+      setRequestTargets(targets);
+      setTargetZoneId((current) => targets.some((target) => target.id === current) ? current : "");
+      setTargetsLoaded(true);
+    }).catch((cause) => {
+      if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : "Unable to load zones for access requests.");
+    }).finally(() => {
+      if (!controller.signal.aborted) setTargetsLoading(false);
+    });
+    return () => controller.abort();
+  }, [dialogOpen, employeeTab, kind, targetsLoaded]);
 
   useEffect(() => {
     if (!dialogOpen || !zonesLoaded || !zones.length) return;
-    setEmployeeForm((current) => current.allowedZones?.length
-      ? current
-      : { ...current, allowedZones: zones.map((zone) => zone.id) });
     setHardwareForm((current) => current.allowedZone
       ? current
       : { ...current, allowedZone: zones[0].id });
@@ -101,18 +133,59 @@ export function RegistryCreateDialog({
 
   const title = kind === "employee" ? "Create Employee" : kind === "visitor" ? "Create Visitor" : "Create Hardware";
   const submitLabel = title;
+  const activeEmployeeCheckpoints = checkpoints.filter((checkpoint) => checkpoint.active !== false);
+  const selectedEmployeeZoneIds = new Set(activeEmployeeCheckpoints
+    .filter((checkpoint) => (employeeForm.allowedCheckpoints ?? []).includes(checkpoint.id))
+    .map((checkpoint) => checkpoint.zoneId ?? checkpoint.zone));
+  const availableRequestTargets = requestTargets.filter((target) => !selectedEmployeeZoneIds.has(target.id));
+
+  useEffect(() => {
+    if (targetZoneId && !availableRequestTargets.some((target) => target.id === targetZoneId)) setTargetZoneId("");
+  }, [availableRequestTargets, targetZoneId]);
 
   function open() {
     setKind(initialKind);
-    setEmployeeForm({ ...initialEmployee, allowedZones: zones.map((zone) => zone.id) });
+    setEmployeeForm({ ...initialEmployee, allowedCheckpoints: checkpoints.filter((item) => item.active !== false).map((item) => item.id) });
     setVisitorForm(visitorDefaults(checkpoints, zones[0]?.id));
     setHardwareForm({ ...initialHardware, allowedZone: zones[0]?.id ?? "" });
+    setEmployeeTab("checkpoints");
+    setCheckpointsTouched(false);
+    setRequestTargets([]);
+    setTargetsLoaded(false);
+    setTargetsLoading(false);
+    setTargetZoneId("");
+    setZoneRequestReason("");
     setError("");
   }
 
   async function submit() {
     try {
-      if (kind === "employee") await onCreateEmployee(employeeForm);
+      if (kind === "employee") {
+        const selectedCheckpoints = (employeeForm.allowedCheckpoints ?? []).filter((id) => activeEmployeeCheckpoints.some((checkpoint) => checkpoint.id === id));
+        if (!selectedCheckpoints.length) {
+          setError("Choose at least one allowed checkpoint.");
+          return false;
+        }
+        const allowedZones = [...new Set(activeEmployeeCheckpoints.filter((checkpoint) => selectedCheckpoints.includes(checkpoint.id)).map((checkpoint) => checkpoint.zoneId ?? checkpoint.zone))];
+        const input: CreateEmployeeInput = { ...employeeForm, allowedCheckpoints: selectedCheckpoints, allowedZones };
+        if (employeeTab === "request-zone") {
+          const reason = zoneRequestReason.trim();
+          if (employeeForm.status !== "active") {
+            setError("Set the employee to active before requesting access to another zone.");
+            return false;
+          }
+          if (!targetZoneId || !availableRequestTargets.some((target) => target.id === targetZoneId)) {
+            setError("Choose a zone with an assigned zone admin.");
+            return false;
+          }
+          if (!reason) {
+            setError("Enter a reason for requesting access to another zone.");
+            return false;
+          }
+          input.zoneAccessRequest = { zoneId: targetZoneId, reason };
+        }
+        await onCreateEmployee(input);
+      }
       else if (kind === "visitor") await onCreateVisitor(visitorForm);
       else await onCreateHardware(hardwareForm);
       return true;
@@ -126,6 +199,16 @@ export function RegistryCreateDialog({
     setKind(next);
     setError("");
     if (next === "visitor" && !visitorForm.checkpointId) setVisitorForm(visitorDefaults(checkpoints, zones[0]?.id));
+  }
+
+  function handleEmployeeTabsKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
+    event.preventDefault();
+    const nextTab = event.key === "Home" ? "checkpoints"
+      : event.key === "End" ? "request-zone"
+      : employeeTab === "checkpoints" ? "request-zone" : "checkpoints";
+    setEmployeeTab(nextTab);
+    document.getElementById(nextTab === "checkpoints" ? "employee-checkpoints-tab" : "employee-zone-request-tab")?.focus();
   }
 
   return (
@@ -160,7 +243,40 @@ export function RegistryCreateDialog({
         <label className={styles.field}><span>Name</span><input value={employeeForm.name} onChange={(event) => { setEmployeeForm((current) => ({ ...current, name: event.target.value })); setError(""); }} placeholder="Employee name" required autoFocus /></label>
         <label className={styles.field}><span>Barcode</span><input value={employeeForm.barcode} onChange={(event) => { setEmployeeForm((current) => ({ ...current, barcode: event.target.value })); setError(""); }} placeholder="Employee barcode" required /></label>
         <label className={styles.field}><span>Status</span><select value={employeeForm.status} onChange={(event) => setEmployeeForm((current) => ({ ...current, status: event.target.value as CreateEmployeeInput["status"] }))}><option value="active">Active</option><option value="inactive">Inactive</option></select></label>
-        <div className={styles.creationFieldSpan}><FacilityZoneSelection label="Allowed zones" value={employeeForm.allowedZones ?? []} onChange={(allowedZones) => setEmployeeForm((current) => ({ ...current, allowedZones }))} zones={zones} disabled={!zonesLoaded || !zones.length} /></div>
+        <div className={styles.creationFieldSpan}>
+          <div className={styles.employeeAccessTabs} role="tablist" aria-label="Employee access options" onKeyDown={handleEmployeeTabsKeyDown}>
+            <button id="employee-checkpoints-tab" type="button" role="tab" tabIndex={employeeTab === "checkpoints" ? 0 : -1} aria-selected={employeeTab === "checkpoints"} aria-controls="employee-checkpoints-panel" className={styles.employeeAccessTab} data-selected={employeeTab === "checkpoints"} onClick={() => { setEmployeeTab("checkpoints"); setError(""); }}>Allowed checkpoints</button>
+            <button id="employee-zone-request-tab" type="button" role="tab" tabIndex={employeeTab === "request-zone" ? 0 : -1} aria-selected={employeeTab === "request-zone"} aria-controls="employee-zone-request-panel" className={styles.employeeAccessTab} data-selected={employeeTab === "request-zone"} onClick={() => { setEmployeeTab("request-zone"); setError(""); }}>Request zone access</button>
+          </div>
+          <section id="employee-checkpoints-panel" role="tabpanel" aria-labelledby="employee-checkpoints-tab" hidden={employeeTab !== "checkpoints"} className={styles.checkpointChoices}>
+              <p className={styles.accessTabHint}>Choose the checkpoints this employee can use. New active checkpoints appear here automatically.</p>
+              {checkpoints.filter((checkpoint) => checkpoint.active !== false).map((checkpoint) => {
+                const id = checkpoint.id;
+                const selected = (employeeForm.allowedCheckpoints ?? []).includes(id);
+                const zoneId = checkpoint.zoneId ?? checkpoint.zone;
+                const checkpointName = checkpointDisplayName(checkpoint, zones);
+                return <label key={id} className={styles.checkpointChoice}>
+                  <input type="checkbox" checked={selected} onChange={(event) => {
+                    setCheckpointsTouched(true);
+                    if (event.target.checked && targetZoneId === zoneId) setTargetZoneId("");
+                    setEmployeeForm((current) => ({ ...current, allowedCheckpoints: event.target.checked
+                      ? [...new Set([...(current.allowedCheckpoints ?? []), id])]
+                      : (current.allowedCheckpoints ?? []).filter((value) => value !== id) }));
+                    setError("");
+                  }} />
+                  <span><strong>{checkpointName}</strong><small>{facilityZoneLabel(zoneId, zones)}</small></span>
+                </label>;
+              })}
+              {!checkpoints.some((checkpoint) => checkpoint.active !== false) && <p className={styles.accessTabHint}>No active checkpoints are available in your zone.</p>}
+          </section>
+          <section id="employee-zone-request-panel" role="tabpanel" aria-labelledby="employee-zone-request-tab" hidden={employeeTab !== "request-zone"} className={styles.zoneRequestFields}>
+              <p className={styles.accessTabHint}>The employee will be created with the selected checkpoints above. The other zone’s admin will review this request in Permission Manager.</p>
+              <label className={styles.field}><span>Zone</span><select value={targetZoneId} disabled={targetsLoading || !targetsLoaded || !availableRequestTargets.length || employeeForm.status !== "active"} onChange={(event) => { setTargetZoneId(event.target.value); setError(""); }} required={employeeTab === "request-zone"}><option value="">{targetsLoading ? "Loading zones…" : "Choose a zone"}</option>{availableRequestTargets.map((target) => <option key={target.id} value={target.id}>{target.name}</option>)}</select></label>
+              <label className={styles.field}><span>Reason</span><textarea value={zoneRequestReason} onChange={(event) => { setZoneRequestReason(event.target.value); setError(""); }} placeholder="Why does this employee need access to this zone?" maxLength={1000} rows={3} required={employeeTab === "request-zone"} /></label>
+              {employeeForm.status !== "active" && <p className={styles.accessTabHint}>Activate the employee to request access to another zone.</p>}
+              {targetsLoaded && !availableRequestTargets.length && <p className={styles.accessTabHint}>No other active zone with an assigned zone admin is available beyond the checkpoints selected above.</p>}
+          </section>
+        </div>
       </div>}
 
       {kind === "visitor" && <div className={styles.creationFields}>
@@ -173,7 +289,7 @@ export function RegistryCreateDialog({
         <label className={styles.field}><span>Checkpoint</span><select value={visitorForm.checkpointId} onChange={(event) => {
           const checkpoint = checkpoints.find((item) => item.id === event.target.value);
           setVisitorForm((current) => ({ ...current, checkpointId: event.target.value, allowedZones: checkpoint ? [checkpoint.zoneId ?? checkpoint.zone] : [] }));
-        }} required><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((checkpoint) => <option key={checkpoint.id} value={checkpoint.id}>{facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone, zones)} · {checkpoint.gateLabel && checkpoint.gateLabel.trim().toLowerCase() !== checkpoint.name.trim().toLowerCase() ? `${checkpoint.name} · ${checkpoint.gateLabel}` : checkpoint.gateLabel || checkpoint.name}</option>)}</select></label>
+        }} required><option value="">Choose a checkpoint</option>{checkpoints.filter((item) => item.active !== false).map((checkpoint) => <option key={checkpoint.id} value={checkpoint.id}>{facilityZoneLabel(checkpoint.zoneId ?? checkpoint.zone, zones)} · {checkpointDisplayName(checkpoint, zones)}</option>)}</select></label>
         <label className={`${styles.field} ${styles.creationFieldSpan}`}><span>Purpose</span><textarea value={visitorForm.purpose ?? ""} onChange={(event) => setVisitorForm((current) => ({ ...current, purpose: event.target.value }))} placeholder="Purpose (optional)" maxLength={1000} rows={2} /></label>
       </div>}
 

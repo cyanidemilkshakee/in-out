@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
+from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 import time
 from urllib.parse import quote
@@ -24,7 +26,7 @@ from database import get_db
 from keycloak_http import get_keycloak_admin_client
 from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
-from models import Checkpoint, TerminalCheckpointAssignment, ZoneAdminAssignment
+from models import AuditEvent, Checkpoint, TerminalCheckpointAssignment, ZoneAdminAssignment
 from event_outbox import enqueue_changed
 from terminal_assignments import enqueue_checkpoint_assignment, set_checkpoint_assignment
 from token_revocation import revoke_principal_tokens
@@ -39,34 +41,6 @@ APP_ROLES = frozenset({ZONE_ADMIN_ROLE, "operator", MASTER_ADMIN_ROLE})
 ASSIGNABLE_ROLES = frozenset({ZONE_ADMIN_ROLE, "operator"})
 CheckpointId = Annotated[str, StringConstraints(min_length=1, max_length=64, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")]
 logger = logging.getLogger(__name__)
-
-
-class UserCreateRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
-    username: str = Field(min_length=3, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
-    first_name: str = Field("", alias="firstName", max_length=100)
-    last_name: str = Field("", alias="lastName", max_length=100)
-    email: str = Field("", max_length=320)
-    password: Annotated[str, StringConstraints(strip_whitespace=False)] = Field(min_length=12, max_length=128)
-    temporary_password: bool = Field(True, alias="temporaryPassword")
-    roles: list[Literal["zone-admin", "operator"]] = Field(default_factory=list)
-    enabled: bool = True
-    checkpoint_id: CheckpointId | None = Field(None, alias="checkpointId")
-    zone_ids: list[str] = Field(default_factory=list, alias="zoneIds", max_length=100)
-    @field_validator("email")
-    @classmethod
-    def valid_email(cls, value: str) -> str:
-        if value and ("@" not in value or value.startswith("@") or value.endswith("@")):
-            raise ValueError("Enter a valid email address")
-        return value
-
-    @field_validator("password")
-    @classmethod
-    def valid_password(cls, value: str) -> str:
-        # Preserve the passphrase for Keycloak's configured password policy.
-        if not value.strip():
-            raise ValueError("Password must contain a non-whitespace character")
-        return value
 
 
 class UserUpdateRequest(BaseModel):
@@ -104,6 +78,13 @@ class UserUpdateRequest(BaseModel):
 class RolesRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     roles: list[Literal["zone-admin", "operator"]]
+
+
+class SsoApprovalRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    roles: list[Literal["zone-admin", "operator"]] = Field(min_length=1, max_length=1)
+    checkpoint_id: CheckpointId | None = Field(None, alias="checkpointId")
+    zone_ids: list[str] = Field(default_factory=list, alias="zoneIds", max_length=100)
 
 
 class PasswordResetRequest(BaseModel):
@@ -181,6 +162,19 @@ async def _request(token: str, method: str, path: str, payload: Any = None) -> h
 def _user_summary(user: dict[str, Any], roles: list[str] | None = None,
     checkpoint_id: str | None = None, can_manage: bool = False,
     zone_ids: list[str] | None = None) -> dict[str, Any]:
+    attributes = user.get("attributes") if isinstance(user.get("attributes"), dict) else {}
+    def user_attribute(name: str) -> str:
+        value = attributes.get(name)
+        if isinstance(value, list) and value and isinstance(value[0], str):
+            return value[0]
+        return value if isinstance(value, str) else ""
+    invite_status = user_attribute("invite_status") or None
+    try:
+        invite_expires_at = int(user_attribute("invite_expires_at")) or None
+    except (TypeError, ValueError):
+        invite_expires_at = None
+    if invite_status == "pending" and (invite_expires_at is None or invite_expires_at < int(time.time())):
+        invite_status = "expired"
     return {
         "id": user.get("id"),
         "username": user.get("username", ""),
@@ -192,6 +186,8 @@ def _user_summary(user: dict[str, Any], roles: list[str] | None = None,
         "createdTimestamp": user.get("createdTimestamp"),
         "checkpointId": checkpoint_id,
         "zoneIds": zone_ids or [],
+        "inviteStatus": invite_status,
+        "inviteExpiresAt": invite_expires_at,
         "canManage": can_manage,
         **({"roles": roles} if roles is not None else {}),
     }
@@ -201,6 +197,33 @@ async def _user_roles(token: str, user_id: str) -> list[str]:
     response = await _request(token, "GET", f"users/{quote(user_id, safe='')}/role-mappings/realm")
     mappings = response.json()
     return sorted(mapping["name"] for mapping in mappings if isinstance(mapping, dict) and mapping.get("name") in APP_ROLES)
+
+
+async def _effective_app_roles(token: str, user_id: str) -> list[str]:
+    """Include application roles inherited through Keycloak composite roles."""
+    response = await _request(token, "GET", f"users/{quote(user_id, safe='')}/role-mappings/realm/composite")
+    mappings = response.json()
+    return sorted(mapping["name"] for mapping in mappings
+        if isinstance(mapping, dict) and mapping.get("name") in APP_ROLES)
+
+
+async def _has_zoho_identity(token: str, user_id: str) -> bool:
+    try:
+        response = await _request(token, "GET", f"users/{quote(user_id, safe='')}/federated-identity")
+    except HTTPException as error:
+        if error.status_code == 404:
+            return False
+        raise
+    try:
+        identities = response.json()
+    except ValueError as error:
+        raise HTTPException(502, "Keycloak returned an invalid identity-provider link list") from error
+    return isinstance(identities, list) and any(
+        isinstance(identity, dict)
+        and isinstance(identity.get("identityProvider"), str)
+        and identity["identityProvider"].casefold() == "zoho"
+        for identity in identities
+    )
 
 
 async def _replace_roles(token: str, user_id: str, requested: list[str], mutations: list[str] | None = None) -> list[str]:
@@ -249,8 +272,11 @@ async def _replace_zone_assignments(db: AsyncSession, user_id: str, zone_ids: li
 
 
 def _profile_body(user: dict[str, Any]) -> dict[str, Any]:
-    return {key: user.get(key, "" if key not in {"enabled", "emailVerified"} else False)
+    body: dict[str, Any] = {key: user.get(key, "" if key not in {"enabled", "emailVerified"} else False)
         for key in ("username", "firstName", "lastName", "email", "enabled", "emailVerified")}
+    if isinstance(user.get("attributes"), dict):
+        body["attributes"] = user["attributes"]
+    return body
 
 
 def _recovered_failure(error: Exception, message: str) -> HTTPException:
@@ -268,7 +294,7 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     actor: dict = Depends(verify_admin_request),
 ) -> dict[str, Any]:
-    query = f"users?briefRepresentation=true&first={first}&max={max_results}"
+    query = f"users?briefRepresentation=false&first={first}&max={max_results}"
     if search.strip():
         query += f"&search={quote(search.strip(), safe='')}"
     users = (await _request(token, "GET", query)).json()
@@ -323,6 +349,72 @@ async def list_users(
     }
 
 
+@router.get("/users/pending-sso")
+async def list_pending_sso_users(
+    search: str = Query("", max_length=100),
+    first: int = Query(0, ge=0),
+    max_results: int = Query(25, alias="max", ge=1, le=50),
+    token: str = Depends(_admin_context),
+    actor: dict = Depends(verify_admin_request),
+) -> dict[str, Any]:
+    """List Zoho-linked Keycloak accounts with no effective InOut role."""
+    if not has_master_admin_role(actor):
+        raise HTTPException(403, "Only a master-admin can approve first-time Zoho sign-ins")
+
+    provider_page_size = 50
+    provider_first = first
+    items: list[dict[str, Any]] = []
+    has_more = False
+    next_first = None
+    role_limit = asyncio.Semaphore(8)
+
+    async def pending_zoho_account(user: dict[str, Any]) -> bool:
+        user_id = user.get("id")
+        if not isinstance(user_id, str) or not user_id or user.get("enabled") is False:
+            return False
+        async with role_limit:
+            if await _effective_app_roles(token, user_id):
+                return False
+        async with role_limit:
+            return await _has_zoho_identity(token, user_id)
+
+    while True:
+        query = f"users?briefRepresentation=false&first={provider_first}&max={provider_page_size}"
+        if search.strip():
+            query += f"&search={quote(search.strip(), safe='')}"
+        response = await _request(token, "GET", query)
+        provider_users = response.json()
+        if not isinstance(provider_users, list) or not provider_users:
+            break
+
+        candidates = [(index, user) for index, user in enumerate(provider_users) if isinstance(user, dict)]
+        matches = await asyncio.gather(*(pending_zoho_account(user) for _, user in candidates))
+        found_extra = False
+        for (index, user), is_pending in zip(candidates, matches):
+            if not is_pending:
+                continue
+            if len(items) >= max_results:
+                has_more = True
+                next_first = provider_first + index
+                found_extra = True
+                break
+            items.append({**_user_summary(user, [], can_manage=False), "provider": "zoho"})
+        if found_extra:
+            break
+
+        provider_first += len(provider_users)
+        if len(provider_users) < provider_page_size:
+            break
+
+    return {
+        "items": items,
+        "first": first,
+        "max": max_results,
+        "hasMore": has_more,
+        "nextFirst": next_first,
+    }
+
+
 @router.get("/users/{user_id}")
 async def get_user(user_id: str, token: str = Depends(_admin_context), db: AsyncSession = Depends(get_db),
     actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
@@ -346,108 +438,40 @@ async def get_user(user_id: str, token: str = Depends(_admin_context), db: Async
         can_manage_user(has_master_admin_role(actor), roles), zone_ids)
 
 
-@router.post("/users", status_code=201)
-async def create_user(payload: UserCreateRequest, token: str = Depends(_admin_context),
-    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
-    master_admin = has_master_admin_role(actor)
-    if not master_admin and set(payload.roles) != {"operator"}:
-        raise HTTPException(403, "Zone admins may create operator accounts only")
-    if not master_admin and payload.zone_ids:
-        raise HTTPException(403, "Zone admins cannot assign administrator zones")
-    if not master_admin and not (payload.first_name and payload.last_name and payload.email):
-        raise HTTPException(422, "Provide the operator's first name, last name, and email")
-    if "operator" in payload.roles and not payload.checkpoint_id:
-        raise HTTPException(422, "Assign a checkpoint when creating an operator account")
-    if ZONE_ADMIN_ROLE in payload.roles and not payload.zone_ids:
-        raise HTTPException(422, "Assign at least one zone when creating an admin account")
-    if payload.zone_ids:
-        from access_validation import validate_registered_zones
-        payload.zone_ids = await validate_registered_zones(db, payload.zone_ids)
-    if payload.checkpoint_id:
-        await require_checkpoint_scope(db, actor, payload.checkpoint_id)
-    try:
-        response = await _request(token, "POST", "users", {
-            "username": payload.username,
-            "firstName": payload.first_name,
-            "lastName": payload.last_name,
-            "email": payload.email,
-            # Keep an incompletely provisioned account unable to sign in.
-            "enabled": False,
-            "emailVerified": False,
-        })
-    except HTTPException as error:
-        if error.status_code >= 500:
-            raise HTTPException(error.status_code, f"Unable to confirm creation for {payload.username}. Inspect Keycloak for a disabled account before retrying.") from error
-        raise
-    location = response.headers.get("Location", "")
-    user_id = location.rstrip("/").rsplit("/", 1)[-1]
-    if not user_id:
-        raise HTTPException(status_code=502, detail=f"Creation incomplete for {payload.username}: Keycloak did not return the account ID. The account was created disabled; inspect it in Keycloak before retrying.")
-    identity = "browser:" + user_id
-    assignment_saved = False
-    try:
-        await _request(token, "PUT", f"users/{quote(user_id, safe='')}/reset-password", {
-            "type": "password", "value": payload.password, "temporary": payload.temporary_password,
-        })
-        if payload.checkpoint_id:
-            await set_checkpoint_assignment(db, identity, payload.checkpoint_id, actor["sub"])
-            await enqueue_checkpoint_assignment(db, identity)
-        if ZONE_ADMIN_ROLE in payload.roles:
-            await _replace_zone_assignments(db, user_id, payload.zone_ids, actor["sub"])
-        if payload.checkpoint_id or ZONE_ADMIN_ROLE in payload.roles:
-            # Persist the access assignment before granting the corresponding
-            # Keycloak role. The account is still disabled at this point; if
-            # the provider write fails, the recovery path removes this saved
-            # assignment before returning.
-            await enqueue_changed(db)
-            await db.commit()
-            assignment_saved = True
-        roles = await _replace_roles(token, user_id, payload.roles)
-        if payload.enabled:
-            await _request(token, "PUT", f"users/{quote(user_id, safe='')}", {"enabled": True})
-        user = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
-    except Exception as error:
-        await db.rollback()
-        cleanup_failed = False
-        try:
-            await _request(token, "DELETE", f"users/{quote(user_id, safe='')}")
-        except Exception:
-            cleanup_failed = True
-            logger.exception("Failed to remove incompletely provisioned Keycloak user %s", user_id)
-            try:
-                await _request(token, "PUT", f"users/{quote(user_id, safe='')}", {"enabled": False})
-            except Exception:
-                logger.exception("Failed to disable incompletely provisioned Keycloak user %s", user_id)
-        if assignment_saved:
-            try:
-                if payload.checkpoint_id:
-                    await set_checkpoint_assignment(db, identity, None, actor["sub"])
-                    await enqueue_checkpoint_assignment(db, identity)
-                if ZONE_ADMIN_ROLE in payload.roles:
-                    await _replace_zone_assignments(db, user_id, [], actor["sub"])
-                    await enqueue_changed(db)
-                await db.commit()
-            except Exception:
-                cleanup_failed = True
-                await db.rollback()
-                logger.exception("Failed to remove incomplete checkpoint assignment %s", identity)
-        if cleanup_failed:
-            raise HTTPException(503, f"Creation incomplete. Recovery is required for Keycloak account {user_id} ({payload.username}); inspect the account before retrying.") from error
-        raise _recovered_failure(error, "Creation was rolled back; the new account was removed. You can retry.") from error
-    return _user_summary(user, roles, payload.checkpoint_id, can_manage_user(master_admin, roles),
-        payload.zone_ids if ZONE_ADMIN_ROLE in roles else [])
-
+@router.post("/users", status_code=410)
+async def create_user(token: str = Depends(_admin_context), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
+    raise HTTPException(410, "Password-based account creation is disabled. Send an invitation instead.")
 
 @router.patch("/users/{user_id}")
 async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Depends(_admin_context),
     db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
+    return await _update_user(user_id, payload, token, db, actor)
+
+
+async def _update_user(user_id: str, payload: UserUpdateRequest, token: str,
+    db: AsyncSession, actor: dict, *, allow_unassigned_sso: bool = False) -> dict[str, Any]:
     await _lock_user(db, user_id)
     current = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
+    invite_status = _user_summary(current).get("inviteStatus")
+    if invite_status in {"pending", "expired", "revoked"}:
+        raise HTTPException(409, "This account is invitation-gated. Resend or revoke its invitation instead of editing account access.")
     previous_roles = await _user_roles(token, user_id)
+    if not previous_roles and payload.roles:
+        raise HTTPException(409, "Assigning access to a new identity requires sending an invitation first.")
+    if not previous_roles and payload.enabled is True and invite_status != "accepted":
+        raise HTTPException(409, "An identity without an accepted invitation cannot be enabled.")
     master_admin = has_master_admin_role(actor)
-    if not can_manage_user(master_admin, previous_roles):
+    if allow_unassigned_sso:
+        if not master_admin:
+            raise HTTPException(403, "Only a master-admin can approve first-time Zoho sign-ins")
+        if (not payload.roles or len(set(payload.roles)) != 1 or previous_roles
+                or await _effective_app_roles(token, user_id)):
+            raise HTTPException(409, "This account is no longer awaiting application access approval")
+        if not await _has_zoho_identity(token, user_id):
+            raise HTTPException(404, "Zoho-linked account not found")
+    elif not can_manage_user(master_admin, previous_roles):
         raise HTTPException(403, "This account can only be managed by a master-admin")
-    if not can_update_user_fields(master_admin, previous_roles, payload.model_fields_set):
+    if not allow_unassigned_sso and not can_update_user_fields(master_admin, previous_roles, payload.model_fields_set):
         raise HTTPException(403, "Admins may change only an operator's enabled state and checkpoint")
     assignment = await db.get(TerminalCheckpointAssignment, "browser:" + user_id, with_for_update=True)
     previous_checkpoint = assignment.checkpoint_id if assignment else None
@@ -481,6 +505,7 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
             "email": updates.get("email", current.get("email", "")),
             "enabled": updates.get("enabled", current.get("enabled", False)),
             "emailVerified": current.get("emailVerified", False) if updates.get("email", current.get("email", "")) == current.get("email", "") else False,
+            "attributes": current.get("attributes", {}),
         }
     else:
         # Keep ordinary-admin provider writes limited to the one permitted
@@ -509,11 +534,33 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
             await _replace_roles(token, user_id, requested_roles, role_mutations)
         saved = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
         saved_roles = await _user_roles(token, user_id)
+        if allow_unassigned_sso:
+            approved_at = datetime.now(timezone.utc)
+            audit_id = str(uuid.uuid4())
+            display_name = " ".join(part for part in (saved.get("firstName"), saved.get("lastName")) if part).strip()
+            db.add(AuditEvent(id=audit_id, created_at=approved_at, data={
+                "id": audit_id,
+                "category": "identity",
+                "action": "zoho_sso_access_approved",
+                "subjectId": user_id,
+                "subjectName": display_name or saved.get("username", user_id),
+                "actor": actor.get("sub", "unknown"),
+                "role": "master-admin",
+                "provider": "zoho",
+                "assignedRoles": saved_roles,
+                "zoneIds": target_zones,
+                "checkpointId": checkpoint,
+                "reason": "First-time Zoho sign-in approved",
+                "createdAt": approved_at.isoformat(),
+            }))
         if checkpoint_changed or zones_changed:
             if checkpoint_changed:
                 await enqueue_checkpoint_assignment(db, "browser:" + user_id)
             else:
                 await enqueue_changed(db)
+        elif allow_unassigned_sso:
+            await enqueue_changed(db)
+        if checkpoint_changed or zones_changed or allow_unassigned_sso:
             await db.commit()
     except Exception as error:
         recovery_failed = False
@@ -552,6 +599,33 @@ async def update_user(user_id: str, payload: UserUpdateRequest, token: str = Dep
         can_manage_user(master_admin, saved_roles), target_zones)
 
 
+@router.post("/users/{user_id}/approve-sso")
+async def approve_zoho_sso_user(user_id: str, payload: SsoApprovalRequest,
+    token: str = Depends(_admin_context), db: AsyncSession = Depends(get_db),
+    actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
+    if not has_master_admin_role(actor):
+        raise HTTPException(403, "Only a master-admin can approve first-time Zoho sign-ins")
+    role = payload.roles[0]
+    if role == "operator":
+        if not payload.checkpoint_id:
+            raise HTTPException(422, "Assign a checkpoint to the new operator")
+        if payload.zone_ids:
+            raise HTTPException(422, "Operator approval does not accept administrator zone assignments")
+    else:
+        if not payload.zone_ids:
+            raise HTTPException(422, "Assign at least one zone to the new zone admin")
+        if payload.checkpoint_id:
+            raise HTTPException(422, "Zone-admin approval does not accept an operator checkpoint")
+
+    update = UserUpdateRequest.model_validate({
+        "enabled": True,
+        "roles": [role],
+        "checkpointId": payload.checkpoint_id,
+        "zoneIds": payload.zone_ids,
+    })
+    return await _update_user(user_id, update, token, db, actor, allow_unassigned_sso=True)
+
+
 @router.put("/users/{user_id}/roles")
 async def replace_user_roles(user_id: str, payload: RolesRequest, token: str = Depends(_admin_context),
     db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
@@ -576,9 +650,13 @@ async def _invalidate_user_sessions(token: str, user_id: str) -> tuple[Exception
 
 @router.put("/users/{user_id}/password")
 async def reset_password(user_id: str, payload: PasswordResetRequest, token: str = Depends(_admin_context),
-    actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
+    db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, bool]:
     if not has_master_admin_role(actor):
         raise HTTPException(403, "Only a master-admin can reset account passwords")
+    await _lock_user(db, user_id)
+    profile = (await _request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
+    if _user_summary(profile).get("inviteStatus") in {"pending", "expired", "revoked"}:
+        raise HTTPException(409, "This account is invitation-gated. Resend or revoke its invitation instead of changing its password.")
     if not can_manage_user(True, await _user_roles(token, user_id)):
         raise HTTPException(403, "This account can only be managed through the master-admin bootstrap")
     reset_error = None

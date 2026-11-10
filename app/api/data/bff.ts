@@ -9,7 +9,7 @@ import {
   normalizeAccessPermission,
   normalizePermissionRequest,
 } from "../../../lib/normalizeDashboard";
-import { normalizeSubjectZones } from "../../../lib/facilityZones";
+import { normalizeSubjectZones, stripZoneNamePrefix } from "../../../lib/facilityZones";
 import { callPythonApi } from "../pythonApi";
 import { loadAllAlerts } from "./serverQueries";
 import { ServerTiming } from "../../../lib/serverTiming";
@@ -80,7 +80,7 @@ function normalizeCheckpointLabels(value: unknown): string[] {
     if (!item || typeof item !== "object" || Array.isArray(item)) return [];
     const checkpoint = item as Record<string, unknown>;
     const label = typeof checkpoint.name === "string"
-      ? checkpoint.name
+      ? stripZoneNamePrefix(checkpoint.name, typeof checkpoint.zoneName === "string" ? [checkpoint.zoneName] : [])
       : typeof checkpoint.id === "string" ? checkpoint.id : "";
     return label ? [label] : [];
   });

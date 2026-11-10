@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from database import get_db, get_read_db
 from data_limits import bounded_rows
 from event_outbox import enqueue_changed, enqueue_workflow_start
-from auth import verify_admin_or_operator_request, verify_admin_request, has_admin_role
+from auth import verify_admin_or_operator_request, verify_admin_request, has_admin_role, has_master_admin_role
 from terminal_assignments import browser_identity, require_checkpoint
 from models import (
     AccessPermission,
@@ -31,11 +31,12 @@ from models import (
     PermissionRequestModel,
     Checkpoint,
     OrganizationZone,
+    ZoneAdminAssignment,
 )
 from schemas import SubjectCreate, SubjectUpdate, SubjectResponse, SubjectListResponse
 from access_validation import (parse_validity, require_registered_checkpoint, validate_window,
     validate_permission_window, validate_registered_zones)
-from permission_decisions import enqueue_decision, permission_version
+from permission_decisions import enqueue_decision, permission_version, zone_permission_version
 from subject_metadata import current_subject_metadata, validate_subject_metadata_size
 from manual_review_policy import revised_access_data
 from registry_validation import (
@@ -223,10 +224,13 @@ async def list_subjects(
     """List subjects with pagination and optional filtering by kind."""
     from registry_reads import subject_search_conditions
     zone_ids = await admin_zone_ids(db, actor)
-    conditions = [*subject_search_conditions(kind, search), subject_zone_condition(zone_ids)]
+    conditions = [*subject_search_conditions(kind, search)]
+    if not has_master_admin_role(actor):
+        conditions.append(subject_zone_condition(zone_ids))
     base = select(Subject).outerjoin(Person, Person.subject_id == Subject.id).outerjoin(
         HardwareAsset, HardwareAsset.subject_id == Subject.id).outerjoin(
-        AccessPermission, AccessPermission.subject_id == Subject.id).options(selectinload(Subject.person), selectinload(Subject.hardware))
+        AccessPermission, AccessPermission.subject_id == Subject.id).options(
+            selectinload(Subject.person), selectinload(Subject.hardware), selectinload(Subject.permissions))
     count_base = select(func.count()).select_from(Subject).outerjoin(Person, Person.subject_id == Subject.id).outerjoin(
         HardwareAsset, HardwareAsset.subject_id == Subject.id).outerjoin(
         AccessPermission, AccessPermission.subject_id == Subject.id)
@@ -245,6 +249,8 @@ async def list_subjects(
             data = current_subject_metadata(sub.kind, sub.person.data)
         elif sub.hardware:
             data = sub.hardware.data
+        if sub.permissions and isinstance((sub.permissions.data or {}).get("zones"), list):
+            data = {**data, "allowedZones": sub.permissions.data["zones"]}
         
         items.append(SubjectResponse(
             id=sub.id,
@@ -293,6 +299,8 @@ async def create_subject(
     """Create a new subject along with their metadata."""
     if not has_admin_role(actor) and payload.kind != "visitor":
         raise HTTPException(status_code=403, detail="Terminal operators may create temporary visitors only")
+    if payload.zone_access_request and payload.kind != "employee":
+        raise HTTPException(422, "A cross-zone access request can only be submitted while creating an employee")
     validate_subject_metadata_size(payload.data)
     subject_id = str(uuid.uuid4())
     actor_zones = await admin_zone_ids(db, actor) if has_admin_role(actor) else ()
@@ -315,6 +323,8 @@ async def create_subject(
             raise HTTPException(status_code=422, detail="Hardware category is required")
     if payload.kind == "employee" and incoming.get("status", "active") not in {"active", "inactive"}:
         raise HTTPException(422, "Unsupported employee status")
+    if payload.zone_access_request and incoming.get("status", "active") != "active":
+        raise HTTPException(422, "Zone access can only be requested for an active employee")
     now = datetime.now(timezone.utc)
     valid_from = incoming.get("validFrom") or now.isoformat()
     valid_to = incoming.get("validTo") or incoming.get("validUntil") or ""
@@ -368,6 +378,27 @@ async def create_subject(
             incoming["allowedCheckpoints"] = await _validate_checkpoint_grants(
                 db, actor, incoming["allowedCheckpoints"], requested_zones, kind=payload.kind,
                 actor_zones=actor_zones)
+    request_target_zone = None
+    request_target_checkpoint = None
+    if payload.zone_access_request:
+        target_zone_id = payload.zone_access_request.zone_id
+        request_target_zone = await db.scalar(select(OrganizationZone).where(
+            OrganizationZone.id == target_zone_id, OrganizationZone.active.is_(True)).with_for_update(read=True))
+        if request_target_zone is None:
+            raise HTTPException(422, "Choose an active organization zone")
+        if target_zone_id in requested_zones:
+            raise HTTPException(422, "The employee already has access to that zone")
+        if not has_master_admin_role(actor) and target_zone_id in actor_zones:
+            raise HTTPException(422, "Choose a different zone so its assigned administrator can review the request")
+        target_admin = await db.scalar(select(ZoneAdminAssignment.admin_subject).where(
+            ZoneAdminAssignment.zone_id == target_zone_id).limit(1).with_for_update(read=True))
+        if not target_admin:
+            raise HTTPException(422, "That zone has no assigned zone admin to receive the request")
+        request_target_checkpoint = await db.scalar(select(Checkpoint).where(
+            Checkpoint.zone_id == target_zone_id, Checkpoint.active.is_(True), Checkpoint.required.is_(True))
+            .order_by(Checkpoint.number).limit(1).with_for_update(read=True))
+        if request_target_checkpoint is None:
+            raise HTTPException(422, "That zone has no active required checkpoint for permission review")
     if payload.kind == "visitor":
         incoming["validFrom"] = valid_from
         incoming["validTo"] = valid_to
@@ -420,6 +451,7 @@ async def create_subject(
         )
         db.add(initial_permission)
     visitor_request = None
+    zone_access_request = None
     if payload.kind == "visitor":
         request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
         checkpoint_id = visitor_checkpoint.id
@@ -445,8 +477,38 @@ async def create_subject(
         }
         db.add(PermissionRequestModel(id=request_id, subject_id=subject_id, data=visitor_request, created_at=now))
 
+    if payload.zone_access_request and request_target_zone and request_target_checkpoint:
+        proposed_zones = list(dict.fromkeys([*requested_zones, request_target_zone.id]))
+        validate_permission_window(valid_from, valid_to, now=now, permanent=True)
+        request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
+        zone_access_request = {
+            "id": request_id,
+            "subjectId": subject_id,
+            "subjectName": data.get("name") or barcode,
+            "subjectType": "employee",
+            "barcode": barcode,
+            "type": "zone_access",
+            "purpose": payload.zone_access_request.reason,
+            "checkpointId": request_target_checkpoint.id,
+            "checkpoint": (request_target_checkpoint.data or {}).get("name", request_target_checkpoint.id),
+            "requester": actor.get("sub") or "Administrator",
+            "requestedZones": proposed_zones,
+            "previousZones": list(requested_zones),
+            "validFrom": valid_from,
+            "validTo": valid_to,
+            "previousValidFrom": valid_from,
+            "previousValidTo": valid_to,
+            "permanentAccess": True,
+            "origin": "cross_zone_request",
+            "targetZoneId": request_target_zone.id,
+            "status": "pending",
+            "permissionVersion": zone_permission_version(initial_permission, data),
+            "createdAt": now.isoformat(),
+        }
+        db.add(PermissionRequestModel(id=request_id, subject_id=subject_id, data=zone_access_request, created_at=now))
+
     response = SubjectResponse(id=new_sub.id, barcode=new_sub.barcode, kind=new_sub.kind,
-        data=data, request=visitor_request)
+        data=data, request=visitor_request or zone_access_request)
     try:
         # Approval rows reference the identity by ID rather than through an
         # ORM relationship. Flush the parent within the same transaction first.
@@ -456,6 +518,8 @@ async def create_subject(
         if visitor_request:
             await enqueue_workflow_start(db, request_id, visitor=True)
             await enqueue_decision(db, {"request": visitor_request, "person": data})
+        elif zone_access_request:
+            await enqueue_decision(db, {"request": zone_access_request, "person": data})
         else:
             await enqueue_changed(db)
         await db.commit()

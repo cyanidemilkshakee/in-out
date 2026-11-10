@@ -121,3 +121,7 @@ export function useOpenAlertCount() {
   if (count === null) throw new Error("Open alert count requires AdminLiveProvider");
   return count;
 }
+
+export function useOpenAlertCountOrZero() {
+  return useContext(OpenAlertCountContext) ?? 0;
+}
