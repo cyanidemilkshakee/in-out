@@ -23,7 +23,6 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-
 # Python
 __pycache__/
 *.py[cod]
@@ -37,19 +36,20 @@ ENV/
 env/
 .mypy_cache/
 .ruff_cache/
-
-
 *.egg-info/
 .eggs/
 build/
 .tox/
-
-
 .venv-review/
 
-# Postman collections
+# Local collections, generated credentials, and temporary files
 postman/collections/
 /tmp/
 /.local-test-accounts/
+
+# Local Codex state and import backups
 /.codex/
-/.codex-main-import-backup-20261109/
+/.codex-*/
+
+# Local-only reports and reference material
+/docs/unofficial/
