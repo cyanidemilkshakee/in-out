@@ -69,6 +69,14 @@ class Settings(BaseSettings):
     ALERT_EVALUATION_MAX_MOVEMENTS: int = Field(default=50_000, ge=1, le=1_000_000)
     ALERT_EVALUATION_MAX_ALERTS: int = Field(default=50_000, ge=1, le=1_000_000)
     ALERT_EVALUATION_MAX_RULES: int = Field(default=1000, ge=1, le=10_000)
+    CHECKPOINT_EVALUATION_MAX_CHECKPOINTS: int = Field(default=10_000, ge=1, le=100_000)
+    CHECKPOINT_EVALUATION_MAX_ALERTS: int = Field(default=10_000, ge=1, le=100_000)
+    # Facility attendance policy: weekday numbers use Monday=0, Sunday=6.
+    ATTENDANCE_WORKDAYS: str = "0,1,2,3,4"
+    ATTENDANCE_CUTOFF_HOUR: int = Field(default=18, ge=0, le=23)
+    ATTENDANCE_CUTOFF_MINUTE: int = Field(default=0, ge=0, le=59)
+    ATTENDANCE_GRACE_MINUTES: int = Field(default=60, ge=0, le=480)
+    ATTENDANCE_HOLIDAYS: str = ""
 
     # Retention is opt-in for audit-sensitive records. Set a positive value
     # only after agreeing a retention policy; zero means keep indefinitely.

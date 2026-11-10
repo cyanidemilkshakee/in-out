@@ -152,7 +152,7 @@ class ScanQueryBudgetTests(unittest.IsolatedAsyncioTestCase):
     async def test_backfill_conflicting_trigger_rolls_back_without_publishing_gate(self):
         await self._legacy_reviews("p1")
         async with self.sessions() as db:
-            db.add(CriticalAlertTrigger(alert_id="legacy-p1-2", subject_id="h1", triggered_at=NOW))
+            db.add(CriticalAlertTrigger(alert_id="legacy-p1-2", subject_id="h1"))
             await db.commit()
         with self.assertRaises(DBAPIError):
             async with self.engine.begin() as conn:

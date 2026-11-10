@@ -8,7 +8,7 @@ export default function AccessPendingPage() {
         <p className={styles.eyebrow}>IN / OUT · ZOHO SIGN-IN</p>
         <h1 id="pending-title">Access is awaiting approval</h1>
         <p className={styles.message}>
-          Your Zoho account is signed in, but it does not have an In / Out role yet. A Master Admin must review the account and assign an operator or zone-admin role before you can use the application.
+          No invitation is needed. Your Zoho account is signed in, but it does not have an In / Out role yet. A Master Admin must review the account and assign an operator or zone-admin role before you can use the application.
         </p>
         <div className={styles.requirement}>
           <span>Next step</span>

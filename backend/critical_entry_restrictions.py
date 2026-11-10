@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from models import (
     Subject, CriticalEntryRestriction, CriticalAlertTrigger, AuditEvent,
-    AlertReview, WarningReset,
+    AlertReview, WarningReset, AccessPermission, Person, HardwareAsset, OrganizationZone,
 )
 
 CONFIRMED_WARNING_ENTRY_THRESHOLD = 3
@@ -59,11 +59,16 @@ async def activate_warning_threshold_entry_restriction(db, subject_id, alert_id,
     marker = await db.get(CriticalAlertTrigger, alert_id, populate_existing=True)
     if marker and marker.subject_id not in (None, subject_id):
         raise HTTPException(409, "The warning is bound to a different subject")
+    subject = await db.get(Subject, subject_id)
     if marker is None:
-        db.add(CriticalAlertTrigger(alert_id=alert_id, subject_id=subject_id, triggered_at=triggered_at))
+        marker = CriticalAlertTrigger(alert_id=alert_id, subject_id=subject_id,
+            zone_ids=await _subject_effective_zone_ids(db, subject))
+        db.add(marker)
     elif marker.subject_id is None:
         # The authenticated review explicitly binds this warning to a subject.
         marker.subject_id = subject_id
+    if marker and subject and not marker.zone_ids:
+        marker.zone_ids = await _subject_effective_zone_ids(db, subject)
 
     row = await db.get(CriticalEntryRestriction, subject_id, populate_existing=True)
     if row and row.active:
@@ -82,7 +87,6 @@ async def activate_warning_threshold_entry_restriction(db, subject_id, alert_id,
         row.trigger_alert_id = alert_id
         row.released_at = row.released_by = row.release_reason = None
 
-    subject = await db.get(Subject, subject_id)
     audit_id = "AUD-" + uuid.uuid4().hex
     db.add(AuditEvent(id=audit_id, created_at=triggered_at, data={
         "id": audit_id,
@@ -187,6 +191,41 @@ def _binding(data):
     return None
 
 
+def _effective_zone_scope(permission_data, metadata_data, active_zone_ids):
+    """Capture every zone affected by a subject-wide entry hold, failing closed."""
+    grant = permission_data if isinstance(permission_data, dict) else {}
+    metadata = metadata_data if isinstance(metadata_data, dict) else {}
+    if "zones" in grant:
+        raw_zones = grant.get("zones")
+    else:
+        raw_zones = metadata.get("allowedZones")
+        if raw_zones is None and isinstance(metadata.get("allowedZone"), str):
+            raw_zones = [metadata["allowedZone"]]
+    if not isinstance(raw_zones, list) or len(raw_zones) > 100 \
+            or any(not isinstance(zone_id, str) or not zone_id for zone_id in raw_zones):
+        return []
+    if "All Zones" in raw_zones:
+        return sorted(active_zone_ids)
+    zones = set(raw_zones)
+    if not zones <= active_zone_ids:
+        # If the grant cannot be mapped to active zones, only Master Admin can
+        # safely release the global hold.
+        return []
+    return sorted(zones)
+
+
+async def _subject_effective_zone_ids(db, subject):
+    if subject is None:
+        return []
+    permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == subject.id)
+        .order_by(AccessPermission.id).limit(1))
+    metadata_row = await db.get(HardwareAsset if subject.kind == "hardware" else Person, subject.id)
+    active_zones = set((await db.scalars(select(OrganizationZone.id).where(
+        OrganizationZone.active.is_(True)))).all())
+    return _effective_zone_scope(permission.data if permission else None,
+        metadata_row.data if metadata_row else None, active_zones)
+
+
 async def activate_critical_entry_restrictions(db, alerts):
     """Bind new critical alerts to explicit IDs/barcodes and atomically hold entry.
 
@@ -217,6 +256,17 @@ async def activate_critical_entry_restrictions(db, alerts):
     by_barcode = {}
     for subject in subjects:
         by_barcode.setdefault(subject.barcode.lower(), []).append(subject)
+    subject_ids = [subject.id for subject in subjects]
+    permission_rows = (await db.scalars(select(AccessPermission).where(
+        AccessPermission.subject_id.in_(subject_ids)))).all() if subject_ids else []
+    permissions = {permission.subject_id: permission.data for permission in permission_rows}
+    people_rows = (await db.scalars(select(Person).where(Person.subject_id.in_(subject_ids)))).all() if subject_ids else []
+    people = {person.subject_id: person.data for person in people_rows}
+    hardware_rows = (await db.scalars(select(HardwareAsset).where(
+        HardwareAsset.subject_id.in_(subject_ids)))).all() if subject_ids else []
+    hardware = {asset.subject_id: asset.data for asset in hardware_rows}
+    active_zones = set((await db.scalars(select(OrganizationZone.id).where(
+        OrganizationZone.active.is_(True)))).all())
     now = datetime.now(timezone.utc)
     affected = set()
     for alert in sorted(pending, key=lambda item: (item.created_at, item.id)):
@@ -229,9 +279,12 @@ async def activate_critical_entry_restrictions(db, alerts):
             else:
                 matches = by_barcode.get(value, [])
                 subject = matches[0] if len(matches) == 1 else None
+        alert_data = alert.data or {}
+        metadata = hardware.get(subject.id) if subject and subject.kind == "hardware" else people.get(subject.id) if subject else None
+        affected_zones = (_effective_zone_scope(permissions.get(subject.id), metadata, active_zones)
+            if subject else [])
         inserted = await db.scalar(insert(CriticalAlertTrigger).values(
-            alert_id=alert.id, subject_id=subject.id if subject else None,
-            triggered_at=alert.created_at,
+            alert_id=alert.id, subject_id=subject.id if subject else None, zone_ids=affected_zones,
         ).on_conflict_do_nothing(index_elements=["alert_id"]).returning(CriticalAlertTrigger.alert_id))
         if not inserted or not subject:
             continue

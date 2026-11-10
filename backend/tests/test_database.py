@@ -20,12 +20,15 @@ from sqlalchemy import text, select, func
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.engine import make_url
 from database import get_db, get_read_db
-from models import Subject, Person, HardwareAsset, Checkpoint, Movement, PresenceState, PermissionRequestModel, AccessPermission, AuditEvent, Alert, ScanRequest, TerminalCheckpointAssignment, EventOutbox, ZoneAdminAssignment
+from models import (Subject, Person, HardwareAsset, Checkpoint, Movement, PresenceState,
+    PermissionRequestModel, AccessPermission, AuditEvent, Alert, ScanRequest,
+    TerminalCheckpointAssignment, EventOutbox, ZoneAdminAssignment, OfflineScanReconciliation,
+    CheckpointEvaluationStatus, CriticalEntryRestriction, CriticalAlertTrigger)
 from schemas import BrowserScanPayload, ScanPayload
 from terminal_scans import record_scan
 from auth import verify_admin_request, verify_terminal_access_request
 from redis_client import close_redis_pool
-from routers import movements, terminal, permissions, registry, alerts, admin_profile
+from routers import movements, terminal, permissions, registry, alerts, admin_profile, offline_reconciliation, checkpoints
 from permission_decisions import apply_permission_decision, zone_permission_version, custody_version
 
 TEST_URL = os.getenv("TEST_DATABASE_URL")
@@ -68,6 +71,14 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                     for revision in reversed(list(scripts.walk_revisions())):
                         revision.module.upgrade()
             await conn.run_sync(migrate)
+            stale_indexes = (await conn.execute(text("""
+                SELECT indexname FROM pg_indexes
+                WHERE schemaname = :schema
+                  AND indexname IN ('idx_access_permissions_subject', 'idx_movements_search_trgm')
+                ORDER BY indexname
+            """), {"schema": self.schema})).scalars().all()
+            if stale_indexes:
+                raise AssertionError(f"Redundant indexes remain after migrations: {stale_indexes}")
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False)
         async with self.sessions() as db:
             # Replace the generated A front gate with the stable cp-main test
@@ -120,6 +131,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.app.include_router(registry.router)
         self.app.include_router(registry.bundle_router, dependencies=[Depends(verify_admin_request)])
         self.app.include_router(alerts.router, dependencies=[Depends(verify_admin_request)])
+        self.app.include_router(offline_reconciliation.router)
+        self.app.include_router(checkpoints.router, dependencies=[Depends(verify_admin_request)])
         self.app.include_router(admin_profile.router)
         async def session():
             async with self.sessions() as db:
@@ -171,6 +184,242 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn(result["request"]["id"], [item["id"] for item in history["permissionRequests"]])
         directory = (await self.client.get("/v1/permissions")).json()
         self.assertIn(result["request"]["subjectId"], [item["subjectId"] for item in directory["people"]])
+
+    async def test_permanent_visitor_grant_is_rejected_without_creating_an_identity(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
+        response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
+            subject_id="", request_type="visitor", barcode="permanent-visitor",
+            new_visitor={"name": "Guest", "host": "Alice"}, permanent_access=True, valid_to=""))
+        self.assertEqual(response.status_code, 422, response.text)
+        async with self.sessions() as db:
+            self.assertIsNone(await db.scalar(select(Subject).where(Subject.barcode == "permanent-visitor")))
+            self.assertEqual(await db.scalar(select(func.count()).select_from(PermissionRequestModel)), 0)
+
+    async def test_zone_admin_direct_edit_preserves_other_zone_checkpoint_limits(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "zone-a-only", "realm_access": {"roles": ["zone-admin"]}}
+        now = datetime.now(timezone.utc)
+        async with self.sessions() as db:
+            db.add(ZoneAdminAssignment(admin_subject="zone-a-only", zone_id="a", assigned_by="fixture"))
+            db.add(AccessPermission(id="multi-zone-permission", subject_id="p1", data={
+                "id": "multi-zone-permission", "subjectId": "p1", "subjectType": "employee",
+                "state": "active", "zones": ["a", "b"], "checkpoints": None,
+                "checkpointScopes": {"a": ["cp-main"], "b": ["b-1"]},
+                "validFrom": now.isoformat(), "validTo": ""}))
+            await db.commit()
+        response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
+            subject_id="p1", requested_zones=["a"], requested_checkpoints=["cp-main"],
+            permanent_access=True, valid_to=""))
+        self.assertEqual(response.status_code, 201, response.text)
+        permission = response.json()["permission"]
+        self.assertEqual(set(permission["zones"]), {"a", "b"})
+        self.assertEqual(permission["checkpointScopes"], {"a": ["cp-main"], "b": ["b-1"]})
+
+    async def test_cross_zone_approval_adds_only_the_new_zone_checkpoint_scope(self):
+        from auth import verify_admin_or_operator_request
+        async with self.sessions() as db:
+            db.add(ZoneAdminAssignment(admin_subject="requester-a", zone_id="a", assigned_by="fixture"))
+            db.add(ZoneAdminAssignment(admin_subject="reviewer-b", zone_id="b", assigned_by="fixture"))
+            permission_id = "cross-zone-current"
+            db.add(AccessPermission(id=permission_id, subject_id="p1", data={
+                "id": permission_id, "subjectId": "p1", "subjectType": "employee", "state": "active",
+                "zones": ["a"], "checkpointScopes": {"a": ["cp-main"]},
+                "validFrom": datetime.now(timezone.utc).isoformat(), "validTo": ""}))
+            await db.commit()
+        self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
+            "sub": "requester-a", "realm_access": {"roles": ["zone-admin"]}}
+        requested = await self.client.post("/v1/permission-requests", json={
+            "subject_id": "p1", "checkpoint_id": "cp-main", "target_zone_id": "b",
+            "request_type": "zone_access", "reason": "Temporary cross-zone assignment"})
+        self.assertEqual(requested.status_code, 200, requested.text)
+        request = requested.json()
+        self.assertEqual(request["requestedCheckpointScopes"], {"a": ["cp-main"], "b": ["b-1"]})
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "reviewer-b", "realm_access": {"roles": ["zone-admin"]}}
+        decided = await self.client.post(f"/v1/permission-requests/{request['id']}/decide",
+            json={"decision": "approved", "reason": "Reviewed by target zone"})
+        self.assertEqual(decided.status_code, 200, decided.text)
+        async with self.sessions() as db:
+            permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == "p1"))
+            self.assertEqual(set(permission.data["zones"]), {"a", "b"})
+            self.assertEqual(permission.data["checkpointScopes"], {"a": ["cp-main"], "b": ["b-1"]})
+
+    async def test_visitor_approval_cannot_create_permanent_access_or_missing_expiry(self):
+        now = datetime.now(timezone.utc)
+        for permanent, valid_to in ((True, ""), (False, "")):
+            request_id = "invalid-visitor-expiry-" + uuid.uuid4().hex[:8]
+            subject_id = "visitor-" + uuid.uuid4().hex[:8]
+            async with self.sessions() as db:
+                db.add(Subject(id=subject_id, barcode=subject_id, kind="visitor",
+                    person=Person(data={"name": "Guest", "status": "pending_approval", "inside": False,
+                        "allowedZones": []})))
+                db.add(PermissionRequestModel(id=request_id, subject_id=subject_id, created_at=now,
+                    data={"id": request_id, "subjectId": subject_id, "subjectName": "Guest", "type": "visitor",
+                        "status": "pending", "requestedZones": ["a"], "checkpointId": "cp-main",
+                        "validFrom": now.isoformat(), "validTo": valid_to, "permanentAccess": permanent,
+                        "origin": "permission_manager"}))
+                await db.commit()
+            async with self.sessions() as db:
+                with self.assertRaises(HTTPException) as raised:
+                    await apply_permission_decision(db, request_id, "approved", "test-admin", "Reviewed")
+                self.assertEqual(raised.exception.status_code, 422)
+                await db.rollback()
+            async with self.sessions() as db:
+                self.assertEqual((await db.get(PermissionRequestModel, request_id)).data["status"], "pending")
+                self.assertIsNone(await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == subject_id)))
+
+    async def test_canonical_empty_visitor_expiry_overrides_stale_metadata_expiry(self):
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
+        now = datetime.now(timezone.utc)
+        async with self.sessions() as db:
+            db.add(Subject(id="visitor-empty-canonical-expiry", barcode="visitor-empty-canonical-expiry",
+                kind="visitor", person=Person(data={"name": "Guest", "type": "visitor",
+                    "status": "pre_approved", "allowedZones": ["a"], "validTo": (now + timedelta(days=10)).isoformat(),
+                    "inside": False})))
+            await db.flush()
+            db.add(AccessPermission(id="visitor-empty-canonical-permission", subject_id="visitor-empty-canonical-expiry",
+                data={"id": "visitor-empty-canonical-permission", "state": "active", "zones": ["a"], "validTo": ""}))
+            await db.commit()
+        response = await self.client.post("/v1/terminal/scans", json={
+            "barcode": "visitor-empty-canonical-expiry", "checkpointId": "cp-main"},
+            headers={"Idempotency-Key": str(uuid.uuid4())})
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertFalse(response.json()["allowed"])
+        self.assertIn("expiry", response.json()["reason"].lower())
+
+    async def test_manual_approval_requires_denied_scan_and_rescan_leaves_first_denial_intact(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
+        body = {"barcode": "visitor-rescan-proof", "checkpointId": "cp-main"}
+        first = await self.client.post("/v1/terminal/scans", json=body,
+            headers={"Idempotency-Key": str(uuid.uuid4())})
+        self.assertFalse(first.json()["allowed"])
+        first_event = first.json()["decision"]["event"]
+        review = await self.client.post("/v1/terminal/manual-reviews", json={**body,
+            "direction": "entry", "eventId": first_event["id"], "operatorNote": "Visitor ID checked"})
+        self.assertEqual(review.status_code, 200, review.text)
+        approved = await self.client.post(f"/v1/permission-requests/{review.json()['id']}/decide",
+            json={"decision": "approved", "reason": "Verified visitor", "valid_for_minutes": 60})
+        self.assertEqual(approved.status_code, 200, approved.text)
+        async with self.sessions() as db:
+            initial = await db.get(Movement, first_event["id"])
+            self.assertIsNotNone(initial)
+            self.assertEqual((initial.result, initial.denial_code), ("denied", "barcode_not_registered"))
+            self.assertIsNone(await db.get(PresenceState, approved.json()["request"]["subjectId"]))
+        entered = await self.client.post("/v1/terminal/scans", json=body,
+            headers={"Idempotency-Key": str(uuid.uuid4())})
+        self.assertTrue(entered.json()["allowed"], entered.text)
+        async with self.sessions() as db:
+            initial = await db.get(Movement, first_event["id"])
+            self.assertEqual((initial.result, initial.denial_code), ("denied", "barcode_not_registered"))
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 2)
+
+    async def test_employee_metadata_cannot_be_patched_with_hardware_category(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
+        response = await self.client.put("/v1/registry/subjects/p1", json={
+            "data": {"category": "Laptop"}})
+        self.assertEqual(response.status_code, 422, response.text)
+        async with self.sessions() as db:
+            person = await db.get(Person, "p1")
+            self.assertNotIn("category", person.data)
+
+    async def test_missing_offline_receipt_is_reconciled_without_movement_history(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
+        self.app.dependency_overrides[verify_terminal_access_request] = lambda: {"sub": "test-operator"}
+        scan = await self.client.post("/v1/terminal/scans", json={"barcode": "p1",
+            "checkpointId": "cp-main", "online": False}, headers={"Idempotency-Key": str(uuid.uuid4())})
+        self.assertEqual(scan.status_code, 200, scan.text)
+        self.assertTrue(scan.json()["needsReconciliation"])
+        reconciliation_id = scan.json()["reconciliationId"]
+        async with self.sessions() as db:
+            self.assertIsNotNone(await db.get(OfflineScanReconciliation, reconciliation_id))
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 0)
+            self.assertIsNone(await db.get(PresenceState, "p1"))
+        resolved = await self.client.post(f"/v1/offline-scan-reconciliations/{reconciliation_id}/resolve",
+            json={"state": "inside", "reason": "Verified the current visitor log"})
+        self.assertEqual(resolved.status_code, 200, resolved.text)
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(PresenceState, "p1")).state, "inside")
+            self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 0)
+            audit = await db.scalar(select(AuditEvent).where(AuditEvent.id == resolved.json()["auditEvent"]["id"]))
+            self.assertFalse(audit.data["movementHistoryChanged"])
+
+    async def test_deleted_subject_identity_cannot_rebind_an_offline_scan(self):
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
+        async with self.sessions() as db:
+            db.add(Subject(id="reused-subject", kind="employee", barcode="reused-offline-barcode",
+                person=Person(data={"name": "New Employee", "allowedZones": ["a"]})))
+            db.add(OfflineScanReconciliation(id="OFFLINE-IDENTITY-REUSE", subject_id=None,
+                subject_identity_at_capture="deleted-original-subject", checkpoint_id="cp-main",
+                terminal_id="browser:test-operator", barcode="reused-offline-barcode",
+                direction="unknown", payload={}, status="pending"))
+            await db.commit()
+        response = await self.client.post(
+            "/v1/offline-scan-reconciliations/OFFLINE-IDENTITY-REUSE/resolve",
+            json={"state": "inside", "reason": "Check the registered identity"})
+        self.assertEqual(response.status_code, 409, response.text)
+        async with self.sessions() as db:
+            self.assertEqual((await db.get(OfflineScanReconciliation, "OFFLINE-IDENTITY-REUSE")).status,
+                "pending")
+            self.assertIsNone(await db.get(PresenceState, "reused-subject"))
+
+    async def test_master_admin_has_only_a_narrow_cross_zone_hold_review(self):
+        now = datetime.now(timezone.utc)
+        async with self.sessions() as db:
+            db.add(CriticalAlertTrigger(alert_id="cross-zone-hold", subject_id="p1", zone_ids=["a", "b"]))
+            db.add(CriticalEntryRestriction(subject_id="p1", active=True, triggered_at=now,
+                trigger_alert_id="cross-zone-hold"))
+            await db.commit()
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "master", "realm_access": {"roles": ["master-admin"]}}
+        response = await self.client.get("/v1/critical-entry-restrictions")
+        self.assertEqual(response.status_code, 200, response.text)
+        item = response.json()["items"][0]
+        self.assertEqual((item["subjectId"], item["barcode"], item["triggerAlertId"]),
+            ("p1", "p1", "cross-zone-hold"))
+        self.assertEqual(set(item["zoneIds"]), {"a", "b"})
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
+        denied = await self.client.get("/v1/critical-entry-restrictions")
+        self.assertEqual(denied.status_code, 403, denied.text)
+
+    async def test_checkpoint_monitor_runs_when_bulk_alert_capacity_is_exceeded(self):
+        from config import settings
+        from workflows.activities import run_alert_rule_evaluation, run_checkpoint_heartbeat_evaluation
+        old_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+        async with self.sessions() as db:
+            assignments = (await db.scalars(select(TerminalCheckpointAssignment).where(
+                TerminalCheckpointAssignment.checkpoint_id == "cp-main"))).all()
+            for assignment in assignments:
+                assignment.last_heartbeat_at = old_time
+                assignment.updated_at = old_time
+            for move_id in ("capacity-movement-1", "capacity-movement-2"):
+                db.add(Movement(id=move_id, subject_id="p1", checkpoint_id="cp-main", occurred_at=old_time,
+                    result="denied", direction="entry", scan_type="auto", subject_type="employee",
+                    sync_state="synced", data={"id": move_id, "subjectId": "p1", "subjectType": "employee",
+                        "result": "denied", "direction": "entry", "date": "Oct 10, 2026"}))
+            await db.commit()
+        with patch("database.async_session", new=self.sessions), \
+             patch("workflows.activities.async_session", new=self.sessions), \
+             patch.object(settings, "ALERT_EVALUATION_MAX_MOVEMENTS", 1):
+            with self.assertRaises(HTTPException):
+                await run_alert_rule_evaluation()
+            created = await run_checkpoint_heartbeat_evaluation()
+        self.assertEqual(created, 1)
+        async with self.sessions() as db:
+            health = await db.get(CheckpointEvaluationStatus, "checkpoint-heartbeat")
+            self.assertEqual(health.checkpoints_evaluated, 1)
+            self.assertEqual(health.alerts_created, 1)
+        self.app.dependency_overrides[verify_admin_request] = lambda: {
+            "sub": "test-admin", "realm_access": {"roles": ["zone-admin"]}}
+        health_response = await self.client.get("/v1/checkpoints/heartbeat-monitor-health")
+        self.assertEqual(health_response.status_code, 200, health_response.text)
+        self.assertEqual(health_response.json()["status"], "healthy")
 
     async def test_direct_existing_visitor_grant_decides_pending_permission_once(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
@@ -954,7 +1203,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 result="denied", direction="entry", scan_type="auto", subject_type="employee", sync_state="synced",
                 data={"id": "ordinary-denial", "scanType": "auto", "overrideRequestId": "pending-review"}))
             db.add(PresenceState(subject_id="p1", state="inside", last_scan_timestamp=now, entry_override={"requestId": "existing-visit"}))
-            db.add(ScanRequest(idempotency_key=key, subject_id="p1", terminal_id="operator", status_code=200,
+            db.add(ScanRequest(idempotency_key=key, subject_id="p1", terminal_id="operator",
                 response_body=original_response, request_fingerprint="unchanged-fingerprint"))
             await db.commit()
         async with self.engine.begin() as conn:
@@ -1333,7 +1582,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             asset = await db.get(HardwareAsset, "h1")
             asset.data = {**asset.data, "owner": "Alice"}
             db.add(AuditEvent(id="retired-fields-audit", created_at=now, data=snapshot))
-            db.add(ScanRequest(idempotency_key=key, subject_id="p1", terminal_id="operator", status_code=200,
+            db.add(ScanRequest(idempotency_key=key, subject_id="p1", terminal_id="operator",
                 response_body=snapshot, request_fingerprint="unchanged"))
             await db.commit()
         for _ in range(2):

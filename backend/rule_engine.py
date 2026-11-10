@@ -53,13 +53,12 @@ RETIRED_ALERT_CONDITIONS = frozenset({
     "unauthorized_hardware_carrier",
 })
 _IST = timezone(timedelta(hours=5, minutes=30))
-_ATTENDANCE_CUTOFF_HOUR = 18
 
 DEFAULT_ALERT_RULES: list[dict[str, object]] = [
     {
         "id": "rule-no-break",
-        "name": "No break recorded",
-        "description": "Alert every six hours an employee remains inside without an approved exit.",
+        "name": "Continuous presence",
+        "description": "Track one alert case per visit when an employee remains inside without an approved exit.",
         "category": "operational",
         "severity": "medium",
         "enabled": True,
@@ -70,7 +69,7 @@ DEFAULT_ALERT_RULES: list[dict[str, object]] = [
     {
         "id": "rule-irregularity",
         "name": "Irregularity",
-        "description": "Alert when an active employee has no approved entry by the end of the day.",
+        "description": "Alert on scheduled workdays when an active employee has no approved entry by the configured cutoff and grace period.",
         "category": "presence_anomaly",
         "severity": "medium",
         "enabled": True,
@@ -446,7 +445,7 @@ def evaluate_no_break_rules(
     rules: list[AlertRule], visits: list[dict[str, Any]], now: datetime | None = None,
     rule_assignments: dict[str, list[str]] | None = None,
 ) -> list[Alert]:
-    """Raise a warning at each six-hour boundary of an employee's current visit."""
+    """Maintain one alert case per continuous visit, refreshing it at six-hour boundaries."""
     evaluation_now = now or datetime.now(timezone.utc)
     generated: list[Alert] = []
     for visit in visits:
@@ -467,30 +466,28 @@ def evaluate_no_break_rules(
         if due_interval <= last_alerted_interval:
             continue
 
-        # Catch up for a bounded period after evaluator downtime, emitting each
-        # elapsed six-hour boundary instead of collapsing missed warnings.
-        first_interval = max(last_alerted_interval + 1, due_interval - 7)
         start_utc = started_at.astimezone(timezone.utc).isoformat()
         building = visit.get("buildingName") or visit.get("buildingId") or "an unrecorded zone"
         name = visit.get("subjectName") or visit.get("barcode") or subject_id
-        for interval_index in range(first_interval, due_interval + 1):
-            threshold_at = started_at + timedelta(hours=6 * interval_index)
-            identity = uuid.uuid5(uuid.NAMESPACE_URL,
-                f"in-out:no-break:{subject_id}:{start_utc}:{interval_index}")
-            generated.append(Alert(
-                id=f"AL-{identity.hex.upper()}", severity=rule.get("severity", "medium"),
-                status="open", title="No break recorded",
-                reason=(f"{name} has remained inside {building} without an approved exit for "
-                        f"at least {6 * interval_index} hours."),
-                subjectName=name, subjectId=subject_id, subjectType="employee",
-                barcode=visit.get("barcode") or subject_id, checkpoint=building,
-                date=_local_date(threshold_at), time=_local_time(threshold_at),
-                category=rule.get("category", "operational"), ruleId=rule.get("id"),
-                conditionKey="no_break", entryStartedAt=start_utc,
-                entryBuildingId=visit.get("buildingId"), intervalIndex=interval_index,
-                explanation=("This alert tracks uninterrupted presence since the last approved entry. "
-                    "An approved exit resets the six-hour interval; workdays and calendar dates do not."),
-            ))
+        threshold_at = started_at + timedelta(hours=6)
+        identity = uuid.uuid5(uuid.NAMESPACE_URL, f"in-out:no-break:{subject_id}:{start_utc}")
+        generated.append(Alert(
+            id=f"AL-{identity.hex.upper()}",
+            severity=("critical" if rule.get("severity") == "critical" else
+                "high" if due_interval >= 2 else rule.get("severity", "medium")),
+            status="open", title="Continuous presence",
+            reason=(f"{name} has remained inside {building} without an approved exit for "
+                    f"at least {6 * due_interval} hours."),
+            subjectName=name, subjectId=subject_id, subjectType="employee",
+            barcode=visit.get("barcode") or subject_id, checkpoint=building,
+            date=_local_date(threshold_at), time=_local_time(threshold_at),
+            category=rule.get("category", "operational"), ruleId=rule.get("id"),
+            conditionKey="no_break", entryStartedAt=start_utc,
+            entryBuildingId=visit.get("buildingId"), intervalIndex=due_interval,
+            reminderCount=max(0, due_interval - 1),
+            explanation=("One alert case is kept for this visit. Each later six-hour check updates the case "
+                "instead of adding another warning; an approved exit starts a new case."),
+        ))
     return generated
 
 
@@ -611,6 +608,11 @@ def evaluate_scheduled_rules(
     now: datetime | None = None,
     rule_assignments: dict[str, list[str]] | None = None,
     irregularity_skip_dates: dict[str, list[str]] | None = None,
+    attendance_workdays: tuple[int, ...] = (0, 1, 2, 3, 4),
+    attendance_cutoff_hour: int = 18,
+    attendance_cutoff_minute: int = 0,
+    attendance_grace_minutes: int = 60,
+    attendance_holidays: set[str] | None = None,
 ) -> list[Alert]:
     """
     Evaluate time-based / scheduled alert rules and return new Alert dicts.
@@ -672,16 +674,36 @@ def evaluate_scheduled_rules(
     irregularity_rule = selected_rule("irregularity")
     local_now = evaluation_now.astimezone(_IST)
     today = _local_date(evaluation_now)
-    if irregularity_rule and local_now.hour >= _ATTENDANCE_CUTOFF_HOUR:
+    cutoff = local_now.replace(hour=attendance_cutoff_hour, minute=attendance_cutoff_minute,
+        second=0, microsecond=0) + timedelta(minutes=attendance_grace_minutes)
+    attendance_day = local_now.date().isoformat()
+    if (irregularity_rule and local_now.weekday() in attendance_workdays
+            and attendance_day not in (attendance_holidays or set()) and local_now >= cutoff):
         employee_roster = employees or []
-        entered_today = {
-            event.get("subjectId")
-            for event in movements
-            if event.get("result") == "approved"
-            and event.get("direction") == "entry"
-            and event.get("subjectType") == "employee"
-            and event.get("date") == today
-        }
+        entry_times: dict[str, datetime | None] = {}
+        entered_today = set()
+        for event in movements:
+            if not (
+                event.get("result") == "approved"
+                and event.get("direction") == "entry"
+                and event.get("subjectType") == "employee"
+                and event.get("date") == today
+                and event.get("subjectId")
+            ):
+                continue
+            employee_id = event["subjectId"]
+            raw_timestamp = event.get("createdAt")
+            try:
+                entry_at = datetime.fromisoformat(str(raw_timestamp).replace("Z", "+00:00"))
+                if entry_at.tzinfo is None:
+                    entry_at = entry_at.replace(tzinfo=_IST)
+                entry_at = entry_at.astimezone(_IST)
+            except (TypeError, ValueError):
+                entry_at = None
+            entered_today.add(employee_id)
+            if employee_id not in entry_times or (entry_at is not None and
+                    (entry_times[employee_id] is None or entry_at < entry_times[employee_id])):
+                entry_times[employee_id] = entry_at
         for employee in employee_roster:
             employee_id = employee.get("id", "")
             status = employee.get("status", "active")
@@ -689,7 +711,8 @@ def evaluate_scheduled_rules(
                 not employee_id
                 or (employee.get("type") or employee.get("kind")) != "employee"
                 or status in {"inactive", "restricted", "expired"}
-                or employee_id in entered_today
+                or (employee_id in entered_today and
+                    (entry_times.get(employee_id) is None or entry_times[employee_id] <= cutoff))
             ):
                 continue
             if local_now.date().isoformat() in (irregularity_skip_dates or {}).get(employee_id, []):
@@ -707,10 +730,9 @@ def evaluate_scheduled_rules(
                     severity=employee_rule.get("severity", "medium"),
                     status="open",
                     title="Attendance irregularity",
-                    reason=(
-                        f"{employee.get('name', employee_id)} is listed as an active "
-                        "employee but has no approved entry today."
-                    ),
+                    reason=(f"{employee.get('name', employee_id)} recorded their first entry after the attendance cutoff."
+                        if employee_id in entered_today else
+                        f"{employee.get('name', employee_id)} has no approved entry by the attendance cutoff."),
                     subjectName=employee.get("name", employee_id),
                     barcode=employee.get("barcode") or employee_id,
                     checkpoint="Attendance policy",
@@ -720,7 +742,8 @@ def evaluate_scheduled_rules(
                     ruleId=employee_rule.get("id"),
                     conditionKey="irregularity",
                     subjectId=employee_id,
-                    explanation="No approved employee entry was recorded before the 6:00 PM attendance cutoff.",
+                    explanation=(f"The attendance cutoff is {attendance_cutoff_hour:02d}:{attendance_cutoff_minute:02d} "
+                        f"plus {attendance_grace_minutes} minutes of grace on configured workdays."),
                 )
             )
             irregularity_keys.add(duplicate_key)

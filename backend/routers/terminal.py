@@ -68,16 +68,17 @@ async def scan(payload: BrowserScanPayload,
                                validated_checkpoint_id=checkpoint_id)
     if not db.info.get("scan_replayed"):
         event = result["decision"]["event"]
-        await enqueue_presence(db, {
-            "type": "manual_review_consumed" if result.get("manualApprovalRequest") else "scan",
-            "subject_id": result.get("subject_id"),
-            "state": ("inside" if event["direction"] == "entry" else "outside") if result["allowed"] else None,
-            "movement": event,
-            "alerts": db.info.get("scan_alerts", []),
-            "people": result.get("updatedPeople", []),
-            "hardwareAssets": result.get("updatedHardwareAssets", []),
-            "request": result.get("manualApprovalRequest"),
-        })
+        if not db.info.get("scan_reconciliation"):
+            await enqueue_presence(db, {
+                "type": "manual_review_consumed" if result.get("manualApprovalRequest") else "scan",
+                "subject_id": result.get("subject_id"),
+                "state": ("inside" if event["direction"] == "entry" else "outside") if result["allowed"] else None,
+                "movement": event,
+                "alerts": db.info.get("scan_alerts", []),
+                "people": result.get("updatedPeople", []),
+                "hardwareAssets": result.get("updatedHardwareAssets", []),
+                "request": result.get("manualApprovalRequest"),
+            })
     await db.commit()
     return project_terminal_scan_response(result)
 

@@ -116,6 +116,25 @@ async def _create_cross_zone_access_request(payload: PermissionRequestCreate, db
     valid_to = current_data.get("validTo") or ""
     validate_permission_window(valid_from, valid_to, now=now, allow_past_start=True, permanent=True)
     requested_zones = list(dict.fromkeys([*previous_zones, target_zone_id]))
+    previous_checkpoint_scopes = current_data.get("checkpointScopes")
+    if not isinstance(previous_checkpoint_scopes, dict):
+        existing_checkpoints = current_data.get("checkpoints")
+        if not isinstance(existing_checkpoints, list):
+            existing_checkpoints = current_data.get("allowedCheckpoints")
+        if isinstance(existing_checkpoints, list) and existing_checkpoints:
+            checkpoint_rows = (await db.execute(select(Checkpoint.id, Checkpoint.zone_id).where(
+                Checkpoint.id.in_(existing_checkpoints), Checkpoint.active.is_(True)
+            ))).all()
+            previous_checkpoint_scopes = {zone_id: [] for zone_id in previous_zones}
+            for checkpoint_id, zone_id in checkpoint_rows:
+                if zone_id in previous_checkpoint_scopes:
+                    previous_checkpoint_scopes[zone_id].append(checkpoint_id)
+        else:
+            # Legacy grants without selectors allow every current/future gate
+            # in the existing zones. Preserve that meaning per zone.
+            previous_checkpoint_scopes = {zone_id: None for zone_id in previous_zones}
+    requested_checkpoint_scopes = dict(previous_checkpoint_scopes)
+    requested_checkpoint_scopes[target_zone_id] = [target_checkpoint.id]
     request_id = f"REQ-{uuid.uuid4().hex[:8].upper()}"
     request_data = {
         "id": request_id,
@@ -129,6 +148,7 @@ async def _create_cross_zone_access_request(payload: PermissionRequestCreate, db
         "checkpoint": (target_checkpoint.data or {}).get("name", target_checkpoint.id),
         "requester": actor.get("sub") or "Administrator",
         "requestedZones": requested_zones,
+        "requestedCheckpointScopes": requested_checkpoint_scopes,
         "previousZones": previous_zones,
         "validFrom": valid_from,
         "validTo": valid_to,

@@ -160,7 +160,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         allowed_review = await self.review(newer)
         self.assertEqual(allowed_review.status_code, 200, allowed_review.text)
 
-    async def test_fourth_alert_requires_reset_after_three_confirmed_warnings(self):
+    async def test_fourth_alert_can_be_excused_but_cannot_be_confirmed_until_reset(self):
         self.authorize()
         now = datetime.now(timezone.utc)
         for index in range(3):
@@ -172,11 +172,14 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.acknowledge(fourth)).status_code, 409)
         blocked_accept = await self.review(fourth)
         self.assertEqual(blocked_accept.status_code, 409, blocked_accept.text)
-        blocked_excuse = await self.review(fourth, "excused", "Do not bypass the warning reset")
-        self.assertEqual(blocked_excuse.status_code, 409, blocked_excuse.text)
+        excused = await self.review(fourth, "excused", "Verified this alert was a false alarm")
+        self.assertEqual(excused.status_code, 200, excused.text)
+        self.assertEqual(excused.json()["warning"]["count"], 3)
+        fifth = await self.create_alert(created_at=now + timedelta(seconds=4))
+        self.assertEqual((await self.review(fifth)).status_code, 409)
         reset = await self.reset()
         self.assertEqual(reset.status_code, 200, reset.text)
-        reviewed = await self.review(fourth)
+        reviewed = await self.review(fifth)
         self.assertEqual(reviewed.status_code, 200, reviewed.text)
         self.assertEqual(reviewed.json()["alert"]["status"], "warned")
 
@@ -263,7 +266,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await db.get(AlertReview, alert_id)).subject_id, "p1")
             self.assertEqual((await db.get(Alert, alert_id)).data["subjectId"], "p1")
 
-    async def test_reset_clears_count_lifts_current_hold_preserves_history_and_is_idempotent(self):
+    async def test_reset_clears_count_but_keeps_hold_until_separate_release(self):
         self.authorize()
         first_id = await self.create_alert()
         critical_id = await self.create_alert(severity="critical")
@@ -275,9 +278,8 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         data = reset.json()
         self.assertEqual(data["warning"]["count"], 0)
         self.assertEqual(data["warning"]["resetBy"], "review-admin")
-        self.assertFalse(data["entryRestriction"]["active"])
-        self.assertEqual(data["entryRestriction"]["releaseReason"], "Checked records; reset and allow entry")
-        self.assertEqual(await self.audit_count(), before + 2)
+        self.assertTrue(data["entryRestriction"]["active"])
+        self.assertEqual(await self.audit_count(), before + 1)
         history = (await self.client.get("/v1/alerts")).json()["items"]
         for item in history:
             self.assertEqual(item["status"], "acknowledged")
@@ -288,7 +290,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         again = await self.reset(reason="Repeat must not change the epoch")
         self.assertEqual(again.json()["warning"], data["warning"])
         self.assertNotIn("auditEvent", again.json())
-        self.assertEqual(await self.audit_count(), before + 2)
+        self.assertEqual(await self.audit_count(), before + 1)
         retry = await self.review(first_id)
         self.assertEqual(retry.json()["alert"]["status"], "acknowledged")
         self.assertEqual(retry.json()["warning"]["count"], 0)
@@ -298,19 +300,19 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((await self.review(new_id)).json()["warning"]["count"], 1)
         async with self.sessions() as db:
             self.assertEqual(await db.scalar(select(func.count()).select_from(AlertReview)), 3)
-            self.assertEqual((await db.get(CriticalEntryRestriction, "p1")).released_by, "review-admin")
+            self.assertTrue((await db.get(CriticalEntryRestriction, "p1")).active)
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), 0)
             self.assertIsNone(await db.get(PresenceState, "p1"))
 
-    async def test_zero_count_reset_still_lifts_new_hold_without_excusing_pending_alert(self):
+    async def test_zero_count_reset_keeps_new_hold_and_does_not_excuse_pending_alert(self):
         self.authorize()
         first = await self.reset()
         self.assertEqual(first.json()["warning"]["count"], 0)
         critical_id = await self.create_alert(severity="critical")
         reset = await self.reset(reason="Release newly raised hold")
         self.assertEqual(reset.status_code, 200, reset.text)
-        self.assertFalse(reset.json()["entryRestriction"]["active"])
-        self.assertNotEqual(first.json()["warning"]["resetAt"], reset.json()["warning"]["resetAt"])
+        self.assertTrue(reset.json()["entryRestriction"]["active"])
+        self.assertEqual(first.json()["warning"]["resetAt"], reset.json()["warning"]["resetAt"])
         async with self.sessions() as db:
             self.assertEqual((await db.get(Alert, critical_id)).data["status"], "open")
             self.assertIsNone(await db.get(AlertReview, critical_id))
@@ -319,7 +321,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         history = (await self.client.get("/v1/alerts")).json()
         self.assertTrue(next(row for row in history["warnings"] if row["subjectId"] == "p1")["entryRestriction"]["active"])
 
-    async def test_reset_lifts_scan_entry_hold_without_changing_presence_or_normal_access(self):
+    async def test_reset_does_not_lift_scan_entry_hold_and_release_is_a_separate_decision(self):
         self.authorize()
         await self.create_alert(severity="critical")
         async def scan():
@@ -335,11 +337,20 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
             person_data = (await db.get(Person, "p1")).data
         reset = await self.reset()
         self.assertEqual(reset.status_code, 200, reset.text)
+        self.assertTrue(reset.json()["entryRestriction"]["active"])
         async with self.sessions() as db:
             state = await db.get(PresenceState, "p1")
             self.assertEqual((state.state, state.last_scan_timestamp, state.entry_override), before)
             self.assertEqual(await db.scalar(select(func.count()).select_from(Movement)), movement_count)
             self.assertEqual((await db.get(Person, "p1")).data, person_data)
+        still_blocked = await scan()
+        self.assertFalse(still_blocked.json()["allowed"], still_blocked.text)
+        async with self.sessions() as db:
+            restriction = await db.get(CriticalEntryRestriction, "p1")
+            trigger_alert_id = restriction.trigger_alert_id
+        released = await self.client.post(f"/v1/alerts/{trigger_alert_id}/release-entry-restriction",
+            json={"reason": "Entry review completed"})
+        self.assertEqual(released.status_code, 200, released.text)
         entered = await scan()
         self.assertTrue(entered.json()["allowed"], entered.text)
         self.assertEqual(entered.json()["decision"]["event"]["direction"], "entry")
@@ -529,7 +540,7 @@ class AlertReviewDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             reset = await reset_subject_warnings(db, "p1", "reset-admin", "Rollback exercise")
             self.assertEqual(reset["warning"]["count"], 0)
-            self.assertFalse(reset["entryRestriction"]["active"])
+            self.assertTrue(reset["entryRestriction"]["active"])
             await db.rollback()
         async with self.sessions() as db:
             self.assertEqual((await db.get(Alert, alert_id)).data["status"], "warned")

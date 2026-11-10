@@ -16,7 +16,7 @@ import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "tests"))
 import test_database as fixture
-from sqlalchemy import event
+from sqlalchemy import event, insert
 from models import Alert, Movement, Person, Subject
 from routers import alerts, dashboard, registry
 from routers.exports import ExportQuery, _existing_read, build_export
@@ -36,6 +36,8 @@ async def benchmark(args):
     case = fixture.DatabaseTests("test_unauthenticated_reads_and_writes_are_rejected")
     await case.asyncSetUp()
     observation = ContextVar("benchmark_observation", default=None)
+    actor = {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
+    movement_batch_size = 5_000
 
     def observe(_conn, _cursor, statement, _parameters, _context, _many):
         current = observation.get()
@@ -56,12 +58,25 @@ async def benchmark(args):
                 person=Person(data={"name": f"Employee {index:05}", "status": "active", "allowedZones": ["a"], "inside": False}))
                 for index in range(args.subjects)])
             await db.flush()
-            db.add_all([Movement(id=f"bench-movement-{index}", subject_id=f"bench-person-{index % args.subjects}",
-                checkpoint_id="a-1", occurred_at=now - timedelta(seconds=(args.movements - index) * 12),
-                result="approved", direction="entry" if (index // args.subjects) % 2 == 0 else "exit",
-                scan_type="auto", subject_type="employee", sync_state="synced",
-                data={"subjectName": f"Employee {index % args.subjects:05}", "barcode": f"BENCH-{index % args.subjects}", "checkpoint": "Front Gate"})
-                for index in range(args.movements)])
+            # Bound Python memory for large movement-history scenarios.
+            for batch_start in range(0, args.movements, movement_batch_size):
+                movement_rows = []
+                for index in range(batch_start, min(batch_start + movement_batch_size, args.movements)):
+                    subject_number = index % args.subjects
+                    movement_rows.append({
+                        "id": f"bench-movement-{index}",
+                        "subject_id": f"bench-person-{subject_number}",
+                        "checkpoint_id": "cp-main",
+                        "occurred_at": now - timedelta(seconds=(args.movements - index) * 12),
+                        "result": "approved",
+                        "direction": "entry" if (index // args.subjects) % 2 == 0 else "exit",
+                        "scan_type": "auto",
+                        "subject_type": "employee",
+                        "sync_state": "synced",
+                        "data": {"subjectName": f"Employee {subject_number:05}",
+                            "barcode": f"BENCH-{subject_number}", "checkpoint": "Front Gate"},
+                    })
+                await db.execute(insert(Movement), movement_rows)
             db.add_all([Alert(id=f"bench-alert-{index}", created_at=now - timedelta(minutes=index), data={
                 "id": f"bench-alert-{index}", "title": "Attendance irregularity", "ruleId": "rule-attendance-irregularity",
                 "subjectId": f"bench-person-{index % args.subjects}", "subjectName": f"Employee {index % args.subjects:05}",
@@ -96,37 +111,46 @@ async def benchmark(args):
 
         async def read(endpoint, **kwargs):
             async with case.sessions() as db:
-                return await _existing_read(endpoint, db, **kwargs)
+                return await _existing_read(endpoint, db, actor, **kwargs)
 
         # Warm connections/prepared statements; warmed cases are still measured
         # on the same fixture and resource budget.
         await read(registry.registry_bundle)
-        await read(registry.registry_bundle, kind="employee", days=1, limit=25)
+        await read(registry.registry_bundle, kind="employee", days=1, limit=25, sortKey="averageHours")
         await timed("registryComplete", lambda _: read(registry.registry_bundle))
-        await timed("registryFirst25WithGlobalSummary", lambda _: read(registry.registry_bundle, kind="employee", days=1, limit=25))
+        await timed("registryFirst25WithGlobalSummary", lambda _: read(registry.registry_bundle,
+            kind="employee", days=1, limit=25, sortKey="averageHours"))
         await timed("alertsComplete", lambda _: read(alerts.list_alerts, limit=min(args.alerts, 500)))
         await timed("alertsCommandFirst50", lambda _: read(alerts.list_alerts, view="command", limit=50))
+
+        report_rows = min(args.movements, 10_000)
+        report_start = now - timedelta(seconds=max(1, report_rows) * 12 + 1)
 
         async def paged_report(_index):
             from routers.movements import list_movements
             async with case.sessions() as db:
-                first = await _existing_read(list_movements, db, limit=200, page_size=200, subjectGroup="people")
+                first = await _existing_read(list_movements, db, actor, limit=200, page_size=200,
+                    subjectGroup="people", startAt=report_start.isoformat(), endAt=now.isoformat())
                 items = first["items"]
-                for offset in range(200, first["total"], 200):
-                    page = await _existing_read(list_movements, db, limit=200, page_size=200, offset=offset, subjectGroup="people")
+                for offset in range(200, min(first["total"], report_rows), 200):
+                    page = await _existing_read(list_movements, db, actor, limit=200, page_size=200,
+                        offset=offset, subjectGroup="people", startAt=report_start.isoformat(), endAt=now.isoformat())
                     items += page["items"]
                 return {"items": items, "total": first["total"]}
 
         async def single_report(_index):
             async with case.sessions() as db:
-                return await build_export(db, ExportQuery(source="movements", subjectGroup="people"))
+                query = ExportQuery(source="movements", subjectGroup="people",
+                    startAt=report_start, endAt=now)
+                return await build_export(db, query, actor)
         await timed("reportPublic200RowPages", paged_report, samples=min(args.samples, 5))
         await timed("reportOneConsistentRead", single_report, samples=min(args.samples, 5))
-        report["reportBrowserRequests"] = {"before": (args.movements + 199) // 200, "after": 1}
+        report["reportBrowserRequests"] = {"rowsCompared": report_rows,
+            "before": (report_rows + 199) // 200, "after": 1}
 
         async def scan(index):
             async with case.sessions() as db:
-                result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode=f"BENCH-{index}", checkpointId="a-1"), "benchmark")
+                result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode=f"BENCH-{index}", checkpointId="cp-main"), "benchmark")
                 if not result["allowed"]:
                     raise RuntimeError("Synthetic scan was denied: " + str(result["decision"]))
                 await enqueue_presence(db, {"type": "scan", "movement": result["decision"]["event"]})
@@ -159,12 +183,13 @@ async def benchmark(args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--subjects", type=int, default=1000)
-    parser.add_argument("--movements", type=int, default=5000)
+    parser.add_argument("--movements", type=int, default=5000,
+        help="synthetic movement count, inserted in 5,000-row batches (up to 1,000,000; large fixtures need ample test-database storage)")
     parser.add_argument("--alerts", type=int, default=500)
     parser.add_argument("--samples", type=int, default=12)
     parser.add_argument("--concurrency", type=int, default=4)
     arguments = parser.parse_args()
     if not (1 <= arguments.samples <= min(arguments.subjects, 100) and 1 <= arguments.concurrency <= 8
-            and 1 <= arguments.subjects <= 5000 and 0 <= arguments.movements <= 10_000 and 1 <= arguments.alerts <= 500):
+            and 1 <= arguments.subjects <= 5000 and 0 <= arguments.movements <= 1_000_000 and 1 <= arguments.alerts <= 500):
         parser.error("Choose bounded fixture sizes and samples no larger than the subject count")
     print(json.dumps(asyncio.run(benchmark(arguments)), indent=2))

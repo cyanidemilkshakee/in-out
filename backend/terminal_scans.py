@@ -311,6 +311,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
     if expected_operator and terminal_id != "browser:" + expected_operator:
         raise HTTPException(403, "This scan belongs to another operator account")
     db.info["scan_replayed"] = False
+    db.info["scan_reconciliation"] = False
     db.info["scan_alerts"] = []
     normalized = payload.model_dump(mode="json")
     # An ownership transport guard must not change a stored scan fingerprint,
@@ -374,6 +375,41 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
         checkpoint_id = canonical_checkpoint_id(payload.checkpoint_id.strip())
         if checkpoint_id != validated_checkpoint_id:
             raise HTTPException(422, "Choose a registered checkpoint")
+    if not payload.online or payload.captured_offline_at is not None or payload.queue_captured_at is not None:
+        # A missing scan receipt means we cannot safely tell whether this was
+        # already applied. Preserve the evidence for an administrator instead
+        # of evaluating it as a new crossing against today's presence state.
+        from offline_reconciliation import stage_offline_scan
+        reconciliation = await stage_offline_scan(db, payload=payload, terminal_id=terminal_id,
+            checkpoint_id=checkpoint_id, request_data={key: value for key, value in normalized.items()
+                if key not in {"expected_operator_subject", "queue_captured_at"}})
+        limit_identity = (request_scope or {}).get("state", {}).get("limit_identity")
+        if reconciliation.subject_id is None and limit_identity:
+            await consume_unknown_barcode_quota(limit_identity, payload.barcode, request_scope)
+        reconciled_subject = await db.get(Subject, reconciliation.subject_id) if reconciliation.subject_id else None
+        checkpoint = await db.get(Checkpoint, checkpoint_id)
+        now = datetime.now(timezone.utc)
+        direction = payload.direction or "unknown"
+        event = {"id": reconciliation.id, "date": _current_date(now), "time": _current_time(now),
+            "checkpointId": checkpoint_id, "checkpoint": (checkpoint.data or {}).get("name", checkpoint.id)
+                if checkpoint else checkpoint_id,
+            "direction": direction, "subjectId": reconciliation.subject_id or "unverified",
+            "subjectName": "Offline scan pending reconciliation",
+            "subjectType": reconciled_subject.kind if reconciled_subject else "visitor",
+            "barcode": payload.barcode.strip(), "result": "denied",
+            "reason": "Offline scan receipt was not found. An administrator must reconcile it before presence changes.",
+            "denialCode": "manual_review", "scanType": "auto", "syncState": "queued",
+            "capturedOfflineAt": reconciliation.captured_at.isoformat() if reconciliation.captured_at else None,
+            "createdAt": now.isoformat()}
+        decision = {"event": event, "replayed": False, "authorizeMovement": False}
+        response = {"allowed": False, "reason": event["reason"], "subject_id": reconciliation.subject_id,
+            "decision": decision, "replayed": False, "authorizeMovement": False,
+            "needsReconciliation": True, "reconciliationId": reconciliation.id}
+        db.add(ScanRequest(idempotency_key=key, subject_id=reconciliation.subject_id,
+            terminal_id=terminal_id, response_body=response, request_fingerprint=fingerprint))
+        db.info["scan_reconciliation"] = True
+        await db.flush()
+        return response
     validate_queued_scan_age(payload)
     subject = (await db.execute(select(Subject).where(
         func.lower(Subject.barcode) == payload.barcode.strip().lower()
@@ -437,7 +473,7 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
             "decision": decision, "updatedPeople": [], "updatedHardwareAssets": [],
             "replayed": False, "authorizeMovement": False}
         db.add(ScanRequest(idempotency_key=key, subject_id=None, terminal_id=terminal_id,
-            status_code=200, response_body=result, request_fingerprint=fingerprint))
+            response_body=result, request_fingerprint=fingerprint))
         await db.flush()
         return result
     if subject.kind == "hardware" and payload.selected_hardware_ids:
@@ -472,6 +508,8 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
         if metadata is None:
             raise HTTPException(422, "Subject metadata is missing")
         data = {**current_subject_metadata(sub.kind, normalize_facility_document(metadata.data)), "id": sub.id, "barcode": sub.barcode}
+        # This comes from the registry row, never editable JSON metadata.
+        data["kind"] = sub.kind
         # Never trust an editable JSONB metadata field for this server-owned hold.
         data["entryRestriction"] = restrictions.get(sub.id)
         permission = permissions.get(sub.id)
@@ -496,9 +534,15 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
         # the evaluator always intersects them with permitted zones.
         if isinstance(permission.get("checkpoints"), list):
             data["allowedCheckpoints"] = permission["checkpoints"]
+        if isinstance(permission.get("checkpointScopes"), dict):
+            data["allowedCheckpointScopes"] = permission["checkpointScopes"]
         if permission.get("validFrom"):
             data["validFrom"] = permission["validFrom"]
-        if permission.get("validTo"):
+        if sub.kind == "visitor" and not permission.get("validTo"):
+            # Once a canonical permission exists, its empty expiry cannot be
+            # overridden by stale JSON metadata copied from an older grant.
+            data.pop("validTo", None)
+        elif permission.get("validTo"):
             data["validTo"] = permission["validTo"]
         if sub.kind != "hardware":
             data["type"] = sub.kind
@@ -715,6 +759,6 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
     result["authorizeMovement"] = result["allowed"]
     decision.update(replayed=False, authorizeMovement=result["allowed"])
     db.add(ScanRequest(idempotency_key=key, subject_id=subject.id, terminal_id=terminal_id,
-        status_code=200, response_body=result, request_fingerprint=fingerprint))
+        response_body=result, request_fingerprint=fingerprint))
     await db.flush()
     return result

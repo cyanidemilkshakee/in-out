@@ -103,6 +103,24 @@ export type EntryRestriction = {
   releaseReason?: string;
 };
 
+export type EntryRestrictionDirectoryItem = {
+  subjectId: string;
+  subjectName: string;
+  subjectType: string;
+  barcode: string;
+  triggerAlertId: string;
+  triggeredAt: string;
+  zoneIds: string[];
+  zones: string[];
+};
+
+export type EntryRestrictionDirectory = {
+  items: EntryRestrictionDirectoryItem[];
+  total: number;
+  limit: number;
+  offset: number;
+};
+
 export type Checkpoint = {
   id: string;
   name: string;
@@ -631,6 +649,7 @@ export type AlertCommandSummary = {
 export interface DataService {
   getSnapshot(scope?: DataScope, signal?: AbortSignal): Promise<AppDataSnapshot>;
   queryOpenAlertCount(signal?: AbortSignal): Promise<number>;
+  queryEntryRestrictions(query?: { limit?: number; offset?: number }, signal?: AbortSignal): Promise<EntryRestrictionDirectory>;
   queryMovements(query: MovementQuery, signal?: AbortSignal): Promise<MovementPage>;
   queryDashboardAnalytics(query: DashboardAnalyticsQuery, signal?: AbortSignal): Promise<DashboardAnalytics>;
   queryEmployeeActivity(query: EmployeeActivityQuery, signal?: AbortSignal): Promise<EmployeeActivity>;

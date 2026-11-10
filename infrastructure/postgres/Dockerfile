@@ -7,4 +7,4 @@ RUN apk upgrade --no-cache \
 USER postgres
 
 EXPOSE 1020
-CMD ["postgres", "-p", "1020"]
+CMD ["postgres", "-p", "1020", "-c", "shared_preload_libraries=pg_stat_statements"]

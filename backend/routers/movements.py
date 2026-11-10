@@ -459,7 +459,7 @@ async def add_movement_note(
     if physical_id is None:
         raise HTTPException(status_code=404, detail="Movement not found")
 
-    note = MovementNote(event_id=physical_id, note=payload.note, created_at=datetime.now(timezone.utc))
+    note = MovementNote(event_id=physical_id, note=payload.note)
     db.add(note)
     await db.flush()
     # Check the complete reply before committing. A capacity rejection must

@@ -30,6 +30,7 @@ import type {
   PermissionRequest,
   PermissionRequestInput,
   EntryRestriction,
+  EntryRestrictionDirectory,
   RecordScanInput,
   RecordScanResult,
   RegistryPage, RegistryPageQuery, RegistrySubjectPage, RegistrySubjectQuery, SubjectProfile,
@@ -139,6 +140,14 @@ export class HttpDataService implements DataService {
 
   async queryOpenAlertCount(signal?: AbortSignal): Promise<number> {
     return readResponse<number>(await fetch("/api/data?resource=openAlertCount", { cache: "no-store", signal }), signal);
+  }
+
+  async queryEntryRestrictions(query: { limit?: number; offset?: number } = {}, signal?: AbortSignal): Promise<EntryRestrictionDirectory> {
+    const params = new URLSearchParams({ resource: "entryRestrictions" });
+    if (query.limit !== undefined) params.set("limit", String(query.limit));
+    if (query.offset !== undefined) params.set("offset", String(query.offset));
+    return readResponse<EntryRestrictionDirectory>(
+      await fetch(`/api/data?${params}`, { cache: "no-store", signal }), signal);
   }
 
   async getSnapshot(scope: DataScope = "all", signal?: AbortSignal) {

@@ -13,7 +13,8 @@ from models import (Subject, Person, HardwareAsset, AccessPermission, PresenceSt
                     PermissionRequestModel, Movement, Checkpoint, AuditEvent)
 from movement_logic import _current_date, _current_time
 from access_validation import (parse_validity, require_registered_checkpoint,
-    validate_permission_window, validate_registered_checkpoints, validate_registered_zones)
+    validate_permission_window, validate_registered_checkpoints, validate_registered_zones,
+    validate_checkpoint_scopes)
 from facility_zones import canonical_checkpoint_id, normalize_facility_document
 from schemas import manual_approval_minutes
 from manual_review_policy import MANUAL_REVIEW_TIMEOUT_MINUTES, manual_access_snapshot, revised_access_data
@@ -29,7 +30,7 @@ def permission_version(permission):
     """Bind a pending visitor request to the server-owned permission it reviewed."""
     if permission is None:
         return None
-    fields = ("state", "zones", "checkpoints", "validFrom", "validTo", "source", "requestId")
+    fields = ("state", "zones", "checkpoints", "checkpointScopes", "validFrom", "validTo", "source", "requestId")
     snapshot = json.dumps({"id": permission.id,
         "data": {key: (permission.data or {}).get(key) for key in fields}}, sort_keys=True)
     return hashlib.sha256(snapshot.encode()).hexdigest()
@@ -464,12 +465,17 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
                 "assignment": perm.data.get("assignment", subject.kind.title()), "source": "request", "requestId": req.id}
             if decision == "approved":
                 permanent_access = data.get("permanentAccess") is True and data.get("origin") in {"permission_manager", "cross_zone_request"}
+                if subject.kind == "visitor" and (permanent_access or not data.get("validTo")):
+                    raise HTTPException(422, "Visitor access must have an expiry")
                 validate_permission_window(data.get("validFrom"), data.get("validTo"), now=now,
                     allow_past_start=True, permanent=permanent_access)
                 zones = await validate_registered_zones(db, data.get("requestedZones") or [])
                 req.data = {**req.data, "requestedZones": zones}
                 permission.update(zones=zones, validFrom=data.get("validFrom", ""), validTo=data.get("validTo", ""))
                 requested_checkpoints = data.get("requestedCheckpoints")
+                requested_checkpoint_scopes = data.get("requestedCheckpointScopes")
+                if requested_checkpoints is not None and requested_checkpoint_scopes is not None:
+                    raise HTTPException(422, "Choose either flat checkpoints or per-zone checkpoint scopes")
                 if requested_checkpoints is not None:
                     if kind == "visitor" and (not isinstance(requested_checkpoints, list) or len(requested_checkpoints) != 1):
                         raise HTTPException(422, "Visitor access must target exactly one checkpoint")
@@ -481,7 +487,13 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
                         raise HTTPException(422, "The primary checkpoint must be included in checkpoint access")
                     req.data = {**req.data, "requestedCheckpoints": normalized_checkpoints}
                     permission["checkpoints"] = normalized_checkpoints
-                elif kind in {"visitor", "zone_access"}:
+                elif requested_checkpoint_scopes is not None:
+                    checkpoint_scopes = await validate_checkpoint_scopes(
+                        db, requested_checkpoint_scopes, zones)
+                    req.data = {**req.data, "requestedCheckpointScopes": checkpoint_scopes}
+                    permission["checkpointScopes"] = checkpoint_scopes
+                    permission.pop("checkpoints", None)
+                elif kind == "visitor":
                     permission.pop("checkpoints", None)
             if not superseded:
                 permission = revised_access_data(perm.data, permission, permission=True, force=True)
@@ -495,6 +507,10 @@ async def apply_permission_decision(db, request_id, decision, actor, reason, *, 
                         updated_metadata["allowedCheckpoints"] = permission["checkpoints"]
                     elif kind in {"visitor", "zone_access"}:
                         updated_metadata.pop("allowedCheckpoints", None)
+                    if isinstance(permission.get("checkpointScopes"), dict):
+                        updated_metadata["allowedCheckpointScopes"] = permission["checkpointScopes"]
+                    else:
+                        updated_metadata.pop("allowedCheckpointScopes", None)
                 metadata.data = revised_access_data(metadata.data, updated_metadata, force=True)
     req.data = {**req.data, "id": req.id, "status": decision, "decidedAt": data.get("decidedAt") or now.isoformat(),
                 "decidedBy": data.get("decidedBy") or actor, "decisionReason": reason, "appliedAt": now.isoformat()}

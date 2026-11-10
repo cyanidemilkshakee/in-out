@@ -25,7 +25,7 @@ from terminal_assignments import record_terminal_heartbeat, require_checkpoint
 from redis_client import get_redis_pool, close_redis_pool
 from routers import presence, movements, registry, permissions
 from routers import dashboard, alerts, audit, checkpoints, terminal, admin_profile, keycloak_admin, zones
-from routers import user_management_auth, exports, password_updates
+from routers import user_management_auth, exports, password_updates, offline_reconciliation
 from routers import invitations
 from temporal_worker import get_temporal_client, close_temporal_client
 
@@ -108,6 +108,7 @@ app.include_router(terminal.router, dependencies=[Depends(verify_terminal_access
 app.include_router(admin_profile.router, dependencies=[Depends(verify_admin_request)])
 app.include_router(exports.router)
 app.include_router(password_updates.router)
+app.include_router(offline_reconciliation.router)
 
 
 @app.post("/internal/gateway/identity", include_in_schema=False)
@@ -157,7 +158,7 @@ async def process_scan(
         raw_response = await record_scan(db, idempotency_key, payload, payload.terminal_id,
             validated_checkpoint_id=checkpoint_id, **scan_options)
         response = ScanResponse(**raw_response)
-        if not db.info.get("scan_replayed"):
+        if not db.info.get("scan_replayed") and not db.info.get("scan_reconciliation"):
             await enqueue_presence(db, {
                 "type": "scan",
                 "subject_id": response.subject_id,

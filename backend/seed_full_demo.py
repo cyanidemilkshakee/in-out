@@ -823,8 +823,7 @@ def fixture_records(now: datetime, identities: dict[str, Any]):
     # all 5,000 staff scans with artificial comments.
     for employee_number in range(1, 51, 5):
         event_id = f"DEMO-EMP-MOVE-{employee_number:04d}-01"
-        note_rows.append({"event_id": event_id, "note": "Showcase history: scheduled morning arrival.",
-            "created_at": now - timedelta(days=45)})
+        note_rows.append({"event_id": event_id, "note": "Showcase history: scheduled morning arrival."})
 
     return {
         "zones": zones, "checkpoints": checkpoints, "zone_assignments": zone_assignment_rows,
@@ -912,8 +911,8 @@ async def write_fixture(db, now: datetime, identities: dict[str, Any]) -> dict[s
         """), records["rule_assignments"])
     if records["notes"]:
         await db.execute(text("""
-            INSERT INTO movement_notes (event_id, note, created_at)
-            VALUES (:event_id, :note, :created_at)
+            INSERT INTO movement_notes (event_id, note)
+            VALUES (:event_id, :note)
         """), records["notes"])
     await db.execute(text("""
         INSERT INTO alerts (id, source_event_id, created_at, data)

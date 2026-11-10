@@ -1,0 +1,55 @@
+.page {
+  --restriction-inset: color-mix(in srgb, var(--admin-surface-strong) 48%, transparent);
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 22px clamp(16px, 3vw, 32px) 56px;
+  color: var(--ui-text-primary);
+}
+.header { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.header > div { min-width: 0; }
+.header h1 { margin: 0; font-size: clamp(30px, 3vw, 40px); font-weight: 780; line-height: 1.1; letter-spacing: -.045em; }
+.header > div > p:last-child { max-width: 760px; margin: 10px 0 0; color: var(--ui-text-secondary); font-size: 16px; line-height: 1.5; }
+.refresh, .releaseControls button, .pagination button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 40px; padding: 8px 13px; border: 1px solid var(--admin-line); border-radius: 10px; background: var(--admin-surface); color: var(--ui-text-primary); font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
+.refresh:hover:not(:disabled), .pagination button:hover:not(:disabled) { border-color: var(--ui-border-hover); }
+.refresh:disabled, .releaseControls button:disabled, .pagination button:disabled { cursor: not-allowed; opacity: .55; }
+.directory { min-width: 0; overflow: hidden; border: 1px solid var(--admin-line); border-radius: 16px; background: color-mix(in srgb, var(--admin-surface) 78%, var(--admin-bg)); }
+.directoryHeader { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px 22px; border-bottom: 1px solid var(--admin-line); }
+.directoryHeader h2 { margin: 0; font-size: 20px; font-weight: 740; }
+.directoryHeader p { margin: 5px 0 0; color: var(--ui-text-secondary); font-size: 14px; }
+.count { display: grid; place-items: center; min-width: 36px; height: 32px; padding: 0 9px; border: 1px solid var(--admin-line); border-radius: 9px; background: var(--restriction-inset); font-size: 14px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.rows { display: grid; }
+.row { display: grid; grid-template-columns: minmax(220px, .9fr) minmax(170px, .7fr) minmax(300px, 1.2fr); align-items: center; gap: 22px; padding: 20px 22px; border-bottom: 1px solid var(--admin-line); }
+.row:last-child { border-bottom: 0; }
+.identity { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.identity > div { min-width: 0; }
+.icon { display: grid; place-items: center; flex: 0 0 40px; width: 40px; height: 40px; border: 1px solid color-mix(in srgb, var(--ui-text-danger) 25%, var(--admin-line)); border-radius: 12px; background: color-mix(in srgb, var(--ui-text-danger) 7%, var(--admin-bg)); color: var(--ui-text-danger); }
+.identity h3 { margin: 0; overflow-wrap: anywhere; font-size: 16px; font-weight: 720; }
+.identity p, .identity time { display: block; margin: 4px 0 0; color: var(--ui-text-secondary); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
+.zones { display: grid; align-content: start; gap: 8px; min-width: 0; }
+.label, .releaseForm label { color: var(--ui-text-secondary); font-size: 12px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+.tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.tag { max-width: 100%; padding: 5px 8px; border: 1px solid var(--admin-line); border-radius: 8px; background: var(--restriction-inset); font-size: 13px; overflow-wrap: anywhere; }
+.legacy { color: var(--ui-text-warning); font-size: 13px; line-height: 1.4; }
+.releaseForm { display: grid; gap: 7px; min-width: 0; }
+.releaseControls { display: flex; gap: 8px; min-width: 0; }
+.releaseControls input { flex: 1 1 auto; width: 100%; min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid var(--admin-line); border-radius: 9px; background: var(--admin-bg); color: var(--ui-text-primary); font: inherit; font-size: 14px; }
+.releaseControls input:focus-visible, .refresh:focus-visible, .releaseControls button:focus-visible, .pagination button:focus-visible { outline: 2px solid color-mix(in srgb, var(--ui-text-info) 60%, transparent); outline-offset: 2px; }
+.releaseControls button { flex: 0 0 auto; border-color: color-mix(in srgb, var(--ui-text-danger) 35%, var(--admin-line)); color: var(--ui-text-danger); }
+.releaseControls button:hover:not(:disabled) { background: color-mix(in srgb, var(--ui-text-danger) 6%, var(--admin-bg)); }
+.empty, .state { display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 150px; margin: 0; padding: 24px; color: var(--ui-text-secondary); font-size: 14px; }
+.empty { flex-direction: column; text-align: center; }
+.empty strong { color: var(--ui-text-primary); font-size: 16px; }
+.empty span { font-size: 14px; }
+.error, .success { display: flex; align-items: center; gap: 8px; margin: 0; padding: 11px 14px; border: 1px solid color-mix(in srgb, var(--ui-text-danger) 25%, var(--admin-line)); border-radius: 10px; color: var(--ui-text-danger); font-size: 14px; }
+.success { border-color: color-mix(in srgb, var(--ui-text-positive) 25%, var(--admin-line)); color: var(--ui-text-positive); }
+.pagination { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; padding: 9px 20px; border-top: 1px solid var(--admin-line); color: var(--ui-text-secondary); font-size: 13px; }
+.pagination > div { display: flex; gap: 8px; }
+.pagination button { width: 38px; min-height: 36px; padding: 0; }
+.spinner { animation: spin 900ms linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (max-width: 900px) { .row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .releaseForm { grid-column: 1 / -1; } }
+@media (max-width: 600px) { .page { gap: 17px; padding: 22px 14px 42px; } .header { align-items: flex-start; } .header > div > p:last-child { font-size: 14px; } .refresh { flex: 0 0 auto; padding: 8px 10px; font-size: 13px; } .row { grid-template-columns: minmax(0, 1fr); gap: 16px; padding: 17px 15px; } .releaseForm { grid-column: auto; } .releaseControls { flex-direction: column; } .releaseControls button { width: 100%; } }

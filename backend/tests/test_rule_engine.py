@@ -161,13 +161,40 @@ class RuleEngineTests(unittest.TestCase):
             [],
         )
         first = evaluate_scheduled_rules(
-            [rule], [], [], [], employees=[employee], now=now.replace(hour=13, minute=0)
+            [rule], [], [], [], employees=[employee], now=now.replace(hour=13, minute=30)
         )
         second = evaluate_scheduled_rules(
-            [rule], [], [], first, employees=[employee], now=now.replace(hour=13, minute=5)
+            [rule], [], [], first, employees=[employee], now=now.replace(hour=13, minute=35)
         )
         self.assertEqual(len(first), 1)
         self.assertEqual(second, [])
+
+    def test_attendance_uses_workdays_holidays_grace_and_late_entry_time(self):
+        employee = {"id": "p1", "barcode": "EMP-1", "name": "Alice", "type": "employee", "status": "active"}
+        rule = {"id": "rule-irregularity", "conditionKey": "irregularity", "enabled": True}
+        sunday_evening = datetime(2026, 10, 11, 13, 5, tzinfo=timezone.utc)  # 7:05 PM IST, Sunday
+        self.assertEqual(evaluate_scheduled_rules([rule], [], [], [], employees=[employee], now=sunday_evening), [])
+        self.assertEqual(evaluate_scheduled_rules([rule], [], [], [], employees=[employee], now=sunday_evening,
+            attendance_workdays=(0, 1, 2, 3, 4, 5, 6), attendance_holidays={"2026-10-11"}), [])
+        late_entry = [{"id": "late", "subjectId": "p1", "subjectType": "employee", "direction": "entry",
+            "result": "approved", "date": "Oct 12, 2026", "createdAt": "2026-10-12T13:31:00+00:00"}]
+        generated = evaluate_scheduled_rules([rule], late_entry, [], [], employees=[employee],
+            now=datetime(2026, 10, 12, 13, 35, tzinfo=timezone.utc))
+        self.assertEqual(len(generated), 1)
+        self.assertIn("after the attendance cutoff", generated[0]["reason"])
+
+    def test_continuous_presence_is_one_visit_case_with_escalating_reminders(self):
+        now = datetime(2026, 10, 6, 13, 0, tzinfo=timezone.utc)
+        rule = {"id": "rule-no-break", "conditionKey": "no_break", "enabled": True}
+        visit = {"subjectId": "p2", "subjectType": "employee", "subjectName": "Alice", "barcode": "EMP-2",
+            "state": "inside", "entryStartedAt": now - timedelta(hours=7), "noBreakAlertedInterval": 0}
+        first = evaluate_continuous_presence_rules([rule], [visit], now=now)[0]
+        repeated_interval = evaluate_continuous_presence_rules([rule], [{**visit, "noBreakAlertedInterval": 1}],
+            now=now + timedelta(hours=6))[0]
+        self.assertEqual(first["id"], repeated_interval["id"])
+        self.assertEqual((first["intervalIndex"], repeated_interval["intervalIndex"],
+            repeated_interval["reminderCount"]), (1, 2, 1))
+        self.assertEqual(repeated_interval["title"], "Continuous presence")
 
     def test_no_break_uses_continuous_presence_not_workday_summary(self):
         now = datetime(2026, 10, 1, 12, 0, tzinfo=timezone.utc)  # 5:30 PM (Asia/Kolkata)

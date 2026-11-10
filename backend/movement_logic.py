@@ -143,7 +143,12 @@ def _current_time(dt: datetime) -> str:
 # ---------------------------------------------------------------------------
 
 def _is_hardware(subject: Any) -> bool:
-    """True when subject has a 'category' key — mirrors TypeScript isHardware()."""
+    """Use the trusted registry kind; category is editable display metadata."""
+    kind = subject.get("kind") or subject.get("type")
+    if kind is not None:
+        return kind == "hardware"
+    # Compatibility for legacy direct evaluator callers. Server scan builders
+    # always include kind, so metadata cannot spoof a hardware subject.
     return "category" in subject
 
 
@@ -152,6 +157,13 @@ def _zone_allowed(subject: Any, checkpoint: Checkpoint) -> bool:
     if not isinstance(allowed, list) or not ("All Zones" in allowed or (
             bool(checkpoint.get("zone")) and checkpoint["zone"] in allowed)):
         return False
+    scoped_checkpoints = subject.get("allowedCheckpointScopes")
+    if isinstance(scoped_checkpoints, dict):
+        zone_id = checkpoint.get("zoneId") or checkpoint.get("zone") or checkpoint.get("buildingId")
+        if zone_id not in scoped_checkpoints:
+            return False
+        zone_scope = scoped_checkpoints[zone_id]
+        return zone_scope is None or (isinstance(zone_scope, list) and checkpoint.get("id") in zone_scope)
     allowed_checkpoints = subject.get("allowedCheckpoints")
     if isinstance(allowed_checkpoints, list) and allowed_checkpoints:
         return checkpoint.get("id") in allowed_checkpoints
@@ -245,6 +257,8 @@ def _status_for(
                 else "Not pre-approved"
             )
             return {"result": "denied", "reason": reason}
+        if not subject.get("validTo"):
+            return {"result": "denied", "reason": "Visitor access requires a valid expiry"}
 
     # Carried hardware restrictions (any non-active asset)
     restricted_hw = next(

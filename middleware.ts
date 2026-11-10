@@ -5,8 +5,10 @@ import { hasAdminAccess, hasMasterAdminAccess } from "./lib/applicationRoles"
 const MASTER_ADMIN_PAGES = new Set([
   "/admin",
   "/admin/users",
+  "/admin/sso-approvals",
   "/admin/employee-zone-access",
   "/admin/zone-assignments",
+  "/admin/entry-restrictions",
 ])
 
 export default auth((req) => {
@@ -24,7 +26,7 @@ export default auth((req) => {
     req.nextUrl.searchParams.get('from') === '/admin/users'
   const isAdminPage = req.nextUrl.pathname.startsWith('/admin')
   const isTerminalPage = req.nextUrl.pathname.startsWith('/terminal')
-  const home = isMasterAdmin ? '/admin/users' : isAdmin ? '/admin/dashboard' : '/terminal'
+  const home = isMasterAdmin ? '/admin/users' : isAdmin ? '/admin/dashboard' : isOperator ? '/terminal' : '/access-pending'
 
   if (isAuthPage) {
     if (isLoggedIn) {
@@ -59,7 +61,7 @@ export default auth((req) => {
   if (isAdminPage && !isAdmin) {
     return isOperator
       ? NextResponse.redirect(new URL('/terminal', req.url))
-      : NextResponse.redirect(new URL('/access-denied?area=admin', req.url))
+      : NextResponse.redirect(new URL(isLoggedIn ? '/access-pending' : '/access-denied?area=admin', req.url))
   }
 
   const adminPath = req.nextUrl.pathname.replace(/\/+$/, "") || "/admin"
@@ -68,7 +70,7 @@ export default auth((req) => {
   }
 
   if (isTerminalPage && !canUseTerminal) {
-    return NextResponse.redirect(new URL('/access-denied?area=terminal', req.url))
+    return NextResponse.redirect(new URL(isLoggedIn ? '/access-pending' : '/access-denied?area=terminal', req.url))
   }
 
   return null

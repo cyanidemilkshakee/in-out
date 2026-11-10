@@ -133,10 +133,48 @@ class ScanRequest(Base):
     idempotency_key = Column(UUID(as_uuid=True), primary_key=True)
     subject_id: str | None = Column(String, ForeignKey("subjects.id"), nullable=True)
     terminal_id: str = Column(String, nullable=False)
-    status_code: int = Column(Integer, nullable=False)
     response_body = Column(JSONB, nullable=False)
     request_fingerprint: str | None = Column(String, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class OfflineScanReconciliation(Base):
+    """Offline submissions without a durable scan receipt are held out of presence."""
+    __tablename__ = "offline_scan_reconciliations"
+    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    subject_id: str | None = Column(String, ForeignKey("subjects.id", ondelete="SET NULL"), nullable=True)
+    # Preserve the subject identity as captured even if its registry row is deleted.
+    subject_identity_at_capture: str | None = Column(String, nullable=True)
+    checkpoint_id: str = Column(String, ForeignKey("checkpoints.id", ondelete="RESTRICT"), nullable=False)
+    terminal_id: str = Column(String, nullable=False)
+    barcode: str = Column(String(64), nullable=False)
+    captured_at = Column(DateTime(timezone=True), nullable=True)
+    received_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    direction: str = Column(String, nullable=False)
+    payload = Column(JSONB, nullable=False)
+    status: str = Column(String, nullable=False, default="pending", server_default="pending")
+    resolution_state: str | None = Column(String, nullable=True)
+    resolution_reason: str | None = Column(String, nullable=True)
+    resolved_by: str | None = Column(String, nullable=True)
+    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    __table_args__ = (
+        CheckConstraint("status IN ('pending', 'resolved', 'dismissed')", name="ck_offline_reconciliation_status"),
+        CheckConstraint("resolution_state IS NULL OR resolution_state IN ('inside', 'outside')", name="ck_offline_reconciliation_state"),
+        CheckConstraint("direction IN ('entry', 'exit', 'unknown')", name="ck_offline_reconciliation_direction"),
+        Index("idx_offline_reconciliation_pending", "status", "received_at"),
+    )
+
+
+class CheckpointEvaluationStatus(Base):
+    """Latest durable health and capacity result for the independent checkpoint monitor."""
+    __tablename__ = "checkpoint_evaluation_status"
+    id: str = Column(String, primary_key=True)
+    last_completed_at = Column(DateTime(timezone=True), nullable=True)
+    last_failed_at = Column(DateTime(timezone=True), nullable=True)
+    last_error_code: str | None = Column(String(128), nullable=True)
+    checkpoints_evaluated: int = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    alerts_created: int = Column(Integer, nullable=False, default=0, server_default=text("0"))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
 class AccessPermission(Base):
@@ -209,7 +247,7 @@ class CriticalAlertTrigger(Base):
     __tablename__ = "critical_alert_triggers"
     alert_id = Column(String, primary_key=True)
     subject_id = Column(String, ForeignKey("subjects.id", ondelete="SET NULL"), nullable=True)
-    triggered_at = Column(DateTime(timezone=True), nullable=False)
+    zone_ids = Column(JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb"))
 
 
 class AlertReview(Base):
@@ -252,7 +290,6 @@ class MovementNote(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     event_id: str = Column(String, ForeignKey("movements.id", ondelete="CASCADE"), nullable=False)
     note: str = Column(String, nullable=False)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
 class AdminAccount(Base):

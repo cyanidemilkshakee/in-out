@@ -132,3 +132,37 @@ async def validate_registered_checkpoints(db, values):
     if set(active_zones.all()) != zone_ids:
         raise HTTPException(422, "One or more selected checkpoints are in an inactive organization zone")
     return [checkpoints[checkpoint_id] for checkpoint_id in checkpoint_ids]
+
+
+async def validate_checkpoint_scopes(db, scopes, allowed_zone_ids):
+    """Validate per-zone checkpoint policy; None means all checkpoints in that zone."""
+    from fastapi import HTTPException
+    if not isinstance(scopes, dict) or len(scopes) > 100:
+        raise HTTPException(422, "Checkpoint scopes must map registered zones to checkpoint lists")
+    zones = set(await validate_registered_zones(db, list(allowed_zone_ids)))
+    normalized = {}
+    checkpoint_ids = []
+    for zone_id, values in scopes.items():
+        if not isinstance(zone_id, str) or zone_id not in zones:
+            raise HTTPException(422, "Checkpoint scopes must belong to the approved zones")
+        if values is None:
+            normalized[zone_id] = None
+            continue
+        if (not isinstance(values, list) or len(values) > 1000
+                or any(not isinstance(value, str) or not value.strip() for value in values)
+                or len(set(values)) != len(values)):
+            raise HTTPException(422, "Checkpoint scope lists must contain unique registered IDs")
+        normalized[zone_id] = list(values)
+        checkpoint_ids.extend(values)
+    if checkpoint_ids:
+        rows = (await db.execute(select(Checkpoint.id, Checkpoint.zone_id).where(
+            Checkpoint.id.in_(set(checkpoint_ids)), Checkpoint.active.is_(True)
+        ))).all()
+        found = {checkpoint_id: zone_id for checkpoint_id, zone_id in rows}
+        if len(found) != len(set(checkpoint_ids)) or any(
+            found.get(checkpoint_id) != zone_id
+            for zone_id, values in normalized.items() if isinstance(values, list)
+            for checkpoint_id in values
+        ):
+            raise HTTPException(422, "One or more checkpoint scopes are unavailable or belong to another zone")
+    return normalized

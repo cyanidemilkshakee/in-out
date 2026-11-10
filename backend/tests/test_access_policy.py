@@ -18,6 +18,35 @@ class AccessPolicyTests(unittest.TestCase):
         self.assertEqual(event["result"], "denied")
         self.assertEqual(event["denialCode"], "zone_not_permitted")
 
+    def test_editable_hardware_category_cannot_change_registered_employee_kind(self):
+        employee = {"id": "p", "name": "Alice", "kind": "employee", "type": "employee",
+            "barcode": "p", "inside": False, "status": "active", "allowedZones": ["a"],
+            "category": "Laptop"}
+        event = evaluate_scan(barcode="p", checkpoint={"id": "a-1", "zone": "a", "mode": "entry"},
+            people=[employee], hardware=[], selected_hardware_ids=[], online=True, event_count=0,
+            scan_type="auto")["event"]
+        self.assertEqual(event["result"], "approved")
+        self.assertEqual(event["subjectType"], "employee")
+
+    def test_checkpoint_scopes_restrict_access_inside_an_allowed_zone(self):
+        employee = {"id": "p", "name": "Alice", "kind": "employee", "type": "employee",
+            "barcode": "p", "inside": False, "status": "active", "allowedZones": ["a", "b"],
+            "allowedCheckpointScopes": {"a": ["a-1"], "b": ["b-2"]}}
+        event = evaluate_scan(barcode="p", checkpoint={"id": "b-1", "zone": "b", "zoneId": "b", "mode": "entry"},
+            people=[employee], hardware=[], selected_hardware_ids=[], online=True, event_count=0,
+            scan_type="auto")["event"]
+        self.assertEqual(event["result"], "denied")
+        self.assertEqual(event["denialCode"], "zone_not_permitted")
+
+    def test_registered_visitor_without_expiry_cannot_enter(self):
+        visitor = {"id": "v", "name": "Guest", "kind": "visitor", "type": "visitor",
+            "barcode": "VIS-1", "inside": False, "status": "pre_approved", "allowedZones": ["a"]}
+        event = evaluate_scan(barcode="VIS-1", checkpoint={"id": "a-1", "zone": "a", "mode": "entry"},
+            people=[visitor], hardware=[], selected_hardware_ids=[], online=True, event_count=0,
+            scan_type="auto")["event"]
+        self.assertEqual(event["result"], "denied")
+        self.assertIn("expiry", event["reason"].lower())
+
     def setUp(self):
         self.person = {"id": "p", "name": "Visitor", "type": "visitor", "barcode": "v", "inside": True,
             "status": "pending_approval", "allowedZones": [],

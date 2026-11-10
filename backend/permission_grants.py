@@ -7,8 +7,9 @@ from sqlalchemy import select, case
 from sqlalchemy.orm import selectinload
 
 from access_validation import (require_registered_checkpoint, validate_permission_window,
-    validate_registered_checkpoints, validate_zones)
-from models import Subject, Person, Checkpoint, PermissionRequestModel
+    validate_registered_checkpoints, validate_registered_zones, validate_zones,
+    validate_checkpoint_scopes)
+from models import Subject, Person, Checkpoint, PermissionRequestModel, AccessPermission, OrganizationZone
 from permission_decisions import apply_permission_decision
 from schemas import SubjectCreate
 from registry_validation import validated_metadata
@@ -65,6 +66,8 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
 
     if kind == "visitor" and subject.kind != "visitor":
         raise HTTPException(422, "Visitor permissions require a visitor")
+    if subject.kind == "visitor" and permanent_access:
+        raise HTTPException(422, "Visitor access must have an expiry")
     if kind == "hardware_custody" and (subject.kind != "hardware" or payload.hardware_id not in (None, subject.id)):
         raise HTTPException(422, "Custody permission requires the selected hardware")
     if subject.kind not in {"employee", "visitor", "hardware"}:
@@ -72,8 +75,11 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
 
     metadata = subject.hardware if subject.kind == "hardware" else subject.person
     subject_data = (metadata.data if metadata else {}) or {}
+    current_permission = await db.scalar(select(AccessPermission).where(
+        AccessPermission.subject_id == subject.id).with_for_update()) if not payload.new_visitor else None
     zones = []
     requested_checkpoints = []
+    data_scopes_requested = None
     valid_from, valid_to = "", ""
     carrier = None
     carrier_name = ""
@@ -88,22 +94,76 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
     else:
         if kind == "zone_access" and not payload.requested_zones:
             raise HTTPException(422, "Choose the complete resulting zone set")
-        zones = validate_zones(payload.requested_zones or [checkpoint.zone_id], known_zone_ids=known_zone_ids)
+        submitted_zones = validate_zones(payload.requested_zones or [checkpoint.zone_id], known_zone_ids=known_zone_ids)
+        if kind == "zone_access" and known_zone_ids is not None:
+            prior_zones = ((current_permission.data or {}).get("zones") if current_permission else None)
+            if not isinstance(prior_zones, list):
+                prior_zones = subject_data.get("allowedZones") or ([subject_data.get("allowedZone")]
+                    if subject_data.get("allowedZone") else [])
+            active_zones = await db.scalars(select(OrganizationZone.id).where(OrganizationZone.active.is_(True)))
+            prior_zones = list(active_zones.all()) if "All Zones" in prior_zones else prior_zones
+            preserved_zones = [zone for zone in prior_zones if zone not in known_zone_ids]
+            zones = await validate_registered_zones(db, list(dict.fromkeys([*preserved_zones, *submitted_zones])))
+        else:
+            zones = submitted_zones
+        current_data = (current_permission.data or {}) if current_permission else {}
+        existing_checkpoint_scopes = current_data.get("checkpointScopes")
+        if kind == "zone_access" and known_zone_ids is not None:
+            if isinstance(existing_checkpoint_scopes, dict):
+                requested_scopes = {zone_id: scope for zone_id, scope in existing_checkpoint_scopes.items()
+                    if zone_id in zones}
+            else:
+                existing_selectors = current_data.get("checkpoints")
+                if not isinstance(existing_selectors, list):
+                    existing_selectors = subject_data.get("allowedCheckpoints")
+                if isinstance(existing_selectors, list) and existing_selectors:
+                    checkpoint_rows = (await db.execute(select(Checkpoint.id, Checkpoint.zone_id).where(
+                        Checkpoint.id.in_(existing_selectors), Checkpoint.active.is_(True)))).all()
+                    requested_scopes = {zone_id: [] for zone_id in zones}
+                    for selected_id, selected_zone in checkpoint_rows:
+                        if selected_zone in requested_scopes:
+                            requested_scopes[selected_zone].append(selected_id)
+                else:
+                    requested_scopes = {zone_id: None for zone_id in zones}
+            for zone_id in zones:
+                requested_scopes.setdefault(zone_id, None)
+            if payload.requested_checkpoints:
+                selected_for_scopes = await validate_registered_checkpoints(db, payload.requested_checkpoints)
+                for zone_id in known_zone_ids:
+                    if zone_id in zones:
+                        requested_scopes[zone_id] = [item.id for item in selected_for_scopes if item.zone_id == zone_id]
+            data_scopes_requested = await validate_checkpoint_scopes(db, requested_scopes, zones)
         if payload.requested_checkpoints:
             selected = await validate_registered_checkpoints(db, payload.requested_checkpoints)
             requested_checkpoints = [item.id for item in selected]
+            if kind == "zone_access" and known_zone_ids is not None:
+                prior_checkpoints = current_data.get("checkpoints")
+                if not isinstance(prior_checkpoints, list):
+                    prior_checkpoints = subject_data.get("allowedCheckpoints")
+                if isinstance(prior_checkpoints, list) and prior_checkpoints:
+                    prior_rows = await db.execute(select(Checkpoint.id, Checkpoint.zone_id).where(
+                        Checkpoint.id.in_(prior_checkpoints), Checkpoint.active.is_(True)))
+                    preserved_ids = [checkpoint_id for checkpoint_id, zone_id in prior_rows.all()
+                        if zone_id not in known_zone_ids]
+                    requested_checkpoints = list(dict.fromkeys([*preserved_ids, *requested_checkpoints]))
             if checkpoint.id not in requested_checkpoints:
                 raise HTTPException(422, "The primary checkpoint must be included in checkpoint access")
             if kind == "visitor" and requested_checkpoints != [checkpoint.id]:
                 raise HTTPException(422, "Visitor access must target the selected checkpoint only")
             checkpoint_zones = list(dict.fromkeys(item.zone_id for item in selected))
-            if set(zones) != set(checkpoint_zones):
+            zone_scoped_edit = kind == "zone_access" and known_zone_ids is not None
+            if not zone_scoped_edit and set(zones) != set(checkpoint_zones):
+                raise HTTPException(422, "Zone scope must match the selected checkpoints")
+            if zone_scoped_edit and (
+                    not set(checkpoint_zones) <= set(zones) or not set(checkpoint_zones) <= set(known_zone_ids)):
                 raise HTTPException(422, "Zone scope must match the selected checkpoints")
             if kind == "visitor" and zones != [checkpoint.zone_id]:
                 raise HTTPException(422, "Visitor checkpoint access must use the selected checkpoint's zone")
         valid_from = payload.valid_from or now.isoformat()
         valid_to = "" if permanent_access else payload.valid_to
         validate_permission_window(valid_from, valid_to, now=now, permanent=permanent_access)
+        if subject.kind == "visitor" and not valid_to:
+            raise HTTPException(422, "Visitor access must have an expiry")
 
     if payload.new_visitor:
         # Separate ORM mappers have no request→subject relationship to order these inserts.
@@ -120,10 +180,22 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
         "requestedZones": zones, "validFrom": valid_from, "validTo": valid_to,
         "status": "pending", "createdAt": (existing.data or {}).get("createdAt") if existing else now.isoformat(),
         "origin": "permission_manager"}
-    if requested_checkpoints:
+    if data_scopes_requested is not None:
+        data.pop("requestedCheckpoints", None)
+        data["requestedCheckpointScopes"] = data_scopes_requested
+    elif requested_checkpoints:
         data["requestedCheckpoints"] = requested_checkpoints
     elif kind in {"visitor", "zone_access"}:
-        data.pop("requestedCheckpoints", None)
+        if kind == "zone_access":
+            # A zone-scoped edit that omits checkpoint selectors retains the
+            # existing explicit selector instead of silently clearing it.
+            previous = (current_permission.data or {}).get("checkpoints") if current_permission else None
+            if isinstance(previous, list):
+                data["requestedCheckpoints"] = previous
+            else:
+                data.pop("requestedCheckpoints", None)
+        else:
+            data.pop("requestedCheckpoints", None)
     if permanent_access:
         data["permanentAccess"] = True
     if carrier:

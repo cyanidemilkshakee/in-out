@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Building2, Check, ChevronLeft, ChevronRight, Cpu, LoaderCircle, MapPin, RotateCw, Search, UsersRound, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Cpu, LoaderCircle, MapPin, RotateCw, Search, UsersRound, X } from "lucide-react";
 import type { OrganizationZone, RegistrySubjectPage } from "../../../lib/types";
 import { DataServiceError, HttpDataService, readResponse } from "../../../services/httpDataService";
 import styles from "./MasterZoneAssignments.module.css";
@@ -138,7 +138,6 @@ export function MasterZoneAssignments({ fixedKind }: { fixedKind?: SubjectKind }
   return <main className={styles.page} aria-label={pageTitle}>
     <header className={styles.header}>
       <div>
-        <div className={styles.eyebrow}><Building2 size={16} aria-hidden="true" /> Organization access</div>
         <h1>{pageTitle}</h1>
         <p>{fixedKind === "employee"
           ? "Assign the organization zones each employee is allowed to enter. Checkpoint rules still apply within each zone."

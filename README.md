@@ -17,7 +17,7 @@ InOut is an inbound/outbound management system for an organization’s branches.
 # Installation and first use
 ## Requirements
 
-Docker Desktop running, Node.js 22.12+ with npm, and a local checkout are required for the Docker setup. The commands below use PowerShell from the repository root; Python runs inside Docker. The test compiler loads the ESM JWT verifier through CommonJS, using the [ESM loading support enabled in Node 22.12](https://nodejs.org/en/blog/release/v22.12.0).
+The application runs in Linux containers and can be used from Windows, macOS, or Linux. Install Docker Desktop on Windows/macOS, or Docker Engine with the Compose v2 plugin on Linux. Node.js 22.12+ with npm is used for the repository's setup and maintenance helpers; Python runs inside Docker. The same Docker Compose and npm commands work from PowerShell, macOS Terminal, or a Linux shell. No host Python installation is required. The test compiler loads the ESM JWT verifier through CommonJS, using the [ESM loading support enabled in Node 22.12](https://nodejs.org/en/blog/release/v22.12.0).
 
 ## Quick start
 
@@ -25,8 +25,8 @@ Docker Desktop running, Node.js 22.12+ with npm, and a local checkout are requir
 
 Existing databases and realms require [existing-volume maintenance](#existing-volume-maintenance). Existing Temporal data also requires the [Temporal upgrade guide](#temporal-upgrade); startup refuses an automatic multi-minor jump. Preserve their configuration and volumes.
 
-```powershell
-Copy-Item .env.example .env
+```text
+npm run env:init
 npm run env:secrets:generate
 ```
 
@@ -46,7 +46,7 @@ To send recovery emails, set `KEYCLOAK_SMTP_*` values in `.env` before running `
 
 ### 2. Build and start
 
-```powershell
+```text
 docker compose up --build -d --wait
 docker compose ps -a
 ```
@@ -57,7 +57,7 @@ For later starts without code changes, use `docker compose up -d --wait` to reus
 
 The Temporal inspection interface is intentionally off by default. Start it only when diagnosing workflows:
 
-```powershell
+```text
 docker compose --profile observability up -d temporal-ui
 ```
 
@@ -65,7 +65,7 @@ docker compose --profile observability up -d temporal-ui
 
 The loopback-only administration gateway starts with the default Compose stack. If it was manually stopped, start it with:
 
-```powershell
+```text
 docker compose up -d --wait keycloak-admin
 npm run keycloak:interactions:apply
 npm run keycloak:interactions:check
@@ -87,7 +87,7 @@ For an existing deployment, first verify synthetic sign-in and password changes 
 
 The administration gateway remains bound to loopback. Stop it when provider administration is not needed; the regular identity listener continues to serve login, account security, and token refresh while rejecting provider administration:
 
-```powershell
+```text
 docker compose stop keycloak-admin
 ```
 
@@ -97,10 +97,10 @@ Use the admin Registry and Permission Manager pages to create people/assets and 
 
 ## Optional local fixtures
 
-Normal startup creates reference zones/checkpoints and alert rules, but does not create sample employees, visitors, hardware, permissions, or movement history. To replace the local InOut application records with a full five-zone walkthrough dataset, run this from PowerShell while the normal stack is healthy:
+Normal startup creates reference zones/checkpoints and alert rules, but does not create sample employees, visitors, hardware, permissions, or movement history. To replace the local InOut application records with a full five-zone walkthrough dataset, run this from any supported host shell while the normal stack is healthy:
 
-```powershell
-.\scripts\seed-full-demo.ps1
+```text
+npm run seed:demo
 ```
 
 The script temporarily stops Kong, the app, API, and Temporal worker so no live requests race with the reset. It then uses a one-shot Docker container and a single database transaction to truncate **only the InOut `public` schema's application data**, keep `alembic_version`, and load the fixtures. It does not drop databases or volumes, change migrations, or clear the Keycloak schema or Temporal databases. If loading fails, the app-data transaction rolls back. The script rebuilds and starts the app, API, Temporal worker, and Kong even when seeding fails; after a successful seed it verifies that all 75 visitor approvals remain pending once Temporal is running.
@@ -115,14 +115,14 @@ The existing one-record `demo`, `additional`, and `test` seed modes remain for t
 
 This removes all InOut, Keycloak, and Temporal records held in the Compose PostgreSQL volume. It does not remove the separate Prometheus volume. Use only for a disposable local environment. First stop the stack, then verify the exact PostgreSQL volume name and Compose project label before removing it:
 
-```powershell
+```text
 docker compose down
 docker volume inspect --format '{{.Name}} {{index .Labels "com.docker.compose.project"}}' in-out_pg-primary-data
 ```
 
 For this checkout, the expected project label is `in-out`. If the inspected volume name or label differs, identify the exact disposable PostgreSQL volume before continuing. Then remove only that volume and initialize a new stack:
 
-```powershell
+```text
 docker volume rm in-out_pg-primary-data
 docker compose up --build -d --wait
 ```
@@ -137,7 +137,7 @@ This lets administrators invite accounts without enabling public self-registrati
 2. **Configure invitation email.** Supply a working sender in `.env` using `KEYCLOAK_SMTP_HOST`, `KEYCLOAK_SMTP_PORT`, `KEYCLOAK_SMTP_FROM`, `KEYCLOAK_SMTP_FROM_DISPLAY_NAME`, `KEYCLOAK_SMTP_AUTH`, `KEYCLOAK_SMTP_USER`, `KEYCLOAK_SMTP_PASSWORD`, `KEYCLOAK_SMTP_STARTTLS`, and `KEYCLOAK_SMTP_SSL`. The sender address must be permitted by the mail provider. These values go to the app's Python invitation mailer; the SMTP password is provider-issued and is not generated by the secret script. If using Keycloak's recovery email feature too, apply its SMTP configuration with `npm run keycloak:recovery:apply`.
 3. **Provision the Keycloak client.** Ensure the loopback Keycloak administration gateway is running, then execute:
 
-   ```powershell
+   ```text
    npm run keycloak:invitations:check
    npm run keycloak:invitations:apply
    npm run keycloak:invitations:check
@@ -148,7 +148,7 @@ This lets administrators invite accounts without enabling public self-registrati
 5. **Bind Zoho's broker flow to invited accounts.** Under **Authentication → Flows**, copy **First Broker Login** and configure the copy for Zoho only. Require **Detect Existing Broker User**, then **Automatically Set Existing User**. Remove any execution or fallback that creates a new user when no invited account matches. In **Identity Providers → Zoho**, set **First Login Flow** to this copy; leave other providers' flows unchanged. Zoho must return a verified email, and Keycloak must match that exact email. Enable **Trust Email** only if Zoho guarantees email verification. Disable self-registration and alternate creation routes that could grant an InOut account without invitation. Keep the app's Zoho broker hint enabled.
 6. **Reload app configuration and verify.** After changing `.env`, recreate the services so they receive the new environment:
 
-   ```powershell
+   ```text
    docker compose up -d --no-deps --force-recreate python-api app
    ```
 
@@ -309,7 +309,7 @@ Changing `.env` does not rotate PostgreSQL passwords saved in an existing volume
 
 Set independent random 32+ character URL-safe secrets for `POSTGRES_PASSWORD`, the four service database passwords, the three Redis passwords and `KONG_IDENTITY_SECRET`. Supply the **current persisted** administrator credential transiently as `POSTGRES_CURRENT_PASSWORD` through a hidden prompt or secret manager. Keep credentials out of arguments and logs. With only PostgreSQL running, execute:
 
-```powershell
+```text
 docker compose run --build --rm --no-deps db-provision python /maintenance/provision_database.py --apply --allow-existing
 ```
 
@@ -348,10 +348,9 @@ This marker records operator verification; it does not prove conversion itself. 
 
 ## Backup and reset
 
-Create a custom-format backup of application and Keycloak data without piping binary output through PowerShell:
+Create a custom-format backup of application and Keycloak data. First create `.data/backups` using your file manager or the command for your shell (`mkdir -p .data/backups` on macOS/Linux; `New-Item -ItemType Directory -Force .data/backups` in PowerShell), then run the shared Docker commands:
 
-```powershell
-New-Item -ItemType Directory -Force .data/backups | Out-Null
+```text
 docker compose exec -T postgres-primary pg_dump -U inout -d inout -Fc -f /tmp/inout.dump
 docker compose cp postgres-primary:/tmp/inout.dump .data/backups/inout.dump
 ```
@@ -379,7 +378,7 @@ The configured custom-image pin is `26.8.1`, [released on 2026-10-13 with upstre
 3. Restore the dump into a separate PostgreSQL instance with a fresh volume and no application writers. Start the target image against that restored copy on an isolated network; retain the original stack's database and image. Confirm that migration completes and run the authentication checks plus the public `/admin` denial checks. Rehearse rollback by restoring the pre-upgrade dump and using the old image on another fresh volume.
 4. After successful rehearsal, set `KEYCLOAK_VERSION=26.8.1` in the existing `.env`, build the custom image with its extension and password denylist, and recreate Keycloak and the regular gateway during the scheduled outage:
 
-```powershell
+```text
 docker compose build keycloak
 docker compose up -d --no-deps --force-recreate --wait keycloak
 docker compose up -d --no-deps --force-recreate --wait kong

@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties, type FocusEvent } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, BookUser, Clock3, Cpu, Grid2X2, Heart, History, Key, LockKeyhole, LockKeyholeOpen, LogOut, MapPin, ScanLine, UserCog, UsersRound } from "lucide-react";
+import { Bell, BookUser, Clock3, Cpu, Grid2X2, Heart, History, Key, LockKeyhole, LockKeyholeOpen, LogOut, MapPin, ScanLine, ShieldAlert, ShieldCheck, UserCog, UsersRound } from "lucide-react";
 import { formatStepUpCountdown } from "../../../lib/userManagementStepUp";
 import { useOpenAlertCountOrZero } from "./AdminLiveProvider";
 
@@ -18,8 +18,10 @@ const navigationItems = [
 
 const masterNavigationItems = [
   { path: "/admin/users", icon: UsersRound, label: "Manage users", exact: true },
+  { path: "/admin/sso-approvals", icon: ShieldCheck, label: "SSO approvals", exact: true },
   { path: "/admin/employee-zone-access", icon: MapPin, label: "Employee zone access", exact: true },
   { path: "/admin/zone-assignments", icon: Cpu, label: "Hardware zone access", exact: true },
+  { path: "/admin/entry-restrictions", icon: ShieldAlert, label: "Entry restrictions", exact: true },
 ];
 
 const returnOptions = [

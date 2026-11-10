@@ -41,6 +41,8 @@ def validated_checkpoint_ids(value) -> list[str]:
 
 def validated_metadata(payload: SubjectCreate, *, known_zone_ids=None) -> dict[str, Any]:
     """Normalize user-entered metadata before it reaches the JSON columns."""
+    if payload.kind != "hardware" and isinstance(payload.data, dict) and "category" in payload.data:
+        raise HTTPException(status_code=422, detail="Category is reserved for hardware records")
     incoming = current_subject_metadata(payload.kind, payload.data)
     incoming.pop("entryRestriction", None)
     incoming.pop("accessRevision", None)

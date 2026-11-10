@@ -58,7 +58,7 @@ class ExportTests(unittest.IsolatedAsyncioTestCase):
             scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="p1", checkpointId="cp-main",
                 selectedHardwareIds=["h1"]), "test:export")
             source = scan["decision"]["event"]["id"]
-            db.add(MovementNote(event_id=source, note="Verified for export", created_at=datetime.now(timezone.utc)))
+            db.add(MovementNote(event_id=source, note="Verified for export"))
             await db.commit()
         query = {"source": "movements", "subjectGroup": "hardware", "subject_id": "h1"}
         exported = await self.client.get("/v1/exports", params=query)

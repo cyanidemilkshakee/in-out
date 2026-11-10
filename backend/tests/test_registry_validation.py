@@ -14,6 +14,12 @@ from schemas import SubjectCreate
 
 
 class RegistryValidationTests(unittest.TestCase):
+    def test_non_hardware_metadata_cannot_claim_a_hardware_category(self):
+        with self.assertRaises(HTTPException) as caught:
+            validated_metadata(SubjectCreate(kind="employee", barcode="employee-1",
+                data={"name": "Alice", "category": "Laptop"}))
+        self.assertEqual(caught.exception.status_code, 422)
+
     def test_visitor_normalization_preserves_input_and_removes_server_owned_fields(self):
         incoming = {
             "name": " Visitor ", "host": " Host ", "phone": "private",

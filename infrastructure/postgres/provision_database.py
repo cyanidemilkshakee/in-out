@@ -164,7 +164,14 @@ async def provision(args):
         marker = await connection.fetchval("SELECT to_regclass('inout_infrastructure.provisioning') IS NOT NULL")
         if marker and not args.allow_existing:
             await verify_existing(connection, passwords)
-            print("Existing provisioning verified; no roles or records changed")
+            if args.apply:
+                # Keep extensions available when an already-provisioned volume
+                # is upgraded to an image that preloads this statistics module.
+                await connection.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public")
+            message = "Existing provisioning verified; no roles or records changed"
+            if args.apply:
+                message = "Existing provisioning verified; statistics extension ensured, no roles or records changed"
+            print(message)
             return
         populated = await connection.fetchval("""SELECT EXISTS(SELECT 1 FROM pg_class c
             JOIN pg_namespace n ON n.oid=c.relnamespace
@@ -195,9 +202,10 @@ async def provision(args):
         # A versioned backfill uses a transaction-scoped temporary table; only
         # the migration role needs the database TEMP privilege.
         await connection.execute("GRANT TEMPORARY ON DATABASE inout TO inout_migrator")
-        # Install the only required trusted extension as the administrator;
-        # migration clients do not receive database-wide CREATE privileges.
+        # Install PostgreSQL extensions as the administrator; migration
+        # clients do not receive database-wide CREATE privileges.
         await connection.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA public")
+        await connection.execute("CREATE EXTENSION IF NOT EXISTS pg_stat_statements WITH SCHEMA public")
         await transfer_schema(connection, "public", "inout_migrator")
         await transfer_schema(connection, "keycloak", "inout_keycloak")
         await connection.execute("REVOKE ALL ON SCHEMA public FROM inout_app")

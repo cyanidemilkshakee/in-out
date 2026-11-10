@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from auth import has_admin_role, has_master_admin_role, verify_admin_request
 from database import get_db
 from event_outbox import enqueue_changed
-from models import AuditEvent, Checkpoint, OrganizationZone, PermissionRequestModel, TerminalCheckpointAssignment
+from models import (AuditEvent, Checkpoint, OrganizationZone, PermissionRequestModel,
+    TerminalCheckpointAssignment, CheckpointEvaluationStatus)
 from user_management_locks import get_window_guard_db, require_unlocked_window
 from user_management_step_up import verified_user_management_window
 from zone_access import admin_zone_ids, require_checkpoint_scope, require_zone_scope
@@ -27,6 +28,27 @@ router = APIRouter(prefix="/v1/checkpoints", tags=["checkpoints"])
 _bearer = HTTPBearer(auto_error=False)
 _MAX_CHECKPOINTS_PER_ZONE = 100
 _CHECKPOINT_NAME = re.compile(r"^[^\x00-\x1f\x7f]+$")
+
+
+@router.get("/heartbeat-monitor-health")
+async def checkpoint_heartbeat_monitor_health(
+    db: AsyncSession = Depends(get_db),
+    _admin: dict = Depends(verify_admin_request),
+) -> dict[str, Any]:
+    """Expose whether the independent terminal heartbeat check is keeping up."""
+    status = await db.get(CheckpointEvaluationStatus, "checkpoint-heartbeat")
+    now = datetime.now(timezone.utc)
+    completed = status.last_completed_at if status else None
+    failed = status.last_failed_at if status else None
+    healthy = bool(completed and now - completed <= timedelta(minutes=3)
+        and (failed is None or failed <= completed))
+    return {"status": "healthy" if healthy else "degraded" if status else "not_started",
+        "lastCompletedAt": completed.isoformat() if completed else None,
+        "lastFailedAt": failed.isoformat() if failed else None,
+        "lastErrorCode": status.last_error_code if status and failed and (not completed or failed > completed) else None,
+        "checkpointsEvaluated": status.checkpoints_evaluated if status else 0,
+        "alertsCreated": status.alerts_created if status else 0,
+        "checkedAt": now.isoformat()}
 
 
 class CheckpointCreate(BaseModel):

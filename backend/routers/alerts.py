@@ -18,11 +18,12 @@ from sqlalchemy import select, func, or_, union_all, case, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from auth import verify_admin_request
+from auth import verify_admin_request, has_master_admin_role
 from database import get_db, get_read_db
 from data_limits import bounded_rows, precharge_mutation_response
 from event_outbox import enqueue_changed, enqueue_presence
-from models import Alert, AlertReview, Checkpoint, CriticalAlertTrigger, Subject
+from models import (Alert, AlertReview, Checkpoint, CriticalAlertTrigger,
+    CriticalEntryRestriction, OrganizationZone, Person, Subject)
 from critical_entry_restrictions import release_critical_entry_restriction
 from alert_reviews import (
     AlertReviewInput, WarningResetInput, acknowledge_alert, enrich_alert_documents, review_alert, reset_subject_warnings,
@@ -38,6 +39,47 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["alerts"])
+
+
+@router.get("/v1/critical-entry-restrictions")
+async def list_critical_entry_restrictions(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0, le=1000000),
+    db: AsyncSession = Depends(get_read_db),
+    admin: dict = Depends(verify_admin_request),
+) -> dict[str, Any]:
+    """Expose only active entry holds to Master Admin for narrow escalation."""
+    if not has_master_admin_role(admin):
+        raise HTTPException(403, "Only a Master Admin can review cross-zone entry restrictions")
+    base = (select(CriticalEntryRestriction, Subject, Person.data, CriticalAlertTrigger.zone_ids)
+        .join(Subject, Subject.id == CriticalEntryRestriction.subject_id)
+        .outerjoin(Person, Person.subject_id == Subject.id)
+        .outerjoin(CriticalAlertTrigger,
+            CriticalAlertTrigger.alert_id == CriticalEntryRestriction.trigger_alert_id)
+        .where(CriticalEntryRestriction.active.is_(True)))
+    total = int(await db.scalar(select(func.count()).select_from(base.subquery())) or 0)
+    rows = (await db.execute(base.order_by(CriticalEntryRestriction.triggered_at.desc(),
+        CriticalEntryRestriction.subject_id).offset(offset).limit(limit))).all()
+    zone_ids = {zone_id for _, _, _, ids in rows if isinstance(ids, list) for zone_id in ids
+        if isinstance(zone_id, str)}
+    zone_rows = (await db.execute(select(OrganizationZone.id, OrganizationZone.name)
+        .where(OrganizationZone.id.in_(zone_ids)))).all() if zone_ids else []
+    zone_names = {zone_id: name for zone_id, name in zone_rows}
+    items = []
+    for restriction, subject, person_data, raw_zone_ids in rows:
+        scoped_zone_ids = [zone_id for zone_id in raw_zone_ids if isinstance(zone_id, str)] \
+            if isinstance(raw_zone_ids, list) else []
+        items.append({
+            "subjectId": subject.id,
+            "subjectName": (person_data.get("name") if isinstance(person_data, dict) else None) or subject.barcode,
+            "subjectType": subject.kind,
+            "barcode": subject.barcode,
+            "triggerAlertId": restriction.trigger_alert_id,
+            "triggeredAt": restriction.triggered_at.isoformat(),
+            "zoneIds": scoped_zone_ids,
+            "zones": [zone_names.get(zone_id, zone_id) for zone_id in scoped_zone_ids],
+        })
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
 
 
 def _parse_alert_bound(value: str) -> datetime:
@@ -376,6 +418,11 @@ async def release_entry_restriction(
     if marker.subject_id is None:
         raise HTTPException(status_code=422, detail="This alert has no registered subject entry restriction")
     await require_subject_grant_scope(db, admin, marker.subject_id)
+    if not has_master_admin_role(admin):
+        allowed_zones = set(await admin_zone_ids(db, admin))
+        protected_zones = marker.zone_ids if isinstance(marker.zone_ids, list) else []
+        if not protected_zones or any(zone_id not in allowed_zones for zone_id in protected_zones):
+            raise HTTPException(403, "Releasing this restriction requires administrators assigned to every affected zone")
     result = await release_critical_entry_restriction(db, alert_id, admin.get("sub", "unknown"), payload.reason)
     await enqueue_changed(db)
     await db.commit()

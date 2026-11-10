@@ -15,7 +15,7 @@ from config import settings
 from data_limits import bounded_rows
 from models import Alert, AlertReview, WarningReset, Subject, Person, HardwareAsset, AuditEvent, CriticalEntryRestriction
 from critical_entry_restrictions import (
-    entry_restrictions_for_subjects, release_critical_entry_restriction,
+    entry_restrictions_for_subjects,
     CONFIRMED_WARNING_ENTRY_THRESHOLD, confirmed_warning_count,
     activate_warning_threshold_entry_restriction,
 )
@@ -310,7 +310,7 @@ async def review_alert(db, alert_id, decision, actor, reason=None):
     if subject:
         await _require_previous_alerts_reviewed(db, alert, subject)
         warning_count = await confirmed_warning_count(db, subject.id)
-        if warning_count >= CONFIRMED_WARNING_ENTRY_THRESHOLD:
+        if decision == "confirmed" and warning_count >= CONFIRMED_WARNING_ENTRY_THRESHOLD:
             raise HTTPException(409, "Reset this person's confirmed warnings before reviewing another alert")
     # Read time after the serialization lock, not the transaction start time.
     now = datetime.now(timezone.utc)
@@ -342,7 +342,7 @@ async def review_alert(db, alert_id, decision, actor, reason=None):
 
 
 async def reset_subject_warnings(db, subject_id, actor, reason):
-    """Reset counts and release the current entry hold in one transaction."""
+    """Reset warning counts without implicitly releasing an entry hold."""
     if not isinstance(reason, str) or not reason.strip() or len(reason) > 1000:
         raise HTTPException(422, "A reason of 1 to 1000 characters is required to reset warnings")
     reason = reason.strip()
@@ -357,7 +357,7 @@ async def reset_subject_warnings(db, subject_id, actor, reason):
         query.order_by(AlertReview.alert_id), maximum=settings.DATA_ANALYTICS_MAX_ROWS)]
     restriction = await db.get(CriticalEntryRestriction, subject_id, populate_existing=True)
     active_hold = restriction is not None and restriction.active
-    if reset and not current_reviews and not active_hold:
+    if reset and not current_reviews:
         _, _, _, summaries, _ = await warning_directory(db, subject_ids=[subject_id])
         return {"warning": summaries[subject_id], "entryRestriction": summaries[subject_id]["entryRestriction"]}
     now = datetime.now(timezone.utc)
@@ -379,14 +379,12 @@ async def reset_subject_warnings(db, subject_id, actor, reason):
         for alert in alerts:
             if (alert.data or {}).get("status") == "warned":
                 alert.data = {**alert.data, "status": "acknowledged", "warningReset": reset_document}
-    release = await release_critical_entry_restriction(db, restriction.trigger_alert_id, actor, reason) if active_hold else None
     audit = _audit(actor, "Subject warnings reset", reason, subject=subject,
-        extra={"previousWarningCount": len(current_reviews), "entryRestrictionLifted": active_hold})
+        extra={"previousWarningCount": len(current_reviews), "entryRestrictionLifted": False,
+            "entryRestrictionRemainsActive": active_hold})
     db.add(audit)
     await db.flush()
     _, _, _, summaries, _ = await warning_directory(db, subject_ids=[subject_id])
     response = {"warning": summaries[subject_id], "entryRestriction": summaries[subject_id]["entryRestriction"],
         "auditEvent": audit.data}
-    if release and "auditEvent" in release:
-        response["releaseAuditEvent"] = release["auditEvent"]
     return response

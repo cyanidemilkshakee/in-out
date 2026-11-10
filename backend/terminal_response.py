@@ -43,7 +43,8 @@ def project_terminal_scan_response(response):
     if not isinstance(response, dict):
         return response
     result = {key: response[key] for key in (
-        "allowed", "reason", "subject_id", "replayed", "authorizeMovement"
+        "allowed", "reason", "subject_id", "replayed", "authorizeMovement",
+        "needsReconciliation", "reconciliationId",
     ) if key in response}
     decision = response.get("decision")
     if isinstance(decision, dict):

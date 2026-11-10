@@ -70,7 +70,7 @@ class HardwareHistoryTests(unittest.IsolatedAsyncioTestCase):
         entry = await self._scan()
         event_id = entry["decision"]["event"]["id"]
         async with self.sessions() as db:
-            db.add(MovementNote(event_id=event_id, note="Laptop verified at gate", created_at=datetime.now(timezone.utc)))
+            db.add(MovementNote(event_id=event_id, note="Laptop verified at gate"))
             await db.commit()
         for params in ({"subject_id": "h1"}, {"subjectGroup": "hardware", "search": "Laptop"},
                 {"subjectGroup": "hardware", "search": "h1"}):

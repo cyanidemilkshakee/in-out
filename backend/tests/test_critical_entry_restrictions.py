@@ -20,7 +20,8 @@ import test_database as database_fixture
 from auth import verify_admin_request, verify_terminal_access_request
 from models import (Alert, AlertRule, CriticalEntryRestriction, CriticalAlertTrigger,
     Subject, Person, PresenceState, AccessPermission, Movement, AuditEvent, ScanRequest)
-from critical_entry_restrictions import activate_critical_entry_restrictions, entry_restrictions_for_subjects
+from critical_entry_restrictions import (activate_critical_entry_restrictions,
+    entry_restrictions_for_subjects, _effective_zone_scope)
 from permission_decisions import apply_permission_decision
 from schemas import BrowserScanPayload
 from terminal_scans import record_scan
@@ -28,6 +29,12 @@ from routers.alerts import EntryRestrictionRelease
 
 
 class EntryRestrictionReleaseValidationTests(unittest.TestCase):
+    def test_hold_scope_captures_all_effective_zones_and_fails_closed(self):
+        active = {"a", "b", "c"}
+        self.assertEqual(_effective_zone_scope({"zones": ["a", "b"]}, {}, active), ["a", "b"])
+        self.assertEqual(_effective_zone_scope({"zones": ["All Zones"]}, {}, active), ["a", "b", "c"])
+        self.assertEqual(_effective_zone_scope({"zones": ["retired-zone"]}, {}, active), [])
+
     def test_release_requires_explicit_nonblank_reason_and_rejects_extra_fields(self):
         self.assertEqual(EntryRestrictionRelease(reason=" Checked ID ").reason, "Checked ID")
         for body in ({}, {"reason": " "}, {"reason": True}, {"reason": "x" * 1001},

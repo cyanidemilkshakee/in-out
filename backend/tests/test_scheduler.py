@@ -14,29 +14,43 @@ import scheduler
 
 
 class SchedulerTests(unittest.IsolatedAsyncioTestCase):
-    async def test_start_has_rpc_deadline_and_preserves_durable_schedule_identity(self):
+    async def test_start_has_rpc_deadline_and_uses_hourly_alert_schedule(self):
         start = AsyncMock()
+        terminate = AsyncMock()
         with patch.object(scheduler, "get_temporal_client", new=AsyncMock(
-                return_value=SimpleNamespace(start_workflow=start))):
+                return_value=SimpleNamespace(start_workflow=start,
+                    get_workflow_handle=lambda workflow_id: SimpleNamespace(terminate=terminate)))):
             await scheduler.bootstrap_schedules()
-        start.assert_awaited_once_with(scheduler.AlertRuleCronWorkflow.run,
-            id="alert-rule-cron", task_queue=scheduler.TASK_QUEUE,
-            cron_schedule="*/5 * * * *", rpc_timeout=timedelta(seconds=5))
+        terminate.assert_awaited_once_with(
+            "Replacing the five-minute alert evaluation schedule with hourly evaluation")
+        self.assertEqual(start.await_args_list[0].args, (scheduler.AlertRuleCronWorkflow.run,))
+        self.assertEqual(start.await_args_list[1].args, (scheduler.CheckpointHeartbeatCronWorkflow.run,))
+        self.assertEqual(start.await_args_list[0].kwargs, {"id": "alert-rule-cron-hourly",
+            "task_queue": scheduler.TASK_QUEUE, "cron_schedule": "0 * * * *",
+            "rpc_timeout": timedelta(seconds=5)})
+        self.assertEqual(start.await_args_list[1].kwargs, {"id": "checkpoint-heartbeat-cron",
+            "task_queue": scheduler.TASK_QUEUE, "cron_schedule": "* * * * *",
+            "rpc_timeout": timedelta(seconds=5)})
 
     async def test_repeated_bootstrap_keeps_existing_schedule(self):
-        start = AsyncMock(side_effect=WorkflowAlreadyStartedError("alert-rule-cron", "AlertRuleCronWorkflow"))
+        start = AsyncMock(side_effect=[
+            WorkflowAlreadyStartedError("alert-rule-cron-hourly", "AlertRuleCronWorkflow"),
+            WorkflowAlreadyStartedError("checkpoint-heartbeat-cron", "CheckpointHeartbeatCronWorkflow"),
+        ])
         with patch.object(scheduler, "get_temporal_client", new=AsyncMock(
-                return_value=SimpleNamespace(start_workflow=start))):
+                return_value=SimpleNamespace(start_workflow=start,
+                    get_workflow_handle=lambda workflow_id: SimpleNamespace(terminate=AsyncMock())))):
             await scheduler.bootstrap_schedules()
-        start.assert_awaited_once()
+        self.assertEqual(start.await_count, 2)
 
     async def test_rpc_timeout_is_reported_so_setup_can_retry(self):
-        start = AsyncMock(side_effect=TimeoutError("Temporal RPC deadline elapsed"))
+        start = AsyncMock(side_effect=[None, TimeoutError("Temporal RPC deadline elapsed")])
         with patch.object(scheduler, "get_temporal_client", new=AsyncMock(
-                return_value=SimpleNamespace(start_workflow=start))):
+                return_value=SimpleNamespace(start_workflow=start,
+                    get_workflow_handle=lambda workflow_id: SimpleNamespace(terminate=AsyncMock())))):
             with self.assertRaises(TimeoutError):
                 await scheduler.bootstrap_schedules()
-        start.assert_awaited_once()
+        self.assertEqual(start.await_count, 2)
 
 
 if __name__ == "__main__":

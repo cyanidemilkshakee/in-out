@@ -88,11 +88,12 @@ async def _run_temporal_worker_once(stop: asyncio.Event) -> None:
     from workflows.activities import (
         approve_override, deny_override, auto_deny_override,
         approve_visitor, deny_visitor, auto_deny_visitor,
-        run_alert_rule_evaluation,
+        run_alert_rule_evaluation, run_checkpoint_heartbeat_evaluation,
     )
     from workflows.permission_override import PermissionOverrideWorkflow
     from workflows.visitor_approval import VisitorApprovalWorkflow
     from workflows.alert_rule_cron import AlertRuleCronWorkflow
+    from workflows.checkpoint_heartbeat_cron import CheckpointHeartbeatCronWorkflow
 
     client = await get_temporal_client()
     worker = Worker(
@@ -102,6 +103,7 @@ async def _run_temporal_worker_once(stop: asyncio.Event) -> None:
             PermissionOverrideWorkflow,
             VisitorApprovalWorkflow,
             AlertRuleCronWorkflow,
+            CheckpointHeartbeatCronWorkflow,
         ],
         activities=[
             approve_override,
@@ -111,6 +113,7 @@ async def _run_temporal_worker_once(stop: asyncio.Event) -> None:
             deny_visitor,
             auto_deny_visitor,
             run_alert_rule_evaluation,
+            run_checkpoint_heartbeat_evaluation,
         ],
     )
     logger.info("Temporal worker started on task queue: %s", TASK_QUEUE)

@@ -1,5 +1,5 @@
 """
-AlertRuleCronWorkflow — Evaluates scheduled alert rules every 5 minutes.
+AlertRuleCronWorkflow — Evaluates scheduled alert rules once per hour.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ with workflow.unsafe.imports_passed_through():
 class AlertRuleCronWorkflow:
     @workflow.run
     async def run(self) -> int:
-        """Called by Temporal every 5 minutes via cron_schedule."""
+        """Called by Temporal once per hour via cron_schedule."""
         return await workflow.execute_activity(
             run_alert_rule_evaluation,
             start_to_close_timeout=timedelta(minutes=2),

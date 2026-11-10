@@ -165,9 +165,8 @@ export function SsoApprovals() {
     <main className={styles.page}>
       <header className={styles.pageHeader}>
         <div>
-          <p className={styles.eyebrow}>ORGANIZATION ACCESS</p>
-          <h1>Zoho sign-in approvals</h1>
-          <p className={styles.intro}>Review first-time Zoho accounts and assign their In / Out role and operating area.</p>
+          <h1>SSO approvals</h1>
+          <p className={styles.intro}>No invitation is needed. Review first-time Zoho sign-ins and assign each person an In / Out role and operating area.</p>
         </div>
         <div className={styles.counter} aria-live="polite"><strong>{page?.items.length ?? items.length}</strong><span>waiting on this page</span></div>
       </header>
@@ -188,7 +187,7 @@ export function SsoApprovals() {
           </form>
           <div className={styles.userList} aria-busy={loading}>
             {loading ? <div className={styles.empty}><LoaderCircle className={styles.spinner} size={21} aria-hidden="true" />Loading accounts…</div> : null}
-            {!loading && items.length === 0 ? <div className={styles.empty}><UserRound size={21} aria-hidden="true" /><strong>No pending accounts</strong><span>New Zoho sign-ins without an In / Out role will appear here.</span></div> : null}
+            {!loading && items.length === 0 ? <div className={styles.empty}><UserRound size={21} aria-hidden="true" /><strong>No pending accounts</strong><span>People who sign in through Zoho without an invitation will appear here until assigned an In / Out role.</span></div> : null}
             {!loading && items.map((user) => (
               <button key={user.id} type="button" className={styles.userRow} data-selected={user.id === selectedId} onClick={() => selectUser(user)}>
                 <span className={styles.avatar} aria-hidden="true">{displayName(user).slice(0, 1).toUpperCase()}</span>

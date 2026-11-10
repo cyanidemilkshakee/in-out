@@ -103,6 +103,33 @@ class GlobalGrantRouteTests(unittest.IsolatedAsyncioTestCase):
                     release.assert_not_awaited()
                     db.commit.assert_not_awaited()
 
+    async def test_hold_release_requires_every_affected_zone_unless_master_admin(self):
+        for actor, zones, should_release in (
+            (ACTOR, ("a",), False),
+            (ACTOR, ("a", "b"), True),
+            ({"sub": "master", "realm_access": {"roles": ["master-admin"]}}, ("a",), True),
+        ):
+            with self.subTest(actor=actor["sub"], zones=zones):
+                marker = SimpleNamespace(subject_id="employee", zone_ids=["a", "b"])
+                db = SimpleNamespace(get=AsyncMock(return_value=marker), commit=AsyncMock())
+                with patch.object(alerts, "require_subject_grant_scope", new=AsyncMock()), \
+                     patch.object(alerts, "admin_zone_ids", new=AsyncMock(return_value=zones)) as get_zones, \
+                     patch.object(alerts, "release_critical_entry_restriction",
+                         new=AsyncMock(return_value={"entryRestriction": {"active": False}})) as release, \
+                     patch.object(alerts, "enqueue_changed", new=AsyncMock()):
+                    if should_release:
+                        await alerts.release_entry_restriction("alert", SimpleNamespace(reason="Reviewed"), db, actor)
+                        release.assert_awaited_once()
+                        db.commit.assert_awaited_once()
+                    else:
+                        with self.assertRaises(HTTPException) as raised:
+                            await alerts.release_entry_restriction("alert", SimpleNamespace(reason="Reviewed"), db, actor)
+                        self.assertEqual(raised.exception.status_code, 403)
+                        release.assert_not_awaited()
+                        db.commit.assert_not_awaited()
+                    if actor["sub"] == "master":
+                        get_zones.assert_not_awaited()
+
     async def test_direct_custody_grant_checks_global_scope_before_creating_permission(self):
         db = SimpleNamespace(commit=AsyncMock(), add=Mock())
         payload = PermissionGrantCreate(subject_id="asset", checkpoint_id="a-1",

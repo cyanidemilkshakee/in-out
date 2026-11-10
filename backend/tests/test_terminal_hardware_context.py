@@ -76,6 +76,11 @@ class TerminalHardwareContextTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(entered.json()["decision"]["event"]["manualApprovalRequestId"], request_id)
         self.assertEqual(entered.json()["decision"]["event"]["hardwareIds"], ["h1"])
         async with self.sessions() as db:
+            first_denial = await db.get(Movement, event["id"])
+            self.assertIsNotNone(first_denial, "the original denied visitor scan must remain in history")
+            self.assertEqual(first_denial.result, "denied")
+            self.assertEqual(first_denial.data["result"], "denied")
+            self.assertEqual(first_denial.denial_code, "barcode_not_registered")
             self.assertEqual((await db.get(PresenceState, "h1")).state, "inside")
             self.assertEqual((await db.get(PresenceState, "h1")).entry_override["hardwareIds"], ["h1"])
             self.assertTrue((await db.get(HardwareAsset, "h1")).data["inside"])

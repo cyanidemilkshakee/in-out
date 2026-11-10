@@ -137,6 +137,15 @@ export async function handleGet(request: NextRequest, timing: ServerTiming) {
     const alerts = await load("/v1/alerts?view=count&status=active");
     return response(alerts.total, timing);
   }
+  if (resource === "entryRestrictions") {
+    const query = new URLSearchParams();
+    for (const key of ["limit", "offset"]) {
+      const value = request.nextUrl.searchParams.get(key);
+      if (value !== null) query.set(key, value);
+    }
+    const search = query.toString();
+    return response(await load(`/v1/critical-entry-restrictions${search ? `?${search}` : ""}`), timing);
+  }
   if (resource === "alertRuleAssignments") {
     const subjectId = request.nextUrl.searchParams.get("subjectId")?.trim();
     if (!subjectId || subjectId.length > 200) {

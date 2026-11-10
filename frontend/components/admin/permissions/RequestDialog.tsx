@@ -483,7 +483,7 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
 
       <div className={`${styles.body} scrollable-content`}>
 
-      {!isNewVisitor && <label className={styles.field}>
+      {!isNewVisitor && <div className={styles.field}>
         <span>{type === "hardware_custody" ? "Asset" : isVisitorAccess ? "Visitor" : "Subject"}</span>
         <RegistrySubjectPicker key={type} value={subjectId} selected={subject} kind={type === "hardware_custody" ? "hardware" : undefined}
           label={type === "hardware_custody" ? "Asset" : isVisitorAccess ? "Visitor" : "Subject"} invalid={invalidSubject} disabled={busy}
@@ -499,7 +499,7 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
           if (selectedSubject && "type" in selectedSubject && selectedSubject.type === "visitor") setPermanentAccess(false);
           setError("");
         }} />
-      </label>}
+      </div>}
 
       {canRequestAnotherZone && <div className={styles.employeeAccessTabs} role="tablist" aria-label="Employee access action" onKeyDown={handleEmployeeAccessKeyDown}>
         <button id="permission-checkpoint-tab" type="button" role="tab" tabIndex={employeeAccessTab === "checkpoint" ? 0 : -1} aria-selected={employeeAccessTab === "checkpoint"} aria-controls="permission-checkpoint-panel" data-selected={employeeAccessTab === "checkpoint"} className={styles.employeeAccessTab} disabled={busy} onClick={() => { setEmployeeAccessTab("checkpoint"); setError(""); }}>Checkpoint access</button>
@@ -550,7 +550,7 @@ export function RequestDialog({ context, mode = "request", checkpoints: supplied
         </div>
       </fieldset>}
 
-      {type === "hardware_custody" && <label className={styles.field}><span>{isGrant ? "New custodian" : "Requested custodian"}</span><RegistrySubjectPicker value={carrierId} selected={employee} kind="employee" label="Employee" disabled={busy} invalid={invalidCarrier} onChange={record => { setSelectedCarrier(record as Person | undefined); setCarrierId(record?.id ?? ""); }} /></label>}
+      {type === "hardware_custody" && <div className={styles.field}><span>{isGrant ? "New custodian" : "Requested custodian"}</span><RegistrySubjectPicker value={carrierId} selected={employee} kind="employee" label="Employee" disabled={busy} invalid={invalidCarrier} onChange={record => { setSelectedCarrier(record as Person | undefined); setCarrierId(record?.id ?? ""); }} /></div>}
 
       {needsZones && <FacilityZoneSelection label={type === "zone_access" ? "Zone access" : "Allowed zones"} value={zones} onChange={(next) => { setZones(next); setError(""); }} zones={zoneChoices} disabled={busy || !zoneChoices.length} invalid={invalidZones} />}
 

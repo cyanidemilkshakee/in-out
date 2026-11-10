@@ -70,6 +70,12 @@ async def employee_activity_rows(db, employee_ids, start, end, *, zone_ids=None)
     return grouped
 
 
+def _activity_from_start(events, start):
+    """Keep the one preceding movement needed to resolve a work session."""
+    first = bisect_left(events, start, key=lambda event: event[1])
+    return events[max(0, first - 1):]
+
+
 def trend_summary(points, start, end, days, average):
     duration = timedelta(days=days)
     bucket_count = 7 if days == 7 else 10 if days == 30 else 12
@@ -91,12 +97,13 @@ def trend_summary(points, start, end, days, average):
             "isUp": value >= prior, "startAt": start.isoformat(), "endAt": end.isoformat()}
 
 
-async def _employee_overview_activity(db, days, end, zone_ids):
-    query = select(Subject.id).where(Subject.kind == "employee")
-    if zone_ids is not None:
-        query = query.where(subject_zone_condition(zone_ids))
-    ids = [row[0] for row in await bounded_rows(db, query)]
-    return await employee_activity_rows(db, ids, end - timedelta(days=2 * days), end, zone_ids=zone_ids)
+async def _employee_overview_activity(db, days, end, zone_ids, *, employee_ids=None):
+    if employee_ids is None:
+        query = select(Subject.id).where(Subject.kind == "employee")
+        if zone_ids is not None:
+            query = query.where(subject_zone_condition(zone_ids))
+        employee_ids = [row[0] for row in await bounded_rows(db, query)]
+    return await employee_activity_rows(db, employee_ids, end - timedelta(days=2 * days), end, zone_ids=zone_ids)
 
 
 async def registry_trend(db, kind, days, end, zone_ids=None, *, employee_events=None):
@@ -153,9 +160,19 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
     activity_start = today - timedelta(days=days - 1)
     averages = {}
     sorted_activity = None
+    overview_activity = None
     if sort_key == "averageHours" and kind == "employee":
         ids = [row[0] for row in await bounded_rows(db, source.with_only_columns(Subject.id).order_by(Subject.id))]
-        sorted_activity = await employee_activity_rows(db, ids, activity_start, now, zone_ids=zone_ids)
+        if include_overview:
+            # The trend needs two periods of activity. Load that wider window
+            # once and reuse its current-period slice for the table sort.
+            overview_ids = None if isinstance(search, str) and search.strip() else ids
+            overview_activity = await _employee_overview_activity(db, days, now, zone_ids,
+                employee_ids=overview_ids)
+            sorted_activity = {subject_id: _activity_from_start(overview_activity.get(subject_id, []), activity_start)
+                for subject_id in ids}
+        else:
+            sorted_activity = await employee_activity_rows(db, ids, activity_start, now, zone_ids=zone_ids)
         averages = {subject_id: round(sum(day["workedHours"] for day in build_activity_days(events, activity_start, now)) / days, 2)
                     if events else None for subject_id, events in sorted_activity.items()}
         ids.sort(key=lambda subject_id: (averages[subject_id] if averages[subject_id] is not None else -1, subject_id),
@@ -186,7 +203,6 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
     latest = (await db.scalars(latest_query
         .distinct(Movement.subject_id).order_by(Movement.subject_id, Movement.occurred_at.desc(), Movement.id.desc()))).all() if ids and include_related else []
     activity_days = {}
-    overview_activity = None
     if kind == "employee" and (sorted_activity is None or include_related):
         if sorted_activity is not None:
             activity = {subject_id: sorted_activity[subject_id] for subject_id in ids}
@@ -195,11 +211,7 @@ async def registry_page(db, *, kind, limit, offset, search, days, sort_key, sort
             activity = {}
             for subject_id in ids:
                 if subject_id in overview_activity:
-                    events = overview_activity[subject_id]
-                    first = bisect_left(events, activity_start, key=lambda event: event[1])
-                    # Match the narrower query's one predecessor and inclusive
-                    # start, retaining the original movement-ID tie ordering.
-                    activity[subject_id] = events[max(0, first - 1):]
+                    activity[subject_id] = _activity_from_start(overview_activity[subject_id], activity_start)
             missing = [subject_id for subject_id in ids if subject_id not in activity]
             if missing:
                 activity.update(await employee_activity_rows(db, missing, activity_start, now, zone_ids=zone_ids))

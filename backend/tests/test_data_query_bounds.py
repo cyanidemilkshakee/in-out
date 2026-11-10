@@ -340,7 +340,7 @@ class DataQueryBoundsDatabaseTests(unittest.IsolatedAsyncioTestCase):
             scan = await record_scan(db, uuid.uuid4(), BrowserScanPayload(
                 barcode="p1", checkpointId="cp-main", selectedHardwareIds=["h1"]), "bounds-terminal")
             source_id = scan["decision"]["event"]["id"]
-            db.add_all([MovementNote(event_id=source_id, note=f"note-{index}", created_at=now)
+            db.add_all([MovementNote(event_id=source_id, note=f"note-{index}")
                 for index in range(3)])
             await db.commit()
         hardware = await self.client.get("/v1/movements", params={"subjectGroup": "hardware"})

@@ -64,6 +64,8 @@ class ScanResponse(BaseModel):
     subject_id: Optional[str] = None
     replayed: bool = False
     authorizeMovement: bool = False
+    needs_reconciliation: bool = Field(default=False, alias="needsReconciliation")
+    reconciliation_id: Optional[str] = Field(default=None, alias="reconciliationId")
 
 
 # ── Phase 2 schemas ────────────────────────────────────────────────────────────

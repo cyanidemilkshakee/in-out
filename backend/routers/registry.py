@@ -568,6 +568,8 @@ async def update_subject(
 
     patch = {key: value for key, value in (payload.data or {}).items()
              if key not in {"id", "type", "kind", "barcode", "inside", "entryOverride", "entryRestriction", "accessRevision", "createdAt"}}
+    if sub.kind != "hardware" and "category" in patch:
+        raise HTTPException(422, "Category is reserved for hardware records")
     patch = current_subject_metadata(sub.kind, patch)
     if sub.kind == "hardware":
         current_hardware = (sub.hardware.data if sub.hardware else {}) or {}
