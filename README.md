@@ -67,13 +67,7 @@ The loopback-only administration gateway starts with the default Compose stack. 
 
 ```text
 docker compose up -d --wait keycloak-admin
-npm run keycloak:interactions:apply
-npm run keycloak:interactions:check
-node scripts/configure-keycloak-password-policy.mjs --apply
-node scripts/configure-keycloak-password-policy.mjs --check
-npm run keycloak:account:repair
-npm run keycloak:master-admin:apply
-npm run keycloak:master-admin:check
+npm run keycloak:setup
 ```
 
 The interaction commands require the matching extension already installed and the existing confidential-client secret unchanged. Their authenticated readiness probe uses the app-configured `KEYCLOAK_CLIENT_SECRET`; a stale app secret must fail the check. Password-policy apply requires the rebuilt image's bundled denylist. New credentials must contain 12 to 128 characters and a non-whitespace character, cannot equal the username or email, and must pass Keycloak's configured policy. The bundled list rejects common passwords; it is a small baseline, not a complete breached-password corpus. Existing stronger requirements and administrator-managed denylists are preserved. Existing credentials are not rotated by applying the policy; review weak existing accounts and arrange a separate password update when required.

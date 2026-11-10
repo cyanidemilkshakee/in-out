@@ -1,4 +1,4 @@
-// Fill empty app-generated secret fields only. Never replace an existing value.
+// Fill empty app-generated secrets and sync default local URLs to configured ports.
 import { randomBytes } from "node:crypto";
 import { readFile, writeFile } from "node:fs/promises";
 const file = new URL("../.env", import.meta.url);
@@ -12,40 +12,94 @@ const featureSecrets = {
 };
 const args = process.argv.slice(2);
 let feature = "all";
-if (args.length) {
+const urlsOnly = args.length === 1 && args[0] === "--urls-only";
+if (args.length && !urlsOnly) {
   const selected = args.length === 1 ? args[0] : args[0] === "--feature" ? args[1] : undefined;
   if ((args.length !== 1 && args.length !== 2) ||
       (args.length === 2 && args[0] !== "--feature") ||
       (selected !== "all" && !Object.hasOwn(featureSecrets, selected))) {
-    throw new Error(`Usage: node scripts/configure-new-install.mjs [--feature ${[...Object.keys(featureSecrets), "all"].join("|")}]`);
+    throw new Error(`Usage: node scripts/configure-new-install.mjs [--feature ${[...Object.keys(featureSecrets), "all"].join("|")}] | --urls-only`);
   }
   feature = selected;
 }
-const secrets = new Set(feature === "all" ? Object.values(featureSecrets).flat() : featureSecrets[feature]);
-const text = await readFile(file, "utf8");
+
+const source = await readFile(file, "utf8");
+function configuredPort(key, fallback) {
+  const match = source.match(new RegExp(`^${key}=([^\\r\\n]*)\\r?$`, "m"));
+  const value = match?.[1].trim();
+  if (!value) return fallback;
+  if (!/^\d+$/.test(value) || Number(value) < 1 || Number(value) > 65535) {
+    throw new Error(`${key} must be an integer from 1 to 65535`);
+  }
+  return String(Number(value));
+}
+
+const urls = feature === "all" ? {
+  AUTH_URL: `http://app.localhost:${configuredPort("APP_PORT", "1008")}`,
+  INOUT_APP_URL: `http://app.localhost:${configuredPort("APP_PORT", "1008")}`,
+  PYTHON_API_URL: `http://127.0.0.1:${configuredPort("PYTHON_API_PORT", "1002")}`,
+  KEYCLOAK_ISSUER: `http://auth.localhost:${configuredPort("KEYCLOAK_PORT", "1005")}/realms/inout`,
+} : {};
+const managedLocalUrls = {
+  AUTH_URL: ["app.localhost", "/"],
+  INOUT_APP_URL: ["app.localhost", "/"],
+  PYTHON_API_URL: ["127.0.0.1", "/"],
+  KEYCLOAK_ISSUER: ["auth.localhost", "/realms/inout"],
+};
+function canSyncLocalUrl(key, value) {
+  if (!value.trim()) return true;
+  try {
+    const url = new URL(value);
+    const [hostname, pathname] = managedLocalUrls[key];
+    return url.protocol === "http:" && url.hostname === hostname &&
+      url.pathname === pathname && !url.search && !url.hash;
+  } catch {
+    return false;
+  }
+}
+
+const secrets = new Set(urlsOnly ? [] : feature === "all" ? Object.values(featureSecrets).flat() : featureSecrets[feature]);
+const text = source;
 let filled = 0;
 const filledKeys = [];
 const foundKeys = new Set();
-const updated = text.replace(/^([A-Z_]+)=([^\r\n]*)/gm, (line, key, value) => {
-  if (!secrets.has(key)) return line;
-  foundKeys.add(key);
-  if (value.trim()) return line;
-  filled++;
-  filledKeys.push(key);
-  return `${key}=${randomBytes(32).toString("base64url")}`;
+const foundUrlKeys = new Set();
+const updatedUrlKeys = [];
+const updated = text.replace(/^([A-Z][A-Z0-9_]*)=([^\r\n]*)/gm, (line, key, value) => {
+  if (secrets.has(key)) {
+    foundKeys.add(key);
+    if (value.trim()) return line;
+    filled++;
+    filledKeys.push(key);
+    return `${key}=${randomBytes(32).toString("base64url")}`;
+  }
+  if (!Object.hasOwn(urls, key)) return line;
+  foundUrlKeys.add(key);
+  if (!canSyncLocalUrl(key, value) || value.trim() === urls[key]) return line;
+  updatedUrlKeys.push(key);
+  return `${key}=${urls[key]}`;
 });
 const missingKeys = [...secrets].filter(key => !foundKeys.has(key));
+const missingUrlKeys = Object.keys(urls).filter(key => !foundUrlKeys.has(key));
 let result = updated;
-if (missingKeys.length) {
+if (missingKeys.length || missingUrlKeys.length) {
   const newline = text.includes("\r\n") ? "\r\n" : "\n";
   if (result && !result.endsWith("\n")) result += newline;
-  result += missingKeys.map(key => `${key}=${randomBytes(32).toString("base64url")}`).join(newline);
+  result += [
+    ...missingKeys.map(key => `${key}=${randomBytes(32).toString("base64url")}`),
+    ...missingUrlKeys.map(key => `${key}=${urls[key]}`),
+  ].join(newline);
   filled += missingKeys.length;
   filledKeys.push(...missingKeys);
 }
-if (filled) await writeFile(file, result, { mode: 0o600 });
+if (filled || updatedUrlKeys.length || missingUrlKeys.length) {
+  await writeFile(file, result, { mode: 0o600 });
+}
 console.log(`Filled ${filled} empty secret field(s) for ${feature}: ${filledKeys.join(", ") || "none"}. Secret values are not printed.`);
 if (feature === "all") {
+  console.log(`Synchronized ${updatedUrlKeys.length + missingUrlKeys.length} local URL field(s) with configured ports: ${[...updatedUrlKeys, ...missingUrlKeys].join(", ") || "none"}.`);
+}
+if (feature === "all" && !urlsOnly) {
   console.log("Use --feature to scope generation. For an existing installation, do not fill blank database or Keycloak bootstrap secrets unless you have confirmed they match the persisted services.");
 }
 console.log("Provider-issued credentials (such as SMTP passwords) are never generated by this script.");

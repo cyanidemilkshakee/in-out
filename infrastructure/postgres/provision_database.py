@@ -67,8 +67,33 @@ async def transfer_schema(connection, schema, role):
 
 async def grant_runtime(connection):
     await connection.execute("GRANT USAGE ON SCHEMA public TO inout_app")
-    await connection.execute("GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO inout_app")
-    await connection.execute("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO inout_app")
+    # PostgreSQL extensions can own relations in public (for example,
+    # pg_stat_statements_info). The migration role must grant only on the
+    # application objects it owns, rather than every relation in the schema.
+    tables = await connection.fetch("""
+        SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
+          AND pg_get_userbyid(c.relowner)=current_user
+          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass
+              AND d.objid=c.oid AND d.deptype='e')
+        ORDER BY c.relname
+    """)
+    for item in tables:
+        await connection.execute(
+            f"GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.{identifier(item['relname'])} TO inout_app"
+        )
+    sequences = await connection.fetch("""
+        SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        WHERE n.nspname='public' AND c.relkind='S'
+          AND pg_get_userbyid(c.relowner)=current_user
+          AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass
+              AND d.objid=c.oid AND d.deptype='e')
+        ORDER BY c.relname
+    """)
+    for item in sequences:
+        await connection.execute(
+            f"GRANT USAGE, SELECT ON SEQUENCE public.{identifier(item['relname'])} TO inout_app"
+        )
     await connection.execute("ALTER DEFAULT PRIVILEGES FOR ROLE inout_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO inout_app")
     await connection.execute("ALTER DEFAULT PRIVILEGES FOR ROLE inout_migrator IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO inout_app")
     if await connection.fetchval("SELECT to_regclass('public.alembic_version') IS NOT NULL"):
