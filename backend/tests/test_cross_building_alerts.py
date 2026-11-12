@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 import test_database as fixture
 from auth import verify_admin_request, verify_terminal_access_request
 from models import (
-    Alert, AlertRule, AlertRuleAssignment, CriticalAlertTrigger,
+    AccessPermission, Alert, AlertRule, AlertRuleAssignment, CriticalAlertTrigger,
     CriticalEntryRestriction, Movement, PermissionRequestModel, Person, PresenceState, ScanRequest,
     Subject, TerminalCheckpointAssignment, EventOutbox,
 )
@@ -61,6 +61,10 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
             db.add(Subject(id="visitor", kind="visitor", barcode="visitor",
                 person=Person(data={"name": "Visitor", "status": "pre_approved",
                                    "allowedZones": ["a", "b"], "inside": False})))
+            db.add(AccessPermission(id="visitor-permission", subject_id="visitor", data={
+                "id": "visitor-permission", "subjectId": "visitor", "subjectType": "visitor",
+                "state": "active", "zones": ["a", "b"], "validFrom": "2026-01-01T00:00:00+00:00",
+                "validTo": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()}))
             # Both rules are global presence checks, including people whose
             # individually selectable attendance rules have been disabled.
             db.add(AlertRuleAssignment(subject_id="p1", rule_ids=[], revision=1, updated_by="test-admin"))
@@ -268,6 +272,10 @@ class CrossBuildingAlertTests(unittest.IsolatedAsyncioTestCase):
             db.add(Subject(id="visitor", kind="visitor", barcode="visitor",
                 person=Person(data={"name": "Visitor", "status": "pre_approved",
                     "allowedZones": ["a", "b"], "inside": False})))
+            db.add(AccessPermission(id="visitor-permission", subject_id="visitor", data={
+                "id": "visitor-permission", "subjectId": "visitor", "subjectType": "visitor",
+                "state": "active", "zones": ["a", "b"], "validFrom": "2026-01-01T00:00:00+00:00",
+                "validTo": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat()}))
             await db.flush()
             db.add(PresenceState(subject_id="visitor", state="outside",
                 visitor_overstay_alerted_entry_at=previous_entry))

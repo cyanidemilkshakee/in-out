@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from auth import verify_admin_request
 from database import get_read_db
 from movement_analytics import router
+from routers import exports
 
 
 class AnalyticsAuthorizationTests(unittest.IsolatedAsyncioTestCase):
@@ -65,9 +66,10 @@ class AnalyticsAuthorizationTests(unittest.IsolatedAsyncioTestCase):
 class AnalyticsZoneDatabaseTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         import test_database as fixture
-        from models import Alert, AlertReview, Movement, Person, PresenceState, Subject, ZoneAdminAssignment
+        from models import Alert, AlertReview, Checkpoint, Movement, Person, PresenceState, Subject, ZoneAdminAssignment
 
         await fixture.DatabaseTests.asyncSetUp(self)
+        self.app.include_router(exports.router)
         yesterday = datetime.now(timezone.utc).date() - timedelta(days=1)
         self.start = datetime.combine(yesterday, datetime.min.time(), timezone.utc) + timedelta(hours=3, minutes=30)
         self.end = self.start + timedelta(hours=8)
@@ -83,7 +85,7 @@ class AnalyticsZoneDatabaseTests(unittest.IsolatedAsyncioTestCase):
             db.add_all([PresenceState(subject_id="p1", state="inside"),
                         PresenceState(subject_id="foreign", state="inside")])
             for subject_id, checkpoint, entry, exit_ in (
-                ("p1", "cp-main", 0, 1), ("p1", "b-1", 2, 6), ("foreign", "b-1", 0, 5),
+                ("p1", "cp-main", 0, 1), ("p1", "server-room", 2, 6), ("foreign", "server-room", 0, 5),
             ):
                 for direction, hour in (("entry", entry), ("exit", exit_)):
                     db.add(Movement(id=f"{subject_id}-{checkpoint}-{direction}", subject_id=subject_id,
@@ -92,7 +94,7 @@ class AnalyticsZoneDatabaseTests(unittest.IsolatedAsyncioTestCase):
                         scan_type="auto", sync_state="synced", data={}))
             for alert_id, data in (
                 ("local-checkpoint", {"subjectId": "p1", "checkpointId": "cp-main"}),
-                ("foreign-checkpoint", {"subjectId": "p1", "checkpointId": "b-1"}),
+                ("foreign-checkpoint", {"subjectId": "p1", "checkpointId": "server-room"}),
                 ("foreign-zone", {"subjectId": "p1", "zoneId": "b"}),
                 ("foreign-subject", {"subjectId": "foreign"}),
                 ("unbound", {}),
@@ -103,7 +105,7 @@ class AnalyticsZoneDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 alert_data={"title": "Attendance irregularity", "checkpointId": "cp-main"}))
             db.add(AlertReview(alert_id="retained-foreign", subject_id="p1", decision="confirmed", reason="Reviewed",
                 reviewed_at=self.start, reviewed_by="fixture", alert_created_at=self.start,
-                alert_data={"title": "Attendance irregularity", "checkpointId": "b-1"}))
+                alert_data={"title": "Attendance irregularity", "checkpointId": "server-room"}))
             await db.commit()
         self.authorize("only-a")
 
@@ -144,6 +146,36 @@ class AnalyticsZoneDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 self.assertAlmostEqual(page["averages"]["p1"], round(1 / 365, 2))
                 self.assertEqual(page["activityDays"]["p1"][0]["workedHours"], 1)
                 self.assertEqual(page["trend"]["value"], 1)
+
+    async def test_zone_admin_alert_lists_and_exports_respect_explicit_checkpoint_scope(self):
+        for path, params, collection in (
+            ("/v1/alerts", {"limit": 100}, "items"),
+            ("/v1/alerts", {"view": "subject", "subjectId": "p1", "limit": 100}, "items"),
+            ("/v1/exports", {"source": "alerts"}, "items"),
+            ("/v1/registry/bundle", {}, "alerts"),
+        ):
+            response = await self.client.get(path, params=params)
+            self.assertEqual(response.status_code, 200, response.text)
+            rows = response.json().get(collection, [])
+            if path == "/v1/registry/bundle":
+                self.assertTrue(any(item.get("checkpointId") == "cp-main" for item in rows))
+                self.assertFalse(any(item.get("checkpointId") == "server-room" or item.get("zoneId") == "b"
+                    or not (item.get("checkpointId") or item.get("zoneId") or item.get("subjectId"))
+                    for item in rows), rows)
+                continue
+            ids = {item.get("id") for item in rows}
+            self.assertIn("local-checkpoint", ids)
+            self.assertIn("retained-local", ids)
+            self.assertTrue({"foreign-checkpoint", "foreign-zone", "foreign-subject",
+                "retained-foreign", "unbound"}.isdisjoint(ids), (path, ids))
+            if params.get("view") == "subject":
+                self.assertEqual(response.json()["totalSubjectAlerts"], 2)
+
+        self.authorize("master", "master-admin")
+        response = await self.client.get("/v1/alerts", params={"limit": 100})
+        self.assertEqual(response.status_code, 200, response.text)
+        master_ids = {item.get("id") for item in response.json().get("items", [])}
+        self.assertTrue({"foreign-checkpoint", "foreign-zone", "unbound"} <= master_ids)
 
     async def test_master_admin_retains_activity_across_all_active_zones(self):
         self.authorize("master", "master-admin")

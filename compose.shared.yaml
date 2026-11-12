@@ -1,0 +1,29 @@
+# Optional public HTTPS edge. Keep the default Compose file local-only.
+# Start with: npm run deploy:shared
+services:
+  caddy:
+    profiles: [shared]
+    image: caddy:${CADDY_VERSION:-2.11.9-alpine}
+    environment:
+      APP_PUBLIC_HOSTNAME: ${APP_PUBLIC_HOSTNAME:-app.localhost}
+      KEYCLOAK_PUBLIC_HOSTNAME: ${KEYCLOAK_PUBLIC_HOSTNAME:-auth.localhost}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    networks:
+      ingress:
+        ipv4_address: ${SHARED_CADDY_IP:-172.30.250.2}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    read_only: true
+    tmpfs: [/tmp]
+    depends_on:
+      kong:
+        condition: service_healthy
+    restart: unless-stopped

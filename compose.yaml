@@ -1,9 +1,9 @@
-# Kong owns the local HTTP listeners. App, API, and Keycloak have no host ports.
-# For physical-terminal TLS, add compose.mtls.yaml with your own certificates.
+# Kong owns the private/local HTTP listeners. App, API, and Keycloak have no host ports.
+# The optional compose.shared.yaml override adds Caddy as the public HTTPS edge.
 services:
   kong:
     # Published loopback ports need a host-facing bridge. Upstreams stay private.
-    networks: [edge, web, cache, monitoring]
+    networks: [edge, ingress, web, cache, monitoring]
     image: inout-kong:${KONG_VERSION:-3.9.3}
     build:
       context: ./gateway
@@ -19,14 +19,17 @@ services:
       # is not published on the host or included in the public proxy listeners.
       KONG_STATUS_LISTEN: "0.0.0.0:1017"
       KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity
-      KONG_NGINX_MAIN_ENV: "INOUT_TERMINAL_SECRET; env INOUT_UPLOAD_DEADLINE_SECONDS; env INOUT_GATEWAY_IDENTITY_SECRET; env INOUT_GATEWAY_REDIS_PASSWORD"
-      INOUT_UPLOAD_DEADLINE_SECONDS: ${INOUT_UPLOAD_DEADLINE_SECONDS:-30}
+      KONG_NGINX_MAIN_ENV: "INOUT_TERMINAL_SECRET; env INOUT_GATEWAY_IDENTITY_SECRET; env INOUT_GATEWAY_REDIS_PASSWORD"
       INOUT_TERMINAL_SECRET: ${KONG_TERMINAL_SECRET:-}
       INOUT_GATEWAY_IDENTITY_SECRET: ${KONG_IDENTITY_SECRET:?Generate KONG_IDENTITY_SECRET}
       INOUT_GATEWAY_REDIS_PASSWORD: ${REDIS_GATEWAY_PASSWORD:?Generate REDIS_GATEWAY_PASSWORD}
-      # Caller-supplied forwarded addresses cannot choose an ingress bucket.
-      KONG_TRUSTED_IPS: ""
+      # Trust forwarded client IPs only from Caddy's isolated ingress address.
+      # Direct localhost and other Docker-network callers still use their peer IP.
+      KONG_TRUSTED_IPS: ${SHARED_CADDY_IP:-172.30.250.2}
+      KONG_REAL_IP_HEADER: X-Forwarded-For
+      KONG_REAL_IP_RECURSIVE: "on"
       KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: 1m
+      KONG_NGINX_HTTP_CLIENT_BODY_TIMEOUT: ${INOUT_UPLOAD_IDLE_TIMEOUT_SECONDS:-30}s
       # Auth.js may chunk the session cookie across several request cookies.
       # Allow the gateway to accept the complete Cookie header on protected routes.
       KONG_NGINX_HTTP_CLIENT_HEADER_BUFFER_SIZE: 16k
@@ -216,17 +219,17 @@ services:
     # Keep Keycloak on private app/database networks and the existing
     # non-internal gateway network for external OIDC provider callbacks.
     networks: [edge, web, identity-db]
-    image: inout-keycloak:${KEYCLOAK_VERSION:-26.8.1}
+    image: inout-keycloak:${KEYCLOAK_VERSION:-26.8.2}
     build:
       context: ./keycloak
       args:
-        KEYCLOAK_VERSION: ${KEYCLOAK_VERSION:-26.8.1}
+        KEYCLOAK_VERSION: ${KEYCLOAK_VERSION:-26.8.2}
     # Database/health augmentation is cached in the image, rather than repeated
     # while the rest of the application is waiting for the identity provider.
     command: start --optimized --http-enabled=true --import-realm
     environment:
-      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME in .env}
-      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      - KC_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-}
+      - KC_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}
       - KC_DB=postgres
       - KC_DB_SCHEMA=keycloak
       - KC_DB_URL=jdbc:postgresql://postgres-primary:1020/inout
@@ -239,10 +242,10 @@ services:
       - KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET=${KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET:-}
       - INOUT_APP_URL=${AUTH_URL:-http://app.localhost:${APP_PORT:-1008}}
       # Keep identity cookies on a separate host from the app; cookies ignore ports.
-      - KC_HOSTNAME=http://auth.localhost:${KEYCLOAK_PORT:-1005}
+      - KC_HOSTNAME=${KEYCLOAK_PUBLIC_URL:-http://auth.localhost:${KEYCLOAK_PORT:-1005}}
       # /admin stays blocked on the public listener; the separate admin
       # gateway below is loopback-bound and forwards to this internal host.
-      - KC_HOSTNAME_ADMIN=http://auth.localhost:${KEYCLOAK_ADMIN_PORT:-1009}
+      - KC_HOSTNAME_ADMIN=${KEYCLOAK_ADMIN_ORIGIN:-http://auth.localhost:${KEYCLOAK_ADMIN_PORT:-1009}}
       - KC_PROXY_HEADERS=xforwarded
     volumes:
       - ./keycloak/realm-inout.json:/opt/keycloak/data/import/inout-realm.json:ro
@@ -277,6 +280,7 @@ services:
       KONG_NGINX_MAIN_ENV: "INOUT_GATEWAY_REDIS_PASSWORD"
       INOUT_GATEWAY_REDIS_PASSWORD: ${REDIS_GATEWAY_PASSWORD:?Generate REDIS_GATEWAY_PASSWORD}
       KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: 1m
+      KONG_NGINX_HTTP_CLIENT_BODY_TIMEOUT: ${INOUT_UPLOAD_IDLE_TIMEOUT_SECONDS:-30}s
       KONG_NGINX_HTTP_CLIENT_HEADER_BUFFER_SIZE: 16k
       KONG_NGINX_HTTP_LARGE_CLIENT_HEADER_BUFFERS: "4 32k"
       KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 64k
@@ -343,8 +347,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://inout_migrator:${MIGRATION_DB_PASSWORD:?Generate MIGRATION_DB_PASSWORD}@postgres-primary:1020/inout
       - KEYCLOAK_ADMIN_BASE=http://keycloak:1022
-      - KEYCLOAK_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:?Set KEYCLOAK_ADMIN_USERNAME in .env}
-      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      - KEYCLOAK_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:-${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-setup-admin}}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}}
       - DEMO_CREDENTIALS_PATH=/output/full-demo-accounts.csv
     volumes:
       - ./.local-test-accounts:/output
@@ -378,7 +382,7 @@ services:
       - TEMPORAL_HOST=temporal:1024
       - KONG_TERMINAL_SECRET=${KONG_TERMINAL_SECRET:-}
       - KONG_IDENTITY_SECRET=${KONG_IDENTITY_SECRET:?Generate KONG_IDENTITY_SECRET}
-      - KEYCLOAK_ISSUER=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
+      - KEYCLOAK_ISSUER=${KEYCLOAK_PUBLIC_URL:-http://auth.localhost:${KEYCLOAK_PORT:-1005}}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:1022/realms/inout
       - KEYCLOAK_ADMIN_BASE=http://keycloak:1022
       - KEYCLOAK_INVITE_CLIENT_ID=${KEYCLOAK_INVITE_CLIENT_ID:-inout-invitations}
@@ -386,7 +390,7 @@ services:
       - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
       - KEYCLOAK_JWKS_CACHE_TTL=${KEYCLOAK_JWKS_CACHE_TTL:-300}
       - KEYCLOAK_STEP_UP_SIGNING_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env}
-      - INVITE_APP_BASE_URL=${INOUT_APP_URL:-http://app.localhost:${APP_PORT:-1008}}
+      - INVITE_APP_BASE_URL=${AUTH_URL:-${INOUT_APP_URL:-http://app.localhost:${APP_PORT:-1008}}}
       - INVITE_TTL_SECONDS=${INVITE_TTL_SECONDS:-900}
       - INVITE_SMTP_HOST=${KEYCLOAK_SMTP_HOST:-}
       - INVITE_SMTP_PORT=${KEYCLOAK_SMTP_PORT:-587}
@@ -464,7 +468,7 @@ services:
       - QUOTA_REDIS_URL=redis://inout-quota:${REDIS_QUOTA_PASSWORD:?Generate REDIS_QUOTA_PASSWORD}@redis:1021/0
       - EVENTS_REDIS_URL=redis://inout-events:${REDIS_EVENTS_PASSWORD:?Generate REDIS_EVENTS_PASSWORD}@redis:1021/0
       - TEMPORAL_HOST=temporal:1024
-      - KEYCLOAK_ISSUER=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
+      - KEYCLOAK_ISSUER=${KEYCLOAK_PUBLIC_URL:-http://auth.localhost:${KEYCLOAK_PORT:-1005}}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:1022/realms/inout
       - KEYCLOAK_AUDIENCE=${KEYCLOAK_AUDIENCE:-inout-frontend}
       - QUOTA_REDIS_MAX_CONNECTIONS=${QUOTA_REDIS_MAX_CONNECTIONS:-64}
@@ -505,10 +509,11 @@ services:
       - KEYCLOAK_CLIENT_ID=inout-frontend
       - KEYCLOAK_CLIENT_SECRET=${KEYCLOAK_CLIENT_SECRET:?Set KEYCLOAK_CLIENT_SECRET in .env}
       - PASSWORD_UPDATE_LOCK_API_URL=http://python-api:1019
-      - KEYCLOAK_ISSUER=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
+      - KEYCLOAK_ISSUER=${KEYCLOAK_PUBLIC_URL:-http://auth.localhost:${KEYCLOAK_PORT:-1005}}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:1022/realms/inout
-      - KEYCLOAK_ISSUER_PUBLIC=http://auth.localhost:${KEYCLOAK_PORT:-1005}/realms/inout
-      - KEYCLOAK_ADMIN_CONSOLE_URL=${KEYCLOAK_ADMIN_CONSOLE_URL:-}
+      - KEYCLOAK_ISSUER_PUBLIC=${KEYCLOAK_PUBLIC_URL:-http://auth.localhost:${KEYCLOAK_PORT:-1005}}/realms/inout
+      # Never advertise the maintenance console link on the public sign-in page.
+      - KEYCLOAK_ADMIN_CONSOLE_URL=
       # Container listeners are fixed in Kong and health checks. Only the
       # published APP_PORT may change; ignore legacy internal-port overrides.
       - PORT=1018
@@ -529,7 +534,7 @@ services:
   # Existing 1.26 data must follow the staged upgrade procedure before startup.
   temporal-schema-init:
     networks: [temporal-db]
-    image: inout-temporal-maintenance:1.32.1
+    image: inout-temporal-maintenance:1.32.2
     build:
       context: ./infrastructure/temporal
       additional_contexts:
@@ -548,7 +553,7 @@ services:
 
   temporal:
     networks: [temporal-db, workflow]
-    image: temporalio/server:1.32.1@sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049
+    image: temporalio/server:1.32.2@sha256:7bf69188a6232fea14869b9cef3d94aa82a1601d99517f7e86c71f22da4e0670
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     read_only: true
@@ -602,7 +607,7 @@ services:
 
   temporal-ui:
     networks: [workflow]
-    image: temporalio/ui:2.55.0@sha256:3899d5cf749b5555c9f798d46f2423b1d6190ea391ca713db5d1bba961759e58
+    image: temporalio/ui:2.56.1@sha256:584dd3408ab8333888d50b12d4a683e550e963409bf95fa2c9159d40d7cb825f
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     profiles: [observability]
@@ -646,10 +651,17 @@ services:
 volumes:
   pg-primary-data:
   prometheus-data:
+  caddy-data:
+  caddy-config:
 
 networks:
   edge:
     driver: bridge
+  ingress:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${SHARED_INGRESS_SUBNET:-172.30.250.0/29}
   web:
     internal: true
   app-db:

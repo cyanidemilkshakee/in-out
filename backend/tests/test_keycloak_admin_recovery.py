@@ -93,7 +93,7 @@ class IdentityStore:
     def __init__(self, db):
         self.db = db
         self.user = {"id": "existing", "username": "existing", "firstName": "Old", "lastName": "Name",
-            "email": "old@example.invalid", "emailVerified": True, "enabled": True}
+            "email": "old@example.invalid", "emailVerified": True, "enabled": True, "attributes": {}}
         self.roles = {"zone-admin", "unrelated-role"}
         self.calls = []
         self.failures = {}
@@ -262,62 +262,59 @@ class KeycloakAdminRecoveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.status_code, 422, result.text)
         self.assertEqual(self.identity.roles, {"zone-admin", "unrelated-role"})
 
-    async def test_creation_is_disabled_until_password_assignment_and_roles_are_ready(self):
+    async def test_password_creation_endpoint_requires_invitation_workflow(self):
         self.db.pending = self.db.committed = None
         result = await self.create()
-        self.assertEqual(result.status_code, 201, result.text)
-        self.assertTrue(result.json()["enabled"])
-        self.assertEqual(result.json()["roles"], ["operator"])
-        self.assertFalse(self.identity.calls[0][2]["enabled"])
-        self.assertEqual(self.db.committed, "server-room")
-        self.publish.assert_awaited_once_with(self.db, "browser:created")
+        self.assertEqual(result.status_code, 410, result.text)
+        self.assertIn("invitation", result.json()["detail"].lower())
+        self.assertEqual(self.identity.calls, [])
+        self.assertIsNone(self.db.committed)
+        self.publish.assert_not_awaited()
 
-    async def test_failed_password_removes_only_new_account(self):
+    async def test_password_failure_does_not_create_or_remove_an_identity(self):
         self.db.pending = self.db.committed = None
         self.identity.fail("PUT", "users/created/reset-password")
         result = await self.create()
-        self.assertEqual(result.status_code, 503, result.text)
-        self.assertIn("new account was removed", result.json()["detail"])
-        self.assertTrue(self.identity.deleted)
-        self.assertEqual([path for method, path, _ in self.identity.calls if method == "DELETE"], ["users/created"])
+        self.assertEqual(result.status_code, 410, result.text)
+        self.assertFalse(self.identity.deleted)
+        self.assertEqual(self.identity.calls, [])
         self.assertIsNone(self.db.committed)
 
-    async def test_failed_role_grant_removes_committed_assignment_and_new_account(self):
+    async def test_password_role_failure_does_not_write_provider_or_assignment(self):
         self.db.pending = self.db.committed = None
         self.identity.fail("POST", "users/created/role-mappings/realm")
         result = await self.create()
-        self.assertEqual(result.status_code, 503, result.text)
-        self.assertTrue(self.identity.deleted)
+        self.assertEqual(result.status_code, 410, result.text)
+        self.assertFalse(self.identity.deleted)
+        self.assertEqual(self.identity.calls, [])
         self.assertIsNone(self.db.committed)
-        self.assertEqual(self.db.commits, 2)
-        self.assertEqual(self.publish.await_args_list,
-            [call(self.db, "browser:created"), call(self.db, "browser:created")])
+        self.assertEqual(self.db.commits, 0)
+        self.publish.assert_not_awaited()
 
-    async def test_failed_creation_cleanup_disables_account_and_reports_recovery_id(self):
+    async def test_password_creation_cleanup_is_not_started_without_invitation(self):
         self.db.pending = self.db.committed = None
         self.identity.fail("POST", "users/created/role-mappings/realm")
         self.identity.fail("DELETE", "users/created")
         result = await self.create()
-        self.assertEqual(result.status_code, 503, result.text)
-        self.assertIn("Recovery is required for Keycloak account created", result.json()["detail"])
-        self.assertFalse(self.identity.user["enabled"])
+        self.assertEqual(result.status_code, 410, result.text)
+        self.assertEqual(self.identity.calls, [])
+        self.assertFalse(self.identity.user.get("enabled") is False)
         self.assertIsNone(self.db.committed)
 
-    async def test_missing_created_id_reports_disabled_account_without_deleting_an_unknown_user(self):
+    async def test_missing_create_response_does_not_mutate_provider_without_invitation(self):
         self.identity.missing_location = True
         result = await self.create()
-        self.assertEqual(result.status_code, 502, result.text)
-        self.assertIn("created disabled", result.json()["detail"])
-        self.assertFalse(self.identity.user["enabled"])
+        self.assertEqual(result.status_code, 410, result.text)
+        self.assertEqual(self.identity.calls, [])
         self.assertFalse(self.identity.deleted)
 
-    async def test_failed_initial_create_does_not_delete_a_preexisting_account(self):
+    async def test_preexisting_account_is_not_probed_by_disabled_password_creation(self):
         async def conflict(*args, **kwargs):
             raise HTTPException(409, "Username already exists")
         with patch("routers.keycloak_admin._request", side_effect=conflict) as provider:
             result = await self.create()
-        self.assertEqual(result.status_code, 409, result.text)
-        self.assertEqual(provider.await_count, 1)
+        self.assertEqual(result.status_code, 410, result.text)
+        self.assertEqual(provider.await_count, 0)
         self.assertFalse(self.identity.deleted)
 
     async def test_regular_admin_can_only_change_operator_enabled_state_and_checkpoint(self):

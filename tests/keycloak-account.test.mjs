@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { applyApplicationClientScopes, localKeycloakRequest, missingAccountRoles, missingApiAudienceMapper,
+import { addDefaultAdminApiScope, applyApplicationClientScopes, hasDefaultAdminApiScope, localKeycloakRequest, missingAccountRoles, missingApiAudienceMapper,
   missingApplicationScopeRoles, missingFrontendRoleClaims, prepareApplicationClientScopes } from "../scripts/keycloak-account-access.mjs";
 
 const clientId = "account-client-id";
@@ -72,10 +72,32 @@ test("API audience repair does not silently replace conflicting custom settings"
   assert.throws(() => missingApiAudienceMapper([{ name: "api-audience", config: {} }]), /conflicting settings/);
 });
 
+test("Keycloak Admin REST scope repair is idempotent and verifies the assigned built-in scope", async () => {
+  const clientId = "frontend-client-id";
+  const scope = { id: "admin-api-scope-id", name: "kc-admin-api" };
+  let defaults = [{ id: "profile-id", name: "profile" }];
+  const writes = [];
+  const api = async (path, { method = "GET" } = {}) => {
+    if (path === `/clients/${clientId}/default-client-scopes` && method === "GET") return Response.json(defaults);
+    if (path === `/clients/${clientId}/default-client-scopes/${scope.id}` && method === "PUT") {
+      writes.push({ path, method });
+      defaults = [...defaults, scope];
+      return new Response(null, { status: 204 });
+    }
+    throw new Error(`Unexpected Keycloak API request: ${method} ${path}`);
+  };
+  assert.equal(await hasDefaultAdminApiScope(api, clientId, scope), false);
+  assert.equal(await addDefaultAdminApiScope(api, clientId, scope), true);
+  assert.equal(await hasDefaultAdminApiScope(api, clientId, scope), true);
+  assert.equal(await addDefaultAdminApiScope(api, clientId, scope), false);
+  assert.equal(writes.length, 1);
+});
+
 const appRealmRoles = ["zone-admin", "operator"].map((name) => ({ id: `realm-${name}`, name, clientRole: false, composite: true }));
 
 test("application client templates scope master-admin only to the frontend", () => {
   const realm = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
+  assert.ok(realm.clients.find((client) => client.clientId === "inout-frontend").defaultClientScopes.includes("kc-admin-api"));
   for (const clientId of ["inout-frontend", "inout-postman"]) {
     assert.equal(realm.clients.find((client) => client.clientId === clientId).fullScopeAllowed, false);
     assert.deepEqual(realm.scopeMappings.find((mapping) => mapping.client === clientId).roles,

@@ -4,7 +4,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, func, or_, select, union_all
+from sqlalchemy import and_, func, or_, select, true, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import verify_admin_request
@@ -141,7 +141,7 @@ async def dashboard_analytics(
         *movement_totals.c,
         *alert_totals.c,
         inside_total.label("active_inside"),
-    ))).mappings().one()
+    ).select_from(movement_totals.join(alert_totals, true())))).mappings().one()
     def period_payload(name):
         values = {key: int(summary[f"{name}_{key}"] or 0) for key in scan_filters}
         return {"scanAnalytics": {**{key: value for key, value in values.items() if key.startswith("total")},

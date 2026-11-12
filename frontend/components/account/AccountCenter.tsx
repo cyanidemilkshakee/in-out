@@ -217,7 +217,7 @@ export function AccountCenter() {
         })}</ul>
       </section> : null}
       <section className={styles.card} aria-labelledby="profile-title">
-        <div className={styles.sectionHeading}><span className={styles.sectionIcon}><UserRound size={21} aria-hidden="true" /></span><div><h2 id="profile-title">Profile</h2><p>@{data.profile.username}</p></div></div>
+        <div className={styles.sectionHeading}><span className={styles.sectionIcon}><UserRound size={21} aria-hidden="true" /></span><div><h2 id="profile-title">Profile preview</h2><p>Edits stay in this page and are not saved to the identity provider. @{data.profile.username}</p></div></div>
         <form className={styles.form} onSubmit={saveProfile} aria-busy={busy}>
           <div className={styles.twoColumn}>
             <label className={styles.field}><span>First name</span><input required maxLength={100} autoComplete="given-name" value={profile.firstName} onChange={(event) => setProfile((value) => ({ ...value, firstName: event.target.value }))} disabled={busy} /></label>
@@ -226,8 +226,8 @@ export function AccountCenter() {
             {data.supportedLocales.length ? <label className={styles.field}><span>Language</span><select value={profile.locale} onChange={(event) => setProfile((value) => ({ ...value, locale: event.target.value }))} disabled={busy}><option value="">Default language</option>{data.supportedLocales.map((locale) => <option value={locale} key={locale}>{locale}</option>)}</select></label> : null}
           </div>
           <div className={styles.emailRow}><span>Email</span><strong>{data.profile.email || "No email address"}</strong><span className={styles.verification} data-verified={data.profile.emailVerified}>{data.profile.emailVerified ? <><BadgeCheck size={16} aria-hidden="true" />Verified</> : "Not verified"}</span></div>
-          {!data.profile.emailVerified && data.profile.email ? <div className={styles.verifyRow}><p className={styles.hint}>Email verification is required before this address can be treated as verified.</p><button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void sendVerificationEmail()}>Send verification email</button></div> : null}
-          <button className={styles.primaryButton} type="submit" disabled={busy}>{busy ? "Saving…" : "Save profile"}</button>
+          {!data.profile.emailVerified && data.profile.email ? <div className={styles.verifyRow}><p className={styles.hint}>Email verification is required before this address can be treated as verified.</p><button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void sendVerificationEmail()}>Preview email verification</button></div> : null}
+          <button className={styles.primaryButton} type="submit" disabled={busy}>{busy ? "Saving preview…" : "Save preview"}</button>
         </form>
       </section>
 
@@ -268,11 +268,11 @@ export function AccountCenter() {
       </section>
 
       <section className={styles.card} aria-labelledby="recovery-codes-title">
-        <div className={styles.sectionHeading}><span className={styles.sectionIcon}><ShieldCheck size={21} aria-hidden="true" /></span><div><h2 id="recovery-codes-title">Recovery codes</h2><p>Generate a new single-use set for account recovery.</p></div></div>
+        <div className={styles.sectionHeading}><span className={styles.sectionIcon}><ShieldCheck size={21} aria-hidden="true" /></span><div><h2 id="recovery-codes-title">Recovery-code preview</h2><p>Sample codes only; they cannot recover an account and are not saved.</p></div></div>
         {recoveryCodes ? <><p className={styles.hint}>Each code can be used once. Save this list now; it will not be shown again.</p><div className={styles.recoveryCodes}>{recoveryCodes.map((code) => <code key={code}>{code}</code>)}</div><button className={styles.secondaryButton} type="button" onClick={() => setRecoveryCodes(null)}>Hide codes</button></> : <div className={styles.form}>
           <label className={styles.field}><span>Current password</span><input type="password" autoComplete="current-password" value={securityProof.password} onChange={(event) => setSecurityProof((value) => ({ ...value, password: event.target.value }))} disabled={busy} /></label>
           <label className={styles.field}><span>Current authenticator code <small>(if configured)</small></span><input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,8}" maxLength={8} value={securityProof.otp} onChange={(event) => setSecurityProof((value) => ({ ...value, otp: event.target.value }))} disabled={busy} /></label>
-          <button className={styles.secondaryButton} type="button" disabled={busy || !securityProof.password} onClick={() => void makeRecoveryCodes()}>Generate recovery codes</button>
+          <button className={styles.secondaryButton} type="button" disabled={busy || !securityProof.password} onClick={() => void makeRecoveryCodes()}>Preview recovery codes</button>
         </div>}
       </section>
 
@@ -282,7 +282,7 @@ export function AccountCenter() {
           <label className={styles.field}><span>Current password</span><input type="password" autoComplete="current-password" value={securityProof.password} onChange={(event) => setSecurityProof((value) => ({ ...value, password: event.target.value }))} disabled={busy} /></label>
           <label className={styles.field}><span>Current authenticator code <small>(if enabled)</small></span><input inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6,8}" maxLength={8} value={securityProof.otp} onChange={(event) => setSecurityProof((value) => ({ ...value, otp: event.target.value }))} disabled={busy} /></label>
           <label className={styles.field}><span>Passkey name</span><input maxLength={100} value={passkeyLabel} onChange={(event) => setPasskeyLabel(event.target.value)} disabled={busy} placeholder="For example, Work laptop" /></label>
-          <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" disabled={busy || !securityProof.password} onClick={() => void addPasskey("second-factor")}>Add security key or passkey</button><button className={styles.secondaryButton} type="button" disabled={busy || !securityProof.password} onClick={() => void addPasskey("passwordless")}>Add passwordless passkey</button></div>
+          <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" disabled={busy || !securityProof.password} onClick={() => void addPasskey("second-factor")}>Preview security key or passkey</button><button className={styles.secondaryButton} type="button" disabled={busy || !securityProof.password} onClick={() => void addPasskey("passwordless")}>Preview passwordless passkey</button></div>
         </div>
       </section>
 
@@ -300,7 +300,7 @@ export function AccountCenter() {
         </div> : null}
         {data.credentials.length ? <div className={styles.credentials}>{data.credentials.map((credential) => <div className={styles.credential} key={credential.id}>
           <div><strong>{readableCredentialType(credential.type)}</strong><label className={styles.field}><span>Credential name</span><input maxLength={100} value={labels[credential.id] ?? ""} onChange={(event) => setLabels((current) => ({ ...current, [credential.id]: event.target.value }))} disabled={busy} /></label></div>
-          <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void saveCredentialLabel()}>Save name</button>{data.requiredActions.includes("delete_credential") && credential.type !== "password" ? <button className={styles.secondaryButton} type="button" disabled={busy || !securityProof.password} onClick={() => void removeCredential(credential)}>Remove</button> : null}</div>
+          <div className={styles.buttonRow}><button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void saveCredentialLabel()}>Preview name change</button>{data.requiredActions.includes("delete_credential") && credential.type !== "password" ? <button className={styles.secondaryButton} type="button" disabled={busy || !securityProof.password} onClick={() => void removeCredential(credential)}>Preview removal</button> : null}</div>
         </div>)}</div> : <p className={styles.empty}>No sign-in credentials are available to display.</p>}
       </section>
     </> : <button className={styles.secondaryButton} type="button" onClick={() => void load()}>Try again</button>}

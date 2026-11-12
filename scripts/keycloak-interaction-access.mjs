@@ -4,7 +4,7 @@ import { localKeycloakRequest } from "./keycloak-account-access.mjs";
 
 export const INTERACTION_PROTOCOL = "inout-app-interactions-v1";
 export const INTERACTION_EXTENSION_VERSION = 1;
-export const INTERACTION_KEYCLOAK_VERSION = "26.8.1";
+export const INTERACTION_KEYCLOAK_VERSION = "26.8.2";
 
 export async function interactionProviderReady(api, adminBase, client, request = localKeycloakRequest,
   clientSecret = process.env.KEYCLOAK_CLIENT_SECRET) {

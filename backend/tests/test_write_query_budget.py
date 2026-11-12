@@ -94,7 +94,8 @@ class ScanManualGrantQueryTests(unittest.IsolatedAsyncioTestCase):
             get=AsyncMock(side_effect=[None, checkpoint]), flush=AsyncMock(), add=Mock())
         restrictions = {held_subject: {"subjectId": held_subject, "active": True}} if held_subject else {}
         with patch("terminal_scans.entry_restrictions_for_locked_subjects", new=AsyncMock(return_value=restrictions)), \
-             patch("terminal_scans._approved_manual_review", new=AsyncMock(return_value=None)) as grants:
+             patch("terminal_scans._approved_manual_review", new=AsyncMock(return_value=None)) as grants, \
+             patch("terminal_scans._maybe_create_checkpoint_scan_alerts", new=AsyncMock()):
             result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode="EMP", checkpointId="a-1",
                 direction=direction, selectedHardwareIds=["asset"] if hardware else []), "browser:operator",
                 validated_checkpoint_id="a-1")

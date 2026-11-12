@@ -159,9 +159,19 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     def _direct_grant(self, **fields):
         now = datetime.now(timezone.utc)
-        return {"subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
-            "reason": "Verified by administrator", "requested_zones": ["a", "b"],
+        request_type = fields.get("request_type", "zone_access")
+        requested_zones = fields.get("requested_zones", ["a", "b"])
+        selected_checkpoints = fields.get("requested_checkpoints")
+        if selected_checkpoints is None and request_type == "zone_access":
+            checkpoints_by_zone = {"a": "cp-main", "b": "server-room"}
+            selected_checkpoints = [checkpoints_by_zone[zone] for zone in requested_zones if zone in checkpoints_by_zone]
+        payload = {"subject_id": "p1", "checkpoint_id": "cp-main", "request_type": request_type,
+            "reason": "Verified by administrator", "requested_zones": requested_zones,
+            "requested_checkpoints": selected_checkpoints,
             "valid_from": now.isoformat(), "valid_to": (now + timedelta(hours=2)).isoformat(), **fields}
+        if selected_checkpoints is None:
+            payload.pop("requested_checkpoints", None)
+        return payload
 
     async def test_direct_visitor_grant_is_atomic_active_and_archived_without_workflow(self):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "grant-admin", "realm_access": {"roles": ["zone-admin"]}}
@@ -205,7 +215,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             db.add(AccessPermission(id="multi-zone-permission", subject_id="p1", data={
                 "id": "multi-zone-permission", "subjectId": "p1", "subjectType": "employee",
                 "state": "active", "zones": ["a", "b"], "checkpoints": None,
-                "checkpointScopes": {"a": ["cp-main"], "b": ["b-1"]},
+                "checkpointScopes": {"a": ["cp-main"], "b": ["server-room"]},
                 "validFrom": now.isoformat(), "validTo": ""}))
             await db.commit()
         response = await self.client.post("/v1/permissions/grant", json=self._direct_grant(
@@ -214,7 +224,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.status_code, 201, response.text)
         permission = response.json()["permission"]
         self.assertEqual(set(permission["zones"]), {"a", "b"})
-        self.assertEqual(permission["checkpointScopes"], {"a": ["cp-main"], "b": ["b-1"]})
+        self.assertEqual(permission["checkpointScopes"], {"a": ["cp-main"], "b": ["server-room"]})
 
     async def test_cross_zone_approval_adds_only_the_new_zone_checkpoint_scope(self):
         from auth import verify_admin_or_operator_request
@@ -234,7 +244,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             "request_type": "zone_access", "reason": "Temporary cross-zone assignment"})
         self.assertEqual(requested.status_code, 200, requested.text)
         request = requested.json()
-        self.assertEqual(request["requestedCheckpointScopes"], {"a": ["cp-main"], "b": ["b-1"]})
+        self.assertEqual(request["requestedCheckpointScopes"], {"a": ["cp-main"], "b": ["server-room"]})
         self.app.dependency_overrides[verify_admin_request] = lambda: {
             "sub": "reviewer-b", "realm_access": {"roles": ["zone-admin"]}}
         decided = await self.client.post(f"/v1/permission-requests/{request['id']}/decide",
@@ -243,7 +253,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == "p1"))
             self.assertEqual(set(permission.data["zones"]), {"a", "b"})
-            self.assertEqual(permission.data["checkpointScopes"], {"a": ["cp-main"], "b": ["b-1"]})
+            self.assertEqual(permission.data["checkpointScopes"], {"a": ["cp-main"], "b": ["server-room"]})
 
     async def test_visitor_approval_cannot_create_permanent_access_or_missing_expiry(self):
         now = datetime.now(timezone.utc)
@@ -254,6 +264,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
                 db.add(Subject(id=subject_id, barcode=subject_id, kind="visitor",
                     person=Person(data={"name": "Guest", "status": "pending_approval", "inside": False,
                         "allowedZones": []})))
+                await db.flush()
                 db.add(PermissionRequestModel(id=request_id, subject_id=subject_id, created_at=now,
                     data={"id": request_id, "subjectId": subject_id, "subjectName": "Guest", "type": "visitor",
                         "status": "pending", "requestedZones": ["a"], "checkpointId": "cp-main",
@@ -617,73 +628,25 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(after["analytics"]["activeInside"], 1)
             self.assertEqual(after["recentMovements"][0]["id"], result["decision"]["event"]["id"])
 
-    async def test_admin_creates_operator_with_checkpoint_before_granting_role(self):
-        import time
+    async def test_password_user_creation_requires_invitation_and_does_not_write(self):
         from routers import keycloak_admin
-        from config import settings
-        from tests.test_user_management_step_up import proof_for, SECRET
         self.app.include_router(keycloak_admin.router)
-        user_id = "new-operator-id"
-        user = {"id": user_id, "username": "new-operator", "enabled": True}
-        granted_roles = []
-
-        async def identity(token, method, path, payload=None):
-            if method == "POST" and path == "users":
-                return httpx.Response(201, headers={"Location": "https://identity.invalid/users/" + user_id})
-            if path.endswith("role-mappings/realm"):
-                if method == "POST":
-                    # A separately committed assignment must exist before the
-                    # new account receives permission to use the terminal.
-                    async with self.sessions() as db:
-                        assignment = await db.get(TerminalCheckpointAssignment, "browser:" + user_id)
-                        self.assertEqual(assignment.checkpoint_id, "server-room")
-                    granted_roles.extend(payload)
-                    return httpx.Response(204)
-                return httpx.Response(200, json=granted_roles)
-            if path == "roles/operator":
-                return httpx.Response(200, json={"id": "operator-role", "name": "operator"})
-            if path.endswith("reset-password"):
-                return httpx.Response(204)
-            return httpx.Response(200, json=user)
-
-        now = int(time.time())
         headers = {"Authorization": "Bearer isolated-test-token"}
-        actor = {"sub": "setup-admin", "iat": now, "exp": now + 600, "jti": "setup-admin-token",
-                 "realm_access": {"roles": ["zone-admin", "master-admin"]}, "auth_time": now}
-        step_up = proof_for({
-            "issuedAt": now, "authTime": now, "expiresAt": now + 600,
-            "durationMinutes": 10,
-            "tokenHash": hashlib.sha256(b"isolated-test-token").hexdigest(),
-            "windowId": str(uuid.uuid4()),
-        })
-        headers["X-InOut-Step-Up"] = step_up
-        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), \
-             patch("auth.verify_keycloak_token", return_value=actor) as token, \
-             patch("routers.keycloak_admin._request", side_effect=identity):
+        actor = {"sub": "setup-admin", "realm_access": {"roles": ["master-admin"]}}
+        self.app.dependency_overrides[verify_admin_request] = lambda: actor
+        with patch("routers.keycloak_admin._request", new=AsyncMock()) as provider:
             response = await self.client.post("/v1/keycloak/users", headers=headers, json={
                 "username": "new-operator", "password": "Isolated9-test-password", "roles": ["operator"], "checkpointId": "server-room",
             })
-            self.assertEqual(response.status_code, 201, response.text)
-            self.assertEqual(response.json()["checkpointId"], "server-room")
-            self.assertEqual(response.json()["roles"], ["operator"])
-            self.assertEqual((await self.durable_events("terminal_assignment"))[0]["terminalIdentity"], "browser:" + user_id)
-            async with self.sessions() as db:
-                audit = await db.scalar(select(AuditEvent))
-                self.assertEqual(audit.data["actor"], "setup-admin")
-            token.return_value = {"sub": user_id, "iat": now, "exp": now + 600, "jti": "new-operator-token",
-                                  "realm_access": {"roles": ["operator"]}}
-            bundle = await self.client.get("/v1/terminal/bundle", headers=headers)
-            self.assertEqual(bundle.status_code, 200, bundle.text)
-            self.assertEqual([cp["id"] for cp in bundle.json()["checkpoints"]], ["server-room"])
-            # Newly created operators cannot choose Main Entrance or manage accounts.
-            forged = await self.client.post("/v1/terminal/scans", headers={**headers, "Idempotency-Key": str(uuid.uuid4())},
-                json={"barcode": "p1", "checkpointId": "cp-main"})
-            self.assertEqual(forged.status_code, 403)
-            self.assertEqual((await self.client.get("/v1/keycloak/users", headers=headers)).status_code, 403)
+            self.assertEqual(response.status_code, 410, response.text)
+            self.assertIn("Send an invitation instead", response.json()["detail"])
+            self.assertFalse(await self.durable_events("terminal_assignment"))
+            provider.assert_not_awaited()
 
     async def test_offline_timestamp_and_hardware_payloads_are_retryable(self):
         async with self.sessions() as db:
-            body = BrowserScanPayload(barcode="p1", checkpointId="cp-main", capturedOfflineAt="2026-09-28T10:00:00Z")
+            captured = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+            body = BrowserScanPayload(barcode="p1", checkpointId="cp-main", capturedOfflineAt=captured)
             key = uuid.uuid4()
             first = await record_scan(db, key, body, "operator")
             await db.commit()
@@ -1441,7 +1404,8 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         for kind in ["employee", "hardware"]:
             response = await self.client.post("/v1/registry/subjects", json={"barcode": "  new-" + kind + "  ", "kind": kind,
-                "data": {"name": "New subject", "allowedZone": "a", "category": "Laptop", "status": "active", **({"ownerId": "p1"} if kind == "hardware" else {})}})
+                "data": {"name": "New subject", "allowedZone": "a", "status": "active",
+                    **({"category": "Laptop", "ownerId": "p1"} if kind == "hardware" else {})}})
             self.assertEqual(response.status_code, 201, response.text)
             subject_id = response.json()["id"]
             async with self.sessions() as db:
@@ -1457,7 +1421,7 @@ class DatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         now = datetime.now(timezone.utc)
         async with self.sessions() as db:
-            db.add(Alert(id="visible", created_at=now, data={"id": "visible", "title": "Restricted access", "status": "open"}))
+            db.add(Alert(id="visible", created_at=now, data={"id": "visible", "title": "Restricted access", "status": "open", "checkpointId": "cp-main"}))
             db.add(Alert(id="review", created_at=now, data={"id": "review", "manualReview": True, "status": "open"}))
             db.add(Movement(
                 id="registry-movement",

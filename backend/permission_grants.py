@@ -213,7 +213,6 @@ async def apply_direct_permission(db, payload, actor, *, known_zone_ids=None):
     result = await apply_permission_decision(db, req_id, "approved", actor, payload.reason)
     # These are direct admin permissions; no pending approval or workflow is exposed.
     if result.get("permission"):
-        from models import AccessPermission
         permission = await db.scalar(select(AccessPermission).where(AccessPermission.subject_id == subject.id))
         permission.data = {**permission.data, "source": "manual"}
         result["permission"] = permission.data

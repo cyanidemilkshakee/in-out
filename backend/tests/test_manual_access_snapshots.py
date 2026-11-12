@@ -113,7 +113,7 @@ class ManualAccessSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.app.dependency_overrides[verify_admin_request] = lambda: {"sub": "admin", "realm_access": {"roles": ["zone-admin"]}}
         granted = await self.client.post("/v1/permissions/grant", json={
             "subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
-            "reason": "Replacement access", "requested_zones": ["a"],
+            "reason": "Replacement access", "requested_zones": ["a"], "requested_checkpoints": ["cp-main"],
             "valid_from": reviewed["validFrom"], "valid_to": reviewed["validTo"]})
         self.assertEqual(granted.status_code, 201, granted.text)
         for field in ("state", "zones", "validFrom", "validTo"):

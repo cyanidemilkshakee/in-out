@@ -40,6 +40,7 @@ class SecurityLimitHTTPTests(unittest.IsolatedAsyncioTestCase):
                     "realm_access": {"roles": ["zone-admin"]}}
         self.events = AsyncMock()
         for patcher in [patch("auth.verify_keycloak_token", side_effect=claims),
+                        patch("token_revocation.get_redis_pool", return_value=self.redis),
                         patch("behavior_limits.get_redis_pool", return_value=self.redis),
                         patch("data_limits.get_redis_pool", return_value=self.redis),
                         patch("limit_events.record_limit_event", new=self.events),

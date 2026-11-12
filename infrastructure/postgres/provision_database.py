@@ -73,7 +73,7 @@ async def grant_runtime(connection):
     tables = await connection.fetch("""
         SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f')
-          AND pg_get_userbyid(c.relowner)=current_user
+          AND pg_get_userbyid(c.relowner)='inout_migrator'
           AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass
               AND d.objid=c.oid AND d.deptype='e')
         ORDER BY c.relname
@@ -85,7 +85,7 @@ async def grant_runtime(connection):
     sequences = await connection.fetch("""
         SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
         WHERE n.nspname='public' AND c.relkind='S'
-          AND pg_get_userbyid(c.relowner)=current_user
+          AND pg_get_userbyid(c.relowner)='inout_migrator'
           AND NOT EXISTS (SELECT 1 FROM pg_depend d WHERE d.classid='pg_class'::regclass
               AND d.objid=c.oid AND d.deptype='e')
         ORDER BY c.relname

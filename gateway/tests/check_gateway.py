@@ -32,7 +32,7 @@ class GatewayTests(unittest.TestCase):
             json={'account': account or self.actor, **state})
         self.assertEqual(response.status_code, 204, self.summary(response))
 
-    def test_slow_upload_has_total_deadline_for_fixed_and_chunked_bodies(self):
+    def test_slow_upload_hits_body_idle_timeout_for_fixed_and_chunked_bodies(self):
         with httpx.Client(timeout=5) as client:
             before = client.get('http://kong:1013/__fixture/body-count', headers=self.auth()).json()['contacts']
         for chunked, crowded in ((False, False), (True, False), (False, True), (True, True)):

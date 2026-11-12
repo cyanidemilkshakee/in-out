@@ -58,7 +58,7 @@ class RobustnessTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_password_whitespace_is_preserved_and_roles_update_only_differences(self):
         password = "  Example9 password!  "
-        self.assertEqual(keycloak_admin.UserCreateRequest(username="alice", password=password).password, password)
+        self.assertEqual(keycloak_admin.PasswordResetRequest(password=password).password, password)
         calls = []
         async def identity(token, method, path, payload=None):
             calls.append((method, path, payload))

@@ -33,7 +33,8 @@ from alert_rule_assignments import (
     lock_scheduled_alert_evaluation,
 )
 from alert_queries import command_center_assignments, confirmed_people_warning_total, focused_alert_people, current_subject_warning_documents
-from zone_access import admin_zone_ids, require_alert_scope, require_subject_scope, require_subject_grant_scope, subject_zone_condition
+from zone_access import (admin_zone_ids, alert_zone_condition, require_alert_scope, require_subject_scope,
+    require_subject_grant_scope, subject_zone_condition)
 import logging
 
 logger = logging.getLogger(__name__)
@@ -199,17 +200,8 @@ async def list_alerts(
         | records.c.data["title"].astext.ilike("Unknown barcode%")
         | records.c.data["title"].astext.ilike("Access decision denied")
     )
-    unscoped_alert = and_(
-        records.c.data["zoneId"].astext.is_(None),
-        records.c.data["checkpointId"].astext.is_(None),
-        records.c.data["subjectId"].astext.is_(None),
-    )
-    branch_filter = or_(
-        unscoped_alert,
-        records.c.data["zoneId"].astext.in_(zone_ids),
-        records.c.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
-        records.c.data["subjectId"].astext.in_(visible_subject_ids),
-    )
+    branch_filter = alert_zone_condition(records.c.data, zone_ids, visible_subject_ids,
+        include_unbound=has_master_admin_role(actor))
     alerts_q = select(records).outerjoin(AlertReview, AlertReview.alert_id == records.c.id).where(
         ~func.coalesce(excluded_alert, False), branch_filter)
     count_q = select(func.count()).select_from(records).outerjoin(AlertReview,
@@ -253,7 +245,7 @@ async def list_alerts(
     subject_history = None
     if view == "subject":
         subject_history = (select(records).outerjoin(AlertReview, AlertReview.alert_id == records.c.id)
-            .where(~func.coalesce(excluded_alert, False), subject_filter))
+            .where(~func.coalesce(excluded_alert, False), branch_filter, subject_filter))
     if search and search.strip():
         literal = search.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = "%" + literal + "%"

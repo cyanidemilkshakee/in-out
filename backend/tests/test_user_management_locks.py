@@ -105,44 +105,20 @@ class UserManagementLockTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.wait_for(waiting, 3)
             self.assertEqual(rejected.exception.status_code, 401)
 
-    async def test_lock_waits_through_create_users_early_assignment_commit(self):
-        claims = {"sub": "admin-a", "realm_access": {"roles": ["zone-admin", "master-admin"]}}
-        self.app.include_router(user_management_auth.router)
+    async def test_password_user_creation_is_disabled_without_provider_or_assignment_writes(self):
+        claims = {"sub": "admin-a", "realm_access": {"roles": ["master-admin"]}}
         self.app.include_router(keycloak_admin.router)
         self.app.dependency_overrides[verify_admin_request] = lambda: claims
-        async def guard_session():
-            async with self.sessions() as db:
-                yield db
-        self.app.dependency_overrides[get_window_guard_db] = guard_session
-        entered, resume = asyncio.Event(), asyncio.Event()
-        async def roles(*args):
-            entered.set()
-            await resume.wait()
-            return ["operator"]
-        async def provider(token, method, path, payload=None):
-            if method == "POST":
-                return httpx.Response(201, headers={"Location": "http://synthetic/users/new-operator"})
-            return httpx.Response(200, json={"id": "new-operator", "username": "new-operator", "enabled": True})
-        headers = {"Authorization": "Bearer synthetic-bearer", "X-InOut-Step-Up": proof_for(self.window())}
-        with patch.object(settings, "KEYCLOAK_STEP_UP_SIGNING_SECRET", SECRET), \
-             patch("routers.keycloak_admin.verify_admin_request", new=AsyncMock(return_value=claims)), \
-             patch("routers.keycloak_admin._request", side_effect=provider), \
-             patch("routers.keycloak_admin._replace_roles", side_effect=roles):
-            creating = asyncio.create_task(self.client.post("/v1/keycloak/users", headers=headers, json={
-                "username": "new-operator", "password": "test-only-password", "roles": ["operator"], "checkpointId": "cp-main"}))
-            locking = None
-            try:
-                await asyncio.wait_for(entered.wait(), 3)
-                locking = asyncio.create_task(self.client.post("/v1/user-management/lock", headers=headers, json={}))
-                await asyncio.sleep(0.05)
-                self.assertFalse(locking.done(), "Assignment commit must not release the full-request authorization guard")
-            finally:
-                resume.set()
-                created = await asyncio.wait_for(creating, 5)
-                if locking is not None:
-                    locked = await asyncio.wait_for(locking, 5)
-            self.assertEqual(created.status_code, 201, created.text)
-            self.assertEqual(locked.status_code, 200, locked.text)
+        headers = {"Authorization": "Bearer synthetic-bearer"}
+        with patch("routers.keycloak_admin._request", new=AsyncMock()) as provider, \
+             patch("routers.keycloak_admin._replace_roles", new=AsyncMock()) as roles:
+            response = await self.client.post("/v1/keycloak/users", headers=headers, json={
+                "username": "new-operator", "password": "test-only-password", "roles": ["operator"], "checkpointId": "cp-main"})
+        self.assertEqual(response.status_code, 410, response.text)
+        provider.assert_not_awaited()
+        roles.assert_not_awaited()
+        async with self.sessions() as db:
+            self.assertIsNone(await db.get(fixture.TerminalCheckpointAssignment, "browser:new-operator"))
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ from fastapi import HTTPException
 from sqlalchemy import delete, func, select
 
 import test_database as fixture
-from models import Alert, AlertRule, AlertRuleAssignment, Person, PresenceState, Subject
+from models import AccessPermission, Alert, AlertRule, AlertRuleAssignment, Person, PresenceState, Subject
 from rule_engine import default_alert_rules, evaluate_visitor_overstay_rules
 from schemas import BrowserScanPayload
 from seed import seed_reference_data
@@ -70,6 +70,11 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 "name": "Guest " + subject_id, "status": status, "allowedZones": ["a", "b"],
                 "inside": metadata_inside,
                 "validTo": valid_to.isoformat() if isinstance(valid_to, datetime) else valid_to or ""})))
+            permission_data = {"id": subject_id + "-permission", "subjectId": subject_id,
+                "subjectType": "visitor", "state": "active", "zones": ["a", "b"],
+                "validFrom": "2026-01-01T00:00:00+00:00",
+                "validTo": valid_to.isoformat() if isinstance(valid_to, datetime) else valid_to or ""}
+            db.add(AccessPermission(id=subject_id + "-permission", subject_id=subject_id, data=permission_data))
             await db.flush()
             db.add(PresenceState(subject_id=subject_id, state=state, entry_building_id=building,
                 last_scan_timestamp=started_at, entry_started_at=started_at))
@@ -173,6 +178,8 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             person = await db.get(Person, "visitor")
             person.data = {**person.data, "validTo": new_expiry.isoformat()}
+            permission = await db.get(AccessPermission, "visitor-permission")
+            permission.data = {**permission.data, "validTo": new_expiry.isoformat()}
             await db.commit()
         await self._record(reentry, direction="entry", checkpoint="server-room")
         self.assertEqual(await self._evaluate(new_expiry - timedelta(microseconds=1)), 0)
@@ -219,7 +226,7 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(await self._evaluate(), 0)
         await self._assert_unalerted()
 
-    async def test_capacity_counts_live_visitors_and_ignores_historical_outside_roster(self):
+    async def test_subject_pages_cover_live_visitors_without_counting_historical_outside_roster(self):
         from config import settings
 
         await self._visitor(started_at=NOW - timedelta(hours=13))
@@ -229,18 +236,13 @@ class VisitorOverstayDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 db.add(Subject(id=subject_id, kind="visitor", barcode=subject_id,
                     person=Person(data={"name": "Old guest", "inside": True})))
                 await db.flush()
-                db.add(PresenceState(subject_id=subject_id, state="outside"))
+            db.add(PresenceState(subject_id=subject_id, state="outside"))
             await db.commit()
+        # ALERT_EVALUATION_MAX_SUBJECTS is the keyset page size. Evaluations
+        # continue over later pages instead of rejecting a larger registry.
         with patch.object(settings, "ALERT_EVALUATION_MAX_SUBJECTS", 2):
-            with self.assertRaises(HTTPException) as error:
-                await self._evaluate()
-            self.assertEqual(error.exception.detail["code"], "alert_evaluation_capacity_exceeded")
-            self.assertEqual(error.exception.detail["resource"], "subjects")
-        await self._assert_unalerted()
-        # The fixture has exactly three relevant subjects: employee, hardware
-        # and one currently inside visitor. Outside history must not fill this cap.
-        with patch.object(settings, "ALERT_EVALUATION_MAX_SUBJECTS", 3):
             self.assertEqual(await self._evaluate(), 1)
+        self.assertEqual(await self._evaluate(), 0)
 
     async def test_busy_subject_rolls_back_earlier_subject_locks_without_marking_visit(self):
         await self._visitor("z-visitor", started_at=NOW - timedelta(hours=13))

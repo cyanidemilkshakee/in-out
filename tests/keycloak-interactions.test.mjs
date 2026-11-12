@@ -81,7 +81,7 @@ test("retirement preserves absent clients and rejects ambiguous identities", asy
 
 test("readiness authenticates the existing client and checks exact extension/protocol/provider versions", async () => {
   const state = fixture();
-  const expected = { extensionVersion: 1, keycloakVersion: "26.8.1", protocol: "inout-app-interactions-v1" };
+  const expected = { extensionVersion: 1, keycloakVersion: "26.8.2", protocol: "inout-app-interactions-v1" };
   const probe = body => interactionProviderReady(state.api, "http://auth.localhost:1009", state.client, async (url, options) => {
     assert.equal(url, "http://auth.localhost:1009/realms/inout/inout-auth/status");
     assert.equal(options.headers.Authorization, "Basic " + Buffer.from("inout-frontend:synthetic-frontend-secret").toString("base64"));
@@ -129,7 +129,7 @@ test("enabled realm or global client policies block cutover and retirement befor
     const state = fixture();
     state.policies = policies;
     const providerReady = client => interactionProviderReady(state.api, "http://auth.localhost:1009", client, async () =>
-      Response.json({ extensionVersion: 1, keycloakVersion: "26.8.1", protocol: "inout-app-interactions-v1" }));
+      Response.json({ extensionVersion: 1, keycloakVersion: "26.8.2", protocol: "inout-app-interactions-v1" }));
     await assert.rejects(state.configure({ apply: true, retireNative: true, providerReady }), /Enabled realm\/global OAuth client policies/);
     assert.deepEqual(state.writes, []);
     assert.equal(state.client.directAccessGrantsEnabled, true);
@@ -141,7 +141,7 @@ test("enabled realm or global client policies block cutover and retirement befor
 test("disabled policies are compatible and malformed policy responses fail closed", async () => {
   const state = fixture();
   const probe = () => interactionProviderReady(state.api, "http://auth.localhost:1009", state.client, async () =>
-    Response.json({ extensionVersion: 1, keycloakVersion: "26.8.1", protocol: "inout-app-interactions-v1" }));
+    Response.json({ extensionVersion: 1, keycloakVersion: "26.8.2", protocol: "inout-app-interactions-v1" }));
   state.policies = { policies: [{ enabled: false }], globalPolicies: [{ name: "disabled-by-default" }] };
   assert.equal(await probe(), true);
   for (const policies of [null, [], {}, { policies: "invalid" }, { policies: [], globalPolicies: {} },

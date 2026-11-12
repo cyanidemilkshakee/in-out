@@ -305,7 +305,7 @@ public final class InteractionResource {
     }
 
     private ClientModel client(boolean enabledRequired) {
-        if (!Version.VERSION.equals("26.8.1")) throw failure(503, "service_unavailable");
+        if (!Version.VERSION.equals("26.8.2")) throw failure(503, "service_unavailable");
         if (!"https".equals(session.getContext().getUri().getBaseUri().getScheme()) &&
             realm.getSslRequired().isRequired(session.getContext().getConnection())) throw failure(403, "not_ready");
         List<String> authorization = original.getHttpHeaders().getRequestHeaders().get(HttpHeaders.AUTHORIZATION);

@@ -38,9 +38,12 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
         # whose zone set is intentionally limited to their assigned checkpoint.
         self.app.dependency_overrides[verify_admin_or_operator_request] = lambda: {
             "sub": "verified-admin", "realm_access": {"roles": ["zone-admin"]}}
-        response = await self.client.post("/v1/permission-requests", json={
-            "subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
-            "reason": "Verified request", "requested_zones": ["a", "b"], **fields})
+        payload = {"subject_id": "p1", "checkpoint_id": "cp-main", "request_type": "zone_access",
+            "reason": "Verified request", **fields}
+        if payload["request_type"] == "zone_access":
+            payload.setdefault("requested_zones", ["a", "b"])
+            payload.setdefault("requested_checkpoints", ["cp-main", "server-room"])
+        response = await self.client.post("/v1/permission-requests", json=payload)
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()
 
@@ -107,9 +110,9 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 req.created_at = datetime.now(timezone.utc) - timedelta(minutes=31)
                 await db.commit()
             expired = await auto_deny_visitor("visitor-request")
-            self.assertEqual(expired["status"], "denied")
-            self.assertEqual(expired["decidedBy"], "system")
-            self.assertEqual(await approve_visitor("visitor-request", "Late forged signal"), expired)
+            self.assertEqual(expired["status"], "pending")
+            self.assertTrue(expired["_visitorDeadlineDisabled"])
+            self.assertEqual((await approve_visitor("visitor-request", "Forged signal"))["status"], "pending")
 
     async def test_busy_alert_evaluation_takes_no_subject_locks_and_http_returns_503(self):
         self.authorize()
@@ -130,7 +133,8 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
         async with self.sessions() as db:
             db.add(Subject(id="capacity-person", kind="employee", barcode="capacity-person",
                 person=Person(data={"name": "Capacity person", "status": "active"})))
-            db.add_all([Alert(id=f"capacity-alert-{i}", created_at=now, data={"id": f"capacity-alert-{i}"}) for i in range(2)])
+            db.add_all([Alert(id=f"capacity-alert-{i}", created_at=now,
+                data={"id": f"capacity-alert-{i}", "subjectId": "p1", "barcode": "p1"}) for i in range(2)])
             db.add_all([AlertRule(id=f"capacity-rule-{i}", data={"id": f"capacity-rule-{i}"}) for i in range(2)])
             await db.commit()
             payload = BrowserScanPayload(barcode="p1", checkpointId="cp-main")
@@ -142,8 +146,8 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
             expected_alerts = await db.scalar(select(func.count()).select_from(Alert))
             expected_movements = await db.scalar(select(func.count()).select_from(Movement))
-        for setting, resource in (("ALERT_EVALUATION_MAX_SUBJECTS", "subjects"),
-                ("ALERT_EVALUATION_MAX_MOVEMENTS", "movements"), ("ALERT_EVALUATION_MAX_ALERTS", "alerts"),
+        for setting, resource in (("ALERT_EVALUATION_MAX_MOVEMENTS", "movements"),
+                ("ALERT_EVALUATION_MAX_ALERTS", "alerts"),
                 ("ALERT_EVALUATION_MAX_RULES", "rules")):
             with self.subTest(resource=resource):
                 async with self.sessions() as scan_lock:
@@ -171,7 +175,7 @@ class SecurityWorkflowTests(unittest.IsolatedAsyncioTestCase):
             # Only an actual alert candidate needs a subject lock now.
             with patch("workflows.activities.async_session", self.sessions), \
                  patch("workflows.activities.datetime", wraps=datetime) as clock:
-                clock.now.return_value = datetime(2026, 10, 10, 13, tzinfo=timezone.utc)
+                clock.now.return_value = datetime(2026, 10, 9, 14, tzinfo=timezone.utc)
                 with self.assertRaises(HTTPException) as error:
                     await asyncio.wait_for(run_alert_rule_evaluation(), timeout=5)
             self.assertEqual(error.exception.status_code, 503)

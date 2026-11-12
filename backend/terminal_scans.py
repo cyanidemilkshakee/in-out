@@ -375,7 +375,12 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
         checkpoint_id = canonical_checkpoint_id(payload.checkpoint_id.strip())
         if checkpoint_id != validated_checkpoint_id:
             raise HTTPException(422, "Choose a registered checkpoint")
-    if not payload.online or payload.captured_offline_at is not None or payload.queue_captured_at is not None:
+    # Reject stale or unverifiable offline evidence before staging it for
+    # reconciliation. A missing receipt must never turn an expired queue item
+    # into a new reconciliation record.
+    validate_queued_scan_age(payload)
+    if (not payload.online or payload.captured_offline_at is not None
+            or getattr(payload, "queue_captured_at", None) is not None):
         # A missing scan receipt means we cannot safely tell whether this was
         # already applied. Preserve the evidence for an administrator instead
         # of evaluating it as a new crossing against today's presence state.
@@ -410,7 +415,6 @@ async def record_scan(db, key, payload, terminal_id, request_scope=None, *, vali
         db.info["scan_reconciliation"] = True
         await db.flush()
         return response
-    validate_queued_scan_age(payload)
     subject = (await db.execute(select(Subject).where(
         func.lower(Subject.barcode) == payload.barcode.strip().lower()
     ))).scalar_one_or_none()

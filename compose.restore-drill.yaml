@@ -1,0 +1,103 @@
+# Isolated restore drill. Always use a fresh, unique Compose project name.
+# Project-scoped volumes and networks must remain separate from production.
+services:
+  postgres-primary:
+    image: ${RESTORE_POSTGRES_IMAGE:-inout-postgres:17}
+    environment:
+      POSTGRES_DB: postgres
+      POSTGRES_USER: recovery_admin
+      POSTGRES_PASSWORD: ${RESTORE_ADMIN_PASSWORD:?Set a temporary RESTORE_ADMIN_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -p 1020 -U recovery_admin -d postgres"]
+
+  # Do not publish any gateway or identity administration listeners during a drill.
+  kong:
+    image: ${RESTORE_KONG_IMAGE:-inout-kong:3.9.3}
+    ports: !reset []
+
+  keycloak-admin:
+    image: ${RESTORE_KEYCLOAK_ADMIN_IMAGE:-inout-kong:3.9.3}
+    ports: !reset []
+
+  app:
+    image: ${RESTORE_APP_IMAGE:-in-out-app:latest}
+
+  backend-init:
+    image: ${RESTORE_BACKEND_INIT_IMAGE:-in-out-backend-init:latest}
+
+  db-provision:
+    image: ${RESTORE_DB_PROVISION_IMAGE:-in-out-db-provision:latest}
+
+  python-api:
+    image: ${RESTORE_PYTHON_API_IMAGE:-in-out-python-api:latest}
+
+  temporal-worker:
+    image: ${RESTORE_TEMPORAL_WORKER_IMAGE:-in-out-temporal-worker:latest}
+
+  temporal-namespace-init:
+    image: ${RESTORE_TEMPORAL_NAMESPACE_IMAGE:-in-out-temporal-namespace-init:latest}
+
+  keycloak:
+    image: ${RESTORE_KEYCLOAK_IMAGE:-inout-keycloak:26.8.2}
+
+  redis:
+    image: ${RESTORE_REDIS_IMAGE:-inout-redis:7}
+
+  temporal-schema-init:
+    image: ${RESTORE_TEMPORAL_SCHEMA_IMAGE:-inout-temporal-maintenance:1.32.2}
+
+networks:
+  # Recovery networks must not consume Docker Desktop's exhausted automatic
+  # address pools. These non-overlapping /28s are reserved for one drill at a
+  # time. Keep every network internal so restored services cannot reach
+  # external identity/mail providers.
+  edge:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.0/28
+  ingress:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.16/28
+  web:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.32/28
+  app-db:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.48/28
+  identity-db:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.64/28
+  temporal-db:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.80/28
+  cache:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.96/28
+  workflow:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.112/28
+  monitoring:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.128/28
+  test:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.254.250.144/28

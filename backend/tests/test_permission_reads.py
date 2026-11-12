@@ -86,7 +86,8 @@ class PermissionReadDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 request_id = f"pending-{index}"
                 db.add(PermissionRequestModel(id=request_id, subject_id="p1", created_at=now, data={
                     "id": request_id, "type": kind, "status": "pending", "subjectId": "p1", "requestedZones": ["a"]}))
-            db.add(PermissionRequestModel(id="decided", subject_id="p1", data={"id": "decided", "type": "visitor", "status": "approved"}))
+            db.add(PermissionRequestModel(id="decided", subject_id="p1", created_at=now,
+                data={"id": "decided", "type": "visitor", "status": "approved"}))
             await db.commit()
         first = await self.client.get("/v1/permissions", params={"view": "pending", "typeGroup": "other", "limit": 1})
         self.assertEqual(first.status_code, 200, first.text)

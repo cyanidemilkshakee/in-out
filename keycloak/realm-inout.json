@@ -61,6 +61,15 @@
       "publicClient": false,
       "protocol": "openid-connect",
       "fullScopeAllowed": false,
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "basic",
+        "email",
+        "kc-admin-api"
+      ],
       "attributes": {
         "login_theme": "inout-app-errors",
         "inout.app-interactions.enabled": "true",

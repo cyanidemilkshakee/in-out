@@ -68,8 +68,11 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_visitor_registration_commits_identity_permission_and_request_together(self):
         db = session()
-        db.execute.return_value = scalar_result(Checkpoint(id="cp-main", zone_id="a",
-            data={"name": "Main Entrance", "zone": "a"}))
+        db.execute.side_effect = [
+            scalar_result("cp-main"),
+            scalar_result(Checkpoint(id="cp-main", zone_id="a",
+                data={"name": "Main Entrance", "zone": "a"})),
+        ]
         added, events = [], []
         db.add.side_effect = added.append
 
@@ -120,7 +123,10 @@ class RegistrationApprovalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_duplicate_barcode_rolls_back_registration_without_publication(self):
         db = session()
-        db.execute.return_value = scalar_result(Checkpoint(id="cp-main", zone_id="a", data={"zone": "a"}))
+        db.execute.side_effect = [
+            scalar_result("cp-main"),
+            scalar_result(Checkpoint(id="cp-main", zone_id="a", data={"zone": "a"})),
+        ]
         db.commit.side_effect = IntegrityError("INSERT subjects", {}, ValueError("duplicate barcode"))
         with patch("routers.registry.enqueue_decision", new=AsyncMock()):
             with self.assertRaises(HTTPException) as error:

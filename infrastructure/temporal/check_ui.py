@@ -15,7 +15,7 @@ while True:
             data = json.loads(response.read(524288))
             assert any(item.get("namespaceInfo", {}).get("name") == "default"
                        for item in data.get("namespaces", []))
-        print("PASS: UI 2.55.0 serves its frontend and proxies the default namespace from server 1.32.1")
+        print("PASS: UI 2.56.1 serves its frontend and proxies the default namespace from server 1.32.2")
         break
     except (urllib.error.URLError, TimeoutError):
         if time.monotonic() >= deadline:

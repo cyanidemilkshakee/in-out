@@ -324,13 +324,20 @@ class KeycloakCompatibilityTests(unittest.TestCase):
                 tokens, login_claims = self.direct_sign_in(role)
                 access = self.verify_token(tokens["access_token"], "inout-frontend")
                 self.assert_scoped_application_claims(access, role)
+                self.assertIn("kc-admin-api", access.get("scope", "").split(),
+                    "Delegated Keycloak Admin REST calls require the built-in kc-admin-api scope")
+                self.assertIn(PUBLIC + "/admin/realms/inout", [access["aud"]] if isinstance(access["aud"], str) else access["aud"],
+                    "The token must be audience-bound to this realm's Admin REST API")
                 self.assertEqual(access["sub"], self.users[role]["id"])
                 headers = {"Authorization": "Bearer " + tokens["access_token"]}
                 for method in ("GET", "POST", "PUT", "DELETE"):
                     self.assertEqual(self.client.request(method, PUBLIC + "/admin/realms/inout/users", headers=headers).status_code, 404)
                     self.assertEqual(self.client.request(method, ISSUER + "/scim/v2/Users", headers=headers).status_code, 404)
                 internal = self.client.get("http://keycloak:1022/admin/realms/inout/users", headers=headers)
-                self.assertEqual(internal.status_code, 200 if role == "zone-admin" else 403)
+                expected_status = 200 if role == "zone-admin" else 403
+                self.assertEqual(internal.status_code, expected_status,
+                    f"Unexpected internal Admin REST response: {internal.text[:256]}; "
+                    f"realm-management roles={access.get('resource_access', {}).get('realm-management', {}).get('roles', [])}")
                 if role == "zone-admin":
                     self.assertIn("manage-users", access["resource_access"]["realm-management"]["roles"])
                 refresh = self.client.post(ISSUER + "/protocol/openid-connect/token", data={
@@ -425,7 +432,7 @@ class KeycloakCompatibilityTests(unittest.TestCase):
         finally:
             self.admin_request("DELETE", "/users/" + user_id).raise_for_status()
 
-    def test_builtin_account_setup_retains_recovery_and_requires_pkce(self):
+    def test_public_oidc_login_returns_to_app_and_requires_pkce(self):
         params = {"client_id": "inout-frontend", "redirect_uri": CALLBACK, "response_type": "code",
             "scope": "openid", "state": secrets.token_urlsafe(16), "nonce": secrets.token_urlsafe(16), "prompt": "login"}
         # Enforcing S256 must reject a code request that omits the challenge.
@@ -440,18 +447,12 @@ class KeycloakCompatibilityTests(unittest.TestCase):
         with httpx.Client(timeout=20, follow_redirects=False, trust_env=False) as browser:
             page = browser.get(ISSUER + "/protocol/openid-connect/auth", params=params)
             self.assertEqual(page.status_code, 200)
-            self.assertNotIn("/css/inout.css", page.text)
-            recovery = re.search(r'href="([^"]*login-actions/reset-credentials[^\"]*)"', page.text)
-            self.assertIsNotNone(recovery, "Stock forgot-password action must remain accessible")
-            target = urljoin(PUBLIC, html.unescape(recovery[1]))
-            self.assertEqual(urlparse(target).netloc, urlparse(PUBLIC).netloc)
-            recovered = browser.get(target)
-            self.assertEqual(recovered.status_code, 200)
-            self.assertIn('id="kc-reset-password-form"', recovered.text)
-            self.assertIn('name="username"', recovered.text)
-            self.assertNotIn("/css/inout.css", recovered.text)
+            self.assertIn("Returning to InOut sign-in.", page.text)
+            self.assertIn('href="http://app.fixture:1018/login?error=identity_provider_failure"', page.text)
+            self.assertNotIn('id="kc-form-login"', page.text)
+            self.assertNotIn("login-actions/reset-credentials", page.text)
 
-    def test_builtin_mfa_enrollment_then_app_form_requires_otp(self):
+    def test_unsupported_totp_enrollment_fails_closed_on_app_login(self):
         username = "fixture-mfa-" + secrets.token_hex(4)
         created = self.admin_request("POST", "/users", json={"username": username, "enabled": True,
             "email": username + "@example.invalid", "firstName": "MFA", "lastName": "Fixture", "emailVerified": True,
@@ -471,47 +472,41 @@ class KeycloakCompatibilityTests(unittest.TestCase):
             incomplete = self.client.post(ADMIN + "/realms/inout/inout-auth/verify",
                 auth=httpx.BasicAuth("inout-frontend", CLIENT_SECRET), json=proof)
             self.assertEqual(incomplete.status_code, 409, "App login must not bypass mandatory OTP enrollment")
-            self.assertEqual(incomplete.json(), {"error": "not_ready"})
-            self.sign_in("mfa", configure_otp=True)
-            user = self.users["mfa"]
-            while int(time.time()) // 30 <= user.get("last_otp_counter", -1):
-                time.sleep(0.25)
-            # Prove valid OTP authentication before intentionally failing login.
-            # The realm's quick-login protection can delay a later valid attempt;
-            # tests must not weaken or bypass that production defense.
-            self.direct_sign_in("mfa", self.otp_code(user["otp_secret"]))
-            for code in (None, "invalid-otp"):
-                result = self.client.post(ADMIN + "/realms/inout/inout-auth/verify",
-                    auth=httpx.BasicAuth("inout-frontend", CLIENT_SECRET),
-                    json={**proof, **({"otp": code} if code is not None else {})})
-                self.assertEqual(result.status_code, 401 if code is None else 400,
-                    "Enrolled accounts require a valid OTP in the app form")
-                self.assertEqual(result.json(), {"error": "credentials" if code is None else "invalid_request"})
+            self.assertEqual(incomplete.json(), {"error": "not_ready"},
+                "The app must fail closed while TOTP enrollment is not supported")
+            page = self.client.get(ISSUER + "/protocol/openid-connect/auth", params={
+                "client_id": "inout-frontend", "redirect_uri": CALLBACK, "response_type": "code",
+                "scope": "openid", "state": secrets.token_urlsafe(16), "nonce": secrets.token_urlsafe(16),
+                "code_challenge": challenge, "code_challenge_method": "S256",
+            })
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("Returning to InOut sign-in.", page.text)
+            self.assertNotIn('id="kc-form-login"', page.text)
         finally:
             self.admin_request("DELETE", "/users/" + user_id).raise_for_status()
             self.users.pop("mfa", None)
 
-    def test_wrong_password_has_generic_error_and_preserves_recovery(self):
+    def test_wrong_password_is_generic_and_provider_login_returns_to_app(self):
         errors = []
+        client_auth = httpx.BasicAuth("inout-frontend", CLIENT_SECRET)
         for username in (self.users["operator"]["username"], "fixture-user-does-not-exist"):
-            with httpx.Client(timeout=20, follow_redirects=False, trust_env=False) as browser:
-                page = browser.get(ISSUER + "/protocol/openid-connect/auth", params={
-                    "client_id": "inout-frontend", "redirect_uri": CALLBACK, "response_type": "code", "scope": "openid",
-                    "state": secrets.token_urlsafe(16), "nonce": secrets.token_urlsafe(16), "prompt": "login",
-                    "code_challenge": base64.urlsafe_b64encode(hashlib.sha256(secrets.token_bytes(32)).digest()).rstrip(b"=").decode(),
-                    "code_challenge_method": "S256"})
-                self.assertEqual(page.status_code, 200)
-                form = re.search(r'<form\b[^>]*id="kc-form-login"[^>]*>', page.text)
-                action = html.unescape(re.search(r'action="([^"]+)"', form[0])[1])
-                rejected = browser.post(action, data={"username": username, "password": "incorrect-isolated-fixture-password", "credentialId": ""})
-                self.assertEqual(rejected.status_code, 200)
-                self.assertIn('id="kc-form-login"', rejected.text)
-                self.assertIn("login-actions/reset-credentials", rejected.text)
-                error = re.search(r'class="[^"]*kc-feedback-text[^\"]*"[^>]*>(.*?)</span>', rejected.text, re.S)
-                self.assertIsNotNone(error, "Provider must display a validation error")
-                errors.append(html.unescape(error[1]).strip())
-        self.assertEqual(errors[0], errors[1], "An unknown account and an incorrect password must have the same message")
-
+            rejected = self.client.post(ADMIN + "/realms/inout/inout-auth/verify", auth=client_auth, json={
+                "mode": "login", "username": username, "currentPassword": "incorrect-isolated-fixture-password",
+                "codeChallenge": base64.urlsafe_b64encode(hashlib.sha256(secrets.token_bytes(32)).digest()).rstrip(b"=").decode(),
+            })
+            self.assertEqual(rejected.status_code, 401)
+            errors.append(rejected.json())
+        self.assertEqual(errors, [{"error": "credentials"}, {"error": "credentials"}],
+            "An unknown account and an incorrect password must have the same app-facing error")
+        page = self.client.get(ISSUER + "/protocol/openid-connect/auth", params={
+            "client_id": "inout-frontend", "redirect_uri": CALLBACK, "response_type": "code", "scope": "openid",
+            "state": secrets.token_urlsafe(16), "nonce": secrets.token_urlsafe(16),
+            "code_challenge": base64.urlsafe_b64encode(hashlib.sha256(secrets.token_bytes(32)).digest()).rstrip(b"=").decode(),
+            "code_challenge_method": "S256",
+        })
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Returning to InOut sign-in.", page.text)
+        self.assertNotIn('id="kc-form-login"', page.text)
     def test_provider_rejects_weak_passwords_without_changing_the_credential(self):
         realm = self.admin_request("GET", "").json()
         self.assertIn("length(12)", realm.get("passwordPolicy", ""))
@@ -523,20 +518,26 @@ class KeycloakCompatibilityTests(unittest.TestCase):
                 "type": "password", "value": password, "temporary": False,
             })
             self.assertEqual(rejected.status_code, 400, rejected.text)
-        self.sign_in("operator")
+        self.direct_sign_in("operator")
         self.admin_request("PUT", f"/users/{user['id']}/reset-password", json={
             "type": "password", "value": user["password"], "temporary": True,
         }).raise_for_status()
+        challenge = base64.urlsafe_b64encode(hashlib.sha256(secrets.token_bytes(32)).digest()).rstrip(b"=").decode()
         incomplete = self.client.post(ADMIN + "/realms/inout/inout-auth/verify",
             auth=httpx.BasicAuth("inout-frontend", CLIENT_SECRET), json={"mode": "login",
-                "username": user["username"], "currentPassword": user["password"],
-                "codeChallenge": base64.urlsafe_b64encode(hashlib.sha256(secrets.token_bytes(32)).digest()).rstrip(b"=").decode()})
+                "username": user["username"], "currentPassword": user["password"], "codeChallenge": challenge})
         self.assertEqual(incomplete.status_code, 409, "App login must not bypass required password updates")
         self.assertEqual(incomplete.json(), {"error": "account_setup_required"},
             "Only the provider's post-proof required-action status may offer account setup")
-        self.sign_in("operator", password_update=secrets.token_urlsafe(32))
+        new_password = secrets.token_urlsafe(32)
+        setup = self.client.post(ADMIN + "/realms/inout/inout-auth/verify",
+            auth=httpx.BasicAuth("inout-frontend", CLIENT_SECRET), json={
+                "mode": "setup", "username": user["username"], "currentPassword": user["password"],
+                "newPassword": new_password, "expectedSubject": user["id"],
+            })
+        self.assertEqual(setup.status_code, 200, setup.text)
+        user["password"] = new_password
         self.direct_sign_in("operator")
-
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

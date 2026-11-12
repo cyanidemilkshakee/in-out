@@ -63,11 +63,23 @@ def main():
     # Authorization regressions deliberately rotate the other fixture's
     # credentials. Keep connectivity witnesses in a fresh independent project.
     parser.add_argument("--project", default="inout-network-boundary-test")
+    parser.add_argument("--compose-override", type=Path,
+                        help="optional Compose override, for example to select unused test subnet ranges")
     args = parser.parse_args()
     if not re.fullmatch(r"inout-[a-z0-9-]+-test", args.project):
         parser.error("The disposable project must have an inout- prefix and -test suffix")
-    compose = ("compose", "-p", args.project, "-f", "infrastructure/compose.test.yaml",
-               "-f", "infrastructure/temporal/compose.fixture.yaml")
+    compose = ["compose", "-p", args.project, "-f", "infrastructure/compose.test.yaml",
+               "-f", "infrastructure/temporal/compose.fixture.yaml"]
+    if args.compose_override:
+        override = (ROOT / args.compose_override).resolve() if not args.compose_override.is_absolute() else args.compose_override.resolve()
+        try:
+            compose_path = override.relative_to(ROOT).as_posix()
+        except ValueError:
+            parser.error("The compose override must be inside the repository")
+        if not override.is_file():
+            parser.error("The compose override file does not exist")
+        compose.extend(("-f", compose_path))
+    compose = tuple(compose)
     docker(*compose, "up", "--build", "-d", "postgres-primary", "redis", "temporal")
     endpoints = inventory(args.project, compose)
     environment = os.environ.copy()

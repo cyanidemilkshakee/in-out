@@ -15,7 +15,7 @@ from rule_engine import build_workday_statuses, default_alert_rules, evaluate_sc
 from workflows import activities
 
 
-NOW = datetime(2026, 10, 10, 13, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 9, 14, tzinfo=timezone.utc)
 
 
 def rows(values):
@@ -44,12 +44,32 @@ class AlertEvaluationProjectionTests(unittest.IsolatedAsyncioTestCase):
         catalog = default_alert_rules()
         expected = evaluate_scheduled_rules(catalog, legacy, build_workday_statuses(legacy, people, now=NOW),
             existing, employees=people, now=NOW)
-        counts = {"subjects": 5, "people": 4, "movements": len(specs), "alerts": len(existing)}
-        capacity = SimpleNamespace(mappings=lambda: SimpleNamespace(one=lambda: counts))
+        person_rows = [(Person(data=person), Subject(id=person["id"], barcode=person["barcode"], kind="employee"))
+            for person in people]
+        execute_results = iter([rows(projected), rows(person_rows), rows([]),
+            rows(projected), rows(person_rows), rows([])])
+        def execute_result(_query):
+            return next(execute_results)
+
+        page_reads = 0
+        def scalars_result(query):
+            nonlocal page_reads
+            sql = str(query).lower()
+            selected = list(query.selected_columns)
+            if "alert_rule_assignments" in sql:
+                return rows([])
+            if "from subjects" in sql:
+                if getattr(query, "_for_update_arg", None) is not None:
+                    return rows(["bob"])
+                page_reads += 1
+                return rows(["alice", "bob", "carol", "visitor", "asset"] if page_reads == 1 else [])
+            if "from alerts" in sql:
+                return rows(existing if selected and selected[0].name == "data" else [])
+            return rows([])
+
         db = SimpleNamespace(scalar=AsyncMock(return_value=True),
-            execute=AsyncMock(side_effect=[capacity, rows([]), rows(projected),
-                rows([(Person(data=person), Subject(id=person["id"], barcode=person["barcode"], kind="employee")) for person in people]), rows([])]),
-            scalars=AsyncMock(side_effect=[rows([]), rows(["alice", "bob", "carol", "visitor", "asset"]), rows([]), rows(existing)]),
+            execute=AsyncMock(side_effect=execute_result),
+            scalars=AsyncMock(side_effect=scalars_result),
             commit=AsyncMock(), add=Mock())
         captured = []
 
@@ -68,13 +88,14 @@ class AlertEvaluationProjectionTests(unittest.IsolatedAsyncioTestCase):
             clock.now.return_value = NOW
             self.assertEqual(await activities.run_alert_rule_evaluation(), 0)
         self.assertEqual(captured, expected)
-        movement_query = db.execute.await_args_list[2].args[0]
+        movement_query = db.execute.await_args_list[0].args[0]
         self.assertEqual({column.name for column in movement_query.selected_columns},
             {"subject_id", "result", "direction", "subject_type", "occurred_at"})
         self.assertIsNotNone(movement_query._limit_clause)
-        history_query = db.scalars.await_args_list[3].args[0]
+        history_query = next(call.args[0] for call in db.scalars.await_args_list
+            if list(call.args[0].selected_columns)[0].name == "data")
         self.assertEqual([column.name for column in history_query.selected_columns], ["data"])
-        db.commit.assert_not_awaited()
+        db.commit.assert_awaited_once()
         db.add.assert_not_called()
         return captured
 

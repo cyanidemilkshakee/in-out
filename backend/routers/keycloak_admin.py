@@ -440,6 +440,8 @@ async def get_user(user_id: str, token: str = Depends(_admin_context), db: Async
 
 @router.post("/users", status_code=410)
 async def create_user(token: str = Depends(_admin_context), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
+    if not has_master_admin_role(actor):
+        raise HTTPException(403, "Only a master-admin can create or invite application users")
     raise HTTPException(410, "Password-based account creation is disabled. Send an invitation instead.")
 
 @router.patch("/users/{user_id}")

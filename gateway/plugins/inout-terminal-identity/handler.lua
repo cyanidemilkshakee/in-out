@@ -1,32 +1,6 @@
 -- TLS validation belongs to Kong's TLS listener. Never trust certificate
 -- identity supplied by a caller, including callers on the Docker network.
-local Handler = { PRIORITY = 10000, VERSION = "1.5.1" }
-
-local function bounded_body()
-  -- Read native body metadata; get_headers() truncates after 100 fields and
-  -- would let late Content-Length/Transfer-Encoding headers skip admission.
-  local length = tonumber(ngx.var.content_length)
-  if not ngx.var.http_transfer_encoding and (not length or length == 0) then return end
-  -- Start the deadline before any lower-priority plugin or proxy buffering
-  -- reads a chunked body. Native NGINX limits still cap buffered bytes.
-  local deadline = tonumber(os.getenv("INOUT_UPLOAD_DEADLINE_SECONDS")) or 30
-  if deadline <= 0 or deadline > 120 then deadline = 30 end
-  local reader = ngx.thread.spawn(function()
-    ngx.req.read_body()
-    return "complete"
-  end)
-  local timer = ngx.thread.spawn(function()
-    ngx.sleep(deadline)
-    return "timeout"
-  end)
-  local ok, result = ngx.thread.wait(reader, timer)
-  ngx.thread.kill(reader)
-  ngx.thread.kill(timer)
-  if not ok or result ~= "complete" then
-    -- Do not drain an unfinished body or keep this HTTP/1 connection alive.
-    return kong.response.exit(408, { message = "Request body timed out" }, { ["Connection"] = "close" })
-  end
-end
+local Handler = { PRIORITY = 10000, VERSION = "1.5.2" }
 
 local function public_identity_path(path)
   -- Inspect both the original URI and Kong's normalized path. Decode once,
@@ -165,8 +139,6 @@ function Handler:access()
       return kong.response.exit(404, { message = "Not found" })
     end
   end
-
-  bounded_body()
 
   kong.service.request.clear_header("InoutListener")
   for name in pairs(kong.request.get_headers()) do

@@ -1,0 +1,10 @@
+{$APP_PUBLIC_HOSTNAME} {
+	reverse_proxy kong:1012 {
+		# Forward live presence events without introducing proxy buffering delay.
+		flush_interval -1
+	}
+}
+
+{$KEYCLOAK_PUBLIC_HOSTNAME} {
+	reverse_proxy kong:1014
+}

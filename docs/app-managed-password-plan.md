@@ -6,10 +6,17 @@ This is a custom authentication protocol built with Keycloak extension APIs. It 
 
 ## Configuration and deployment
 
-1. Build the provider into the Keycloak image using `keycloak/Dockerfile`. The current deployment target is **Keycloak 26.8.1**; the custom interaction protocol is `inout-app-interactions-v1`, extension version `1`. The 26.8.0 real-provider suite passed on 1 November 2026, but the 26.8.1 provider build/runtime suite had not been run as of the 5 November verification. Re-run it in an isolated realm before treating 26.8.1 as verified; the Authentication SPI is internal and can change between releases.
+1. The provider source is `keycloak/providers/src/main/java/io/inout/keycloak/InteractionResource.java`, registered by the provider service descriptor and compiled by `keycloak/Dockerfile` against the JARs copied from the exact Keycloak runtime image. The current deployment target is **Keycloak 26.8.2**; the custom interaction protocol remains `inout-app-interactions-v1`, extension version `1`. The provider is version-coupled to that exact Keycloak runtime because it uses internal Authentication SPI APIs. Build the matching image with `docker compose build keycloak` after setting the intended `KEYCLOAK_VERSION`. Run the disposable real-provider compatibility suite and cleanup with:
+
+   ```powershell
+   docker compose -p inout-keycloak-test -f keycloak/compose.test.yaml run --build --rm tests
+   docker compose -p inout-keycloak-test -f keycloak/compose.test.yaml down --volumes
+   ```
+
+   On 12 November 2026, all 21 tests passed on 26.8.2 after the app client was configured with Keycloak's built-in `kc-admin-api` default scope. The prior 26.8.1 failures are historical and superseded by this result; see [current release evidence](release-evidence-2026-11-12.md). The Authentication SPI is internal and can change between releases.
 2. Preserve `KEYCLOAK_CLIENT_SECRET` from the existing confidential `inout-frontend` client. The app authenticates its private provider calls with this secret. Do not expose it, interaction tickets or provider tokens to browser JavaScript.
 3. Through the loopback maintenance gateway, run `npm run keycloak:interactions:apply` and `npm run keycloak:interactions:check`. Both first authenticate a read-only `GET /realms/inout/inout-auth/status` probe, verify the exact provider/protocol version and check that no realm/global OAuth client policy is enabled. A missing/mismatched provider, malformed policy response or enabled policy stops configuration before any writes. No policy is disabled automatically.
-4. Configuration enables `inout.app-interactions.enabled=true`, disables Direct Access Grants, retains confidential-client authentication and S256 browser code flow, and preserves existing secrets, unrelated attributes, scope mappings and return URLs. `keycloak:app-sign-in:apply` now uses the same readiness gate and cannot re-enable password grants.
+4. Configuration enables `inout.app-interactions.enabled=true`, disables Direct Access Grants, retains confidential-client authentication and S256 browser code flow, and preserves existing secrets, unrelated attributes, scope mappings and return URLs. `keycloak:app-sign-in:apply` now uses the same readiness gate and cannot re-enable password grants. Keycloak 26.8.2 also requires delegated Admin REST tokens to include its built-in `kc-admin-api` scope and realm Admin API audience; the realm template provides it for new installs and `npm run keycloak:account:repair` applies and verifies it on existing installs.
 5. Deploy the matching app and verify synthetic sign-in and password changes. During an existing-install cutover, enabling the extension and disabling the grant must be coordinated with the app deployment: the old app still requires its old sign-in path.
 6. Only after the new app works, explicitly retire its previous administrative password client:
 
@@ -23,6 +30,8 @@ This is a custom authentication protocol built with Keycloak extension APIs. It 
 The private `PASSWORD_UPDATE_LOCK_API_URL` remains required for password changes. Compose supplies `http://python-api:1019`; manual development needs a reachable private API and matching `AUTH_SECRET` / `KEYCLOAK_STEP_UP_SIGNING_SECRET`. The old password-client ID/secret are migration-only settings and are not used by the interaction flow. All existing application services remain.
 
 ## Interaction protocol
+
+Keep `inout-app-interactions-v1` and extension version `1` unchanged this week. The source, provider build, and compatibility checks must continue to agree on the same protocol and Keycloak runtime version; do not introduce a second protocol or migrate callers as part of the release-evidence work.
 
 The app's same-origin authentication/password routes retain signed CSRF validation, origin checks, bounded request fields/bodies and deadlines. Kong shares its credential-POST allowance with password changes. Keycloak interaction endpoints are private backend calls authenticated as the enabled confidential frontend client; a public or different client cannot use them.
 
@@ -45,6 +54,8 @@ Successful temporary setup returns to ordinary app sign-in with the username pre
 - Keep Keycloak client secrets and interaction routes private, use HTTPS outside local development, and retain native brute-force protection and gateway controls. The extension still receives app-forwarded passwords and does not make that architectural risk disappear.
 
 ## Validation
+
+The latest local results are recorded in [release evidence dated 2026-11-12](release-evidence-2026-11-12.md). The 21-test Keycloak 26.8.2 result supersedes older provider-version checks below; older dates are retained as historical evidence only.
 
 `npm test` covers bridge token validation and configuration regressions, including refusal to change clients before an authenticated version probe. `npm run test:keycloak:interactions` runs configuration checks alone. After `npm run build`, use the built-app authentication/password HTTP harnesses with isolated provider/lease stubs. Backend lease regressions are in `backend/tests/test_password_update_locks.py`.
 

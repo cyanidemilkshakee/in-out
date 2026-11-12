@@ -11,13 +11,18 @@ $env:AUTH_URL = "http://app.localhost:3001"
 npm run dev
 ```
 
-Open [app.localhost:3001](http://app.localhost:3001). Register this exact callback/origin through authenticated provider maintenance for development; the default realm permits only the Compose app origin. Use `npm run dev:webpack` for the Webpack development server. Remove the temporary override with `Remove-Item Env:AUTH_URL` before returning to the Docker application URL. Backend code changes require rebuilding its services through `docker compose up --build -d`.
+Open [app.localhost:3001](http://app.localhost:3001). Register this exact callback/origin through authenticated provider maintenance for development; the default realm permits only the Compose app origin. `npm run dev` is the normal Turbopack server. Use `npm run dev:webpack` only as a Webpack fallback or for comparison. `npm run dev:bounded` is the same Turbopack server with a 15-minute timeout for temporary sessions. Remove the temporary override with `Remove-Item Env:AUTH_URL` before returning to the Docker application URL. Backend code changes require rebuilding its services through `docker compose up --build -d`.
+
+After `npm run build`, use `npm start` to serve the production build locally. `npm run start:bounded` adds a 15-minute limit for temporary runs.
 
 | Command | Verification |
 | --- | --- |
 | `npm run typecheck` | TypeScript types |
 | `npm audit --audit-level=moderate` | Known advisories in the locked npm dependency tree |
-| `npm test` | Data contracts, session/token handling, and realm-repair behavior |
+| `npm run test:frontend` | Frontend workflows, shared data contracts, offline queue, and analytics helpers |
+| `npm run test:auth` | Authentication, Keycloak integration, and security boundary checks |
+| `npm test` | Both local frontend and authentication test groups; does not start Docker |
+| `npm run test:all` | `npm test`, isolated PostgreSQL backend suite, then isolated Kong gateway suite; requires Docker |
 | `npm run test:keycloak:interactions` | Readiness-gated interaction-client configuration and explicit legacy-client retirement regressions |
 | `npm run build` | Production frontend build |
 | `npm run test:auth:http` | HTTP authentication using isolated identity/API stubs; run after building |
@@ -26,6 +31,8 @@ Open [app.localhost:3001](http://app.localhost:3001). Register this exact callba
 | `uv audit --project backend --frozen --no-dev` | Known advisories in the locked Python runtime dependencies |
 | `npm run test:gateway` | Disposable real Kong, certificate authentication, request limits, and streaming with fixture upstreams |
 | `npm run test:auth:account` | Live local Keycloak account endpoints, signed frontend role claims, and parallel admin API authorization; creates and removes a temporary test identity |
+
+For a single backend test area, use `npm run test:python` for the local Python suite, or `npm run test:postgres` for the isolated Docker/PostgreSQL suite. Use `npm run test:gateway` for Kong. `npm run test:all` runs the project's standard frontend/auth, backend/PostgreSQL, and gateway groups in sequence; it does not run live-account checks or disposable Keycloak-provider compatibility fixtures.
 
 PostgreSQL tests use the `test` Compose profile, a separate temporary database, and a schema per database test. They require Docker and the Compose configuration values. Stop the test service afterward with `docker compose --profile test stop db-test`. The live account check additionally requires the running local stack and matching credentials in `.env`.
 
@@ -270,7 +277,7 @@ For the restriction branch, use a rule configured with critical severity through
 3. Set a future return time at sign-out and check terminal availability; sign in again and verify it clears. Test past/naive/out-of-range availability. App-form sign-out must clear the local session and revoke its provider refresh token. Account-action previews do not create sessions. Stall the availability service: logout must continue after its five-second timeout. The provider callback must not perform another availability write.
 4. Keep the admin Dashboard open while the operator enters/exits. Expect committed live updates, no occupancy change for denied scans, and snapshot recovery after reconnect. An expired stream token must close the stream.
 5. Run the isolated HTTP-auth suite for refresh/revoked-grant/cookie forwarding and the gateway suite for spoofed headers, certificates, body limits, `429`, and streaming. Run `npm run test:auth:account` separately for the real local account integration.
-6. On the disposable stack, stop Redis, then Temporal, then PostgreSQL one at a time, restore each, and poll probes directly inside the API container if Kong cannot route an unhealthy upstream. Use a bounded client timeout and record both statuses and elapsed time. Readiness should return `503` when a dependency check fails while the process's liveness stays `200`; the current handler has no explicit overall deadline, so prompt failure versus a client timeout remains unverified. Check committed scans/decisions survive post-commit publication failure.
+6. On the disposable stack, stop Redis, then Temporal, then PostgreSQL one at a time, restore each, and poll probes directly inside the API container if Kong cannot route an unhealthy upstream. Use a bounded client timeout and record both statuses and elapsed time. Readiness is bounded by a four-second overall deadline (`_READINESS_TIMEOUT_SECONDS` in `backend/main.py`): dependency failure or deadline expiry should return `503`, while liveness stays `200`. Verify both outcomes and record elapsed time; a client-side timeout alone is not evidence of the server response. Check committed scans/decisions survive post-commit publication failure.
 
 **Edges:** Wrong issuer/audience/signature/kid, expired token, revoked refresh, cross-origin/non-JSON mutations, large/chunked bodies, certificate/body/assignment mismatch, Redis reconnect, and actual Temporal signal/retry/replay. Presence requires an application role; operator visibility across checkpoint boundaries still needs a defined data-scope policy. Keep gateway fixture results separate from real application integration.
 

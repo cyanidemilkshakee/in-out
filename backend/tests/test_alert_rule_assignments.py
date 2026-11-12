@@ -219,7 +219,7 @@ class AlertRuleAssignmentDatabaseTests(unittest.IsolatedAsyncioTestCase):
         self.authorize()
         await self.seed_rule(severity="critical")
         self.assertEqual((await self.save("p1", [], 0)).status_code, 200)
-        fixed_now = datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 10, 7, 14, 0, tzinfo=timezone.utc)
         with patch("workflows.activities.async_session", new=self.sessions), \
              patch("workflows.activities.datetime", wraps=datetime) as clock:
             clock.now.return_value = fixed_now

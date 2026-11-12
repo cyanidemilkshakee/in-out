@@ -48,7 +48,7 @@ class InteractionTests(unittest.TestCase):
     def test_client_authentication_origin_gate_and_public_boundary(self):
         response = self.client.get(BASE + "/status", auth=CLIENT)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {"extensionVersion": 1, "keycloakVersion": "26.8.1", "protocol": "inout-app-interactions-v1"})
+        self.assertEqual(response.json(), {"extensionVersion": 1, "keycloakVersion": "26.8.2", "protocol": "inout-app-interactions-v1"})
         self.assertIn("no-store", response.headers["cache-control"])
         for options in ({}, {"auth": httpx.BasicAuth("inout-frontend", "incorrect-fixture-secret")},
                         {"auth": CLIENT, "headers": {"Origin": "http://foreign.invalid"}}):
@@ -286,25 +286,16 @@ class InteractionTests(unittest.TestCase):
             self.fixture.admin_request("PUT", "", json={"passwordPolicy": original_policy}).raise_for_status()
             self.fixture.admin_request("PUT", path, json={"requiredActions": []}).raise_for_status()
 
-    def test_native_otp_verification_is_required_and_replay_is_rejected(self):
-        helper = self.fixture("test_builtin_mfa_enrollment_then_app_form_requires_otp")
-        user = self.fixture.users["operator"]
-        self.fixture.admin_request("PUT", "/users/" + user["id"], json={"requiredActions": ["CONFIGURE_TOTP"]}).raise_for_status()
-        helper.sign_in("operator", configure_otp=True)
-        while int(time.time()) // 30 <= user["last_otp_counter"]:
-            time.sleep(0.2)
-        common = {"mode": "login", "username": user["username"], "currentPassword": user["password"], "codeChallenge": self.challenge}
-        actual = helper.otp_code(user["otp_secret"])
-        wrong = str((int(actual) + 1) % 1_000_000).zfill(6)
-        # Establish success before failures: native quick-login protection can
-        # temporarily lock a user after rapidly repeated failed OTP attempts.
-        valid = self.post("verify", {**common, "otp": actual})
-        self.assertEqual(valid.status_code, 200, valid.text)
-        self.assertEqual(self.redeem(valid.json()["code"]).status_code, 200)
-        self.assertEqual(self.post("verify", {**common, "otp": actual}).status_code, 401)
-        self.assertEqual(self.post("verify", common).status_code, 401)
-        self.assertEqual(self.post("verify", {**common, "otp": wrong}).status_code, 401)
-
+    def test_unsupported_totp_enrollment_fails_closed(self):
+        user_path = "/users/" + self.user["id"]
+        self.fixture.admin_request("PUT", user_path, json={"requiredActions": ["CONFIGURE_TOTP"]}).raise_for_status()
+        try:
+            blocked = self.proof()
+            self.assertEqual(blocked.status_code, 409)
+            self.assertEqual(blocked.json(), {"error": "not_ready"})
+            self.assertNotIn("code", blocked.json())
+        finally:
+            self.fixture.admin_request("PUT", user_path, json={"requiredActions": []}).raise_for_status()
     def test_zz_expired_code_cannot_issue_session(self):
         code = self.proof().json()["code"]
         time.sleep(31)

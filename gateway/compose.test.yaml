@@ -61,10 +61,10 @@ services:
       KONG_ADMIN_LISTEN: "off"
       KONG_STATUS_LISTEN: "0.0.0.0:1017"
       KONG_PLUGINS: bundled,inout-terminal-identity,inout-rate-identity
-      KONG_NGINX_MAIN_ENV: "INOUT_TERMINAL_SECRET; env INOUT_UPLOAD_DEADLINE_SECONDS; env INOUT_GATEWAY_IDENTITY_SECRET; env INOUT_GATEWAY_REDIS_PASSWORD"
+      KONG_NGINX_MAIN_ENV: "INOUT_TERMINAL_SECRET; env INOUT_GATEWAY_IDENTITY_SECRET; env INOUT_GATEWAY_REDIS_PASSWORD"
       INOUT_GATEWAY_IDENTITY_SECRET: fixture-identity-secret-not-for-production-12345
       INOUT_GATEWAY_REDIS_PASSWORD: fixture-gateway-credential-000000000000000000
-      INOUT_UPLOAD_DEADLINE_SECONDS: "1"
+      KONG_NGINX_HTTP_CLIENT_BODY_TIMEOUT: "1s"
       INOUT_TERMINAL_SECRET: gateway-test-secret-not-for-production-12345
       KONG_SSL_CERT: /certificates/server.crt
       KONG_SSL_CERT_KEY: /certificates/server.key

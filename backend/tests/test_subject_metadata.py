@@ -163,6 +163,7 @@ class SubjectMetadataTests(unittest.IsolatedAsyncioTestCase):
                 with patch("terminal_scans.entry_restrictions_for_subjects", new=AsyncMock(return_value={})), \
                      patch("terminal_scans.entry_restrictions_for_locked_subjects", new=AsyncMock(return_value={})), \
                      patch("terminal_scans._approved_manual_review", new=AsyncMock(return_value=None)), \
+                     patch("terminal_scans._maybe_create_checkpoint_scan_alerts", new=AsyncMock()), \
                      patch("terminal_scans.require_registered_checkpoint", new=AsyncMock(return_value="cp-main")):
                     result = await record_scan(db, uuid.uuid4(), BrowserScanPayload(barcode=subject.barcode, checkpointId="cp-main"), "operator")
                 self.assertEqual(result["allowed"], not restricted)

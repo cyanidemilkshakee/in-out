@@ -38,7 +38,10 @@ WORKDIR /app
 
 # Runtime never installs packages. Remove pip and its bundled fallback wheel,
 # whose private dependencies are independent of the audited application lock.
-RUN python -m pip uninstall --yes pip \
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip uninstall --yes pip \
     && rm -rf /usr/local/lib/python3.13/ensurepip
 
 RUN addgroup --system --gid 10001 app \

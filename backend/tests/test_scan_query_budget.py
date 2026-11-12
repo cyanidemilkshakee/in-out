@@ -21,7 +21,7 @@ from terminal_scans import record_scan
 from workflows.activities import run_alert_rule_evaluation
 
 
-NOW = datetime(2026, 10, 10, 13, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 9, 14, tzinfo=timezone.utc)
 
 
 @unittest.skipUnless(fixture.TEST_URL, "Set TEST_DATABASE_URL for isolated PostgreSQL tests")
@@ -121,10 +121,14 @@ class ScanQueryBudgetTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         async with self.engine.begin() as conn:
             def rerun(connection):
-                revision = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic")).get_revision("b6c7d8e9f0").module
+                scripts = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
+                legacy_shape = scripts.get_revision("b8c9d0e1f2").module
+                revision = scripts.get_revision("b6c7d8e9f0").module
                 with Operations.context(MigrationContext.configure(connection)):
+                    legacy_shape.downgrade()
                     revision.downgrade()
                     revision.upgrade()
+                    legacy_shape.upgrade()
             await conn.run_sync(rerun)
         async with self.sessions() as db:
             self.assertTrue((await db.get(CriticalEntryRestriction, "p1")).active)
@@ -157,10 +161,14 @@ class ScanQueryBudgetTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(DBAPIError):
             async with self.engine.begin() as conn:
                 def rerun(connection):
-                    revision = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic")).get_revision("b6c7d8e9f0").module
+                    scripts = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
+                    legacy_shape = scripts.get_revision("b8c9d0e1f2").module
+                    revision = scripts.get_revision("b6c7d8e9f0").module
                     with Operations.context(MigrationContext.configure(connection)):
+                        legacy_shape.downgrade()
                         revision.downgrade()
                         revision.upgrade()
+                        legacy_shape.upgrade()
                 await conn.run_sync(rerun)
         async with self.sessions() as db:
             self.assertFalse((await db.get(Subject, "p1")).warning_hold_materialized)
@@ -211,7 +219,9 @@ class ScanQueryBudgetTests(unittest.IsolatedAsyncioTestCase):
              patch("rule_engine.evaluate_scheduled_rules", new=start_scan), \
              patch.object(AsyncSession, "execute", new=intercept):
             clock.now.return_value = NOW
-            scan_clock.now.return_value = NOW
+            # The scan commits before the attendance cutoff; evaluation runs
+            # after the cutoff and must observe that timely entry on recheck.
+            scan_clock.now.return_value = NOW - timedelta(hours=2)
             self.assertEqual(await asyncio.wait_for(run_alert_rule_evaluation(), 10), 0)
         self.assertTrue(entry_committed)
         self.assertEqual(calls, 2)

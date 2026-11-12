@@ -34,11 +34,11 @@ services:
       postgres: {condition: service_healthy}
 
   keycloak:
-    image: inout-keycloak:${KEYCLOAK_TEST_VERSION:-26.8.1}
+    image: inout-keycloak:${KEYCLOAK_TEST_VERSION:-26.8.2}
     build:
       context: .
       args:
-        KEYCLOAK_VERSION: ${KEYCLOAK_TEST_VERSION:-26.8.1}
+        KEYCLOAK_VERSION: ${KEYCLOAK_TEST_VERSION:-26.8.2}
     mem_limit: 1g
     command: start --optimized --http-enabled=true --import-realm
     environment:

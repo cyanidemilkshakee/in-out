@@ -20,7 +20,7 @@ services:
       provision: {condition: service_completed_successfully}
   temporal:
     profiles: !reset []
-    image: temporalio/server:1.32.1@sha256:acecbab5b0b8ae9cf4012b508866ca97feda3709577bf157b537239f40029049
+    image: temporalio/server:1.32.2@sha256:7bf69188a6232fea14869b9cef3d94aa82a1601d99517f7e86c71f22da4e0670
     environment:
       DB: postgres12
       DB_PORT: '1020'
@@ -68,7 +68,7 @@ services:
   temporal-ui:
     profiles: [ui-compatibility]
     networks: [workflow]
-    image: temporalio/ui:2.55.0@sha256:3899d5cf749b5555c9f798d46f2423b1d6190ea391ca713db5d1bba961759e58
+    image: temporalio/ui:2.56.1@sha256:584dd3408ab8333888d50b12d4a683e550e963409bf95fa2c9159d40d7cb825f
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     environment:

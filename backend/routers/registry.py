@@ -45,7 +45,8 @@ from registry_validation import (
     validated_checkpoint_ids,
     validated_metadata as _validated_metadata,
 )
-from zone_access import admin_zone_ids, checkpoint_zone_condition, require_checkpoint_scope, require_subject_scope, subject_zone_condition, validate_zone_subset
+from zone_access import (admin_zone_ids, alert_zone_condition, checkpoint_zone_condition, require_checkpoint_scope,
+    require_subject_scope, subject_zone_condition, validate_zone_subset)
 
 logger = logging.getLogger(__name__)
 
@@ -821,19 +822,10 @@ async def registry_bundle(
         | (Alert.data["ruleId"].astext == "rule-unknown-barcode")
         | Alert.data["title"].astext.ilike("Unknown barcode%")
     )
-    unscoped_alert = and_(
-        Alert.data["zoneId"].astext.is_(None),
-        Alert.data["checkpointId"].astext.is_(None),
-        Alert.data["subjectId"].astext.is_(None),
-    )
     alerts = [alert.data for alert in (await db.execute(
         select(Alert)
-        .where(~func.coalesce(excluded_alert, False), or_(
-            unscoped_alert,
-            Alert.data["zoneId"].astext.in_(zone_ids),
-            Alert.data["checkpointId"].astext.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zone_ids))),
-            Alert.data["subjectId"].astext.in_(visible_subject_ids) if visible_subject_ids else false(),
-        ))
+        .where(~func.coalesce(excluded_alert, False), alert_zone_condition(Alert.data, zone_ids,
+            visible_subject_ids, include_unbound=has_master_admin_role(actor)))
         .order_by(Alert.created_at.desc())
         .limit(200)
     )).scalars().all()]

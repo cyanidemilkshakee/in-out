@@ -50,6 +50,13 @@ class MovementSearchIndexTests(unittest.IsolatedAsyncioTestCase):
     async def test_upgrade_downgrade_reupgrade_preserves_rows_and_uses_matching_index(self):
         async with self.engine.begin() as connection:
             await connection.execute(text("""
+                CREATE INDEX idx_movements_search_trgm
+                ON movements USING gin (
+                    lower(coalesce(data->>'subjectName', '') || ' ' || coalesce(data->>'barcode', '') || ' ' ||
+                          coalesce(data->>'checkpoint', '') || ' ' || coalesce(data->>'reason', '')) gin_trgm_ops
+                )
+            """))
+            await connection.execute(text("""
                 INSERT INTO movements(id,subject_id,checkpoint_id,occurred_at,result,direction,scan_type,subject_type,sync_state,data)
                 SELECT CASE WHEN number=19337 THEN 'needle-id-19337' ELSE 'fixture-event-'||number END,
                     'p1','cp-main',now(),'approved','entry','auto','employee','synced',
@@ -76,6 +83,15 @@ class MovementSearchIndexTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_blocked_index_build_times_out_and_retains_previous_index(self):
         await self.migrate("downgrade")
+        async with self.sessions() as index_builder:
+            await index_builder.execute(text("""
+                CREATE INDEX idx_movements_search_trgm
+                ON movements USING gin (
+                    lower(coalesce(data->>'subjectName', '') || ' ' || coalesce(data->>'barcode', '') || ' ' ||
+                          coalesce(data->>'checkpoint', '') || ' ' || coalesce(data->>'reason', '')) gin_trgm_ops
+                )
+            """))
+            await index_builder.commit()
         async with self.sessions() as writer:
             await writer.execute(text("LOCK TABLE movements IN ROW EXCLUSIVE MODE"))
             with self.assertRaises(DBAPIError) as raised:

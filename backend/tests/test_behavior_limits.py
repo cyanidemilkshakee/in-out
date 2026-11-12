@@ -120,16 +120,22 @@ class UnknownScanAdmissionTests(unittest.IsolatedAsyncioTestCase):
         db.add = Mock()
         db.execute.return_value = result
         checkpoint = SimpleNamespace(id="cp-main", data={"name": "Main Entrance", "mode": "entry"})
-        # Receipt lookup, registered-checkpoint validation, then scan payload.
-        db.get.side_effect = [cached] if cached else [None, checkpoint, checkpoint]
+        def lookup(model, _identity, *_args, **_kwargs):
+            if model.__name__ == "ScanRequest":
+                return cached
+            if model.__name__ == "Checkpoint":
+                return checkpoint
+            return None
+        db.get.side_effect = lookup
         return db
 
     async def test_fresh_unknown_scan_rejection_writes_no_movement_or_receipt(self):
         db = self.database()
         scope = request_scope("/v1/terminal/scans", actor="verified-account")
-        payload = BrowserScanPayload(barcode="unknown", checkpointId="cp-main", online=False)
+        payload = BrowserScanPayload(barcode="unknown", checkpointId="cp-main", online=True)
         with patch("terminal_scans.consume_unknown_barcode_quota", AsyncMock(
-            side_effect=HTTPException(429, "cooldown", headers={"Retry-After": "60"}))) as admit:
+            side_effect=HTTPException(429, "cooldown", headers={"Retry-After": "60"}))) as admit, \
+             patch("terminal_scans._maybe_create_checkpoint_scan_alerts", new=AsyncMock()):
             with self.assertRaises(HTTPException) as caught:
                 await record_scan(db, uuid.uuid4(), payload, "browser:operator", request_scope=scope)
         self.assertEqual(caught.exception.status_code, 429)
@@ -144,7 +150,8 @@ class UnknownScanAdmissionTests(unittest.IsolatedAsyncioTestCase):
             "decision": {"event": {"direction": "entry", "subjectType": "visitor"}}})
         db = self.database(cached)
         payload = BrowserScanPayload(barcode="unknown", checkpointId="cp-main", online=False)
-        with patch("terminal_scans.consume_unknown_barcode_quota", AsyncMock()) as admit:
+        with patch("terminal_scans.consume_unknown_barcode_quota", AsyncMock()) as admit, \
+             patch("terminal_scans._maybe_create_checkpoint_scan_alerts", new=AsyncMock()):
             result = await record_scan(db, uuid.uuid4(), payload, "browser:operator",
                                        request_scope=request_scope("/v1/terminal/scans"))
         admit.assert_not_awaited()
@@ -155,7 +162,8 @@ class UnknownScanAdmissionTests(unittest.IsolatedAsyncioTestCase):
     async def test_unbound_domain_scan_requires_no_external_limiter_io(self):
         db = self.database()
         payload = BrowserScanPayload(barcode="unknown", checkpointId="cp-main")
-        with patch("terminal_scans.consume_unknown_barcode_quota", AsyncMock()) as admit:
+        with patch("terminal_scans.consume_unknown_barcode_quota", AsyncMock()) as admit, \
+             patch("terminal_scans._maybe_create_checkpoint_scan_alerts", new=AsyncMock()):
             result = await record_scan(db, uuid.uuid4(), payload, "browser:operator")
         admit.assert_not_awaited()
         self.assertFalse(result["allowed"])

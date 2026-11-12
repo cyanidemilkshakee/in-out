@@ -7,7 +7,7 @@ const featureSecrets = {
   redis: ["REDIS_QUOTA_PASSWORD", "REDIS_EVENTS_PASSWORD", "REDIS_GATEWAY_PASSWORD"],
   gateway: ["KONG_IDENTITY_SECRET", "KONG_TERMINAL_SECRET"],
   auth: ["AUTH_SECRET"],
-  keycloak: ["KEYCLOAK_CLIENT_SECRET", "KEYCLOAK_ADMIN_PASSWORD", "KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET"],
+  keycloak: ["KEYCLOAK_CLIENT_SECRET", "KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD", "KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET"],
   invitations: ["KEYCLOAK_INVITE_CLIENT_SECRET"],
 };
 const args = process.argv.slice(2);
@@ -38,13 +38,13 @@ const urls = feature === "all" ? {
   AUTH_URL: `http://app.localhost:${configuredPort("APP_PORT", "1008")}`,
   INOUT_APP_URL: `http://app.localhost:${configuredPort("APP_PORT", "1008")}`,
   PYTHON_API_URL: `http://127.0.0.1:${configuredPort("PYTHON_API_PORT", "1002")}`,
-  KEYCLOAK_ISSUER: `http://auth.localhost:${configuredPort("KEYCLOAK_PORT", "1005")}/realms/inout`,
+  KEYCLOAK_PUBLIC_URL: `http://auth.localhost:${configuredPort("KEYCLOAK_PORT", "1005")}`,
 } : {};
 const managedLocalUrls = {
   AUTH_URL: ["app.localhost", "/"],
   INOUT_APP_URL: ["app.localhost", "/"],
   PYTHON_API_URL: ["127.0.0.1", "/"],
-  KEYCLOAK_ISSUER: ["auth.localhost", "/realms/inout"],
+  KEYCLOAK_PUBLIC_URL: ["auth.localhost", "/"],
 };
 function canSyncLocalUrl(key, value) {
   if (!value.trim()) return true;

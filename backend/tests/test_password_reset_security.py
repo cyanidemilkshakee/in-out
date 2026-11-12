@@ -20,50 +20,71 @@ class PasswordResetSecurityTests(unittest.IsolatedAsyncioTestCase):
         self.roles.start()
         self.addCleanup(self.roles.stop)
 
+    async def reset(self, actor=None):
+        # Call the route function with explicit dependency values; FastAPI's
+        # Depends markers are only resolved when the route is invoked through ASGI.
+        return await keycloak_admin.reset_password("operator", self.payload, "token", AsyncMock(),
+            self.actor if actor is None else actor)
+
     async def test_reset_ends_provider_sessions_then_revokes_all_application_tokens(self):
         calls = []
         async def request(token, method, path, payload=None):
             calls.append((method, path))
+            if method == "GET":
+                return httpx.Response(200, json={"username": "operator", "enabled": True})
+            return httpx.Response(204)
         async def revoke(issuer, subject):
             calls.append(("revoke", subject))
         with patch("routers.keycloak_admin._request", side_effect=request), \
              patch("routers.keycloak_admin.revoke_principal_tokens", side_effect=revoke):
-            self.assertEqual(await keycloak_admin.reset_password("operator", self.payload, "token", self.actor), {"updated": True})
-        self.assertEqual(calls, [("PUT", "users/operator/reset-password"), ("POST", "users/operator/logout"), ("revoke", "operator")])
+            self.assertEqual(await self.reset(), {"updated": True})
+        self.assertEqual(calls, [("GET", "users/operator"), ("PUT", "users/operator/reset-password"),
+            ("POST", "users/operator/logout"), ("revoke", "operator")])
 
     async def test_logout_failure_still_revokes_existing_access_tokens_and_reports_partial_save(self):
         revoke = AsyncMock()
         async def request(token, method, path, payload=None):
+            if method == "GET":
+                return httpx.Response(200, json={"username": "operator", "enabled": True})
             if method == "POST":
                 raise HTTPException(503, "isolated identity outage")
+            return httpx.Response(204)
         with patch("routers.keycloak_admin._request", side_effect=request), \
              patch("routers.keycloak_admin.revoke_principal_tokens", new=revoke):
             with self.assertRaises(HTTPException) as raised:
-                await keycloak_admin.reset_password("operator", self.payload, "token", self.actor)
+                await self.reset()
         self.assertEqual(raised.exception.status_code, 503)
         self.assertIn("Password changed", raised.exception.detail)
         self.assertIn("sessions could not be ended", raised.exception.detail)
         revoke.assert_awaited_once()
 
     async def test_revocation_failure_reports_password_changed_and_never_returns_success(self):
-        request = AsyncMock()
+        async def request(token, method, path, payload=None):
+            if method == "GET":
+                return httpx.Response(200, json={"username": "operator", "enabled": True})
+            return httpx.Response(204)
+        request = AsyncMock(side_effect=request)
         with patch("routers.keycloak_admin._request", new=request), \
              patch("routers.keycloak_admin.revoke_principal_tokens", side_effect=HTTPException(503, "isolated")):
             with self.assertRaises(HTTPException) as raised:
-                await keycloak_admin.reset_password("operator", self.payload, "token", self.actor)
+                await self.reset()
         self.assertIn("Password changed", raised.exception.detail)
         self.assertIn("could not be revoked", raised.exception.detail)
-        self.assertEqual(request.await_count, 2)
+        self.assertEqual(request.await_count, 3)
 
     async def test_rejected_reset_does_not_end_sessions_or_publish_revocation(self):
         for status in (400, 401, 403, 404, 409, 429):
             with self.subTest(status=status):
-                request, revoke = AsyncMock(side_effect=HTTPException(status, "isolated rejection")), AsyncMock()
+                async def reject_reset(token, method, path, payload=None):
+                    if method == "GET":
+                        return httpx.Response(200, json={"username": "operator", "enabled": True})
+                    raise HTTPException(status, "isolated rejection")
+                request, revoke = AsyncMock(side_effect=reject_reset), AsyncMock()
                 with patch("routers.keycloak_admin._request", new=request), patch("routers.keycloak_admin.revoke_principal_tokens", new=revoke):
                     with self.assertRaises(HTTPException) as raised:
-                        await keycloak_admin.reset_password("operator", self.payload, "token", self.actor)
+                        await self.reset()
                 self.assertEqual(raised.exception.status_code, status)
-                self.assertEqual(request.await_count, 1)
+                self.assertEqual(request.await_count, 2)
                 revoke.assert_not_awaited()
 
     async def test_ambiguous_reset_attempts_both_protections_once_and_reports_unconfirmed_write(self):
@@ -75,10 +96,13 @@ class PasswordResetSecurityTests(unittest.IsolatedAsyncioTestCase):
                     calls = []
                     async def request(token, method, path, payload=None):
                         calls.append((method, path))
+                        if method == "GET":
+                            return httpx.Response(200, json={"username": "operator", "enabled": True})
                         if method == "PUT":
                             raise reset_failure
                         if logout_fails:
                             raise HTTPException(503, "isolated logout outage")
+                        return httpx.Response(204)
                     async def revoke(issuer, subject):
                         calls.append(("revoke", subject))
                         if revocation_fails:
@@ -86,7 +110,7 @@ class PasswordResetSecurityTests(unittest.IsolatedAsyncioTestCase):
                     with patch("routers.keycloak_admin._request", side_effect=request), \
                          patch("routers.keycloak_admin.revoke_principal_tokens", side_effect=revoke):
                         with self.assertRaises(HTTPException) as raised:
-                            await keycloak_admin.reset_password("operator", self.payload, "token", self.actor)
+                            await self.reset()
                     self.assertEqual(raised.exception.status_code, 503)
                     self.assertIn("reset could not be confirmed", raised.exception.detail)
                     self.assertIn("Try signing in with the new password", raised.exception.detail)
@@ -99,16 +123,20 @@ class PasswordResetSecurityTests(unittest.IsolatedAsyncioTestCase):
                         self.assertIn("Use End sessions", raised.exception.detail)
                     else:
                         self.assertIn("sessions and application tokens were revoked", raised.exception.detail)
-                    self.assertEqual(calls, [("PUT", "users/operator/reset-password"), ("POST", "users/operator/logout"), ("revoke", "operator")])
+                    self.assertEqual(calls, [("GET", "users/operator"), ("PUT", "users/operator/reset-password"),
+                        ("POST", "users/operator/logout"), ("revoke", "operator")])
 
     async def test_both_outages_report_both_incomplete_protections(self):
         async def request(token, method, path, payload=None):
+            if method == "GET":
+                return httpx.Response(200, json={"username": "operator", "enabled": True})
             if method == "POST":
                 raise HTTPException(503, "isolated")
+            return httpx.Response(204)
         with patch("routers.keycloak_admin._request", side_effect=request), \
              patch("routers.keycloak_admin.revoke_principal_tokens", side_effect=HTTPException(503, "isolated")):
             with self.assertRaises(HTTPException) as raised:
-                await keycloak_admin.reset_password("operator", self.payload, "token", self.actor)
+                await self.reset()
         self.assertIn("sessions could not be ended", raised.exception.detail)
         self.assertIn("tokens could not be revoked", raised.exception.detail)
         self.assertIn("Use End sessions", raised.exception.detail)
@@ -116,7 +144,7 @@ class PasswordResetSecurityTests(unittest.IsolatedAsyncioTestCase):
     async def test_zone_admin_cannot_reset_passwords(self):
         with patch("routers.keycloak_admin._request", new=AsyncMock()) as request:
             with self.assertRaises(HTTPException) as raised:
-                await keycloak_admin.reset_password("operator", self.payload, "token", {"realm_access": {"roles": ["zone-admin"]}})
+                await self.reset({"realm_access": {"roles": ["zone-admin"]}})
         self.assertEqual(raised.exception.status_code, 403)
         request.assert_not_awaited()
 
@@ -146,12 +174,9 @@ class PasswordResetSecurityTests(unittest.IsolatedAsyncioTestCase):
                         self.assertEqual(await keycloak_admin.end_user_sessions("operator", "token", self.actor), {"updated": True})
                 self.assertEqual(calls, [("POST", "users/operator/logout"), ("revoke", "operator")])
 
-    def test_create_and_reset_reject_short_new_passwords_and_preserve_passphrase_bytes(self):
+    def test_password_reset_rejects_short_passwords_and_preserves_passphrase_bytes(self):
         for password in ("x", "a" * 11, " " * 12, "\t\n" * 6, "\u2003" * 12):
             with self.assertRaises(ValidationError):
                 keycloak_admin.PasswordResetRequest(password=password)
-            with self.assertRaises(ValidationError):
-                keycloak_admin.UserCreateRequest(username="fixture", password=password)
         password = "  a long passphrase  "
         self.assertEqual(keycloak_admin.PasswordResetRequest(password=password).password, password)
-        self.assertEqual(keycloak_admin.UserCreateRequest(username="fixture", password=password).password, password)

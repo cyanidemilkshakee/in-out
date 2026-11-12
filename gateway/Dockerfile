@@ -4,6 +4,6 @@ FROM kong:${KONG_VERSION}
 # Keep Kong's routing version while applying published distribution TLS fixes.
 USER root
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends --only-upgrade libssl3t64 openssl \
+    && apt-get upgrade -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 USER kong

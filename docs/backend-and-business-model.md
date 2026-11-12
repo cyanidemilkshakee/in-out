@@ -153,7 +153,7 @@ flowchart LR
 
 The API's lifespan manages connection resources. Migrations, seed/bootstrap work, scheduling, and workflow execution have separate entry points. This lets the HTTP process restart without embedding all background lifecycles inside it.
 
-The current declared frontend stack includes Next.js 15, React 19, Auth.js, and `jose`. The backend uses FastAPI, Pydantic 2, SQLAlchemy 2, `asyncpg`, Redis, and the Temporal SDK. The custom Keycloak provider and image are pinned to 26.8.1. Dependency constraints, resolved lockfiles, and deployed images describe different levels of version certainty.
+The current declared frontend stack includes Next.js 15, React 19, Auth.js, and `jose`. The backend uses FastAPI, Pydantic 2, SQLAlchemy 2, `asyncpg`, Redis, and the Temporal SDK. The custom Keycloak provider and image are pinned to 26.8.2. Dependency constraints, resolved lockfiles, and deployed images describe different levels of version certainty.
 
 Sources: [API assembly and lifespan](../backend/main.py), [frontend dependencies](../package.json), [backend dependencies](../backend/pyproject.toml), [worker](../backend/temporal_worker.py), [Keycloak image](../keycloak/Dockerfile).
 

@@ -173,7 +173,8 @@ def eligible_alert_subject_types(rule: dict[str, Any]) -> tuple[str, ...]:
 
 def is_system_alert_rule(rule: dict[str, Any]) -> bool:
     """True for global rules evaluated from application events, not subjects."""
-    return rule.get("conditionKey") in SYSTEM_ALERT_CONDITIONS
+    condition = rule.get("conditionKey")
+    return isinstance(condition, str) and condition in SYSTEM_ALERT_CONDITIONS
 
 
 def with_default_alert_rules(rules: list[AlertRule]) -> list[AlertRule]:

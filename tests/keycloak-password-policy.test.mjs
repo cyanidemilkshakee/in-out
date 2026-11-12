@@ -18,7 +18,7 @@ test("fresh realm enforces length, identity exclusions and a bundled common-pass
   const realm = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
   assert.equal(realm.passwordPolicy, APP_PASSWORD_POLICY);
   assert.match(APP_PASSWORD_POLICY, /length\(12\)/);
-  const words = readFileSync(new URL("../keycloak/password-blacklists/inout-common-passwords.txt", import.meta.url), "utf8").split("\n");
+  const words = readFileSync(new URL("../keycloak/password-blacklists/inout-common-passwords.txt", import.meta.url), "utf8").split(/\r?\n/);
   assert.ok(words.includes("password123456"));
   assert.match(readFileSync(new URL("../keycloak/Dockerfile", import.meta.url), "utf8"), /COPY password-blacklists\/ \/opt\/keycloak\/data\/password-blacklists\//);
 });

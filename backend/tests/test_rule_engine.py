@@ -20,8 +20,9 @@ class RuleEngineTests(unittest.TestCase):
     def test_assignment_eligibility_never_offers_hardware_or_retired_conditions(self):
         for rule in default_alert_rules():
             expected = {"cross_building_scan": ("employee", "visitor"),
-                        "visitor_overstay": ("visitor",)}.get(
-                rule["conditionKey"], ("employee",))
+                        "visitor_overstay": ("visitor",),
+                        "scan_burst": (), "checkpoint_denial_rate": (),
+                        "checkpoint_offline": ()}.get(rule["conditionKey"], ("employee",))
             self.assertEqual(eligible_alert_subject_types(rule), expected)
             self.assertEqual(eligible_alert_subject_types({**rule, "enabled": False}), expected)
         for rule in (
@@ -33,7 +34,7 @@ class RuleEngineTests(unittest.TestCase):
             self.assertEqual(eligible_alert_subject_types(rule), ())
 
     def test_complete_assignments_filter_both_conditions_and_default_subjects_inherit(self):
-        now = datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 10, 7, 14, 0, tzinfo=timezone.utc)
         employees = [{"id": subject_id, "name": subject_id, "barcode": subject_id, "type": "employee"}
                      for subject_id in ("default", "none", "break-only", "attendance-only")]
         workdays = [{"employeeId": employee["id"], "employeeName": employee["name"], "date": "Oct 6, 2026",
@@ -53,7 +54,7 @@ class RuleEngineTests(unittest.TestCase):
         })
 
     def test_assigned_inactive_rules_stay_inactive_and_reselection_preserves_dedup(self):
-        now = datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc)
+        now = datetime(2026, 10, 7, 14, 0, tzinfo=timezone.utc)
         employee = {"id": "p1", "name": "Alice", "barcode": "EMP-1", "type": "employee"}
         rule = {"id": "rule-irregularity", "conditionKey": "irregularity", "enabled": False}
         assignments = {"p1": ["rule-irregularity"]}
@@ -72,15 +73,17 @@ class RuleEngineTests(unittest.TestCase):
                  {"id": "alternate-attendance", "conditionKey": "irregularity", "enabled": True, "severity": "high"}]
         employee = {"id": "p1", "name": "Alice", "type": "employee"}
         generated = evaluate_scheduled_rules(rules, [], [], [], employees=[employee],
-            now=datetime(2026, 10, 7, 13, 0, tzinfo=timezone.utc), rule_assignments={"p1": ["alternate-attendance"]})
+            now=datetime(2026, 10, 7, 14, 0, tzinfo=timezone.utc), rule_assignments={"p1": ["alternate-attendance"]})
         self.assertEqual([(alert["ruleId"], alert["severity"]) for alert in generated], [("alternate-attendance", "high")])
 
     def test_default_rules_only_include_supported_conditions(self):
         rules = default_alert_rules()
         self.assertEqual({rule["id"] for rule in rules}, {
-            "rule-no-break", "rule-irregularity", "rule-cross-building-scan", "rule-visitor-overstay"})
+            "rule-no-break", "rule-irregularity", "rule-cross-building-scan", "rule-visitor-overstay",
+            "rule-scan-burst", "rule-checkpoint-denial-rate", "rule-checkpoint-offline"})
         self.assertEqual({rule["conditionKey"] for rule in rules}, {
-            "no_break", "irregularity", "cross_building_scan", "visitor_overstay"})
+            "no_break", "irregularity", "cross_building_scan", "visitor_overstay", "scan_burst",
+            "checkpoint_denial_rate", "checkpoint_offline"})
 
         legacy = [
             {"id": "rule-exit-balance", "conditionKey": "exit_balance", "enabled": True},
@@ -88,13 +91,14 @@ class RuleEngineTests(unittest.TestCase):
         ]
         normalized = with_default_alert_rules(legacy)
         self.assertEqual({rule["conditionKey"] for rule in normalized}, {
-            "no_break", "irregularity", "cross_building_scan", "visitor_overstay"})
+            "no_break", "irregularity", "cross_building_scan", "visitor_overstay", "scan_burst",
+            "checkpoint_denial_rate", "checkpoint_offline"})
 
     def test_visitor_overstay_follows_access_expiry_not_visit_duration(self):
         now = datetime(2026, 10, 12, 9, tzinfo=timezone.utc)
         visit = {"subjectId": "visitor", "subjectType": "visitor", "subjectName": "Guest",
             "barcode": "VIS-1", "state": "inside", "buildingId": "zone-b", "buildingName": "Branch B",
-            "entryStartedAt": now - timedelta(minutes=5), "validTo": (now + timedelta(hours=2)).isoformat()}
+            "entryStartedAt": now - timedelta(minutes=5), "permissionValidTo": (now + timedelta(hours=2)).isoformat()}
         expiry = now + timedelta(hours=2)
         self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=expiry - timedelta(microseconds=1)), [])
         first = evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=expiry)
@@ -102,7 +106,7 @@ class RuleEngineTests(unittest.TestCase):
         self.assertEqual((first[0]["subjectId"], first[0]["checkpoint"], first[0]["severity"]),
             ("visitor", "Branch B", "medium"))
         self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(),
-            [{**visit, "alertedEntryAt": visit["entryStartedAt"]}], now=expiry + timedelta(days=1)), [])
+            [{**visit, "alertedPermissionValidTo": expiry}], now=expiry + timedelta(days=1)), [])
         later = evaluate_visitor_overstay_rules(default_alert_rules(), [visit], now=now + timedelta(days=1))
         self.assertEqual(first[0]["id"], later[0]["id"])
 
@@ -112,8 +116,8 @@ class RuleEngineTests(unittest.TestCase):
             "entryStartedAt": now - timedelta(hours=13), "validTo": (now - timedelta(hours=1)).isoformat()}
         for changes in ({"entryStartedAt": None}, {"entryStartedAt": now + timedelta(days=1)},
                         {"entryStartedAt": (now - timedelta(hours=13)).replace(tzinfo=None)},
-                        {"validTo": None}, {"validTo": "not-a-date"},
-                        {"validTo": (now + timedelta(hours=1)).isoformat()},
+                        {"permissionValidTo": None}, {"permissionValidTo": "not-a-date"},
+                        {"permissionValidTo": (now + timedelta(hours=1)).isoformat()},
                         {"subjectType": "employee"}, {"state": "outside"}):
             with self.subTest(changes=changes):
                 self.assertEqual(evaluate_visitor_overstay_rules(default_alert_rules(), [{**visit, **changes}], now=now), [])

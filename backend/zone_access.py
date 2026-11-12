@@ -1,6 +1,6 @@
 """Authorization helpers for branch-scoped administrator operations."""
 from fastapi import HTTPException
-from sqlalchemy import String, false, or_, select
+from sqlalchemy import String, and_, false, or_, select
 from sqlalchemy.dialects.postgresql import array
 
 from auth import has_admin_role, has_master_admin_role
@@ -94,6 +94,33 @@ def checkpoint_zone_condition(model, zone_ids: tuple[str, ...] | list[str]):
     if not zones:
         return false()
     return model.checkpoint_id.in_(select(Checkpoint.id).where(Checkpoint.zone_id.in_(zones)))
+
+
+def alert_zone_condition(data, zone_ids: tuple[str, ...] | list[str], visible_subject_ids,
+                         *, include_unbound: bool = False):
+    """Scope alert records by their explicit location before falling back to subject scope.
+
+    A location-bound alert must not become visible merely because its subject
+    also has access in the requesting administrator's zone. Unbound global
+    alerts are visible only to master-admins.
+    """
+    zones = tuple(zone_ids)
+    zone_id = data["zoneId"].astext
+    checkpoint_id = data["checkpointId"].astext
+    subject_id = data["subjectId"].astext
+    allowed_checkpoints = select(Checkpoint.id).where(Checkpoint.zone_id.in_(zones))
+    has_location = or_(zone_id.is_not(None), checkpoint_id.is_not(None))
+    location_is_allowed = and_(
+        has_location,
+        or_(zone_id.is_(None), zone_id.in_(zones)),
+        or_(checkpoint_id.is_(None), checkpoint_id.in_(allowed_checkpoints)),
+    )
+    subject_is_allowed = and_(zone_id.is_(None), checkpoint_id.is_(None),
+        subject_id.in_(visible_subject_ids))
+    scopes = [location_is_allowed, subject_is_allowed]
+    if include_unbound:
+        scopes.append(and_(zone_id.is_(None), checkpoint_id.is_(None), subject_id.is_(None)))
+    return or_(*scopes)
 
 
 async def require_subject_scope(db, actor: dict, subject_id: str) -> Subject:

@@ -93,7 +93,9 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(approved["movement"])
             self.assertTrue(approved["person"]["entryRestriction"]["active"])
             self.assertTrue((await db.get(CriticalEntryRestriction, "p1")).active)
-            self.assertEqual((await db.get(PresenceState, "p1")).state, "outside")
+            state = await db.get(PresenceState, "p1")
+            self.assertIsNotNone(state)
+            self.assertEqual(state.state, "outside", "A rejected entry must not change the subject's outside presence")
         blocked = await self.scan()
         self.assertFalse(blocked.json()["allowed"], blocked.text)
         self.assertTrue(blocked.json()["decision"]["entryRestrictions"])
@@ -234,9 +236,10 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
         event = response.json()["decision"]["event"]
         self.assertEqual(datetime.fromisoformat(event["capturedOfflineAt"]), captured)
         self.assertGreater(datetime.fromisoformat(event["createdAt"].replace("Z", "+00:00")), captured)
-        self.assertTrue(response.json()["decision"]["entryRestrictions"][0]["active"])
+        self.assertEqual(event["denialCode"], "manual_review")
+        self.assertFalse(response.json()["authorizeMovement"])
         async with self.sessions() as db:
-            self.assertEqual((await db.get(PresenceState, "p1")).state, "outside")
+            self.assertIsNone(await db.get(PresenceState, "p1"), "A rejected queued scan must not create presence state")
             self.assertEqual((await db.get(AccessPermission, "normal-active-permission")).data["state"], "active")
         bundle = (await self.client.get("/v1/registry/bundle")).json()
         self.assertTrue(next(person for person in bundle["people"] if person["id"] == "p1")["entryRestriction"]["active"])
@@ -285,10 +288,14 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
             await db.commit()
         async with self.engine.begin() as conn:
             def rerun(connection):
-                revision = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic")).get_revision("s7t8u9v0w1").module
+                scripts = ScriptDirectory(str(Path(__file__).resolve().parents[1] / "alembic"))
+                current_extension = scripts.get_revision("d0e1f2a3b4c5").module
+                revision = scripts.get_revision("s7t8u9v0w1").module
                 with Operations.context(MigrationContext.configure(connection)):
+                    current_extension.downgrade()
                     revision.downgrade()
                     revision.upgrade()
+                    current_extension.upgrade()
             await conn.run_sync(rerun)
         async with self.sessions() as db:
             states = await entry_restrictions_for_subjects(db, ["p1", "h1"])
@@ -324,7 +331,7 @@ class CriticalEntryRestrictionDatabaseTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_scheduled_critical_alert_is_atomically_bound_and_evaluation_deduplicates(self):
         from workflows.activities import run_alert_rule_evaluation
-        fixed_now = datetime(2026, 10, 6, 13, 0, tzinfo=timezone.utc)
+        fixed_now = datetime(2026, 10, 6, 14, 0, tzinfo=timezone.utc)
         async with self.sessions() as db:
             rule = await db.get(AlertRule, "rule-irregularity")
             data = {"id": "rule-irregularity", "conditionKey": "irregularity", "enabled": True, "severity": "critical"}

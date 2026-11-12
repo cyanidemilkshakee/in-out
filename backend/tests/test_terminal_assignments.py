@@ -4,6 +4,7 @@ import time
 import unittest
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -20,9 +21,9 @@ from schemas import ScanPayload
 class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_registered_dynamic_checkpoint_can_be_used_as_an_assignment(self):
         db = Mock(
-            scalar=AsyncMock(return_value=TerminalCheckpointAssignment(
-                terminal_identity="browser:operator", checkpoint_id="cp-north-lobby")),
+            scalar=AsyncMock(),
             get=AsyncMock(return_value=Checkpoint(id="cp-north-lobby", data={"name": "North Lobby"})),
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: "cp-north-lobby")),
         )
         self.assertEqual(await require_checkpoint(db, "browser:operator", "cp-north-lobby"), "cp-north-lobby")
 
@@ -79,18 +80,18 @@ class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
             db.commit.assert_awaited_once()
             publish.assert_awaited_once_with(db, "browser:operator")
 
-    async def test_operator_creation_without_assignment_rejects_before_keycloak_write(self):
-        payload = keycloak_admin.UserCreateRequest(username="operator", password="Temporary9-password", roles=["operator"])
+    async def test_password_creation_requires_invitation_before_keycloak_write(self):
         with patch("routers.keycloak_admin._request", new=AsyncMock()) as identity:
             with self.assertRaises(HTTPException) as error:
-                await keycloak_admin.create_user(payload, "token", Mock(), {
+                await keycloak_admin.create_user("token", {
                     "sub": "master", "realm_access": {"roles": ["master-admin"]}})
-            self.assertEqual(error.exception.status_code, 422)
+            self.assertEqual(error.exception.status_code, 410)
             identity.assert_not_awaited()
 
     async def test_physical_certificate_identity_cannot_select_another_checkpoint(self):
         payload = ScanPayload(barcode="person", terminal_id="door-a", checkpoint_id="cp-main", direction="entry")
         db = Mock(scalar=AsyncMock(), get=AsyncMock(return_value=Checkpoint(id="cp-main", zone_id="a", active=True)),
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: None)),
             commit=AsyncMock(), rollback=AsyncMock(), info={})
         current_assignment = {"value": None}
         async def scalar(query):
@@ -110,8 +111,9 @@ class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_physical_terminal_uses_its_registered_checkpoint(self):
         payload = ScanPayload(barcode="person", terminal_id="door-a", checkpoint_id="server-room", direction="entry")
         assignment = TerminalCheckpointAssignment(terminal_identity="mtls:door-a", checkpoint_id="server-room")
-        db = Mock(scalar=AsyncMock(side_effect=[assignment, OrganizationZone(id="b", name="B", active=True)]),
+        db = Mock(scalar=AsyncMock(return_value=OrganizationZone(id="b", name="B", active=True)),
             get=AsyncMock(return_value=Checkpoint(id="server-room", zone_id="b", active=True)),
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: "server-room")),
             commit=AsyncMock(), info={})
         response = {"allowed": False, "reason": "Zone not permitted", "subject_id": "person", "decision": {"event": {"direction": "entry"}}}
         key = uuid.uuid4()
@@ -126,8 +128,9 @@ class TerminalAssignmentTests(unittest.IsolatedAsyncioTestCase):
     async def test_physical_http_scan_forwards_verified_scope_without_changing_direct_call_contract(self):
         payload = ScanPayload(barcode="person", terminal_id="door-a", checkpoint_id="server-room", direction="entry")
         assignment = TerminalCheckpointAssignment(terminal_identity="mtls:door-a", checkpoint_id="server-room")
-        db = Mock(scalar=AsyncMock(side_effect=[assignment, OrganizationZone(id="b", name="B", active=True)]),
+        db = Mock(scalar=AsyncMock(return_value=OrganizationZone(id="b", name="B", active=True)),
             get=AsyncMock(return_value=Checkpoint(id="server-room", zone_id="b", active=True)),
+            execute=AsyncMock(return_value=SimpleNamespace(scalar_one_or_none=lambda: "server-room")),
             commit=AsyncMock(), info={})
         response = {"allowed": False, "reason": "Zone not permitted", "subject_id": "person", "decision": {"event": {"direction": "entry"}}}
         request = Request({"type": "http", "state": {"limit_identity": "terminal:CN=door-a"}})

@@ -5,21 +5,49 @@ InOut is an inbound/outbound management system for an organization’s branches.
 ## Contents
 
 - [Installation and first use](#installation-and-first-use)
+- [Shared HTTPS deployment](docs/shared-deployment.md)
 - [Usage and features](#usage-and-features)
 - [Architecture and services](#architecture)
 - [Configuration](#configuration)
 - [Development and testing](#development-and-testing)
 - [API](#api)
 - [Operations and maintenance](#operations-and-maintenance)
+- [Coordinated backup and restore](docs/backup-restore.md)
+- [Engineer handoff and current readiness](docs/handoff.md)
 - [Troubleshooting](#troubleshooting)
 - [Main documentation](#main-documentation)
 
 # Installation and first use
 ## Requirements
 
-The application runs in Linux containers and can be used from Windows, macOS, or Linux. Install Docker Desktop on Windows/macOS, or Docker Engine with the Compose v2 plugin on Linux. Node.js 22.12+ with npm is used for the repository's setup and maintenance helpers; Python runs inside Docker. The same Docker Compose and npm commands work from PowerShell, macOS Terminal, or a Linux shell. No host Python installation is required. The test compiler loads the ESM JWT verifier through CommonJS, using the [ESM loading support enabled in Node 22.12](https://nodejs.org/en/blog/release/v22.12.0).
+The application runs in Linux containers and can be used from Windows, macOS, or Linux. Install Docker Desktop on Windows/macOS, or Docker Engine with the Compose v2 plugin on Linux; the stack and first-run helper require Docker Compose **2.24 or newer**. Node.js 22.12+ with npm is used for the repository's setup and maintenance helpers; Python runs inside Docker. The same Docker Compose and npm commands work from PowerShell, macOS Terminal, or a Linux shell. No host Python installation is required. The test compiler loads the ESM JWT verifier through CommonJS, using the [ESM loading support enabled in Node 22.12](https://nodejs.org/en/blog/release/v22.12.0).
 
 ## Quick start
+
+### One-command first run
+
+After cloning the repository, installing Node.js 22.12+ and Docker Compose 2.24+, and starting Docker Desktop/Engine, run these from the repository root:
+
+```text
+npm ci
+npm run setup:first-run
+```
+
+`npm ci` installs the locked host-side Node tools. The setup command creates `.env` only when missing, generates blank setup secrets only when no project database volume exists, starts the stack, and runs the Keycloak setup and checks. Existing database volumes and populated secret values are preserved. It does not create the first human app account or configure Zoho; the command prints those remaining steps.
+
+The first Keycloak admin is a temporary **bootstrap account**. After setup, create your own master-realm administrator in Keycloak and use it for maintenance. On a new `.env`, put its username and password in `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD`, then run `npm run keycloak:bootstrap-admin:retire`. The command verifies access to both realms before removing only `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME` and `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` from `.env`. It does not delete or disable the temporary account; remove or disable that account in Keycloak after verifying your own admin works.
+
+On installations created before bootstrap and maintenance credentials were separated, `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` currently hold the bootstrap login. Replace those values with your own administrator's credentials after creating it; this overwrites the old bootstrap details and keeps maintenance scripts working. The retirement command will report that there are no separate bootstrap fields to remove.
+
+To start with sample records and demo accounts instead, use:
+
+```text
+npm run setup:first-run:demo
+```
+
+This asks you to type `SEED` before proceeding because demo seeding replaces existing InOut application records. In a non-interactive environment, add `-- --yes` only when that replacement is intended. It preserves the PostgreSQL volume, migrations, and existing Keycloak users. Demo login credentials are written to `.local-test-accounts/full-demo-accounts.csv`.
+
+These commands automate a fresh local setup; for an existing installation, keep its matching `.env` and follow the existing-volume maintenance instructions below.
 
 ### 1. Prepare the environment
 
@@ -32,11 +60,11 @@ npm run env:secrets:generate
 
 The script fills missing or empty app-generated secret fields with independent random URL-safe values and prints only the field names. It leaves existing values untouched and never generates provider-issued credentials such as SMTP passwords. For an existing installation, scope it to a feature, for example `npm run env:secrets:generate -- invitations`; do not fill blank database or Keycloak bootstrap values unless you have confirmed that they match the persisted services. The default application URL is `http://app.localhost:1008`. Never commit `.env`. It does not rotate passwords or client secrets saved in an existing database/provider.
 
-`KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` bootstrap Keycloak's server-level administrator only when its database is first initialized. Editing those values later does not change an existing Keycloak account. If a secret has been exposed in a screenshot or shared, replace the credential in the service that owns it and update the matching app configuration before restarting dependent services.
+`KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME` and `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` create Keycloak's initial temporary master-realm administrator only when its database is first initialized. `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` hold the permanent administrator credentials used by local Keycloak maintenance and demo-seeding scripts. After creating that permanent account, put its credentials in those fields and run `npm run keycloak:bootstrap-admin:retire`; the command verifies admin API access before deleting only the bootstrap fields from `.env`. If a secret has been exposed in a screenshot or shared, replace the credential in the service that owns it and update the matching app configuration before restarting dependent services.
 
 For an **existing realm**, keep its current client secret from **Clients → inout-frontend → Credentials**. Changing `.env` does not rotate the saved secret, and startup import does not overwrite an existing realm. Back up the realm before applying identity changes; make and verify those changes in Keycloak before relying on the updated application configuration.
 
-Sign-in stays on the application's `/login` page with its own username/password form. A custom Keycloak **26.8.1** extension authenticates private server-side interactions for the confidential `inout-frontend` client, using native password/configured-OTP checks and one-use, short-lived codes bound to an S256 verifier before issuing signed provider tokens. Direct Access Grants are disabled and are not a fallback. Temporary-password setup stays on the same app page. Auth.js CSRF, strict origin/input checks, gateway limits and cryptographic token verification remain. Client secrets and interaction tickets stay server-side; provider tokens enter only private exchanges and encrypted HttpOnly cookies, excluded from public session JSON. Passwords are not stored in sessions. This is a custom extension protocol, not Keycloak's recommended Authorization Code browser flow; app-owned credential handling and version-compatibility responsibilities remain. Use HTTPS outside local development.
+Sign-in stays on the application's `/login` page with its own username/password form. A custom Keycloak **26.8.2** extension authenticates private server-side interactions for the confidential `inout-frontend` client, using native password/configured-OTP checks and one-use, short-lived codes bound to an S256 verifier before issuing signed provider tokens. Direct Access Grants are disabled and are not a fallback. Temporary-password setup stays on the same app page. Auth.js CSRF, strict origin/input checks, gateway limits and cryptographic token verification remain. Client secrets and interaction tickets stay server-side; provider tokens enter only private exchanges and encrypted HttpOnly cookies, excluded from public session JSON. Passwords are not stored in sessions. This is a custom extension protocol, not Keycloak's recommended Authorization Code browser flow; app-owned credential handling and version-compatibility responsibilities remain. Use HTTPS outside local development.
 
 For an existing realm, startup import does not overwrite clients: first install and verify the matching extension image, then coordinate the app cutover with `npm run keycloak:interactions:apply` through the maintenance gateway in step 3 and verify with `npm run keycloak:interactions:check`. Configuration authenticates an exact protocol/version readiness probe before writes, enables the app-interaction client attribute and disables password grants while preserving secrets, scope mappings, unrelated attributes and exact return URLs. Standard Flow with S256 remains available for OIDC and provider recovery. The older `keycloak:app-sign-in` commands use the same readiness gate and cannot re-enable Direct Access Grants. Postman's public client keeps password grants disabled; implicit flow and service accounts remain disabled for the application.
 
@@ -54,6 +82,48 @@ docker compose ps -a
 `-d` runs services in the background. `db-provision`, `temporal-schema-init`, `temporal-namespace-init` and `backend-init` should exit successfully; the API and worker remain running. A new cluster initializes workflow schemas using only its database owner, verifies real gRPC/namespace readiness, then seeds reference checkpoints and alert rules and registers the durable alert schedule. Startup does not create application login users.
 
 For later starts without code changes, use `docker compose up -d --wait` to reuse the built images. Keycloak is compiled into its image, and the app initializes alongside its dependencies; Kong waits for all required services before opening the public listeners. Startup probes run every second during their grace periods. Frontend compilation and Python dependency downloads are cached between builds. Direct PostgreSQL connections reuse prepared statements; set `DATABASE_STATEMENT_CACHE_SIZE=0` when using a transaction pool that does not preserve them.
+
+### Shared host with HTTPS
+
+See the dedicated [shared HTTPS deployment guide](docs/shared-deployment.md) for the environment values, safe Keycloak maintenance, start/stop/log/update commands, and recovery steps.
+
+The default Compose stack is local-only: Kong publishes its app, API and Keycloak listeners on `127.0.0.1`. This deliberately prevents direct, unencrypted internet access. Setting `AUTH_URL` alone changes the app's advertised URL, but it does not configure TLS, Keycloak's public issuer, or the URLs registered on the Keycloak client.
+
+For a shared host, use the optional [Compose override](compose.shared.yaml). Caddy is the only service that binds public host ports; it automatically obtains and renews TLS certificates, then proxies the app and Keycloak through their existing Kong listeners. The API and Keycloak maintenance gateway remain loopback-only. Caddy needs public DNS for both names and inbound ports 80 and 443; allow UDP 443 if HTTP/3 is desired. See [Caddy's HTTPS setup requirements](https://caddyserver.com/docs/automatic-https).
+
+Replace the example names in `.env` with two DNS hostnames you control. Both A/AAAA records must point to this server, and the public URL must match its hostname exactly:
+
+```text
+APP_PUBLIC_HOSTNAME=app.example.com
+AUTH_URL=https://app.example.com
+KEYCLOAK_PUBLIC_HOSTNAME=auth.example.com
+KEYCLOAK_PUBLIC_URL=https://auth.example.com
+KEYCLOAK_ADMIN_ORIGIN=
+SHARED_INGRESS_SUBNET=172.30.250.0/29
+SHARED_CADDY_IP=172.30.250.2
+```
+
+Keep `KEYCLOAK_ADMIN_ORIGIN` blank for the loopback-only admin gateway. Choose an ingress subnet that does not overlap with your host, VPN, or existing Docker networks; the example subnet is only a default. Kong trusts forwarded client IPs from the configured Caddy address alone, so preserve the address/subnet pairing. Then start or update the deployment with:
+
+```text
+npm run deploy:shared
+```
+
+The command uses `compose.yaml` plus `compose.shared.yaml`. It checks the HTTPS URLs, hostname matches, ingress IP range and Keycloak administrator credentials first. It builds and starts the private stack, registers and verifies the Keycloak app callbacks and app-managed sign-in, then starts Caddy. On an update it briefly stops an existing Caddy container first; if a Keycloak check fails, public traffic stays stopped until you fix the configuration and rerun the command. It does not erase or recreate database volumes. Caddy's certificate data is stored in its own named volume. Ports 80/443 must be available on the host. If another web server already owns them, integrate that proxy with the isolated ingress network and set Kong's trusted proxy address before enabling shared traffic.
+
+Keycloak puts the public URL into its token issuer. Keep `KEYCLOAK_PUBLIC_URL` stable after users sign in because FastAPI and the app validate the token's issuer against it; `KEYCLOAK_JWKS_BASE` remains an internal Docker address and is not a public URL. `deploy:shared` applies and checks the Keycloak URLs and app-managed sign-in automatically. To update those settings manually, bring up the private Keycloak maintenance gateway and run:
+
+```text
+docker compose up -d --wait keycloak-admin
+npm run keycloak:public-urls:apply
+npm run keycloak:public-urls:check
+npm run keycloak:app-sign-in:apply
+npm run keycloak:app-sign-in:check
+```
+
+The URL command adds the HTTPS app callback, password setup/change callbacks, web origin and logout return URLs while preserving existing client settings. The app-sign-in command also updates the client base URL and verifies the app-managed sign-in extension. Set Zoho's authorized redirect/callback URL to `https://auth.example.com/realms/inout/broker/zoho/endpoint`, then verify sign-in and logout through the HTTPS app domain. New realms import the configured URLs at initial creation; existing realms are not overwritten by Keycloak's startup import.
+
+Do not expose the Keycloak administration listener through this public Caddy config. On the server, use `http://auth.localhost:1009/admin/master/console/`. For remote maintenance, create an SSH tunnel such as `ssh -L 1009:127.0.0.1:1009 user@server`, then open the same local URL. If maintenance scripts must run from another machine, configure `KEYCLOAK_ADMIN_ORIGIN` to an HTTPS endpoint on a private/VPN-only proxy that forwards only to the loopback admin gateway; the scripts reject arbitrary origins and non-local HTTP.
 
 The Temporal inspection interface is intentionally off by default. Start it only when diagnosing workflows:
 
@@ -87,7 +157,7 @@ docker compose stop keycloak-admin
 
 ### 4. Register subjects and start operations
 
-Use the admin Registry and Permission Manager pages to create people/assets and configure access. Assign the scanning account a checkpoint through **Manage users** before scanning at `/terminal`.
+Use the admin Registry and Permission Manager pages to create people/assets and configure access. To prepare scanning, sign in as a master-admin, open **Manage users**, select the operator account, assign the required active checkpoint(s) within that operator's assigned zones, and save. Sign out and sign back in as that operator, then verify the assigned checkpoint is shown on `/terminal` before scanning. Do not give an operator an administrator role just to assign checkpoints.
 
 ## Optional local fixtures
 
@@ -199,17 +269,23 @@ Host-facing ports bind to loopback in the `1001–1011` block. Container-side li
 | `REDIS_QUOTA_PASSWORD`, `REDIS_EVENTS_PASSWORD`, `REDIS_GATEWAY_PASSWORD` | Independent Redis ACL credentials for data/behavior/leases, presence events, and Kong request counters |
 | `AUTH_SECRET` | Encrypts/authenticates Auth.js session cookies |
 | `AUTH_TRUST_HOST` | Auth.js host handling; Compose supplies this for the local stack |
-| `KEYCLOAK_ADMIN_USERNAME`, `KEYCLOAK_ADMIN_PASSWORD` | Bootstrap master credentials, used when Keycloak first initializes |
+| `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME`, `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Temporary master-realm account used only to initialize Keycloak for the first time; retire these after setting up your own Keycloak admin |
+| `KEYCLOAK_ADMIN_USERNAME`, `KEYCLOAK_ADMIN_PASSWORD` | Permanent Keycloak admin credentials for local maintenance and demo-seeding scripts |
 | `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET` | Frontend client configuration; Compose uses `inout-frontend` and requires its matching secret |
 | `KEYCLOAK_INVITE_CLIENT_ID`, `KEYCLOAK_INVITE_CLIENT_SECRET` | Dedicated server-only invitation acceptance client in the `inout` realm; secret is used by Python API only and generated with `npm run env:secrets:generate -- invitations` |
 | `KEYCLOAK_PASSWORD_UPDATE_CLIENT_ID`, `KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET` | Legacy native-reset configuration only; unused by the custom interaction flow. Preserve existing values during migration; explicitly retire the old client after verifying the new app |
 | `PASSWORD_UPDATE_LOCK_API_URL` | Private password-update lease API; Compose supplies `http://python-api:1019`. Manual development must supply a reachable private API and matching `AUTH_SECRET`/`KEYCLOAK_STEP_UP_SIGNING_SECRET` |
-| `AUTH_URL`, `APP_PORT` | Browser-facing application origin and Docker port; keep callback URLs consistent |
+| `AUTH_URL`, `APP_PORT` | Browser-facing application origin and local Docker port; for a shared install, set `AUTH_URL` to the public HTTPS app origin |
+| `APP_PUBLIC_HOSTNAME`, `KEYCLOAK_PUBLIC_HOSTNAME` | Hostnames Caddy serves in the optional shared HTTPS profile; point both DNS records to the server |
+| `KEYCLOAK_PUBLIC_URL` | Public Keycloak origin and token issuer host; must match the Keycloak hostname and token `iss` claim |
+| `KEYCLOAK_ADMIN_ORIGIN` | Optional private HTTPS maintenance proxy origin; blank uses the loopback-only admin gateway |
+| `SHARED_INGRESS_SUBNET`, `SHARED_CADDY_IP` | Private Docker network and Caddy's fixed address; Kong trusts forwarded client IPs only from this proxy address |
+| `CADDY_VERSION` | Pinned Caddy image for the optional shared HTTPS edge |
 | `INOUT_APP_URL`, `INVITE_TTL_SECONDS` | Public origin used in invitation links and their expiry; defaults to `http://app.localhost:1008` and 900 seconds |
 | `KEYCLOAK_VERSION`, `KEYCLOAK_PORT` | Server image pin and local identity-provider port |
 | `KEYCLOAK_ADMIN_PORT` | Loopback administration gateway; default `1009`, starts with the default Compose stack |
 | `TEMPORAL_UI_HOST_PORT`, `PROMETHEUS_PORT` | Optional observability host ports; Temporal UI uses the observability profile, while Prometheus is available on the local stack |
-| `KEYCLOAK_ISSUER`, `KEYCLOAK_ISSUER_PUBLIC`, `KEYCLOAK_JWKS_BASE`, `KEYCLOAK_AUDIENCE` | Token issuer, optional browser-facing issuer override, internal JWKS address, and required API audience |
+| `KEYCLOAK_ISSUER`, `KEYCLOAK_ISSUER_PUBLIC`, `KEYCLOAK_JWKS_BASE`, `KEYCLOAK_AUDIENCE` | Container token issuer values (derived from `KEYCLOAK_PUBLIC_URL`), internal JWKS address, and required API audience |
 | `KEYCLOAK_SMTP_*` | SMTP host, port, permitted sender, auth and TLS settings. Python API uses these for invitation mail; `npm run keycloak:recovery:apply` applies them to Keycloak recovery email settings when that feature is used. SMTP credentials must come from the mail provider |
 | `KEYCLOAK_JWKS_CACHE_TTL` | Signing-key cache lifetime; default 300 seconds |
 | `PYTHON_API_URL`, `DATABASE_URL`, `READ_DATABASE_URL` | API and database connections; an empty read URL uses the primary database |
@@ -230,7 +306,7 @@ Host-facing ports bind to loopback in the `1001–1011` block. Container-side li
 | `BEHAVIOR_FAILURES_PER_MINUTE` | Authenticated 400/403/409/422 response threshold; default 20 per sliding minute |
 | `BEHAVIOR_UNKNOWN_BARCODES_PER_MINUTE` | Fresh distinct unregistered barcode threshold per verified scanning identity; default 30 per sliding minute |
 | `BEHAVIOR_COOLDOWN_SECONDS` | Temporary write pause after a behavior threshold; default 60 seconds; accounts are not suspended |
-| `REQUEST_BODY_DEADLINE_SECONDS`, `INOUT_UPLOAD_DEADLINE_SECONDS` | Total API/gateway upload deadlines, both 30 seconds by default |
+| `REQUEST_BODY_DEADLINE_SECONDS`, `INOUT_UPLOAD_IDLE_TIMEOUT_SECONDS` | API total body-read deadline and gateway maximum idle time between body reads; defaults are 30 seconds |
 | `PRESENCE_STREAMS_PER_PRINCIPAL`, `PRESENCE_STREAMS_GLOBAL`, `PRESENCE_LEASE_SECONDS` | Distributed live-stream admission; defaults 3 per principal, 128 globally, 45-second crash recovery leases |
 | `QUOTA_REDIS_MAX_CONNECTIONS`, `EVENTS_REDIS_MAX_CONNECTIONS` | Independent bounded Redis pools, default 64 and 160 connections |
 | `ALERT_EVALUATION_MAX_SUBJECTS`, `ALERT_EVALUATION_MAX_MOVEMENTS`, `ALERT_EVALUATION_MAX_ALERTS`, `ALERT_EVALUATION_MAX_RULES` | Whole-evaluation capacity caps; exceeding any cap returns 503 without partial alerts |
@@ -266,9 +342,14 @@ Install the frontend dependencies with `npm ci`. For the local stack, start the 
 
 | Command | Purpose |
 | --- | --- |
+| `npm run dev` | Normal local development server, using Next.js Turbopack |
+| `npm run dev:webpack` | Webpack fallback if you need to compare or troubleshoot the dev bundler |
+| `npm run dev:bounded` | Turbopack development server with a 15-minute time limit |
 | `npm run typecheck` | TypeScript checks |
 | `npm test` | Frontend, authentication, and contract suites |
 | `npm run build` | Production frontend build |
+| `npm start` | Serve the production build locally |
+| `npm run start:bounded` | Production server with a 15-minute time limit |
 | `npm run test:postgres` | Backend/database tests in the isolated Compose test profile |
 | `npm run test:gateway` | Disposable Kong and rate-limit tests |
 | `npm run test:python` | Python unit tests |
@@ -280,7 +361,7 @@ The complete acceptance procedures, test details, benchmark commands, and latenc
 The browser uses same-origin Next.js routes. Direct clients use FastAPI `/v1` endpoints with a verified Keycloak access token and the required role/audience. User-management routes also enforce their reauthentication policy.
 
 # Operations and maintenance
-Before release or recovery work, identify the exact installation and compatible schema/workflow revisions. A complete isolated restore drill is not documented as completed; treat recovery as unverified until rehearsed.
+Before release or recovery work, identify the exact installation and compatible schema/workflow revisions. A local database restore and service replay rehearsal is recorded in the [backup and restore runbook](docs/backup-restore.md); it used a dirty source worktree and did not verify app login or named synthetic business records, and encrypted off-host artifact transfer was not tested. Complete those checks on the clean release revision before treating it as final handoff evidence.
 
 | Task | Command |
 | --- | --- |
@@ -309,11 +390,11 @@ docker compose run --build --rm --no-deps db-provision python /maintenance/provi
 
 This explicit operation rotates scoped credentials and supported ownership/grants without rewriting application rows, then synchronizes the administrator password to `POSTGRES_PASSWORD`. It refuses connected project clients; it does not terminate them. Clear the transient credential afterward, run `backend-init`, and check health, login and service boundaries before restoring writers. Interrupted cross-database maintenance needs inspection and an idempotent rerun with the valid administrator credential; rollback requires the tested backup.
 
-Keycloak import preserves existing realms. Through the temporary administration gateway, keep the existing client secret and set the `inout-frontend` callback exactly to `${AUTH_URL}/api/auth/callback/keycloak`, web origin to `${AUTH_URL}`, and logout URLs to `${AUTH_URL}/login` and `${AUTH_URL}/logout/complete`. After installing the rebuilt 26.8.1 image and its bundled common-password denylist, check with `node scripts/configure-keycloak-password-policy.mjs --check`, apply the baseline with `node scripts/configure-keycloak-password-policy.mjs --apply`, then check again. This partial update preserves stronger existing length requirements, other policy clauses, an existing administrator-managed denylist, users, clients, and unrelated realm settings; it does not clear password strength or rotate existing credentials. Verify login and account/API permissions, then stop the gateway.
+Keycloak import preserves existing realms. Through the temporary administration gateway, keep the existing client secret and set the `inout-frontend` callback exactly to `${AUTH_URL}/api/auth/callback/keycloak`, web origin to `${AUTH_URL}`, and logout URLs to `${AUTH_URL}/login` and `${AUTH_URL}/logout/complete`. After installing the rebuilt 26.8.2 image and its bundled common-password denylist, check with `node scripts/configure-keycloak-password-policy.mjs --check`, apply the baseline with `node scripts/configure-keycloak-password-policy.mjs --apply`, then check again. Run `npm run keycloak:account:repair` as well: Keycloak 26.8.2 now requires delegated Admin REST tokens to have both the realm Admin API audience and the built-in `kc-admin-api` client scope. The repair command adds and verifies the scope without replacing users, client secrets, or unrelated realm settings. Verify login and account/API permissions, then stop the gateway.
 
 ## Temporal upgrade
 
-The base deployment targets digest-pinned server **1.32.1** and schemas **1.19 / 1.14**. The existing local cluster remains on the guarded **1.26.3** compatibility overlay, schemas **1.14 / 1.7**, cluster `active` and four shards. Its ignored local `.env` selects:
+The base deployment targets digest-pinned server **1.32.2** and schemas **1.19 / 1.14**. The existing local cluster remains on the guarded **1.26.3** compatibility overlay, schemas **1.14 / 1.7**, cluster `active` and four shards. Its ignored local `.env` selects:
 
 ```dotenv
 COMPOSE_PATH_SEPARATOR=|
@@ -322,10 +403,10 @@ COMPOSE_FILE=compose.yaml|compose.temporal-legacy.yaml
 
 Keep these values until the staged upgrade completes. The legacy guard validates exact schemas, scoped ownership, persisted cluster/shard metadata and absence of an upgrade marker without modifying data. Both startup paths retain private networks, scoped credentials and nonroot read-only operation. Availability recovery does not complete the vendor security upgrade.
 
-Follow the [official sequential-upgrade procedure](https://docs.temporal.io/self-hosted-guide/upgrade-server). The documented target chain is **1.26.3 → 1.27.4 → 1.28.4 → 1.29.7 → 1.30.7 → 1.31.3 → 1.32.1**; recheck release instructions, intermediate image availability and digests before executing maintenance. Rehearse the entire chain on a restored isolated copy first. Back up both Temporal databases, roles, namespace/configuration and worker revision. Stop workflow starters, scheduler and workers. At each stage, update both schemas with matching official SQL tooling before starting that server, allow roughly ten minutes per version for all History shards' conversion, and verify health and persisted-history replay. Preserve namespace settings and four shards. Never skip minors, delete histories or forge a marker to bypass the guard.
+Follow the [official sequential-upgrade procedure](https://docs.temporal.io/self-hosted-guide/upgrade-server). The documented target chain is **1.26.3 → 1.27.4 → 1.28.4 → 1.29.7 → 1.30.7 → 1.31.3 → 1.32.2**; recheck release instructions, intermediate image availability and digests before executing maintenance. Rehearse the entire chain on a restored isolated copy first. Back up both Temporal databases, roles, namespace/configuration and worker revision. Stop workflow starters, scheduler and workers. At each stage, update both schemas with matching official SQL tooling before starting that server, allow roughly ten minutes per version for all History shards' conversion, and verify health and persisted-history replay. Preserve namespace settings and four shards. Never skip minors, delete histories or forge a marker to bypass the guard.
 
 
-## Temporal post-upgrade verification
+### Temporal post-upgrade verification
 
 After the full operational chain has actually completed, stop writers/server again and verify schemas **1.19 / 1.14**. As the scoped `inout_temporal` owner, attest the validated baseline in **each Temporal database**, keeping stage evidence with the backup:
 
@@ -342,16 +423,15 @@ This marker records operator verification; it does not prove conversion itself. 
 
 ## Backup and reset
 
-Create a custom-format backup of application and Keycloak data. First create `.data/backups` using your file manager or the command for your shell (`mkdir -p .data/backups` on macOS/Linux; `New-Item -ItemType Directory -Force .data/backups` in PowerShell), then run the shared Docker commands:
+Use the [coordinated backup and restore runbook](docs/backup-restore.md) for
+all three databases, global roles, protected configuration, revision capture,
+and an isolated restore drill. The older one-database dump example was
+incomplete and is not a full recovery procedure.
 
-```text
-docker compose exec -T postgres-primary pg_dump -U inout -d inout -Fc -f /tmp/inout.dump
-docker compose cp postgres-primary:/tmp/inout.dump .data/backups/inout.dump
-```
-
-Use a distinct filename for each backup. This single dump covers the `inout` database only. A coordinated recovery set also needs `temporal`, `temporal_visibility`, global roles, protected configuration/secrets, and matching runtime/worker revisions. A coordinated restore must be rehearsed in an isolated project: quiesce writers for the capture and restore into a separate fresh PostgreSQL project with no source networks, volumes or listeners. Preserve ownership/ACLs and verify business state, identity, workflow replay and pending delivery before planning a cutover. A dump or a second database in the operational PostgreSQL container alone is not a completed recovery drill.
-
-For a disposable local reset, use the targeted PostgreSQL-volume procedure in [first-use guide](#reset-a-disposable-local-database). `docker compose down -v` removes every non-external named volume declared by the project, including observability data; use it only when that broader deletion is intended.
+For a disposable local reset, use the targeted PostgreSQL-volume procedure in
+[first-use guide](#reset-a-disposable-local-database). `docker compose down -v`
+removes every non-external named volume declared by the project, including
+observability data; use it only when that broader deletion is intended.
 
 ## Deployment boundaries
 
@@ -365,12 +445,12 @@ Offline scan evidence and cached terminal details also remain plaintext in the s
 
 ## Keycloak upgrade
 
-The configured custom-image pin is `26.8.1`, [released on 2026-10-13 with upstream security fixes](https://www.keycloak.org/2026/10/keycloak-2681-released). The provider compiles against that runtime and rejects mismatched versions. Changing the source default does not update an existing `.env` override or running container. An existing installation must deliberately update its own `KEYCLOAK_VERSION` after rehearsing the migration.
+The configured custom-image pin is `26.8.2`, [released on 2026-11-05 with upstream security fixes](https://www.keycloak.org/2026/11/keycloak-2682-released). The provider compiles against that runtime and rejects mismatched versions. Changing the source default does not update an existing `.env` override or running container. An existing installation must deliberately update its own `KEYCLOAK_VERSION` after rehearsing the migration.
 
 1. Review all applicable changes from your current version in the [upgrading guide](https://www.keycloak.org/docs/latest/upgrading/index.html). Version 26.8 enables SCIM support by default; the gateway therefore also blocks `/realms/{realm}/scim` publicly. This application uses the regular OIDC and Admin REST APIs; verify login, refresh, logout, Account Console access, application roles, and fresh user-management reauthentication against the target version.
-2. Schedule an identity outage, stop the maintenance gateway and Keycloak, and take a distinct custom-format backup using the procedure above. The actual identity tables are in the `keycloak` schema of the `inout` database. For an identity-only backup while Keycloak is stopped, use `pg_dump -U inout -d inout --schema=keycloak -Fc -f /tmp/keycloak-before-upgrade.dump` through `docker compose exec -T postgres-primary`, then `docker compose cp` to a distinct file under `.data/backups/`. Preserve the old image version, Compose files, realm template, and secrets securely. Saved users and credentials require the database dump; a realm template alone is insufficient. Back up Temporal separately when rehearsing recovery of the whole stack.
+2. Schedule an identity outage, stop the maintenance gateway and Keycloak, and take a distinct custom-format backup using the procedure above. The actual identity tables are in the `keycloak` schema of the `inout` database. For an identity-only backup while Keycloak is stopped, run `docker compose exec -T postgres-primary sh -c 'export PGPASSWORD="$POSTGRES_PASSWORD"; pg_dump -h 127.0.0.1 -p 1020 -U inout -d inout --schema=keycloak -Fc -f /tmp/keycloak-before-upgrade.dump'`, then `docker compose cp` to a distinct file under `.data/backups/`. Preserve the old image version, Compose files, realm template, and secrets securely. Saved users and credentials require the database dump; a realm template alone is insufficient. Back up Temporal separately when rehearsing recovery of the whole stack.
 3. Restore the dump into a separate PostgreSQL instance with a fresh volume and no application writers. Start the target image against that restored copy on an isolated network; retain the original stack's database and image. Confirm that migration completes and run the authentication checks plus the public `/admin` denial checks. Rehearse rollback by restoring the pre-upgrade dump and using the old image on another fresh volume.
-4. After successful rehearsal, set `KEYCLOAK_VERSION=26.8.1` in the existing `.env`, build the custom image with its extension and password denylist, and recreate Keycloak and the regular gateway during the scheduled outage:
+4. After successful rehearsal, set `KEYCLOAK_VERSION=26.8.2` in the existing `.env`, build the custom image with its extension and password denylist, and recreate Keycloak and the regular gateway during the scheduled outage:
 
 ```text
 docker compose build keycloak
@@ -379,6 +459,8 @@ docker compose up -d --no-deps --force-recreate --wait kong
 ```
 
 Verify the effective running image with `docker compose images keycloak`, then test sign-in/refresh/logout, account security, user-management unlock/lock/expiry, and `http://auth.localhost:1005/admin/realms/inout/users` returning `404` even with a valid administrator token. The loopback maintenance gateway starts by default; stop it after provider checks if it is not otherwise in use. If migration or validation fails, stop the new Keycloak instance and restore the pre-upgrade database into a fresh volume before starting the old image. Keycloak does not support downgrading an already-migrated database; [rollback requires restoring the backup](https://www.keycloak.org/docs/latest/upgrading/index.html#_prepare-for-upgrade).
+
+Current working-tree checks from **2026-11-12** are recorded in [Release evidence](docs/release-evidence-2026-11-12.md). They include passing, failing and unrun checks; they are not a release approval or evidence for a clean final commit.
 
 Historical verification on **2026-11-05**: **245 frontend tests** and **365 backend tests** passed; the backend discovered 634 tests and skipped 269 integration tests. TypeScript checking, the Next.js 15.5.29 production build, and the three synthetic localhost HTTP suites (sign-in, password updates, and security boundaries) passed. Cross-zone checks cover checkpoint grants, analytics, shared hardware custody, warning resets, restriction releases, and rule changes. Docker was unavailable, so real database/cache/Temporal checks and the Keycloak 26.8.1 provider build/runtime suite were not executed; no live deployment or policy repair was applied. The user deferred the administration-authority and terminal-storage redesigns; those redesigns remain deferred.
 

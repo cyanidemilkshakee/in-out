@@ -140,8 +140,8 @@ class MaintenanceBatchDatabaseTests(unittest.IsolatedAsyncioTestCase):
                 db.add(Movement(id=identity, checkpoint_id="cp-main", occurred_at=occurred_at,
                     result="denied", direction="entry", scan_type="auto", subject_type="employee", data={}))
             await db.flush()
-            db.add(Alert(id="ret-evidence", source_event_id="ret-alert", data={"status": "open"}))
-            db.add(PermissionRequestModel(id="ret-review-request", data={"eventId": "ret-review"}))
+            db.add(Alert(id="ret-evidence", source_event_id="ret-alert", created_at=old, data={"status": "open"}))
+            db.add(PermissionRequestModel(id="ret-review-request", created_at=old, data={"eventId": "ret-review"}))
             await db.commit()
         commits = []
         def committed(_connection):
