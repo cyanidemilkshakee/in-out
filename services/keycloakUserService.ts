@@ -29,13 +29,6 @@ async function request<T>(method: "GET" | "POST", body?: unknown, query?: string
 }
 
 export type ManagedUserPage = { items: ManagedUser[]; first: number; max: number; hasMore: boolean; nextFirst: number | null };
-export type PendingSsoUser = ManagedUser & { provider: "zoho" };
-export type PendingSsoUserPage = { items: PendingSsoUser[]; first: number; max: number; hasMore: boolean; nextFirst: number | null };
-export type SsoApprovalInput = {
-  roles: Array<"zone-admin" | "operator">;
-  checkpointId?: string | null;
-  zoneIds?: string[];
-};
 export const MANAGED_USER_PAGE_SIZE = 25;
 
 async function invitationRequest<T>(body: unknown): Promise<T> {
@@ -73,20 +66,6 @@ export async function listManagedUsers(search = "", signal?: AbortSignal): Promi
   }
 }
 
-export async function listPendingZohoSsoUsers(search = "", first = 0, signal?: AbortSignal): Promise<PendingSsoUserPage> {
-  const page = await request<PendingSsoUserPage>("GET", undefined,
-    `pendingSso=zoho&search=${encodeURIComponent(search.trim())}&first=${first}&max=${MANAGED_USER_PAGE_SIZE}`, signal);
-  if (!Array.isArray(page.items) || typeof page.hasMore !== "boolean" ||
-      (page.hasMore && (!Number.isSafeInteger(page.nextFirst) || page.nextFirst! <= first))) {
-    throw new Error("Identity service returned an invalid pending SSO page.");
-  }
-  return page;
-}
-
-export function approveZohoSsoUser(userId: string, input: SsoApprovalInput) {
-  return request<ManagedUser>("POST", { action: "approveSsoUser", userId, input });
-}
-
 export function getManagedUser(userId: string) {
   return request<ManagedUser>("GET", undefined, `userId=${encodeURIComponent(userId)}`);
 }
@@ -101,8 +80,8 @@ export function createManagedUser(input: Record<string, unknown>) {
   });
 }
 
-export function resendManagedUserInvite(userId: string) {
-  return invitationRequest<ManagedUser>({ action: "resend", userId });
+export function resendManagedUserInvite(userId: string, email?: string) {
+  return invitationRequest<ManagedUser>({ action: "resend", userId, ...(email ? { email } : {}) });
 }
 
 export function revokeManagedUserInvite(userId: string) {

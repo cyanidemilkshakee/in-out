@@ -771,8 +771,8 @@ The following distinctions matter when presenting or extending the current proje
 | Hardware count | API schemas allow eight selected hardware IDs, while terminal documentation describes four | UI capacity and API validation need to be described separately |
 | Rule definitions | `PATCH /v1/alert-rules/{rule_id}` deliberately returns 403 | Per-subject assignments are editable, while global definitions are read-only through this API |
 | Account creation | `POST /v1/keycloak/users` returns 410 | Invitation endpoints are the current account-onboarding path |
-| Former Zoho approval page/API | `/api/zoho-approvals` returns 410 | Invitation gating replaced that approval process |
-| Invitation broker boundary | Linking/unknown-user rejection depends on realm configuration | The setup procedure is part of the security contract and needs deployment verification |
+| No-invitation Zoho approval | Approval UI and backend role-grant path are removed; legacy approval APIs return 410 | New InOut roles must be assigned through an invitation |
+| Invitation broker boundary | The setup script binds Zoho to a required existing-user-only broker flow | Run the invitation setup check after configuring Zoho and Trust Email; review any legacy accounts separately |
 | Redis restart | Runtime persistence is disabled | Quotas, leases, and application revocation markers need recovery analysis across restart |
 | Temporal outage | Dispatcher lanes are independent, but readiness checks Temporal | Internal presence progress does not establish healthy API readiness |
 | Access scope changes | Zone approval replaces the complete stored scope | Clients must not assume an automatic additive merge |

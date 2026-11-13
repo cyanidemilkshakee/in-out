@@ -46,7 +46,30 @@ async function getPresence(request: NextRequest) {
         retryAfter && /^\d{1,6}$/.test(retryAfter) ? retryAfter : undefined);
     }
 
-    return new Response(res.body, {
+    const reader = res.body?.getReader();
+    const body = reader ? new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        try {
+          const { done, value } = await reader.read();
+          if (done) {
+            controller.close();
+            return;
+          }
+          controller.enqueue(value);
+        } catch (error) {
+          if (request.signal.aborted || (error instanceof DOMException && error.name === "AbortError")) {
+            controller.close();
+            return;
+          }
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        try { await reader.cancel(reason); } catch { /* The upstream may already be closed. */ }
+      },
+    }) : null;
+
+    return new Response(body, {
       headers: {
         "Content-Type": "text/event-stream",
         "Cache-Control": "no-cache, no-transform",

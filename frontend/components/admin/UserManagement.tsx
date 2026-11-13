@@ -38,7 +38,9 @@ function canDeleteAccount(user: ManagedUser) {
 }
 
 function needsInvitationAction(user: ManagedUser) {
-  return user.inviteStatus === "pending" || user.inviteStatus === "expired" || user.inviteStatus === "revoked";
+  if (user.inviteStatus === "pending" || user.inviteStatus === "expired" || user.inviteStatus === "revoked") return true;
+  return user.inviteStatus == null && !user.enabled && Boolean(user.email) &&
+    !user.roles?.includes("master-admin") && Boolean(user.roles?.some((role) => role === "operator" || role === "zone-admin"));
 }
 
 function invitationExpiry(expiresAt?: number | null) {
@@ -384,10 +386,10 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
 
   async function resendInvite() {
     const target = selected;
-    if (!target?.canManage || !needsInvitationAction(target) || !beginOperation("invite")) return;
+    if (!target?.canManage || !needsInvitationAction(target) || !editForm.email.trim() || !beginOperation("invite")) return;
     setMessage(null);
     try {
-      const updated = await resendManagedUserInvite(target.id);
+      const updated = await resendManagedUserInvite(target.id, isMasterAdmin ? editForm.email.trim() : undefined);
       setSelected(updated);
       setEditForm(formForUser(updated));
       setUsers((current) => current.map((user) => user.id === updated.id ? updated : user));
@@ -999,16 +1001,24 @@ export function UserManagement({ isMasterAdmin, stepUpExpiresAt, stepUpDurationM
                 <p className={styles.statusMessage} role="status">
                   {selected.inviteStatus === "pending" ? `This account is disabled until the recipient accepts the invitation. Link expires ${invitationExpiry(selected.inviteExpiresAt)}.`
                     : selected.inviteStatus === "expired" ? "This invitation has expired. Send a fresh one to let the recipient activate the account."
-                      : "This invitation was revoked. Send a fresh one if the person should receive access."}
+                      : selected.inviteStatus === "revoked" ? "This invitation was revoked. Send a fresh one if the person should receive access."
+                        : "This account is disabled and has no active invitation. Send a fresh invitation to the current email address."}
                 </p>
-                <div className={styles.securityActionRow}>
-                  <button className={styles.secondaryButton} type="button" disabled={busy} onClick={() => void resendInvite()}>
-                    {operation === "invite" ? <LoaderCircle className={styles.loadingIcon} size={16} aria-hidden="true" /> : <RotateCw size={16} aria-hidden="true" />}Resend invitation
-                  </button>
-                  {selected.inviteStatus !== "revoked" ? <button className={styles.dangerButton} type="button" disabled={busy} onClick={() => void revokeInvite()}>
-                    {operation === "invite" ? <LoaderCircle className={styles.loadingIcon} size={16} aria-hidden="true" /> : <Ban size={16} aria-hidden="true" />}Revoke invitation
-                  </button> : null}
-                </div>
+                <form className={styles.invitationForm} onSubmit={(event) => { event.preventDefault(); void resendInvite(); }}>
+                  <label className={styles.field}>
+                    <span>Invitation email</span>
+                    <input type="email" required maxLength={254} autoComplete="email" readOnly={!isMasterAdmin || busy}
+                      value={editForm.email} onChange={(event) => setEditForm((current) => ({ ...current, email: event.target.value }))} />
+                  </label>
+                  <div className={styles.securityActionRow}>
+                    <button className={styles.secondaryButton} type="submit" disabled={busy || !editForm.email.trim()}>
+                      {operation === "invite" ? <LoaderCircle className={styles.loadingIcon} size={16} aria-hidden="true" /> : <RotateCw size={16} aria-hidden="true" />}{selected.inviteStatus == null ? "Send invitation" : "Resend invitation"}
+                    </button>
+                    {selected.inviteStatus !== "revoked" && selected.inviteStatus != null ? <button className={styles.dangerButton} type="button" disabled={busy} onClick={() => void revokeInvite()}>
+                      {operation === "invite" ? <LoaderCircle className={styles.loadingIcon} size={16} aria-hidden="true" /> : <Ban size={16} aria-hidden="true" />}Revoke invitation
+                    </button> : null}
+                  </div>
+                </form>
               </section> : selected.canManage ? <UserDetailsForm form={editForm} onChange={setEditForm} busy={busy} onSubmit={saveUser} accessOnly={!isMasterAdmin} checkpoints={checkpoints} zones={zones} /> : <p className={styles.statusMessage} role="status">{isMasterAdmin
                 ? selected.roles?.length === 0
                   ? "This identity has no InOut application role. Use the add button for the intended zone or checkpoint to send its invitation."

@@ -123,6 +123,8 @@ async def _sse_event_generator(request: Request, expires_at: float, claims: dict
                     # Admins receive a refresh hint only; the event payload can
                     # contain subjects or decisions from other organization zones.
                     message = json.dumps({"type": "data_changed"})
+                if time.time() >= expires_at or await request.is_disconnected():
+                    break
                 yield ": heartbeat\n\n" if message is None else f"data: {message}\n\n"
     except asyncio.CancelledError:
         pass
@@ -195,11 +197,24 @@ async def _versioned_sse(request: Request, expires_at: float, claims: dict, afte
             yield _frame({"type": "snapshot_required", "revision": through}, revision=through, event="snapshot_required")
             return
         for revision, payload in events:
-            yield await render(revision, payload)
+            frame = await render(revision, payload)
+            if time.time() >= expires_at:
+                return
+            yield frame
             after = revision
+        if time.time() >= expires_at:
+            return
         yield _frame({"revision": through}, revision=through, event="ready")
-        while not overflow.is_set() and time.time() < expires_at and not await request.is_disconnected():
-            active, raw, size = await queue.get()
+        while not overflow.is_set() and not await request.is_disconnected():
+            remaining = expires_at - time.time()
+            if remaining <= 0:
+                return
+            try:
+                active, raw, size = await asyncio.wait_for(queue.get(), timeout=remaining)
+            except asyncio.TimeoutError:
+                return
+            if time.time() >= expires_at:
+                return
             queued_bytes -= size
             if not active:
                 return
@@ -217,8 +232,13 @@ async def _versioned_sse(request: Request, expires_at: float, claims: dict, afte
                     yield _frame({"type": "snapshot_required", "revision": through}, revision=through, event="snapshot_required")
                     return
                 for revision, payload in events:
-                    yield await render(revision, payload)
+                    frame = await render(revision, payload)
+                    if time.time() >= expires_at:
+                        return
+                    yield frame
                     after = revision
+                if time.time() >= expires_at:
+                    return
                 yield ": heartbeat\n\n"
                 continue
             try:
@@ -238,11 +258,14 @@ async def _versioned_sse(request: Request, expires_at: float, claims: dict, afte
                 else:
                     events = [(revision, payload)]
                 for revision, payload in events:
-                    yield await render(revision, payload)
+                    frame = await render(revision, payload)
+                    if time.time() >= expires_at:
+                        return
+                    yield frame
                     after = revision
             except (ValueError, TypeError):
                 continue
-        if overflow.is_set():
+        if overflow.is_set() and time.time() < expires_at:
             yield _frame({"type": "snapshot_required"}, event="snapshot_required")
     except asyncio.CancelledError:
         raise
@@ -291,11 +314,26 @@ class LeasedStreamingResponse(StreamingResponse):
             # sending is blocked. Otherwise a live stream could outlast its
             # lease and no longer count toward the shared stream caps.
             try:
-                while await renew_stream_lease(self.lease):
-                    await anyio.sleep(10)
+                while True:
+                    remaining = self.lease.expires_at - time.time()
+                    if remaining <= 2:
+                        # The bearer token itself is expiring. Let the SSE
+                        # generator finish on its next heartbeat instead of
+                        # cancelling the ASGI response mid-write.
+                        return
+                    await anyio.sleep(min(10, remaining))
+                    remaining = self.lease.expires_at - time.time()
+                    if remaining <= 2:
+                        return
+                    if not await renew_stream_lease(self.lease):
+                        remaining = self.lease.expires_at - time.time()
+                        if remaining <= 2:
+                            return
+                        logger.warning("Presence stream lease was lost before token expiry")
+                        group.cancel_scope.cancel()
+                        return
             except Exception:
                 logger.exception("Presence stream lease renewal failed")
-            finally:
                 group.cancel_scope.cancel()
 
         try:

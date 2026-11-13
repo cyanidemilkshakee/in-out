@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { APP_PASSWORD_POLICY, configurePasswordPolicy, securePasswordPolicy } from "../scripts/configure-keycloak-password-policy.mjs";
+import { APP_PASSWORD_POLICY, configurePasswordPolicy, securePasswordPolicy } from "../scripts/setup-keycloak.mjs";
 
 function fixture(passwordPolicy) {
   const state = { passwordPolicy, smtpServer: { host: "preserved.fixture" } };

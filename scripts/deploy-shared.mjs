@@ -70,10 +70,9 @@ if (adminUrl) {
   }
 }
 
-const hasMaintenanceAdmin = Boolean(process.env.KEYCLOAK_ADMIN_USERNAME?.trim() && process.env.KEYCLOAK_ADMIN_PASSWORD?.trim());
 const hasBootstrapAdmin = Boolean(process.env.KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME?.trim() && process.env.KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD?.trim());
-if (!hasMaintenanceAdmin && !hasBootstrapAdmin) {
-  throw new Error("Set the permanent Keycloak administrator pair, or the temporary bootstrap pair for a new installation, before shared deployment.");
+if (!hasBootstrapAdmin) {
+  throw new Error("Set KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME and KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD in .env before shared deployment.");
 }
 
 function run(label, command, args) {
@@ -96,17 +95,17 @@ if (currentCaddy.stdout.trim()) run("stop the existing public proxy during the u
 try {
   run("build and start the private application stack", "docker", [...composeFiles, "up", "--build", "-d", "--wait"]);
   run("assign and verify the Keycloak Admin REST scope used for delegated user management", process.execPath,
-    [path.join(root, "scripts/keycloak-account-access.mjs"), "--apply"]);
+    [path.join(root, "scripts/setup-keycloak.mjs"), "--action", "account", "--apply"]);
   run("verify delegated account and Admin REST token scopes", process.execPath,
-    [path.join(root, "scripts/keycloak-account-access.mjs"), "--check"]);
+    [path.join(root, "scripts/setup-keycloak.mjs"), "--action", "account", "--check"]);
   run("register the HTTPS application callbacks and logout URLs", process.execPath,
-    [path.join(root, "scripts/configure-keycloak-public-urls.mjs"), "--apply"]);
+    [path.join(root, "scripts/setup-keycloak.mjs"), "--action", "public-urls", "--apply"]);
   run("configure and verify the app-managed Keycloak sign-in", process.execPath,
-    [path.join(root, "scripts/configure-keycloak-app-sign-in.mjs"), "--apply"]);
+    [path.join(root, "scripts/setup-keycloak.mjs"), "--action", "app-sign-in", "--apply"]);
   run("verify the registered HTTPS application callbacks", process.execPath,
-    [path.join(root, "scripts/configure-keycloak-public-urls.mjs"), "--check"]);
+    [path.join(root, "scripts/setup-keycloak.mjs"), "--action", "public-urls", "--check"]);
   run("verify the app-managed Keycloak sign-in", process.execPath,
-    [path.join(root, "scripts/configure-keycloak-app-sign-in.mjs"), "--check"]);
+    [path.join(root, "scripts/setup-keycloak.mjs"), "--action", "app-sign-in", "--check"]);
 } catch (error) {
   try { run("close the loopback-only Keycloak maintenance gateway", "docker", [...composeFiles, "stop", "keycloak-admin"]); }
   catch (stopError) { console.error(`Could not stop the maintenance gateway after failure: ${stopError.message}`); }

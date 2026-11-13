@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { addDefaultAdminApiScope, applyApplicationClientScopes, hasDefaultAdminApiScope, localKeycloakRequest, missingAccountRoles, missingApiAudienceMapper,
-  missingApplicationScopeRoles, missingFrontendRoleClaims, prepareApplicationClientScopes } from "../scripts/keycloak-account-access.mjs";
+  missingApplicationScopeRoles, missingFrontendRoleClaims, prepareApplicationClientScopes } from "../scripts/setup-keycloak.mjs";
 
 const clientId = "account-client-id";
 const roles = ["manage-account", "view-profile", "delete-account"].map((name) => ({ id: `id-${name}`, name, clientRole: true, containerId: clientId }));

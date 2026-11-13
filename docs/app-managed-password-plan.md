@@ -21,8 +21,8 @@ This is a custom authentication protocol built with Keycloak extension APIs. It 
 6. Only after the new app works, explicitly retire its previous administrative password client:
 
    ```powershell
-   node scripts/configure-keycloak-interactions.mjs --apply --retire-native-password-client
-   node scripts/configure-keycloak-interactions.mjs --check --retire-native-password-client
+   node scripts/setup-keycloak.mjs --action interactions --apply --retire-native-password-client
+   node scripts/setup-keycloak.mjs --action interactions --check --retire-native-password-client
    ```
 
    This disables only `inout-password-updates`; it does not delete its secret, policy history, users or unrelated realm data. Default apply does not retire it prematurely. New realm templates leave this legacy client disabled. Do not run the legacy native-password provisioning command after cutover.
@@ -65,9 +65,9 @@ Run real-provider checks only in a disposable project, using a separate PowerShe
 docker compose -p inout-interactions-test -f keycloak/compose.test.yaml -f keycloak/compose.interactions-test.yaml up -d --build --wait --wait-timeout 600 kong
 $env:KEYCLOAK_PORT = '1098'
 $env:KEYCLOAK_ADMIN_PORT = '1099'
-$env:KEYCLOAK_ADMIN_USERNAME = 'fixture-master'
-$env:KEYCLOAK_ADMIN_PASSWORD = 'isolated-keycloak-test-master-password'
-node scripts/configure-keycloak-interactions.mjs --apply
+$env:KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME = 'fixture-master'
+$env:KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD = 'isolated-keycloak-test-master-password'
+node scripts/setup-keycloak.mjs --action interactions --apply
 npm run test:compile
 $env:TEST_INTERACTION_FIXTURE = '1'
 node scripts/test-keycloak-interactions.mjs

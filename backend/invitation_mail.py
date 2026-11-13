@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import socket
 import smtplib
 import ssl
 from email.message import EmailMessage
@@ -12,6 +13,34 @@ from urllib.parse import quote, urlsplit
 from fastapi import HTTPException
 
 from config import settings
+
+
+class _RelayedSMTP(smtplib.SMTP):
+    """Connect through the private relay but keep the public SMTP host for TLS."""
+
+    def _get_socket(self, host: str, port: int, timeout: float | None):
+        if not settings.INVITE_SMTP_PROXY_HOST:
+            return super()._get_socket(host, port, timeout)
+        return socket.create_connection(
+            (settings.INVITE_SMTP_PROXY_HOST, settings.INVITE_SMTP_PROXY_PORT), timeout
+        )
+
+
+class _RelayedSMTPSSL(smtplib.SMTP_SSL):
+    """Tunnel implicit TLS while validating the Zoho server certificate."""
+
+    def _get_socket(self, host: str, port: int, timeout: float | None):
+        if not settings.INVITE_SMTP_PROXY_HOST:
+            return super()._get_socket(host, port, timeout)
+        raw_socket = socket.create_connection(
+            (settings.INVITE_SMTP_PROXY_HOST, settings.INVITE_SMTP_PROXY_PORT), timeout
+        )
+        try:
+            context = self.context or ssl.create_default_context()
+            return context.wrap_socket(raw_socket, server_hostname=self._host)
+        except Exception:
+            raw_socket.close()
+            raise
 
 
 def _validate_mail_configuration() -> None:
@@ -67,13 +96,13 @@ def _send(message: EmailMessage) -> None:
     context = ssl.create_default_context()
     try:
         if settings.INVITE_SMTP_SSL:
-            with smtplib.SMTP_SSL(settings.INVITE_SMTP_HOST, settings.INVITE_SMTP_PORT,
-                                  timeout=10, context=context) as client:
+            with _RelayedSMTPSSL(settings.INVITE_SMTP_HOST, settings.INVITE_SMTP_PORT,
+                                 timeout=10, context=context) as client:
                 if settings.INVITE_SMTP_AUTH:
                     client.login(settings.INVITE_SMTP_USER, settings.INVITE_SMTP_PASSWORD)
                 client.send_message(message)
         else:
-            with smtplib.SMTP(settings.INVITE_SMTP_HOST, settings.INVITE_SMTP_PORT,
+            with _RelayedSMTP(settings.INVITE_SMTP_HOST, settings.INVITE_SMTP_PORT,
                               timeout=10) as client:
                 client.ehlo()
                 if settings.INVITE_SMTP_STARTTLS:

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { applicationSignInReady, configureApplicationSignIn as configureSignIn } from "../scripts/configure-keycloak-app-sign-in.mjs";
+import { applicationSignInReady, configureApplicationSignIn as configureSignIn } from "../scripts/setup-keycloak.mjs";
 
 const configureApplicationSignIn = (api, options = {}) => configureSignIn(api, { providerReady: async () => true, ...options });
 

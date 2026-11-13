@@ -157,8 +157,8 @@ jobs:
       REDIS_EVENTS_PASSWORD: ci-redis-events-password-32-characters
       REDIS_GATEWAY_PASSWORD: ci-redis-gateway-password-32-characters
       KONG_IDENTITY_SECRET: ci-gateway-identity-secret-32-characters
-      KEYCLOAK_ADMIN_USERNAME: ci-admin
-      KEYCLOAK_ADMIN_PASSWORD: ci-keycloak-password
+      KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME: ci-admin
+      KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD: ci-keycloak-password
       KEYCLOAK_CLIENT_SECRET: ci-client-secret
       AUTH_SECRET: ci-auth-secret
     steps:

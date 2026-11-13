@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { configurePasswordUpdates, passwordUpdateClientReady, PASSWORD_UPDATE_CLIENT_ID } from "../scripts/configure-keycloak-password-updates.mjs";
+import { configurePasswordUpdates, passwordUpdateClientReady, PASSWORD_UPDATE_CLIENT_ID } from "../scripts/setup-keycloak.mjs";
 
 const secret = "synthetic-password-update-secret-00000000000000";
 

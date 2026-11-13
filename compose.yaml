@@ -347,8 +347,8 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://inout_migrator:${MIGRATION_DB_PASSWORD:?Generate MIGRATION_DB_PASSWORD}@postgres-primary:1020/inout
       - KEYCLOAK_ADMIN_BASE=http://keycloak:1022
-      - KEYCLOAK_ADMIN_USERNAME=${KEYCLOAK_ADMIN_USERNAME:-${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-setup-admin}}
-      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:-${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}}
+      - KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME=${KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-setup-admin}
+      - KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD=${KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}
       - DEMO_CREDENTIALS_PATH=/output/full-demo-accounts.csv
     volumes:
       - ./.local-test-accounts:/output
@@ -366,7 +366,7 @@ services:
     cap_drop: [ALL]
     read_only: true
     tmpfs: [/tmp]
-    networks: [web, app-db, cache, workflow]
+    networks: [web, app-db, cache, workflow, mail]
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -394,6 +394,8 @@ services:
       - INVITE_TTL_SECONDS=${INVITE_TTL_SECONDS:-900}
       - INVITE_SMTP_HOST=${KEYCLOAK_SMTP_HOST:-}
       - INVITE_SMTP_PORT=${KEYCLOAK_SMTP_PORT:-587}
+      - INVITE_SMTP_PROXY_HOST=mail-relay
+      - INVITE_SMTP_PROXY_PORT=2525
       - INVITE_SMTP_FROM=${KEYCLOAK_SMTP_FROM:-}
       - INVITE_SMTP_DISPLAY_NAME=${KEYCLOAK_SMTP_FROM_DISPLAY_NAME:-InOut Management}
       - INVITE_SMTP_AUTH=${KEYCLOAK_SMTP_AUTH:-true}
@@ -447,6 +449,26 @@ services:
         condition: service_healthy
       temporal-namespace-init:
         condition: service_completed_successfully
+      mail-relay:
+        condition: service_started
+    restart: unless-stopped
+
+  # The relay has a dedicated outbound network and a private application
+  # network. It only opens TCP connections to the configured SMTP host/port;
+  # the API itself remains on internal-only networks.
+  mail-relay:
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    read_only: true
+    tmpfs: [/tmp]
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    command: ["python", "mail_egress_relay.py"]
+    environment:
+      - MAIL_RELAY_UPSTREAM_HOST=${KEYCLOAK_SMTP_HOST:-}
+      - MAIL_RELAY_UPSTREAM_PORT=${KEYCLOAK_SMTP_PORT:-587}
+    networks: [mail, mail-egress]
     restart: unless-stopped
 
   temporal-worker:
@@ -512,8 +534,8 @@ services:
       - KEYCLOAK_ISSUER=${KEYCLOAK_PUBLIC_URL:-http://auth.localhost:${KEYCLOAK_PORT:-1005}}/realms/inout
       - KEYCLOAK_JWKS_BASE=http://keycloak:1022/realms/inout
       - KEYCLOAK_ISSUER_PUBLIC=${KEYCLOAK_PUBLIC_URL:-http://auth.localhost:${KEYCLOAK_PORT:-1005}}/realms/inout
-      # Never advertise the maintenance console link on the public sign-in page.
-      - KEYCLOAK_ADMIN_CONSOLE_URL=
+      # Local sign-in links to the loopback-only Keycloak administration console.
+      - KEYCLOAK_ADMIN_CONSOLE_URL=${KEYCLOAK_ADMIN_CONSOLE_URL:-http://auth.localhost:${KEYCLOAK_ADMIN_PORT:-1009}/admin/master/console/}
       # Container listeners are fixed in Kong and health checks. Only the
       # published APP_PORT may change; ignore legacy internal-port overrides.
       - PORT=1018
@@ -664,6 +686,10 @@ networks:
         - subnet: ${SHARED_INGRESS_SUBNET:-172.30.250.0/29}
   web:
     internal: true
+  mail:
+    internal: true
+  mail-egress:
+    driver: bridge
   app-db:
     internal: true
   identity-db:

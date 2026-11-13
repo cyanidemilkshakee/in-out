@@ -31,15 +31,15 @@ from terminal_assignments import enqueue_checkpoint_assignment
 
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 KEYCLOAK_BASE = os.getenv("KEYCLOAK_ADMIN_BASE", "http://keycloak:1022").rstrip("/")
-KEYCLOAK_ADMIN_USERNAME = os.getenv("KEYCLOAK_ADMIN_USERNAME", "")
-KEYCLOAK_ADMIN_PASSWORD = os.getenv("KEYCLOAK_ADMIN_PASSWORD", "")
+KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME = os.getenv("KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME", "")
+KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD = os.getenv("KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD", "")
 CREDENTIALS_PATH = Path(os.getenv("DEMO_CREDENTIALS_PATH", "/output/full-demo-accounts.csv"))
 
 ZONE_SPECS = (
-    ("a", "North Campus"),
-    ("b", "South Campus"),
-    ("c", "East Campus"),
-    ("d", "West Campus"),
+    ("a", "Zone A"),
+    ("b", "Zone B"),
+    ("c", "Zone C"),
+    ("d", "Zone D"),
     ("e", "Central Campus"),
 )
 CHECKPOINT_SPECS = (
@@ -94,7 +94,7 @@ def checkpoint_document(zone_id: str, zone_name: str, spec: tuple[int, str, bool
     checkpoint_id = f"{zone_id}-{number}"
     return {
         "id": checkpoint_id,
-        "name": label if gate_type == "custom" else str(number),
+        "name": label,
         "mode": "auto",
         "zone": zone_id,
         "zoneId": zone_id,
@@ -240,14 +240,14 @@ async def ensure_demo_account(
 
 
 async def provision_keycloak_identities() -> dict[str, Any]:
-    if not KEYCLOAK_ADMIN_USERNAME or not KEYCLOAK_ADMIN_PASSWORD:
-        raise RuntimeError("Set KEYCLOAK_ADMIN_USERNAME and KEYCLOAK_ADMIN_PASSWORD in .env before provisioning demo operators")
+    if not KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME or not KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:
+        raise RuntimeError("Set KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME and KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD in .env before provisioning demo operators")
     async with httpx.AsyncClient(base_url=KEYCLOAK_BASE, timeout=20.0) as unauthenticated:
         token_response = await unauthenticated.post("/realms/master/protocol/openid-connect/token", data={
             "grant_type": "password",
             "client_id": "admin-cli",
-            "username": KEYCLOAK_ADMIN_USERNAME,
-            "password": KEYCLOAK_ADMIN_PASSWORD,
+            "username": KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME,
+            "password": KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD,
         })
         if token_response.is_error or not token_response.json().get("access_token"):
             raise RuntimeError(f"Could not authenticate the configured Keycloak bootstrap administrator (HTTP {token_response.status_code}); application data was not reset")
@@ -418,8 +418,15 @@ def fixture_records(now: datetime, identities: dict[str, Any]):
                 allowed_zones = [zone_id, adjacent]
             else:
                 allowed_zones = [zone_id]
-            explicit_checkpoints = ([f"{zone_id}-1"] if offset % 4 == 0 else
-                [f"{zone_id}-1", f"{zone_id}-2"] if offset % 4 == 1 else None)
+            # The multi-zone cohorts have zone-wide access. Keep explicit
+            # checkpoint restrictions only on home-zone-only records so their
+            # visible checkpoint groups always agree with their zone scope.
+            explicit_checkpoints = None
+            if offset < 70:
+                if offset % 4 == 0:
+                    explicit_checkpoints = [f"{zone_id}-1"]
+                elif offset % 4 == 1:
+                    explicit_checkpoints = [f"{zone_id}-1", f"{zone_id}-2"]
             created_at = now - timedelta(days=120 - (number % 120))
             employee = {
                 "id": subject_id, "barcode": barcode, "name": name, "type": "employee",

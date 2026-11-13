@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { configureInteractions, retireNativePasswordClient } from "../scripts/configure-keycloak-interactions.mjs";
-import { interactionProviderReady as checkInteractionProviderReady } from "../scripts/keycloak-interaction-access.mjs";
+import { configureInteractions, retireNativePasswordClient, interactionProviderReady as checkInteractionProviderReady } from "../scripts/setup-keycloak.mjs";
 
 const interactionProviderReady = (api, base, client, request) =>
   checkInteractionProviderReady(api, base, client, request, "synthetic-frontend-secret");

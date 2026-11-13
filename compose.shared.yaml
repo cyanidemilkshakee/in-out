@@ -1,6 +1,12 @@
 # Optional public HTTPS edge. Keep the default Compose file local-only.
 # Start with: npm run deploy:shared
 services:
+  # Keep the Keycloak administration link off the public sign-in page. The
+  # administration listener remains loopback-only and is reached by SSH tunnel.
+  app:
+    environment:
+      KEYCLOAK_ADMIN_CONSOLE_URL: ""
+
   caddy:
     profiles: [shared]
     image: caddy:${CADDY_VERSION:-2.11.9-alpine}

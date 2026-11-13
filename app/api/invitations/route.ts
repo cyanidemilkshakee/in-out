@@ -49,7 +49,8 @@ async function adminInvitationRequest(request: NextRequest) {
     }
     const userId = encodeURIComponent(body.userId);
     if (body.action === "resend") {
-      return NextResponse.json({ data: await callPythonApi(`/v1/invitations/${userId}/resend`, "POST", {}) });
+      const email = typeof body.email === "string" ? body.email : undefined;
+      return NextResponse.json({ data: await callPythonApi(`/v1/invitations/${userId}/resend`, "POST", { email }) });
     }
     if (body.action === "revoke") {
       return NextResponse.json({ data: await callPythonApi(`/v1/invitations/${userId}`, "DELETE") });

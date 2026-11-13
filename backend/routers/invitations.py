@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from urllib.parse import quote
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,6 +39,15 @@ _ACCEPTED = "accepted"
 _REVOKED = "revoked"
 
 
+def _normalize_invite_email(value: str) -> str:
+    value = value.strip().casefold()
+    if (len(value) > 254 or any(ord(char) < 33 for char in value) or
+            value.count("@") != 1 or value.startswith("@") or value.endswith("@") or
+            "." not in value.rsplit("@", 1)[1]):
+        raise ValueError("Enter a valid email address")
+    return value
+
+
 class InviteCreateRequest(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
     email: str = Field(min_length=3, max_length=254)
@@ -51,12 +60,17 @@ class InviteCreateRequest(BaseModel):
     @field_validator("email")
     @classmethod
     def normalize_email(cls, value: str) -> str:
-        value = value.strip().casefold()
-        if (len(value) > 254 or any(ord(char) < 33 for char in value) or
-                value.count("@") != 1 or value.startswith("@") or value.endswith("@") or
-                "." not in value.rsplit("@", 1)[1]):
-            raise ValueError("Enter a valid email address")
-        return value
+        return _normalize_invite_email(value)
+
+
+class InviteResendRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+    email: str | None = Field(None, min_length=3, max_length=254)
+
+    @field_validator("email")
+    @classmethod
+    def normalize_email(cls, value: str | None) -> str | None:
+        return _normalize_invite_email(value) if value is not None else None
 
 
 class PublicInviteAcceptRequest(BaseModel):
@@ -114,6 +128,22 @@ def _attributes_with_invite(user: dict[str, Any], token_hash: str, expires_at: i
         "invite_expires_at": [str(expires_at)] if expires_at else [],
     })
     return merged
+
+
+def _invitation_state_was_saved(user: dict[str, Any], token_hash: str, expires_at: int) -> bool:
+    saved_hash = _attribute(user, "invite_nonce_hash")
+    return (
+        _attribute(user, "invite_status") == _PENDING and
+        _attribute(user, "invite_expires_at") == str(expires_at) and
+        bool(saved_hash) and hmac.compare_digest(saved_hash, token_hash)
+    )
+
+
+def _raise_invitation_state_not_saved() -> None:
+    raise HTTPException(
+        503,
+        "Keycloak did not save the invitation state. Run the invitation setup check and apply commands, then retry; no invitation email was sent.",
+    )
 
 
 def _audit_event(action: str, actor_id: str, user_id: str, *, email: str = "",
@@ -315,6 +345,8 @@ async def create_invitation(payload: InviteCreateRequest,
         role_attempted = True
         roles = await keycloak_admin._replace_roles(token, user_id, [payload.role])
         saved = (await keycloak_admin._request(token, "GET", f"users/{quote(user_id, safe='')}")).json()
+        if not isinstance(saved, dict) or not _invitation_state_was_saved(saved, token_hash, expires_at):
+            _raise_invitation_state_not_saved()
         db.add(_audit_event("created", actor["sub"], user_id, email=payload.email,
             role=payload.role, checkpoint_id=checkpoint_id, zone_ids=zone_ids, expires_at=expires_at))
         await db.commit()
@@ -360,6 +392,7 @@ async def create_invitation(payload: InviteCreateRequest,
 
 @router.post("/{user_id}/resend")
 async def resend_invitation(user_id: str, token: str = Depends(keycloak_admin._admin_context),
+    payload: InviteResendRequest = Body(default=InviteResendRequest()),
     db: AsyncSession = Depends(get_db), actor: dict = Depends(verify_admin_request)) -> dict[str, Any]:
     ensure_invitation_mail_ready()
     await keycloak_admin._lock_user(db, user_id)
@@ -369,20 +402,51 @@ async def resend_invitation(user_id: str, token: str = Depends(keycloak_admin._a
         raise HTTPException(404, "Invitation was not found")
     roles = await keycloak_admin._user_roles(token, user_id)
     await _require_invite_scope(db, actor, user_id, roles)
-    if current.get("enabled") is True or _attribute(current, "invite_status") not in {_PENDING, _REVOKED}:
+    invite_state, _ = _invite_state(current)
+    legacy_disabled_account = (
+        invite_state == "" and current.get("enabled") is not True and
+        bool(current.get("email")) and bool(set(roles) & {"operator", "zone-admin"}) and
+        "master-admin" not in roles
+    )
+    if current.get("enabled") is True or (
+        invite_state not in {_PENDING, "expired", _REVOKED} and not legacy_disabled_account
+    ):
         raise HTTPException(409, "Only a pending or revoked invitation can be resent")
+    previous_email = current.get("email", "")
+    requested_email = payload.email or previous_email
+    if not requested_email:
+        raise HTTPException(422, "Set an email address before resending the invitation")
+    if requested_email != previous_email:
+        if not has_master_admin_role(actor):
+            raise HTTPException(403, "Only a master-admin can change an invitation email address")
+        existing = await _find_user_by_email(token, requested_email)
+        if existing is not None and existing.get("id") != user_id:
+            raise HTTPException(409, "Another Keycloak account already uses this email address")
     invite_token, token_hash, expires_at = _new_invite_values()
     await keycloak_admin._request(token, "PUT", f"users/{quote(user_id, safe='')}", {
-        **current, "enabled": False,
+        **current, "email": requested_email,
+        "emailVerified": current.get("emailVerified", False) if requested_email == previous_email else False,
+        "enabled": False,
         "attributes": _attributes_with_invite(current, token_hash, expires_at),
     })
+    saved_response = await keycloak_admin._request(token, "GET", f"users/{quote(user_id, safe='')}")
+    saved = saved_response.json()
+    if not isinstance(saved, dict) or not _invitation_state_was_saved(saved, token_hash, expires_at):
+        try:
+            await keycloak_admin._request(token, "PUT", f"users/{quote(user_id, safe='')}", current)
+        except Exception:
+            logger.exception("Failed to restore account after Keycloak discarded invitation state for %s", user_id)
+        _raise_invitation_state_not_saved()
+    current["email"] = requested_email
+    if requested_email != previous_email:
+        current["emailVerified"] = False
     current["enabled"] = False
     current["attributes"] = _attributes_with_invite(current, token_hash, expires_at)
     await db.execute(text("SELECT pg_advisory_xact_lock(hashtextextended(:identity, 0))"),
         {"identity": "keycloak-invite-audit:" + user_id})
-    db.add(_audit_event("resent", actor["sub"], user_id, email=current.get("email", ""), expires_at=expires_at))
+    db.add(_audit_event("resent", actor["sub"], user_id, email=requested_email, expires_at=expires_at))
     await db.commit()
-    await send_invitation(current.get("email", ""), _email_body_name(current), user_id, invite_token)
+    await send_invitation(requested_email, _email_body_name(current), user_id, invite_token)
     return _with_invite_summary(current, roles, can_manage=keycloak_admin.can_manage_user(
         has_master_admin_role(actor), roles))
 

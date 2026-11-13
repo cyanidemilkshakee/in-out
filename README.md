@@ -20,47 +20,37 @@ InOut is an inbound/outbound management system for an organization’s branches.
 # Installation and first use
 ## Requirements
 
-The application runs in Linux containers and can be used from Windows, macOS, or Linux. Install Docker Desktop on Windows/macOS, or Docker Engine with the Compose v2 plugin on Linux; the stack and first-run helper require Docker Compose **2.24 or newer**. Node.js 22.12+ with npm is used for the repository's setup and maintenance helpers; Python runs inside Docker. The same Docker Compose and npm commands work from PowerShell, macOS Terminal, or a Linux shell. No host Python installation is required. The test compiler loads the ESM JWT verifier through CommonJS, using the [ESM loading support enabled in Node 22.12](https://nodejs.org/en/blog/release/v22.12.0).
+The application runs in Linux containers and can be used from Windows, macOS, or Linux. Install Docker Desktop on Windows/macOS, or Docker Engine with the Compose v2 plugin on Linux; Docker Compose **2.24 or newer** is required. Node.js 22.12+ with npm is used for environment and maintenance commands; Python runs inside Docker. The same Docker Compose and npm commands work from PowerShell, macOS Terminal, or a Linux shell. No host Python installation is required. The test compiler loads the ESM JWT verifier through CommonJS, using the [ESM loading support enabled in Node 22.12](https://nodejs.org/en/blog/release/v22.12.0).
 
 ## Quick start
 
-### One-command first run
+### Manual first setup
 
-After cloning the repository, installing Node.js 22.12+ and Docker Compose 2.24+, and starting Docker Desktop/Engine, run these from the repository root:
-
-```text
-npm ci
-npm run setup:first-run
-```
-
-`npm ci` installs the locked host-side Node tools. The setup command creates `.env` only when missing, generates blank setup secrets only when no project database volume exists, starts the stack, and runs the Keycloak setup and checks. Existing database volumes and populated secret values are preserved. It does not create the first human app account or configure Zoho; the command prints those remaining steps.
-
-The first Keycloak admin is a temporary **bootstrap account**. After setup, create your own master-realm administrator in Keycloak and use it for maintenance. On a new `.env`, put its username and password in `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD`, then run `npm run keycloak:bootstrap-admin:retire`. The command verifies access to both realms before removing only `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME` and `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` from `.env`. It does not delete or disable the temporary account; remove or disable that account in Keycloak after verifying your own admin works.
-
-On installations created before bootstrap and maintenance credentials were separated, `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` currently hold the bootstrap login. Replace those values with your own administrator's credentials after creating it; this overwrites the old bootstrap details and keeps maintenance scripts working. The retirement command will report that there are no separate bootstrap fields to remove.
-
-To start with sample records and demo accounts instead, use:
+After cloning the repository, installing Node.js 22.12+ and Docker Compose 2.24+, and starting Docker Desktop/Engine, run each step from the repository root:
 
 ```text
-npm run setup:first-run:demo
+npm run setup:prepare
+docker compose up --build -d --wait
+npm run keycloak:prepare
 ```
 
-This asks you to type `SEED` before proceeding because demo seeding replaces existing InOut application records. In a non-interactive environment, add `-- --yes` only when that replacement is intended. It preserves the PostgreSQL volume, migrations, and existing Keycloak users. Demo login credentials are written to `.local-test-accounts/full-demo-accounts.csv`.
+`setup:prepare` invokes one self-contained file, `scripts/setup-prepare.mjs`. That file runs `npm ci`, creates `.env` from `.env.example` only if it is missing, then fills blank generated secrets and syncs default local URLs without printing secret values. It performs the environment setup directly rather than invoking the separate npm commands. `npm run env:init` and `npm run env:secrets:generate` remain available for those individual tasks. Review `.env` after preparation. This command does not start Docker or configure Keycloak. The Compose command builds and starts services, applies migrations, and initializes reference data. `keycloak:prepare` applies and checks the required Keycloak configuration through the loopback-only admin gateway. Use `setup:prepare` for a fresh installation; for an existing database, preserve its matching `.env` and secrets.
 
-These commands automate a fresh local setup; for an existing installation, keep its matching `.env` and follow the existing-volume maintenance instructions below.
+The Keycloak bootstrap administrator is also the administrator used by maintenance scripts. Keep its `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME` and `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` values active in `.env`; no second Keycloak administrator credential pair is required by the app scripts.
+
+Then open [Keycloak administration](http://auth.localhost:1009/admin/master/console/), create the first application user in the `inout` realm, and assign `master-admin`. This application account is distinct from the Keycloak administrator. Configure Zoho separately if company sign-in is needed. For an existing installation, keep its matching `.env` and follow the existing-volume maintenance instructions below; `docker compose up` does not reset data.
 
 ### 1. Prepare the environment
 
 Existing databases and realms require [existing-volume maintenance](#existing-volume-maintenance). Existing Temporal data also requires the [Temporal upgrade guide](#temporal-upgrade); startup refuses an automatic multi-minor jump. Preserve their configuration and volumes.
 
 ```text
-npm run env:init
-npm run env:secrets:generate
+npm run setup:prepare
 ```
 
-The script fills missing or empty app-generated secret fields with independent random URL-safe values and prints only the field names. It leaves existing values untouched and never generates provider-issued credentials such as SMTP passwords. For an existing installation, scope it to a feature, for example `npm run env:secrets:generate -- invitations`; do not fill blank database or Keycloak bootstrap values unless you have confirmed that they match the persisted services. The default application URL is `http://app.localhost:1008`. Never commit `.env`. It does not rotate passwords or client secrets saved in an existing database/provider.
+This runs dependency installation, creates `.env` if missing, then fills blank app-generated secret fields with independent random URL-safe values. Existing nonblank values stay unchanged; provider-issued credentials such as SMTP passwords are never generated. For an existing installation, preserve its `.env` and run `npm run env:secrets:generate -- invitations` only when you need to generate that feature's missing secret. Do not fill blank database or Keycloak bootstrap values unless you have confirmed they match persisted services. The default application URL is `http://app.localhost:1008`. Never commit `.env`; this process does not rotate passwords or client secrets already saved in a database or provider.
 
-`KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME` and `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` create Keycloak's initial temporary master-realm administrator only when its database is first initialized. `KEYCLOAK_ADMIN_USERNAME` and `KEYCLOAK_ADMIN_PASSWORD` hold the permanent administrator credentials used by local Keycloak maintenance and demo-seeding scripts. After creating that permanent account, put its credentials in those fields and run `npm run keycloak:bootstrap-admin:retire`; the command verifies admin API access before deleting only the bootstrap fields from `.env`. If a secret has been exposed in a screenshot or shared, replace the credential in the service that owns it and update the matching app configuration before restarting dependent services.
+`KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME` and `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` create Keycloak's initial master-realm administrator and are also used by maintenance scripts, including demo seeding. Keep them in `.env` while the installation uses those scripts. If the password changes in Keycloak, update the matching `.env` value. If a secret has been exposed in a screenshot or shared, replace the credential in Keycloak and update `.env` before restarting dependent services.
 
 For an **existing realm**, keep its current client secret from **Clients → inout-frontend → Credentials**. Changing `.env` does not rotate the saved secret, and startup import does not overwrite an existing realm. Back up the realm before applying identity changes; make and verify those changes in Keycloak before relying on the updated application configuration.
 
@@ -137,12 +127,12 @@ The loopback-only administration gateway starts with the default Compose stack. 
 
 ```text
 docker compose up -d --wait keycloak-admin
-npm run keycloak:setup
+npm run keycloak:prepare
 ```
 
 The interaction commands require the matching extension already installed and the existing confidential-client secret unchanged. Their authenticated readiness probe uses the app-configured `KEYCLOAK_CLIENT_SECRET`; a stale app secret must fail the check. Password-policy apply requires the rebuilt image's bundled denylist. New credentials must contain 12 to 128 characters and a non-whitespace character, cannot equal the username or email, and must pass Keycloak's configured policy. The bundled list rejects common passwords; it is a small baseline, not a complete breached-password corpus. Existing stronger requirements and administrator-managed denylists are preserved. Existing credentials are not rotated by applying the policy; review weak existing accounts and arrange a separate password update when required.
 
-For an existing deployment, first verify synthetic sign-in and password changes with the matching app/provider, then explicitly disable the previous privileged password client using `node scripts/configure-keycloak-interactions.mjs --apply --retire-native-password-client`. Default apply deliberately leaves that client alone during cutover; new realms keep it disabled. Do not run the legacy native-password provisioning command after migration. To enable the separate provider password-reset email workflow, configure SMTP values in `.env` and run `npm run keycloak:recovery:apply` while the maintenance gateway is available.
+For an existing deployment, first verify synthetic sign-in and password changes with the matching app/provider, then explicitly disable the previous privileged password client using `node scripts/setup-keycloak.mjs --action interactions --apply --retire-native-password-client`. Default apply deliberately leaves that client alone during cutover; new realms keep it disabled. Do not run the legacy native-password provisioning command after migration. To enable the separate provider password-reset email workflow, configure SMTP values in `.env` and run `npm run keycloak:recovery:apply` while the maintenance gateway is available.
 
 1. Open [Keycloak administration](http://auth.localhost:1009/admin/master/console/) using the master credentials from `.env`. Port `1009` is the loopback administration gateway; Keycloak's internal port `1022` is not a browser URL. The gateway routes `/` and `/admin` to the console.
 2. Select the `inout` realm, create a user under **Users**, and set a temporary password under **Credentials**. At first sign-in, the extension verifies credentials before returning its setup-required result and the app offers **Change temporary password**. Complete the inline form, then sign in normally with the new password. A signed-in user changes a password from **Account and security → Password**, entering the real username/email and current credentials; other account controls remain previews. Neither password form redirects to Keycloak.
@@ -161,17 +151,19 @@ Use the admin Registry and Permission Manager pages to create people/assets and 
 
 ## Optional local fixtures
 
-Normal startup creates reference zones/checkpoints and alert rules, but does not create sample employees, visitors, hardware, permissions, or movement history. To replace the local InOut application records with a full five-zone walkthrough dataset, run this from any supported host shell while the normal stack is healthy:
+Normal startup creates reference zones/checkpoints and alert rules, but does not create sample employees, visitors, hardware, permissions, or movement history. To replace the local InOut application records with a full five-zone walkthrough dataset, manually stop the writers and run the seed container:
 
 ```text
-npm run seed:demo
+docker compose stop kong app python-api temporal-worker
+docker compose --profile demo run --build --rm --no-deps demo-seed
+docker compose up --build -d --wait python-api temporal-worker app kong
 ```
 
-The script temporarily stops Kong, the app, API, and Temporal worker so no live requests race with the reset. It then uses a one-shot Docker container and a single database transaction to truncate **only the InOut `public` schema's application data**, keep `alembic_version`, and load the fixtures. It does not drop databases or volumes, change migrations, or clear the Keycloak schema or Temporal databases. If loading fails, the app-data transaction rolls back. The script rebuilds and starts the app, API, Temporal worker, and Kong even when seeding fails; after a successful seed it verifies that all 75 visitor approvals remain pending once Temporal is running.
+**This replaces local InOut application records.** Do not run it against a shared or production environment. It uses a one-shot Docker container and a single database transaction to truncate **only the InOut `public` schema's application data**, keep `alembic_version`, and load the fixtures. It does not drop databases or volumes, change migrations, or clear the Keycloak schema or Temporal databases. If loading fails, the app-data transaction rolls back. Always run the final `docker compose up` command even if the seed command fails, so the API, worker, app, and gateway are restored. After a successful seed, verify in the app that the 75 visitor approvals remain pending after Temporal starts.
 
 The full fixture contains **5 zones**, **4 checkpoints per zone**, **7 real Keycloak operator accounts per zone** (35 total), one zone administrator per zone, one demo master administrator, **500 employees**, **500 visitors**, **500 hardware assets**, several thousand movement scans, permissions, visitor and manual-review queues, alert examples, audit history, and presence state. Each zone has 100 employees, 100 visitors, and 100 hardware records. Employees include active, restricted, and inactive examples with zone-wide and checkpoint-limited permissions; visitor data covers approved, pending, denied, expired, and currently-overstayed visits. Each checkpoint has at least one operator account assigned to it. Demo zone administrators start offline so operator status indicators can be exercised.
 
-The loader creates or refreshes only its marked `demo-*` users in the existing `inout` Keycloak realm. It does not delete your existing Keycloak users. Demo IDs use the `demo-` prefix and barcodes use `DEMO-`. Login credentials are written to the gitignored file `.local-test-accounts/full-demo-accounts.csv`; treat it as secret and share it only with the people testing locally. The accounts are `demo-master-admin`, `demo-zone-a-admin` through `demo-zone-e-admin`, and `demo-operator-{a..e}-{01..07}`. The Keycloak bootstrap administrator values must already be configured in `.env`; the seed command does not print passwords.
+The loader creates or refreshes only its marked `demo-*` users in the existing `inout` Keycloak realm. It does not delete your existing Keycloak users. Demo IDs use the `demo-` prefix and barcodes use `DEMO-`. Login credentials are written to the gitignored file `.local-test-accounts/full-demo-accounts.csv`; treat it as secret and share it only with the people testing locally. The accounts are `demo-master-admin`, `demo-zone-a-admin` through `demo-zone-e-admin`, and `demo-operator-{a..e}-{01..07}`. The seed service authenticates with `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME` and `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` from `.env`. The seed command does not print passwords.
 
 The existing one-record `demo`, `additional`, and `test` seed modes remain for their development workflows. Do not use any local fixture against an organization database.
 
@@ -197,6 +189,8 @@ Avoid `docker compose down -v` for a targeted reset: it removes every named Comp
 
 This lets administrators invite accounts without enabling public self-registration. The invite acceptance link is single-use and expires after 15 minutes by default; this is separate from visitor permission approvals. It adds no database table and needs no migration or database reset.
 
+For Zoho OIDC application registration, Keycloak provider JSON, callback URLs, and scopes, see [Zoho SSO setup](docs/zoho-sso-setup.md).
+
 1. **Set the app values.** Keep `KEYCLOAK_INVITE_CLIENT_ID=inout-invitations`. Generate only its secret with `npm run env:secrets:generate -- invitations`; this fills a missing or empty `KEYCLOAK_INVITE_CLIENT_SECRET` and preserves all other values. Do not reuse `KEYCLOAK_CLIENT_SECRET` or the legacy password-update client secret. Set `INOUT_APP_URL` to the app origin (`http://app.localhost:1008` locally, your real HTTPS origin in production). Set `INVITE_TTL_SECONDS` if you need a different link lifetime (supported range: 60–86,400 seconds; default: 900).
 2. **Configure invitation email.** Supply a working sender in `.env` using `KEYCLOAK_SMTP_HOST`, `KEYCLOAK_SMTP_PORT`, `KEYCLOAK_SMTP_FROM`, `KEYCLOAK_SMTP_FROM_DISPLAY_NAME`, `KEYCLOAK_SMTP_AUTH`, `KEYCLOAK_SMTP_USER`, `KEYCLOAK_SMTP_PASSWORD`, `KEYCLOAK_SMTP_STARTTLS`, and `KEYCLOAK_SMTP_SSL`. The sender address must be permitted by the mail provider. These values go to the app's Python invitation mailer; the SMTP password is provider-issued and is not generated by the secret script. If using Keycloak's recovery email feature too, apply its SMTP configuration with `npm run keycloak:recovery:apply`.
 3. **Provision the Keycloak client.** Ensure the loopback Keycloak administration gateway is running, then execute:
@@ -207,10 +201,9 @@ This lets administrators invite accounts without enabling public self-registrati
    npm run keycloak:invitations:check
    ```
 
-   These commands use the local Keycloak administrator configuration and target the **`inout` realm**, not the built-in `master` realm. They create or verify a confidential, server-only `inout-invitations` client with browser flows, direct grants, redirects, and web origins disabled. The app enables the client only after verifying its service account has exactly the required `realm-management` roles: `manage-users`, `query-users`, and `view-users`. The client secret is passed only to Python API. If this client already exists, the script will not rotate its secret; preserve and coordinate its existing value.
-4. **Add invitation attributes in Keycloak.** In the Admin Console select **`inout` → Realm settings → User profile**. Add optional text attributes named `invite_status`, `invite_nonce_hash`, and `invite_expires_at`. Allow administrators to view and edit them; keep them hidden and non-editable for end users. Do not require these fields or enter their values manually. The app stores `pending`/`accepted`/`revoked`, the SHA-256 hash of the one-use token, and its Unix-second expiry; the raw link secret is never stored.
-5. **Bind Zoho's broker flow to invited accounts.** Under **Authentication → Flows**, copy **First Broker Login** and configure the copy for Zoho only. Require **Detect Existing Broker User**, then **Automatically Set Existing User**. Remove any execution or fallback that creates a new user when no invited account matches. In **Identity Providers → Zoho**, set **First Login Flow** to this copy; leave other providers' flows unchanged. Zoho must return a verified email, and Keycloak must match that exact email. Enable **Trust Email** only if Zoho guarantees email verification. Disable self-registration and alternate creation routes that could grant an InOut account without invitation. Keep the app's Zoho broker hint enabled.
-6. **Reload app configuration and verify.** After changing `.env`, recreate the services so they receive the new environment:
+   These commands use the local Keycloak administrator configuration and target the **`inout` realm**, not the built-in `master` realm. They create or verify a confidential, server-only `inout-invitations` client with browser flows, direct grants, redirects, and web origins disabled. The provisioning script grants exactly the required `realm-management` roles (`manage-users`, `query-users`, and `view-users`), maps them into the service token, and assigns Keycloak 26.8+'s built-in `kc-admin-api` default scope so the token has the Admin REST audience. It also registers `invite_status`, `invite_nonce_hash`, and `invite_expires_at` as optional, admin-only user-profile attributes. The app enables the client only after verifying the permissions and scopes. The client secret is passed only to Python API. If this client already exists, the script will not rotate its secret; preserve and coordinate its existing value.
+4. **Bind Zoho's broker flow to invited accounts.** Under **Authentication → Flows**, copy **First Broker Login** and configure the copy for Zoho only. Require **Detect Existing Broker User**, then **Automatically Set Existing User**. Remove any execution or fallback that creates a new user when no invited account matches. In **Identity Providers → Zoho**, set **First Login Flow** to this copy; leave other providers' flows unchanged. Zoho must return a verified email, and Keycloak must match that exact email. Enable **Trust Email** only if Zoho guarantees email verification. Disable self-registration and alternate creation routes that could grant an InOut account without invitation. Keep the app's Zoho broker hint enabled.
+5. **Reload app configuration and verify.** After changing `.env`, recreate the services so they receive the new environment:
 
    ```text
    docker compose up -d --no-deps --force-recreate python-api app
@@ -269,8 +262,7 @@ Host-facing ports bind to loopback in the `1001–1011` block. Container-side li
 | `REDIS_QUOTA_PASSWORD`, `REDIS_EVENTS_PASSWORD`, `REDIS_GATEWAY_PASSWORD` | Independent Redis ACL credentials for data/behavior/leases, presence events, and Kong request counters |
 | `AUTH_SECRET` | Encrypts/authenticates Auth.js session cookies |
 | `AUTH_TRUST_HOST` | Auth.js host handling; Compose supplies this for the local stack |
-| `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME`, `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Temporary master-realm account used only to initialize Keycloak for the first time; retire these after setting up your own Keycloak admin |
-| `KEYCLOAK_ADMIN_USERNAME`, `KEYCLOAK_ADMIN_PASSWORD` | Permanent Keycloak admin credentials for local maintenance and demo-seeding scripts |
+| `KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME`, `KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD` | Creates the initial master-realm administrator and authenticates Keycloak maintenance scripts |
 | `KEYCLOAK_CLIENT_ID`, `KEYCLOAK_CLIENT_SECRET` | Frontend client configuration; Compose uses `inout-frontend` and requires its matching secret |
 | `KEYCLOAK_INVITE_CLIENT_ID`, `KEYCLOAK_INVITE_CLIENT_SECRET` | Dedicated server-only invitation acceptance client in the `inout` realm; secret is used by Python API only and generated with `npm run env:secrets:generate -- invitations` |
 | `KEYCLOAK_PASSWORD_UPDATE_CLIENT_ID`, `KEYCLOAK_PASSWORD_UPDATE_CLIENT_SECRET` | Legacy native-reset configuration only; unused by the custom interaction flow. Preserve existing values during migration; explicitly retire the old client after verifying the new app |
@@ -390,7 +382,7 @@ docker compose run --build --rm --no-deps db-provision python /maintenance/provi
 
 This explicit operation rotates scoped credentials and supported ownership/grants without rewriting application rows, then synchronizes the administrator password to `POSTGRES_PASSWORD`. It refuses connected project clients; it does not terminate them. Clear the transient credential afterward, run `backend-init`, and check health, login and service boundaries before restoring writers. Interrupted cross-database maintenance needs inspection and an idempotent rerun with the valid administrator credential; rollback requires the tested backup.
 
-Keycloak import preserves existing realms. Through the temporary administration gateway, keep the existing client secret and set the `inout-frontend` callback exactly to `${AUTH_URL}/api/auth/callback/keycloak`, web origin to `${AUTH_URL}`, and logout URLs to `${AUTH_URL}/login` and `${AUTH_URL}/logout/complete`. After installing the rebuilt 26.8.2 image and its bundled common-password denylist, check with `node scripts/configure-keycloak-password-policy.mjs --check`, apply the baseline with `node scripts/configure-keycloak-password-policy.mjs --apply`, then check again. Run `npm run keycloak:account:repair` as well: Keycloak 26.8.2 now requires delegated Admin REST tokens to have both the realm Admin API audience and the built-in `kc-admin-api` client scope. The repair command adds and verifies the scope without replacing users, client secrets, or unrelated realm settings. Verify login and account/API permissions, then stop the gateway.
+Keycloak import preserves existing realms. Through the temporary administration gateway, keep the existing client secret and set the `inout-frontend` callback exactly to `${AUTH_URL}/api/auth/callback/keycloak`, web origin to `${AUTH_URL}`, and logout URLs to `${AUTH_URL}/login` and `${AUTH_URL}/logout/complete`. After installing the rebuilt 26.8.2 image and its bundled common-password denylist, check with `npm run keycloak:password-policy:check`, apply the baseline with `npm run keycloak:password-policy:apply`, then check again. Run `npm run keycloak:account:repair` as well: Keycloak 26.8.2 now requires delegated Admin REST tokens to have both the realm Admin API audience and the built-in `kc-admin-api` client scope. The repair command adds and verifies the scope without replacing users, client secrets, or unrelated realm settings. Verify login and account/API permissions, then stop the gateway.
 
 ## Temporal upgrade
 

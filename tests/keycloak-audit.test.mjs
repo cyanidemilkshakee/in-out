@@ -7,7 +7,7 @@ import {
   keycloakAuditReady,
   keycloakAuditSettings,
   REQUIRED_USER_EVENT_TYPES,
-} from "../scripts/configure-keycloak-audit.mjs";
+} from "../scripts/setup-keycloak.mjs";
 
 const template = JSON.parse(readFileSync(new URL("../keycloak/realm-inout.json", import.meta.url), "utf8"));
 

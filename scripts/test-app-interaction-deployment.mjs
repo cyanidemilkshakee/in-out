@@ -4,7 +4,7 @@
 // node scripts/test-app-interaction-deployment.mjs --local
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
-import { connectLocalKeycloak } from "./keycloak-account-access.mjs";
+import { connectLocalKeycloak } from "./setup-keycloak.mjs";
 
 if (process.argv.length !== 3 || process.argv[2] !== "--local") {
   console.error("Usage: node scripts/test-app-interaction-deployment.mjs --local");

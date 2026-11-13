@@ -61,8 +61,8 @@ npm run build
 npm run test:auth:http
 
 $env:POSTGRES_PASSWORD = "isolated-test-postgres"
-$env:KEYCLOAK_ADMIN_USERNAME = "isolated-test-admin"
-$env:KEYCLOAK_ADMIN_PASSWORD = "isolated-test-password"
+$env:KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME = "isolated-test-admin"
+$env:KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD = "isolated-test-password"
 $env:KEYCLOAK_CLIENT_SECRET = "isolated-test-client-secret"
 $env:AUTH_SECRET = "isolated-test-auth-secret"
 

@@ -5,7 +5,6 @@ import { hasAdminAccess, hasMasterAdminAccess } from "./lib/applicationRoles"
 const MASTER_ADMIN_PAGES = new Set([
   "/admin",
   "/admin/users",
-  "/admin/sso-approvals",
   "/admin/employee-zone-access",
   "/admin/zone-assignments",
   "/admin/entry-restrictions",

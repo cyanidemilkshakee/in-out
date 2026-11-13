@@ -4,7 +4,7 @@
 import assert from "node:assert/strict";
 import { randomBytes, createHash } from "node:crypto";
 import { createLocalJWKSet, jwtVerify } from "jose";
-import { connectLocalKeycloak, localKeycloakRequest, missingFrontendRoleClaims } from "./keycloak-account-access.mjs";
+import { connectLocalKeycloak, localKeycloakRequest, missingFrontendRoleClaims } from "./setup-keycloak.mjs";
 
 const { base, api } = await connectLocalKeycloak();
 const realmUrl = `${base}/realms/inout`;

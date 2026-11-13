@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     INVITE_SMTP_PASSWORD: str = ""
     INVITE_SMTP_STARTTLS: bool = True
     INVITE_SMTP_SSL: bool = False
+    # Optional TCP egress relay. TLS remains end-to-end with INVITE_SMTP_HOST,
+    # so certificate verification and SMTP credentials stay in this process.
+    INVITE_SMTP_PROXY_HOST: str = ""
+    INVITE_SMTP_PROXY_PORT: int = Field(default=2525, ge=1, le=65_535)
     KONG_TERMINAL_SECRET: str = ""
     KONG_IDENTITY_SECRET: str = ""
     MAX_REQUEST_BODY_BYTES: int = Field(default=262_144, ge=1_024, le=10_485_760)

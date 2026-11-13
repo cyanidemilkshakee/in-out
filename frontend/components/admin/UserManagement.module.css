@@ -225,6 +225,8 @@
 .securityHeader .dangerButton { min-height: 40px; padding: 7px 10px; font-size: 14px; }
 .passwordForm { display: grid; gap: 12px; min-width: 0; }
 .passwordForm > .field { max-width: 520px; }
+.invitationForm { display: grid; gap: 14px; min-width: 0; }
+.invitationForm > .field { width: 100%; }
 .securityActionRow { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 16px; min-width: 0; }
 .securityHeader > .securityActionRow { flex-wrap: wrap; gap: 8px; }
 .field { display: grid; min-width: 0; gap: 6px; color: var(--ui-text-primary); font-size: 16px; font-weight: 600; }
@@ -333,7 +335,7 @@
   .userCard { padding: 13px; }
   .userName { font-size: 19px; }
   .zoneListSection { padding: 12px; }
-  .zoneCard { gap: 12px; padding: 12px; }
+  .zoneCard { gap: 12px; padding: 13px; }
   .zoneHeading { flex-wrap: wrap; gap: 8px; }
   .zoneTitle { flex: 1 1 auto; }
   .zoneHeading > .retireButton { order: 1; margin-left: auto; }
@@ -358,9 +360,8 @@
   .page .accessControls :global(.identity-duration-select) { justify-content: space-between; width: 100%; }
   .accessControls > button { flex: 1; }
   .checkpointCard { grid-template-columns: minmax(0, 1fr); gap: 12px; }
-  .zoneCard { padding: 13px; }
   .globalAccountList { grid-template-columns: minmax(0, 1fr); }
-  .directoryGrid:not(.zoneDirectory) { grid-template-columns: minmax(0, 1fr); max-height: none; }
+  .directoryGrid:not(.zoneDirectory) { max-height: none; }
   .listAddAction, .renameButton, .nameEditAction, .retireButton { flex-basis: 44px; width: 44px; min-height: 44px; }
   .nameEditInput { min-width: 0; min-height: 44px; }
   .enabledToggle { min-height: 44px; }
